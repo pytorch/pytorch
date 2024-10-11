@@ -191,9 +191,9 @@ def gen_conv_ops_library() -> List[CKConvOp]:
     ]
     conv_specs = [
         "ConvolutionForwardSpecialization::Default",
-        "ConvolutionForwardSpecialization::Filter1x1Pad0",
-        "ConvolutionForwardSpecialization::Filter1x1S1Pad0",
-        "ConvolutionForwardSpecialization::OddC",
+        # "ConvolutionForwardSpecialization::Filter1x1Pad0",
+        # "ConvolutionForwardSpecialization::Filter1x1Stride1Pad0",
+        # "ConvolutionForwardSpecialization::OddC",
     ]
 
     # substitute templated args by looping through their domains
@@ -336,7 +336,6 @@ class CKConvTemplate(CKTemplate):
             *workspace_size = conv.GetWorkSpaceSize(&argument);
             return 0;
         }
-        printf("before invoker.run:\n");
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
@@ -658,3 +657,6 @@ class CKConvTemplate(CKTemplate):
             weight_layout=op.b_layout,
             output_layout=op.e_layout,
         )
+
+    def size_args(self):
+        return []

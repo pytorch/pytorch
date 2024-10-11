@@ -1201,7 +1201,7 @@ def use_ck_template(layout):
     if not requested_supported_archs:
         return False
     # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16]:
+    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
         return False
 
     ck_package_dirname, _, _, _ = try_import_ck_lib()

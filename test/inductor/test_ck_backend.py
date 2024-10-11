@@ -370,10 +370,10 @@ class TestCKBackend(TestCase):
     def test_max_autotune_conv2d(self, max_autotune_gemm_backends):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
 
-        x = torch.randn(1, 3, 224, 224, **tensor_options).to(memory_format=torch.channels_last)
-        w = torch.randn(64, 3, 7, 7, **tensor_options).to(memory_format=torch.channels_last)
+        x = torch.randn(1, 8, 224, 224, **tensor_options)
+        w = torch.randn(64, 8, 7, 7, **tensor_options)
 
         assert "rocm" in dir(config)
 
@@ -382,9 +382,9 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
+                "compile_threads": 144,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 2,
+                # "rocm.n_max_profiling_configs": 2,
             }
         ):
 
