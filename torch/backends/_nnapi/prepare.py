@@ -183,8 +183,6 @@ def process_for_nnapi(
         shapes, based on the shapes of args.  Returns a list of output templates.
         """
 
-        pass
-
     shape_compute_module = torch.jit.script(ShapeComputeModule())
     real_shape_compute_lines = [
         "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",

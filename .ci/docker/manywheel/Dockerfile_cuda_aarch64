@@ -75,17 +75,17 @@ ARG BASE_CUDA_VERSION
 ADD ./common/install_magma.sh install_magma.sh
 RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
 
-FROM base as openblas
-# Install openblas
-ADD ./common/install_openblas.sh install_openblas.sh
-RUN bash ./install_openblas.sh && rm install_openblas.sh
+FROM base as nvpl
+# Install nvpl
+ADD ./common/install_nvpl.sh install_nvpl.sh
+RUN bash ./install_nvpl.sh && rm install_nvpl.sh
 
 FROM final as cuda_final
 ARG BASE_CUDA_VERSION
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
-COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
+COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
+COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
