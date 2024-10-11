@@ -390,7 +390,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
-    def test_fused_scaled_matmul_reduce_scatter(self, scatter_dim: int) -> None:
+    @parametrize("rowwise", [True, False])
+    def test_fused_scaled_matmul_reduce_scatter(
+        self, scatter_dim: int, rowwise: bool
+    ) -> None:
         self._init_process()
 
         BATCH = 8
@@ -403,9 +406,14 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
-        A_scale = torch.tensor(0.1, device="cuda")
         B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
-        B_scale = torch.tensor(0.1, device="cuda")
+
+        if rowwise:
+            A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
+            B_scale = torch.full((1, N), 0.1, device="cuda")
+        else:
+            A_scale = torch.tensor(0.1, device="cuda")
+            B_scale = torch.tensor(0.1, device="cuda")
 
         output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
             A,
