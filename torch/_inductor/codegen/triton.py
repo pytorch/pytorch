@@ -1359,8 +1359,11 @@ class TritonKernel(SIMDKernel):
                     f"{tree.prefix}base = {self.iteration_ranges_ranges_code(tree)}"
                 )
 
-        if self.inside_reduction and not any(tree.is_loop for tree in self.range_trees):
-            self.codegen_reduction_inds(self.body)
+        if self.inside_reduction:
+            self.codegen_reduction_numels(self.body)
+            if not any(tree.is_loop for tree in self.range_trees):
+                # Indexing goes inside the innermost loop
+                self.codegen_reduction_inds(self.body)
 
     def need_numel_args(self):
         """
@@ -3133,6 +3136,21 @@ class TritonKernel(SIMDKernel):
             for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
         ]
 
+    def codegen_reduction_numels(self, buffer) -> None:
+        # rnumel = r0_numel * ... * r(n-1)_numel
+        reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
+        rnumel = " * ".join(sorted(f"{tree.prefix}numel" for tree in reduction_trees))
+        buffer.splice(f"rnumel = {self.kexpr(rnumel)}")
+
+        # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
+        rn_blocks = [
+            TritonSymbols.block_sizes[tree.symt]
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+        rblock = sympy_product(rn_blocks)
+        buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
+
     def codegen_reduction_inds(self, buffer) -> None:
         """
         Converts ND reduction indices into rindex, rbase, roffset, etc.
@@ -3151,20 +3169,6 @@ class TritonKernel(SIMDKernel):
         rn_bases = get_rsymbols("base", integer=True, nonnegative=True)
         rn_offsets = get_rsymbols("offset", integer=True, nonnegative=True)
         rn_inds = get_rsymbols("index", integer=True, nonnegative=True)
-        rn_blocks = [
-            TritonSymbols.block_sizes[tree.symt]
-            for tree in self.range_trees
-            if tree.is_reduction
-        ]
-
-        # rnumel = r0_numel * ... * r(n-1)_numel
-        reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-        rnumel = sympy_product(rn_numels)
-        buffer.splice(f"rnumel = {self.kexpr(rnumel)}")
-
-        # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
-        rblock = sympy_product(rn_blocks)
-        buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
         # Compute coefficients to convert ND indices to linear.
         # For example:
