@@ -615,8 +615,9 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
 
         if TEST_WITH_ROCM:
             errorString = (r"HIP error: invalid device ordinal\n"
-                          r"HIP kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\n"
-                          r"For debugging consider passing AMD_SERIALIZE_KERNEL=3")
+                           r"HIP kernel errors might be asynchronously reported at some other API call, "
+                           r"so the stacktrace below might be incorrect.\n"
+                           r"For debugging consider passing AMD_SERIALIZE_KERNEL=3")
         else:
             errorString = r"CUDA error: invalid device ordinal"
         with self.assertRaisesRegex(
