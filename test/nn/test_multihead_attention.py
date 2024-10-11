@@ -959,6 +959,26 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
 
+    @dtypes(torch.double)
+    @torch.no_grad()
+    def test_multihead_attn_qk_proj_dim(self, device, dtype):
+        # setting qk_proj_dim != embed_dim and embed_dim == kdim == vdim
+        mha1 = torch.nn.MultiheadAttention(
+            4, 4, qk_proj_dim=8, dtype=dtype, device=device
+        )
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        out = mha1(query, key, key)
+        self.assertEqual(query.size(), out[0].size())
+        # setting qk_proj_dim != embed_dim and embed_dim != kdim and embed_dim != vdim
+        mha2 = torch.nn.MultiheadAttention(
+            4, 4, kdim=2, vdim=8, qk_proj_dim=16, dtype=dtype, device=device
+        )
+        query = torch.rand(4, 4, 4, dtype=dtype, device=device)
+        key = torch.rand(4, 4, 2, dtype=dtype, device=device)
+        value = torch.rand(4, 4, 8, dtype=dtype, device=device)
+        out = mha2(query, key, value)
+        self.assertEqual(query.size(), out[0].size())
 
 instantiate_device_type_tests(TestMultiheadAttentionNNDeviceType, globals())
 instantiate_parametrized_tests(TestMultiheadAttentionNN)
