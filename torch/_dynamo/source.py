@@ -285,7 +285,6 @@ class TensorProperty(enum.Enum):
     STORAGE_OFFSET = 2
 
     def method_name(self):
-        breakpoint()
         if self is TensorProperty.SIZE:
             return "size"
         elif self is TensorProperty.STRIDE:
