@@ -79,9 +79,9 @@ if(HIP_FOUND)
   # Note that CMake does not support \s for blank space. That is
   # why in the regular expressions below we have a blank space in
   # the square brackets.
-  # There are three streps:
+  # There are three steps:
   # 1. Match regular expression
-  # 2. Strip thie non-numerical part of the string
+  # 2. Strip the non-numerical part of the string
   # 3. Strip leading and trailing spaces
   string(REGEX MATCH "ROCM_VERSION_MAJOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
   string(REPLACE "ROCM_VERSION_MAJOR" "" TEMP2 ${TEMP1})
