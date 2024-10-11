@@ -224,10 +224,31 @@ struct LiftedIValueArgs {
   const std::optional<size_t>& active_node_call_idx;
 };
 
+// Hold GIL while using
+struct PyTLSSnapshot {
+  PyTLSSnapshot(std::unordered_map<std::string_view, PyObject*>&& state)
+      : state(state) {}
+  PyTLSSnapshot(const PyTLSSnapshot&) = delete;
+  PyTLSSnapshot& operator=(const PyTLSSnapshot&) = delete;
+  PyTLSSnapshot(PyTLSSnapshot&&) = default;
+  PyTLSSnapshot& operator=(PyTLSSnapshot&&) = default;
+  ~PyTLSSnapshot();
+
+  static PyTLSSnapshot create();
+
+  PyObject* get(std::string_view key) const;
+
+ private:
+  // PyObject lifetime managed by ::create() and dtor
+  std::unordered_map<std::string_view, PyObject*> state;
+};
+
 struct AutogradCompilerCall {
-  AutogradCompilerCall()
+  AutogradCompilerCall() = delete;
+  AutogradCompilerCall(PyTLSSnapshot&& state)
       : tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx) {}
+        lifted_ivalue_args(active_node_call_idx),
+        state(std::move(state)) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -252,9 +273,12 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
   std::optional<size_t> active_node_call_idx;
+
+  const PyTLSSnapshot state;
 };
 
 class CompiledNodeArgs {

@@ -117,7 +117,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled:
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
@@ -275,7 +275,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled:
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:

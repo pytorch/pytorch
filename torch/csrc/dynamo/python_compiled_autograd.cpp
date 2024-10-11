@@ -324,8 +324,45 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
   }
 };
 
-static PyObject* the_autograd_compiler = nullptr;
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
+PyTLSSnapshot::~PyTLSSnapshot() {
+  // leak on shutdown
+  if (Py_IsInitialized()) {
+    for (auto& [_, v] : state) {
+      Py_DECREF(v);
+    }
+  }
+}
+
+/* static */ PyTLSSnapshot PyTLSSnapshot::create() {
+  TORCH_INTERNAL_ASSERT(
+      at::impl::ThreadLocalPythonObjects::contains("compiled_autograd_state"));
+  PyObject* pystate =
+      check(at::impl::ThreadLocalPythonObjects::get("compiled_autograd_state")
+                ->ptr(getPyInterpreter()));
+  TORCH_INTERNAL_ASSERT(PyDict_Check(pystate));
+
+  std::unordered_map<std::string_view, PyObject*> state;
+  Py_ssize_t pos = 0;
+  PyObject* key = nullptr;
+  PyObject* value = nullptr;
+  while (PyDict_Next(pystate, &pos, &key, &value)) {
+    TORCH_INTERNAL_ASSERT(
+        PyUnicode_Check(key),
+        "Compiled autograd TLS state should only has string keys");
+    Py_INCREF(value);
+    state.emplace(std::string_view(PyUnicode_AsUTF8(key)), value);
+  }
+  return PyTLSSnapshot(std::move(state));
+}
+
+PyObject* PyTLSSnapshot::get(std::string_view key) const {
+  auto it = state.find(key);
+  TORCH_CHECK(
+      it != state.end(), "Compiled autograd TLS state missing key ", key);
+  return it->second;
+}
+
+static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
@@ -361,7 +398,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
 
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
-    {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
+    {"notify_autograd_engine", notify_autograd_engine, METH_NOARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
@@ -523,7 +560,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(PyTLSSnapshot::create());
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -597,6 +634,8 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
     // cache miss, need to capture FX graph
+    PyObject* the_autograd_compiler = compiler_call.state.get("compiler");
+    TORCH_INTERNAL_ASSERT(the_autograd_compiler != Py_None);
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
@@ -794,28 +833,16 @@ variable_list compiled_autograd(
   return outputs;
 }
 
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return nullptr;
-  }
-
-  PyObject* prior = the_autograd_compiler;
-  if (obj == Py_None) { // disable
-    the_autograd_compiler = nullptr; // decref not needed due to `prior`
+  PyTLSSnapshot state = PyTLSSnapshot::create();
+  PyObject* compiler = state.get("compiler");
+  if (compiler == Py_None) { // disable
     Engine::set_compiled_autograd(nullptr);
   } else { // enable
-    Py_INCREF(obj);
-    the_autograd_compiler = obj;
     Engine::set_compiled_autograd(&compiled_autograd);
   }
-
-  if (prior == nullptr) {
-    Py_RETURN_NONE;
-  } else {
-    return prior;
-  }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 

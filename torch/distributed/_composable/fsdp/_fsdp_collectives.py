@@ -181,7 +181,7 @@ def foreach_all_gather(
 def _get_param_all_gather_inputs(
     fsdp_params: List[FSDPParam],
 ) -> List[List[torch.Tensor]]:
-    if ca.compiled_autograd_enabled:
+    if ca.local.enabled:
         return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
 
     # Intentionally try to run a fast-path that bypasses abstractions for the
@@ -251,7 +251,7 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        if ca.compiled_autograd_enabled:
+        if ca.local.enabled:
             fsdp_param.init_all_gather_outputs(
                 all_gather_input_numels,
                 all_gather_input_dtypes,
@@ -399,7 +399,7 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            if not ca.compiled_autograd_enabled:
+            if not ca.local.enabled:
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                     or {}
