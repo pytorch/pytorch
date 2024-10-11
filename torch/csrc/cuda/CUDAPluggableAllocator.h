@@ -127,14 +127,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>) override;
-  void beginAllocateSentinelPointers(
-      c10::DeviceIndex device,
-      std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void(void*, size_t)> allocatorOverride,
-      size_t captureUniqueToken
-  ) override;
-  void endAllocateSentinelPointers(size_t captureUniqueToken) override; 
+      std::function<bool(cudaStream_t)>,
+      std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) override;
   void endAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id) override;

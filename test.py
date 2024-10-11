@@ -13,17 +13,10 @@ def make_dynamic(func):
         nonlocal graph, initialized
 
         if not initialized:
-            # First time: create and capture graphs with all allocations as nullptr
             g1 = torch.cuda.CUDAGraph()
             g1.enable_debug_mode() # because we need the graph_t to stick around, not just the graphexec_t
-            with torch.cuda.graph(g1, sentinel_allocations_mode=1):
+            with torch.cuda.graph(g1, dynamic_graph=True):
                 func(*[torch.empty_like(arg) for arg in args])
-            # Second time, do it again where all allocations are allocIdx+1
-            g2 = torch.cuda.CUDAGraph()
-            g2.enable_debug_mode()
-            with torch.cuda.graph(g2, sentinel_allocations_mode=2):
-                func(*[torch.empty_like(arg) for arg in args])
-            g1.compare_with_recapture(g2) # Investigate the graphs and determine which allocation is which
             graph = g1
             initialized = True
 
@@ -38,8 +31,11 @@ def myFunc(a, b, c):
 
     # check that simple kernels work:
     a += b.sum() * c
-    for i in range(100): # mess with the allocator a bit (make it reuse some stuff)
-        temp = torch.ones_like(c) # we can even allocate :)
+    temp = torch.ones_like(c)
+    for i in range(100):
+        # demonstrate that it can handle weird allocator stuff
+        # (these lines will reuse memory a bunch)
+        temp = temp.clone() + 1 / temp.clone() + torch.ones_like(c)
     temp += 1
     a += temp
     a[3:] += 2

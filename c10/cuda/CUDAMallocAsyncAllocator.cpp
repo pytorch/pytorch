@@ -672,25 +672,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
-  void beginAllocateSentinelPointers(
-      c10::DeviceIndex device,
-      std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void(void*, size_t)> allocatorOverride,
-      size_t captureUniqueToken
-  ) override {
-    TORCH_CHECK(
-        false,
-        "cudaMallocAsync does not yet support beginAllocateSentinelPointers. "
-        "If you need it, please file an issue describing your use case.");
-  }
-
-  void endAllocateSentinelPointers(size_t captureUniqueToken) override {
-    TORCH_CHECK(
-        false,
-        "cudaMallocAsync does not yet support endAllocateSentinelPointers. "
-        "If you need it, please file an issue describing your use case.");
-  }
-
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
   DeviceStats getDeviceStats(c10::DeviceIndex device) override {
@@ -796,13 +777,15 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>) override {
+      std::function<bool(cudaStream_t)>,
+      std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
     TORCH_CHECK(
         !capture_underway,
-        "Only one capture at a time is allowed in a process.")
+        "Only one capture at a time is allowed in a process.");
+    TORCH_CHECK(!allocation_logger, "Not supported");
     capture_underway = true;
   }
 

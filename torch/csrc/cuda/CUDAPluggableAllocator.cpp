@@ -259,31 +259,13 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 void CUDAPluggableAllocator::beginAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter) {
+    std::function<bool(cudaStream_t)> filter,
+    std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) {
+  TORCH_CHECK(!allocation_logger, "Not supported");
   if (begin_allocate_to_pool_fn_) {
     begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
   }
 }
-
-void CUDAPluggableAllocator::beginAllocateSentinelPointers(
-      c10::DeviceIndex device,
-      std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void(void*, size_t)> allocatorOverride,
-      size_t captureUniqueToken
-) {
-  TORCH_CHECK(
-    false,
-    "CUDAPluggableAllocator does not yet support beginAllocateSentinelPointers. "
-    "If you need it, please file an issue describing your use case.");
-}
-
-void CUDAPluggableAllocator::endAllocateSentinelPointers(size_t captureUniqueToken) {
-  TORCH_CHECK(
-    false,
-    "CUDAPluggableAllocator does not yet support endAllocateSentinelPointers. "
-    "If you need it, please file an issue describing your use case.");
-}
-
 
 void CUDAPluggableAllocator::endAllocateToPool(
     c10::DeviceIndex device,

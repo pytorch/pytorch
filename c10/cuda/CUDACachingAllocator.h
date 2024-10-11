@@ -219,18 +219,12 @@ class CUDAAllocator : public Allocator {
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter) = 0;
+      std::function<bool(cudaStream_t)> filter,
+      std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) = 0;
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
-  virtual void beginAllocateSentinelPointers(
-      c10::DeviceIndex device,
-      std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void(void*, size_t)> allocatorOverride,
-      size_t captureUniqueToken
-  ) = 0;
-  virtual void endAllocateSentinelPointers(size_t captureUniqueToken) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
@@ -389,21 +383,9 @@ inline CheckpointDelta setCheckpointPoolState(
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter) {
-  get()->beginAllocateToPool(device, mempool_id, std::move(filter));
-}
-
-inline void beginAllocateSentinelPointers(
-  c10::DeviceIndex device,
-  std::function<bool(cudaStream_t)> streamFilter,
-  std::function<void(void*, size_t)> allocatorOverride,
-  size_t captureUniqueToken
-) {
-  get()->beginAllocateSentinelPointers(device, std::move(streamFilter), std::move(allocatorOverride), captureUniqueToken);
-}
-
-inline void endAllocateSentinelPointers(size_t captureUniqueToken) {
-  get()->endAllocateSentinelPointers(captureUniqueToken);
+    std::function<bool(cudaStream_t)> filter,
+    std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) {
+  get()->beginAllocateToPool(device, mempool_id, std::move(filter), std::move(allocation_logger));
 }
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

@@ -32,7 +32,7 @@ void THCPGraph_init(PyObject* module) {
           [](::at::cuda::CUDAGraph& self,
              std::optional<c10::cuda::MempoolId_t> pool_opt,
              std::string capture_error_mode,
-             int sentinel_allocations_mode) {
+             bool dynamic_graph) {
             cudaStreamCaptureMode capture_mode;
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
@@ -49,17 +49,15 @@ void THCPGraph_init(PyObject* module) {
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
             }
-            return self.capture_begin(pool, capture_mode, sentinel_allocations_mode);
+            return self.capture_begin(pool, capture_mode, dynamic_graph);
           },
           py::arg("pool"),
           py::arg("capture_error_mode"),
-          py::arg("sentinel_allocations_mode"),
+          py::arg("dynamic_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
-      .def("compare_with_recapture",
-          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::compare_with_recapture))
       .def(
           "register_generator_state",
           [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {

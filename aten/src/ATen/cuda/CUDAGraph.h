@@ -53,18 +53,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal,
-      int sentinel_allocations_mode = 0);
+      bool dynamic_graph = 0);
   void capture_end();
   void replay();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
-  void compare_with_recapture(const CUDAGraph& graph2);
   void replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens);
 
  protected:
-  void instantiate_graph_exec();
+  void introspect_dynamic_graph();
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
@@ -83,12 +82,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CaptureId_t capture_id_ = -1;
 
   size_t sentinelCaptureUniqueToken;
-  int sentinelAllocationsMode;
+  bool dynamic_graph;
   std::vector<TrackedAllocation> allocations;
 
   std::vector<DynamicGraphKernelParamUpdate> kernelParamUpdates;
   std::vector<DynamicGraphOtherNodeUpdate> graphNodeParamUpdates;
-  bool hasComparedAgainstRecapture = false;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.
