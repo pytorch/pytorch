@@ -9,7 +9,7 @@
 namespace torch::cuda {
 
 size_t device_count() {
-  return at::detail::getCUDAHooks().getNumGPUs();
+  return at::detail::getCUDAHooks().deviceCount();
 }
 
 bool is_available() {
@@ -27,7 +27,7 @@ bool cudnn_is_available() {
 /// Sets the seed for the current GPU.
 void manual_seed(uint64_t seed) {
   if (is_available()) {
-    auto index = at::detail::getCUDAHooks().current_device();
+    auto index = at::detail::getCUDAHooks().getCurrentDevice();
     auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(index);
     {
       // See Note [Acquire lock when using random generators]

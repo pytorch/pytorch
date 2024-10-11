@@ -333,7 +333,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
 
     if arches is None:
         # Define default compute archivectures
@@ -369,7 +369,13 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
-            ) and python_version == "3.13":
+            ) and (python_version == "3.13" or python_version == "3.13t"):
+                continue
+
+            # TODO: Enable python 3.13t on xpu and cpu-s390x
+            if (
+                gpu_arch_type == "xpu" or gpu_arch_type == "cpu-s390x"
+            ) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
@@ -403,7 +409,7 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                             if os != "linux-aarch64"
                             else ""
                         ),
@@ -451,7 +457,7 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
                             if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),

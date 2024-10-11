@@ -92,6 +92,7 @@ class ModuleCallSignature:
     outputs: List[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
+    forward_arg_names: Optional[List[str]] = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -451,6 +452,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
+        gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they
     # changed when calling aot_export
