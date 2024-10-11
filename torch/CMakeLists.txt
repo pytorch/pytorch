@@ -418,7 +418,6 @@ endif()
 # Preserve XPU arch flags
 if(USE_XPU)
   torch_xpu_get_arch_list(TORCH_XPU_ARCH_LIST)
-  message(FATAL_ERROR ${TORCH_XPU_ARCH_LIST})
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${TORCH_XPU_ARCH_LIST}\"")
 endif()
 
