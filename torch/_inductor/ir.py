@@ -90,6 +90,7 @@ from .utils import (
     sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
+    inductor_dataclass
 )
 from .virtualized import ops, OpsValue, V
 
@@ -335,8 +336,8 @@ class IRNode:
             IRNode._current_origins = old
 
     def __post_init__(self):
-        self.origins = OrderedSet(self._current_origins)
-        self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
+        object.__setattr__(self, "origins", OrderedSet(self._current_origins))
+        object.__setattr__(self, "traceback", traceback.format_stack() if config.debug_ir_traceback else None)
 
     def get_read_names(self) -> OrderedSet[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
@@ -421,10 +422,12 @@ class IRNode:
     get_unbacked_symbol_uses: Callable[[], OrderedSet[sympy.Symbol]]
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Operation:
+    operation_name: Optional[str] = None
     def __post_init__(self):
-        self.operation_name: Optional[str] = None
+        pass
+        # self.operation_name: Optional[str] = None
 
     def get_device(self):
         raise NotImplementedError
@@ -490,7 +493,7 @@ class Operation:
         return 0
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
@@ -646,7 +649,7 @@ class Pointwise(Loops):
         return Pointwise(device, self.dtype, loader, self.ranges)
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[List[Expr]], Expr]
     scatter_mode: Optional[str] = None
@@ -656,12 +659,12 @@ class Scatter(Pointwise):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Scatter(
-            device,
-            self.dtype,
-            loader,
-            self.ranges,
-            self.output_indexer,
-            self.scatter_mode,
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
+            output_indexer=self.output_indexer,
+            scatter_mode=self.scatter_mode,
         )
 
     def store_output(self, output_name, indexer, vars):
@@ -763,7 +766,7 @@ def significant_strides_equal(
     return strides1 == strides2
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
@@ -817,14 +820,14 @@ class Reduction(Loops):
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Reduction(
-            device,
-            self.dtype,
-            loader,
-            self.ranges,
-            self.reduction_ranges,
-            self.reduction_type,
-            self.src_dtype,
-            ReductionHint.DEFAULT,
+            device=device,
+            dtype=self.dtype,
+            loader=loader,
+            ranges=self.ranges,
+            reduction_ranges=self.reduction_ranges,
+            reduction_type=self.reduction_type,
+            src_dtype=self.src_dtype,
+            reduction_hint=ReductionHint.DEFAULT,
         )
 
     @staticmethod
@@ -981,14 +984,14 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         r = Reduction(
-            device,
-            dst_dtype,
-            inner_fn,
-            ranges,
-            reduction_ranges,
-            reduction_type,
-            src_dtype,
-            ReductionHint.DEFAULT,
+            device=device,
+            dtype=dst_dtype,
+            inner_fn=inner_fn,
+            ranges=ranges,
+            reduction_ranges=reduction_ranges,
+            reduction_type=reduction_type,
+            src_dtype=src_dtype,
+            reduction_hint=ReductionHint.DEFAULT,
         )
 
         def get_read_indices(r):
@@ -1156,7 +1159,7 @@ class Reduction(Loops):
                     reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
                     return inner_fn(index, reduction_index)
 
-            return Pointwise.create(device, dst_dtype, fn, ranges)
+            return Pointwise.create(device=device, dtype=dst_dtype, inner_fn=fn, ranges=ranges)
 
         if (
             isinstance(reduction_numel, sympy.Integer)
@@ -1165,12 +1168,12 @@ class Reduction(Loops):
             and sympy_product(ranges) != 1
         ):
             return Pointwise.create(
-                device,
-                dst_dtype,
-                cls._unroll_reduction_fn(
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=cls._unroll_reduction_fn(
                     inner_fn, reduction_ranges, reduction_type, src_dtype
                 ),
-                ranges,
+                ranges=ranges,
             )
 
         # triton doesn't support reduce to single element well, so break it up
@@ -1225,14 +1228,14 @@ class Reduction(Loops):
 
         return TensorBox.create(
             Reduction(
-                device,
-                dst_dtype,
-                inner_fn,
-                ranges,
-                reduction_ranges,
-                reduction_type,
-                src_dtype,
-                reduction_hint,
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=inner_fn,
+                ranges=ranges,
+                reduction_ranges=reduction_ranges,
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=reduction_hint,
             )
         )
 
@@ -1397,14 +1400,14 @@ class Reduction(Loops):
         assert original_ranges == new_ranges[: len(original_ranges)]
         return TensorBox.create(
             Reduction(
-                device,
-                dst_dtype,
-                intermediate_fn,
-                original_ranges,
-                new_ranges[len(original_ranges) :],
-                reduction_type,
-                src_dtype,
-                reduction_hint,
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=intermediate_fn,
+                ranges=original_ranges,
+                reduction_ranges=new_ranges[len(original_ranges) :],
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=reduction_hint,
             )
         )
 
@@ -1511,14 +1514,14 @@ class WelfordReduction(Reduction):
                 return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
-            device,
-            dtype,
-            loader,
-            ranges,
-            reduction_ranges,
-            reduction_type,
-            dtype,
-            reduction_hint,
+            device=device,
+            dtype=dtype,
+            inner_fn=loader,
+            ranges=ranges,
+            reduction_ranges=reduction_ranges,
+            reduction_type=reduction_type,
+            src_dtype=dtype,
+            reduction_hint=reduction_hint,
         )
         self.output_index = output_index
 
@@ -1744,7 +1747,7 @@ class WelfordReduction(Reduction):
         )
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
@@ -1931,12 +1934,12 @@ class Scan(Loops):
 
 
 # This signifies a scan op that should go through TritonSplitScanKernel codegen on CUDA.
-@dataclasses.dataclass
+@inductor_dataclass
 class SplitScan(Scan):
     pass
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Sort(Loops):
     # Sorts a tuple of key, value pairs
     sort_ranges: List[Expr]
@@ -2162,7 +2165,7 @@ def is_stride_order_storage_and_layout(
         return False
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class BaseView(IRNode):
     data: IRNode
 
@@ -2253,7 +2256,7 @@ class BaseView(IRNode):
         return Pointwise(device, self.get_dtype(), loader, self.get_size())
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ExpandView(BaseView):
     size: List[Expr]
 
@@ -2300,9 +2303,9 @@ class ExpandView(BaseView):
                 new_stride,
                 old_layout.offset,
             )
-            return ReinterpretView(storage, new_layout)
+            return ReinterpretView(data=storage, layout=new_layout)
 
-        return ExpandView(x, new_size)
+        return ExpandView(data=x, size=new_size)
 
     def get_size(self):
         return self.size
@@ -2324,7 +2327,7 @@ class ExpandView(BaseView):
         return reindex
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class PermuteView(BaseView):
     dims: List[Expr]
 
@@ -2342,9 +2345,9 @@ class PermuteView(BaseView):
                 [old_layout.stride[i] for i in dims],
                 old_layout.offset,
             )
-            return ReinterpretView(storage, new_layout)
+            return ReinterpretView(data=storage, layout=new_layout)
 
-        return PermuteView(x, dims)
+        return PermuteView(data=x, dims=dims)
 
     @classmethod
     def _map_neg_dims(cls, dims):
@@ -2398,7 +2401,7 @@ class SqueezeView(BaseView):
                 new_stride,
                 old_layout.offset,
             )
-            return ReinterpretView(storage, new_layout)
+            return ReinterpretView(data=storage, layout=new_layout)
 
         if dim is None:
             # redirect to a generic view
@@ -2426,7 +2429,7 @@ class SqueezeView(BaseView):
         raise AssertionError("use SqueezeView.create()")
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class GenericView(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
@@ -2450,13 +2453,13 @@ class GenericView(BaseView):
 
     @classmethod
     def create(cls, x, new_size, reindex):
-        return cls(x, list(new_size), reindex)
+        return cls(data=x, size=list(new_size), reindex=reindex)
 
     def get_size(self):
         return self.size
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class View(GenericView):
     @staticmethod
     def handle_negative_index(idx, size):
@@ -2488,7 +2491,7 @@ class View(GenericView):
             def fake_reindex(index):
                 return tuple([0] * len(old_size))
 
-            return cls(x, list(new_size), fake_reindex)
+            return cls(data=x, size=list(new_size), reindex=fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
@@ -2504,10 +2507,10 @@ class View(GenericView):
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
             )
-            return ReinterpretView(storage, new_layout)
+            return ReinterpretView(data=storage, layout=new_layout)
 
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        return cls(x, list(new_size), reindex)
+        return cls(data=x, size=list(new_size), reindex=reindex)
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
@@ -2604,7 +2607,7 @@ class View(GenericView):
         return reindex
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
@@ -2688,7 +2691,7 @@ class ReinterpretView(BaseView):
         return 1
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class DtypeView(BaseView):
     """Pretend our storage has a different type"""
 
@@ -2705,8 +2708,8 @@ class DtypeView(BaseView):
                 old_layout.stride,
                 old_layout.offset,
             )
-            return ReinterpretView(storage, new_layout)
-        return DtypeView(x, new_dtype)
+            return ReinterpretView(data=storage, layout=new_layout)
+        return DtypeView(data=x, dtype=new_dtype)
 
     def __str__(self) -> str:
         return self.str_helper([self.data, self.target_dtype])
@@ -2792,7 +2795,7 @@ class SliceView(View):
                 new_stride,
                 old_layout.offset + old_layout.stride[dim] * start,
             )
-            return ReinterpretView(storage, new_layout)
+            return ReinterpretView(data=storage, layout=new_layout)
 
         def reindex(index):
             assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
@@ -2801,7 +2804,7 @@ class SliceView(View):
             return index
 
         # redirect to a generic view
-        return SliceView(x, size=new_size, reindex=reindex)
+        return SliceView(data=x, size=new_size, reindex=reindex)
 
 
 class BaseConstant(IRNode):
@@ -2830,7 +2833,7 @@ class BaseConstant(IRNode):
         return False
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Constant(BaseConstant):
     value: Any
     dtype: torch.dtype
@@ -2846,10 +2849,10 @@ class Constant(BaseConstant):
         pass
 
     def constant_to_device(self, device):
-        return Constant(self.value, self.dtype, device)
+        return Constant(value=self.value, dtype=self.dtype, device=device)
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class IndexingConstant(BaseConstant):
     index: Any
     dtype: torch.dtype
@@ -2862,7 +2865,7 @@ class IndexingConstant(BaseConstant):
         return loader
 
     def constant_to_device(self, device):
-        return IndexingConstant(self.index, self.dtype, device)
+        return IndexingConstant(index=self.index, dtype=self.dtype, device=device)
 
 
 def is_contiguous_strides_for_shape(
@@ -2880,7 +2883,7 @@ def get_align_for_dtype(dtype: torch.dtype) -> int:
     return config.padding_alignment_bytes // dtype.itemsize
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Layout(IRNode):
     def __init__(
         self,
@@ -3378,7 +3381,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.target.make_indexer()
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Buffer(IRNode):
     # Name is sometimes None; e.g., ForceInPlace, where there isn't
     # a meaningful name
@@ -3390,7 +3393,8 @@ class Buffer(IRNode):
 
     def __post_init__(self):
         super().__post_init__()
-        self.origin_node = None
+        object.__setattr__(self, "origin_node", None)
+        # self.origin_node = None
 
     def make_indexer(self):
         return self.layout.make_indexer()
@@ -3499,7 +3503,7 @@ class Buffer(IRNode):
         return False
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class OperationBuffer(Buffer, Operation):
     # An operation that produces a single output buffer
     def get_outputs(self) -> List[Buffer]:
@@ -3561,7 +3565,7 @@ class ShapeAsConstantBuffer(IRNode):
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ComputedBuffer(OperationBuffer):
     data: Loops
 
@@ -4106,7 +4110,7 @@ class CppTemplateBuffer(TemplateBuffer):
         self.choice = choice
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
@@ -4286,7 +4290,7 @@ class ConcatKernel(NopKernel):
         if not isinstance(dst, ReinterpretView):
             if is_storage_and_layout(dst):
                 storage, layout = as_storage_and_layout(dst)
-                dst = ReinterpretView(storage, layout)
+                dst = ReinterpretView(data=storage, layout=layout)
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
@@ -4314,7 +4318,7 @@ class ConcatKernel(NopKernel):
         return True
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -4350,9 +4354,9 @@ class ExternKernel(InputsKernel):
         op_overload=None,
     ):
         super().__init__(
-            name,
-            layout,
-            inputs,
+            name=name,
+            layout=layout,
+            inputs=inputs,
         )
         self.constant_args = constant_args
         self.kwargs = kwargs if kwargs else {}
@@ -4677,7 +4681,7 @@ class ExternKernel(InputsKernel):
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
-            return ReinterpretView(cls.realize_input(x.data), x.get_layout())
+            return ReinterpretView(data=cls.realize_input(x.data), layout=x.get_layout())
         if isinstance(x, BaseView):
             x.realize()
             if is_storage_and_layout(x.unwrap_view()):
@@ -5066,7 +5070,7 @@ class ExternKernel(InputsKernel):
     __repr__ = __str__
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -5706,7 +5710,7 @@ class AssertScalar(ExternKernel):
             wrapper.writeline(f"{self.get_name()} = None")
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ExternKernelNode:
     name: str
     node: export_schema.Node
@@ -6149,7 +6153,7 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             assert device, "Not sure where to find device info"
             packed = cls(
-                MultiOutputLayout(device),
+                MultiOutputLayout(device=device),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -6195,7 +6199,7 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class ComplexView(FallbackKernel):
     """View a complex number as two dtyped numbers or vice versa"""
 
@@ -6226,7 +6230,7 @@ class ComplexView(FallbackKernel):
         )
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
@@ -6436,7 +6440,7 @@ class StorageBox(MutableBox):
         return self.data.num_reads()
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
@@ -6452,7 +6456,7 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
     operands: Optional[List[TensorBox]] = None
@@ -6546,7 +6550,7 @@ class Conditional(ExternKernel):
             operands=operands,
             true_subgraph=true_fn,
             false_subgraph=false_fn,
-            layout=MultiOutputLayout(device),
+            layout=MultiOutputLayout(device=device),
         )
 
         outputs = [
@@ -6573,7 +6577,7 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class WhileLoop(ExternKernel):
     carried_inputs: Optional[List[TensorBox]] = None
     additional_inputs: Optional[List[TensorBox]] = None
@@ -6666,7 +6670,7 @@ class WhileLoop(ExternKernel):
             cond_subgraph=cond_fn,
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
-            layout=MultiOutputLayout(device),
+            layout=MultiOutputLayout(device=device),
         )
 
         outputs = [
@@ -6744,7 +6748,7 @@ class EffectfulKernel(FallbackKernel):
         return True
 
 
-@dataclasses.dataclass
+@inductor_dataclass
 class TorchBindObject(IRNode):
     name: str
     value: torch._C.ScriptObject
@@ -6870,7 +6874,7 @@ class _CollectiveKernel(FallbackKernel):
         if isinstance(example_output, list):
             device = cls.find_device(tensor_args, example_output)
             packed = cls(
-                MultiOutputLayout(device),
+                MultiOutputLayout(device=device),
                 kernel,
                 tensor_args,
                 non_tensor_args,
