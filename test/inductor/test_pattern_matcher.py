@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import itertools
 import os
 import unittest
 
@@ -65,6 +66,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
@@ -219,6 +221,28 @@ class TestPatternMatcher(TestCase):
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(mixed_mm_choice="triton")
+    def test_mixed_mm_exhaustive_dtypes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        dtypes_left = [torch.float16, torch.float32, torch.bfloat16]
+        dtypes_right = [torch.int8, torch.uint8]
+        dtype_ranges = {torch.uint8: (0, 255), torch.int8: (-128, 127)}
+        for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
+            low, high = dtype_ranges[dtype_right]
+            args = (
+                torch.randn(256, 256, dtype=dtype_left, device="cuda"),
+                torch.randint(low, high, (256, 256), dtype=dtype_right, device="cuda"),
+            )
+            fallback_mixed_mm_expected = (
+                dtype_left == torch.bfloat16 and dtype_right == torch.uint8
+            )
+            self._test_mixed_impl(
+                fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
+            )
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
@@ -688,7 +712,9 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -706,7 +732,9 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -725,6 +753,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
+        torch._dynamo.reset()
         counters.clear()
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
@@ -1423,7 +1452,7 @@ class TestPatternMatcher(TestCase):
             (t, [64, 128, 8, 8]),
             {"dim": 1, "out": [t, t, t, t]},
         )
-        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check("call_function", torch.ops.fsdp.copy_, (t, t), {})
         check(
             "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
         )
@@ -1431,6 +1460,18 @@ class TestPatternMatcher(TestCase):
             "call_function",
             torch.ops._c10d_functional.all_gather_into_tensor,
             (t, 2, "0"),
+            {},
+            expect=False,
+        )
+
+        @torch.library.custom_op("vllm::fused_rms_norm_quant_static", mutates_args=[])
+        def fused_rms_norm_quant_static(out: torch.Tensor, input: torch.Tensor) -> None:
+            pass
+
+        check(
+            "call_function",
+            torch.ops.vllm.fused_rms_norm_quant_static,
+            (t, t),
             {},
             expect=False,
         )
