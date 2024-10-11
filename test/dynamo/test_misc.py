@@ -423,8 +423,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
-    @torch._dynamo.config.patch(dynamic_first_dimension=True)
-    def test_dynamic_first_dim(self):
+    @torch._dynamo.config.patch(assume_outer_dim_dynamic_by_default=True)
+    def test_dynamic_outer_dim(self):
         def fn(x, y):
             return x * y
 
@@ -6578,7 +6578,11 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(guard_failure is not None)
         first_guard_failure = guard_failure[0].partition("\n")[0]
-        if torch._dynamo.config.assume_static_by_default:
+
+        if (
+            torch._dynamo.config.assume_static_by_default
+            or torch._dynamo.config.assume_outer_dim_dynamic_by_default
+        ):
             self.assertIn(
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
                 first_guard_failure,
