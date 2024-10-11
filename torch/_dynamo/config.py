@@ -74,7 +74,7 @@ dynamic_shapes = True
 # as a batch dimension that varies over time.
 #
 # Precedence (assume_static_by_default): assume_outer_dim_dynamic_by_default takes precedence over
-# assume_static_by_default. Specifically, if assume_static_by_default is True, the outermost dimension
+# assume_static_by_default. Specifically, if assume_outer_dim_dynamic_by_default is True, the outermost dimension
 # will be marked as dynamic even if assume_static_by_default is True. However, If assume_static_by_default=False
 # setting this flag as false does not cause the first dimension to be static.
 #
