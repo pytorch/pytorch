@@ -8970,8 +8970,8 @@ class TestNNDeviceType(NNTestCase):
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
-    @dtypesIfMPS(torch.float)
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
     def test_BatchNorm_empty(self, device, dtype):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device, dtype=dtype)
@@ -9000,8 +9000,12 @@ class TestNNDeviceType(NNTestCase):
 
     def test_one_hot(self, device):
         # cuda throws device assert for invalid data
-        # xla ignores out of bound indices
-        if self.device_type not in ('cuda', 'mps', 'xla'):
+        # xla & mps ignore out of bound indices
+        if (
+            self.device_type != 'cuda'
+            and self.device_type != 'xla'
+            and self.device_type != 'mps'
+        ):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
@@ -12721,6 +12725,8 @@ if __name__ == '__main__':
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         clip_value = 2.5
@@ -12750,6 +12756,8 @@ if __name__ == '__main__':
     def test_clip_grad_norm(self, norm_type, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         max_norm = 2

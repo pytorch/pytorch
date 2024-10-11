@@ -572,7 +572,6 @@ class _World:
     def __init__(self) -> None:
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
-        self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
 
     @property
     def default_pg(self) -> Optional[ProcessGroup]:
@@ -662,10 +661,6 @@ class _World:
         return self._pg_coalesce_state
 
     @property
-    def pg_default_device(self) -> Dict[ProcessGroup, torch.device]:
-        return self._pg_default_device
-
-    @property
     def pg_config_info(self) -> List[Dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
@@ -750,9 +745,13 @@ _default_pg_init_method: Optional[str] = None
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 
-def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
+def _get_object_coll_device(group: Optional[ProcessGroup] = None) -> str:
     """
-    Return the device to use with ``group`` for control flow usage (object collectives, barrier).
+    .. note:: This is an internal helper and does not have backward
+        compatibility, please use with caution.
+
+    Return the device type to use with ``group`` for object collectives or
+    barrier.
 
     There are selection rules:
         1. If user specifies exactly one backend in ``init_process_group`` call:
@@ -766,13 +765,85 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
             the default process group will be used.
 
     Returns:
-        torch.device: The device to use with ``group``.
+        str: The device type to use for object collective with ``group``.
 
     """
     group = group or _get_default_group()
-    if group in _world.pg_default_device:
-        # Previously searched and cached; just return
-        return _world.pg_default_device[group]
+
+    if not isinstance(group, ProcessGroup):
+        warnings.warn(
+            f"You are using a Backend {type(group)} as a ProcessGroup. "
+            "This usage is deprecated since PyTorch 2.0. Please use a public API "
+            "of PyTorch Distributed instead.",
+        )
+        # Provide backward compatibility to cases where `group` passed in is
+        # actually a Backend (like `ProcessGroupGloo`) rather than a
+        # `ProcessGroup` in PT 2.0 sense
+        if isinstance(group, ProcessGroupGloo):
+            # RPC uses Gloo for object collectives
+            return "cpu"
+        else:
+            raise ValueError(f"Expecting a ProcessGroup, but got a {type(group)}.")
+
+    """
+    ``group._device_types`` is a property pybind that returns the devices
+    ("cpu", "cuda", etc) supported by ``group``. Can be multiple if the
+    ``group`` supports multiple devices.
+    """
+    devices = group._device_types
+
+    if len(devices) == 1:
+        # User fixed exactly one backend in `init_process_group`
+        return devices[0].type
+    elif len(devices) == 0:
+        # No backend has been registered with this PG (maybe because no
+        # collective has been run?) We pick cpu as the default and hopefully
+        # this would lazily init Gloo or other available cpu backend.
+        return "cpu"
+    elif torch.device("cpu") in devices:
+        # There are multiple backends in this PG and cpu is among them.
+        # cpu is preferred as the object is in cpu memory. No need for device
+        # copy.
+        return "cpu"
+    else:
+        # No cpu in the backend list. Randomly pick the first backend
+        return devices[0].type
+
+
+def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
+    """
+    .. note:: This method will be deprecated, it only stays for
+        backward-compatiblity reason. Alternatives:
+
+        - If you need to find a device for object collectives, please use
+        `_get_object_coll_device(group)`.
+
+        - If you need to query the device types supported by group, please use
+        `_device_capability(group)`.
+
+    Return the device type registered with ``group``.
+
+    For example, if `init_process_group("nccl", ...)` was called, the returned
+    value would be `torch.device("cuda")`.
+
+    Errors out if no device has been registered.
+
+    Args:
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Returns:
+        torch.device: The device type registered with ``group``.
+    """
+
+    warnings.warn(
+        "`_get_pg_default_device` will be deprecated, it only stays for "
+        "backward-compatiblity reason. If you need to find a device for object "
+        "collectives, please use `_get_object_coll_device`. If you need to query "
+        "the device types supported by group, please use "
+        "`_device_capability(group)`. "
+    )
+    group = group or _get_default_group()
 
     if not isinstance(group, ProcessGroup):
         # Provide backward compatibility to cases where `group` passed in is
@@ -786,8 +857,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
             stacklevel=3,
         )
         # Most users create Gloo with private API for object collectives
-        _world.pg_default_device[group] = torch.device("cpu")
-        return _world.pg_default_device[group]
+        return torch.device("cpu")
 
     """
     ``group._device_types`` is a property pybind that returns the devices
@@ -798,25 +868,39 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
 
     if len(devices) == 1:
         # User fixed exactly one backend in `init_process_group`
-        _world.pg_default_device[group] = devices[0]
+        return devices[0]
     elif len(devices) == 0:
-        # No backend has been registered with this PG (maybe because no
-        # collective has been run?) We pick cpu as the default and hopefully
-        # this would lazily init Gloo or other available cpu backend.
-        _world.pg_default_device[group] = torch.device("cpu")
-    elif torch.device("cpu") in devices:
-        # There are multiple backends in this PG and cpu is among them.
-        # cpu is preferred as the object is in cpu memory. No need for device
-        # copy.
-        _world.pg_default_device[group] = torch.device("cpu")
+        raise RuntimeError(
+            "Default device not found, because no backend has been registered "
+            "with this ProcessGroup."
+        )
     else:
-        # No cpu in the backend list. Randomly pick the first backend
-        _world.pg_default_device[group] = devices[0]
+        # There are multiple backends in this PG.
+        if torch.device("cpu") in devices:
+            rv = torch.device("cpu")
+        else:
+            rv = devices[0]
+        warnings.warn(
+            "Multiple backends are registered with this ProcessGroup. We cannot "
+            f"determine which one is the default. Returning {rv}. "
+            "Please consider using other APIs."
+        )
+        return rv
 
-    logger.info(
-        "Using device %s for object " "collectives.", _world.pg_default_device[group]
-    )
-    return _world.pg_default_device[group]
+
+def _device_capability(group: Optional[ProcessGroup] = None) -> List[str]:
+    """
+    Return the device type(s) supported by ``group``.
+
+    Args:
+        group (ProcessGroup, optional): The process group to query. If None,
+            the default process group will be used.
+
+    Returns:
+        List[str]: A list of device types supported by ``group``.
+    """
+    group = group or _get_default_group()
+    return [device.type for device in group._device_types]
 
 
 @_time_logger
@@ -1506,7 +1590,7 @@ def init_process_group(
             -1,
             [],
             backend,
-            None,
+            Store(),  # Placeholder value since store cannot be None
             group_name,
             timeout=timeout,
             group_desc="default_pg",
@@ -1944,7 +2028,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_default_device.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -1962,8 +2045,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        if pg in _world.pg_default_device:
-            del _world.pg_default_device[pg]
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -2716,7 +2797,7 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_pg_default_device(group)
+    current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2816,7 +2897,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    current_device = _get_pg_default_device(group)
+    current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2933,7 +3014,7 @@ def send_object_list(object_list, dst, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # sent to this device.
-    current_device = device or _get_pg_default_device(group)
+    current_device = device or _get_object_coll_device(group)
     # Serialize object_list elements to tensors on src rank.
     tensor_list, size_list = zip(
         *[_object_to_tensor(obj, current_device, group) for obj in object_list]
@@ -3020,7 +3101,7 @@ def recv_object_list(object_list, src=None, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # received to this device.
-    current_device = device or _get_pg_default_device(group)
+    current_device = device or _get_object_coll_device(group)
     object_sizes_tensor = torch.empty(
         len(object_list), dtype=torch.long, device=current_device
     )
@@ -3121,7 +3202,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    current_device = device or _get_pg_default_device(group)
+    current_device = device or _get_object_coll_device(group)
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
@@ -3234,7 +3315,7 @@ def scatter_object_list(
         )
 
     my_rank = get_rank()
-    pg_device = _get_pg_default_device(group)
+    pg_device = _get_object_coll_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
             *[
@@ -4166,16 +4247,14 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    .. note:: `ProcessGroupNCCL` now relies on stream synchronization instead of
-              device synchronization to block the CPU. Thus, please do not assume that
-              `barrier()` would perform a device synchronization.
+    .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
-    opts.device = _get_pg_default_device(group)
+    opts.device = torch.device(_get_object_coll_device(group))
     if device_ids is not None:
         if isinstance(device_ids, list):
             opts.device_ids = device_ids

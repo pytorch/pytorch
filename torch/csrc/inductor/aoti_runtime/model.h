@@ -56,6 +56,14 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
+enum ConstantType : uint8_t {
+  Unknown = 0,
+  Parameter = 1,
+  Buffer = 2,
+  TensorConstant = 3,
+  FoldedConstant = 4,
+};
+
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
@@ -395,6 +403,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).from_folded;
   }
 
+  int32_t constant_type(int64_t idx) const {
+    return constants_info_.at(idx).type;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
@@ -529,6 +541,7 @@ class AOTInductorModelBase {
     int64_t opaque_metadata_size{};
     const char* original_fqn = nullptr;
     bool from_folded{};
+    int32_t type{};
   };
 
   std::vector<ParamInfo> inputs_info_;
