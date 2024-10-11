@@ -194,6 +194,25 @@ def _trig2(score, b, h, m, n):
     return z
 
 
+# --------- Useful mask mod functions for testing ---------
+def _causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q >= token_kv
+
+
+def _inverse_causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q <= token_kv
+
+
 test_score_mods = [
     _identity,
     _times_two,
@@ -204,6 +223,17 @@ test_score_mods = [
     _rel_causal,
     _generate_alibi_bias(8),
 ]
+
+test_score_mask_mod_map = {
+    _identity: noop_mask,
+    _times_two: noop_mask,
+    _squared: noop_mask,
+    _causal: _causal_mask,
+    _inverse_causal: _inverse_causal_mask,
+    _rel_bias: noop_mask,
+    _rel_causal: _causal_mask,
+    _generate_alibi_bias(8): noop_mask,
+}
 
 captured_buffers_map = {
     "_head_offset": _head_offset,
@@ -423,17 +453,18 @@ class TestFlexAttention(InductorTestCase):
 
     def run_dynamic_test(
         self,
-        score_mod: Callable,
+        score_mask_mod: Tuple[Callable, Callable],
         dtype: torch.dtype = torch.float16,
         B: int = B,
         H: int = H,
         S: int = S,
         D: int = D,
     ):
+        score_mod, mask_mod = score_mask_mod
         # If the seqlen becomes smaller than the seqlen of the previous batch,
         # we can still reuse the block_mask created from a larger seqlen.
         MAX_S = S
-        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        block_mask = create_block_mask(mask_mod, 1, 1, MAX_S, MAX_S)
         sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -465,6 +496,21 @@ class TestFlexAttention(InductorTestCase):
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
+        # The third eager batch, shape (B * 2, H, S / 4, D)
+        S = int(S / 2)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
+        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
+        ref_out3 = sdpa_partial(q3_ref, k3_ref, v3_ref)
+        golden_out3 = sdpa_partial(q3_gold, k3_gold, v3_gold)
+
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+
+        golden_out3.backward(backward_grad3.to(torch.float64))
+        ref_out3.backward(backward_grad3)
+
         # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
         # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
         torch._dynamo.reset()
@@ -489,7 +535,8 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # No re-compilation, use the compiled dynamic shape version.
+        # Since current q_seqlen (MAX_S/2) is smaller than the seqlen from block_mask (MAX_S),
+        # recompile to include the BlockMask._adjust part.
         compiled_out2 = compiled_sdpa(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
         self._check_out_and_grad(
@@ -506,11 +553,32 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
-        # The third iteration, shape (B * 2, H, S * 2, D)
+        # No re-compilation, use the compiled dynamic shape version.
+        # The current q_seqlen (MAX_S/4) is still smaller than the seqlen from block_mask (MAX_S),
+        # we don't recompile since we can reuse the compiled graph, which already includes the BlockMask._adjust part.
+        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        compiled_out3.backward(backward_grad3)
+        self._check_out_and_grad(
+            golden_out3,
+            ref_out3,
+            compiled_out3,
+            q3_gold,
+            q3_ref,
+            q3,
+            k3_gold,
+            k3_ref,
+            k3,
+            v3_gold,
+            v3_ref,
+            v3,
+        )
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+        # The forth iteration, shape (B * 2, H, S * 2, D)
         # Since seqlen is larger than the seqlen in block_mask, throw errors.
-        S = int(S * 4)
+        S = int(S * 8)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -632,14 +700,16 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
-        if score_mod.__name__ == "_alibi_bias":
+    @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
+    def test_builtin_score_mods_dynamic(
+        self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
+    ):
+        if score_mask_mod[0].__name__ == "_alibi_bias":
             # TODO
             self.skipTest(
                 "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
             )
-        self.run_dynamic_test(score_mod, dtype)
+        self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -973,6 +1043,53 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1623,6 +1740,66 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
         torch.testing.assert_close(lse, lse2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(
+            q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            k_grad, k_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    # Use weird mask to test reusing block_mask does work well.
+    @supported_platform
+    def test_block_mask_reuse_with_weird_mask(self):
+        def mask(b, h, q, kv):
+            return (kv < 256) | (kv >= 2048)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 4, 4096, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
+        torch.compile(flex_attention, dynamic=True)(
+            make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
+        )
+
+        make_tensor2 = functools.partial(
+            torch.randn,
+            (4, 4, 2048, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor2(), make_tensor2(), make_tensor2()
+
+        # Compile 2st version with q/k/v(seqlen=2048) and block_mask(seqlen=4096),
+        # The graph includes the BlockMask._adjust part.
+        out = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask
+        )
+        out.sum().backward()
+        q_grad, k_grad, v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
+        out2 = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask2
+        )
+        out2.sum().backward()
+        q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
+        tolerance = Tolerances(atol=1e-3, rtol=1e-3)
+
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
         torch.testing.assert_close(
             q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
@@ -2392,6 +2569,32 @@ class TestBlockMask(InductorTestCase):
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
+
+    @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
     def test_block_mask_viz(self):
