@@ -662,11 +662,16 @@ def convolution(
                     **cfg.kwargs,
                 )
 
-    if use_ck_template(layout):
+    if use_ck_template(layout) and channels_last_conv():
         CKConvTemplate.add_ck_conv_choices(
             choices,
             layout,
             [x, weight, bias],
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            n_spacial_dimensions=ndim,
         )
 
     return autotune_select_algorithm("convolution", choices, args, layout)
