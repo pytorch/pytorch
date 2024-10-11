@@ -289,8 +289,7 @@ struct ExitTransformer {
       else_pair = ExitPair(else_pair.hasExited(), exit_vals);
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* has_exited;
+    Value* has_exited = nullptr;
     if (if_status == ExitStatus::WILL) {
       // Need to maintain the invariant that if hasExited() == true_val_
       // then we have exited.
@@ -551,10 +550,8 @@ static bool inlineConsecutiveIfs(Node* node) {
   bool else_value = maybe_else_value->toBool();
 
   for (const auto i : c10::irange(2)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* first_if_block;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Block* second_if_block;
+    Block* first_if_block = nullptr;
+    Block* second_if_block = nullptr;
 
     if (i == 0) {
       first_if_block = first_if.thenBlock();

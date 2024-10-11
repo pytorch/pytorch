@@ -27,12 +27,11 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  # Prior to Python 3.8 paths were suffixed with an 'm'
-  if [[ -d  "\${python_path}/bin" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  elif [[ -d "\${python_path}m/bin" ]]; then
-    export PATH="\${python_path}m/bin:\$PATH"
+  if [[ "\$python_nodot" = *t ]]; then
+    python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
+    python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 EXTRA_CONDA_FLAGS=""
@@ -50,13 +49,6 @@ if [[ "\$python_nodot" = *39* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
-fi
-
-if [[ "\$python_nodot" = *38* ]]; then
-  # sympy 1.12.1 is the last version that supports Python 3.8
-  SYMPY_PIN="==1.12.1"
-else
-  SYMPY_PIN=">=1.13.0"
 fi
 
 # Move debug wheels out of the package dir so they don't get installed
@@ -88,7 +80,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
-      "sympy\${SYMPY_PIN}" \
+      sympy>=1.12 \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
@@ -123,14 +115,13 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   cd /tmp/libtorch
 fi
 
-if [[ "$GPU_ARCH_TYPE" == xpu ]]; then
-  # Workaround for __mkl_tmp_MOD unbound variable issue, refer https://github.com/pytorch/pytorch/issues/130543
-  set +u
-  source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
-fi
-
 # Test the package
 /builder/check_binary.sh
+
+if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
+  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
+  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+fi
 
 # Clean temp files
 cd /builder && git clean -ffdx

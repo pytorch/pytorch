@@ -8,7 +8,9 @@
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>
+C10_DIAGNOSTIC_POP()
 #include <fbgemm/QuantUtils.h>
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding

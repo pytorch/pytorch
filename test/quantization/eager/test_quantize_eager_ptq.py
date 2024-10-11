@@ -81,7 +81,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                                     extra_module_kwargs,
                                     input_size):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = float_module_class(**extra_module_kwargs)
                 self.quant = QuantStub()
@@ -94,7 +94,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 return x
 
         class RefM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = float_module_class(**extra_module_kwargs)
                 self.quant1 = QuantStub()
@@ -203,7 +203,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
     def test_int16_reference_module(self):
 
         class RefM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.ConvTranspose2d(1, 1, 1)
                 self.quant1 = QuantStub()
@@ -277,7 +277,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             extra_module_kwargs: keyword args to instantiate the float module
         """
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.activation_op = float_module_class(**extra_module_kwargs)
                 self.quant = QuantStub()
@@ -839,7 +839,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
             class EmbeddingBagWithLinear(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                      include_last_offset=True, scale_grad_by_freq=False, mode='sum')
@@ -861,7 +861,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
 
@@ -901,7 +901,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 return quantized
 
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.custom = CustomModule()
 
@@ -909,7 +909,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 return self.custom(x)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -924,7 +924,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 return x
 
         class RefM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = QuantStub()
                 self.conv1 = torch.nn.Conv2d(1, 1, 1)
@@ -1031,7 +1031,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         `non_leaf_module_list`.
         """
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = QuantStub()
                 self.sigmoid = torch.nn.Sigmoid()
@@ -1477,7 +1477,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_embedding_bag_dynamic(self):
         class EmbeddingBagWithLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                  include_last_offset=True, scale_grad_by_freq=False, mode='sum')
@@ -1502,7 +1502,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_embedding_ops_dynamic(self):
         class EmbeddingWithLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(
                     num_embeddings=10, embedding_dim=12, scale_grad_by_freq=False)

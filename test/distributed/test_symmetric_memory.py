@@ -2,11 +2,14 @@
 
 import torch
 import torch.distributed as dist
+from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
+    _fused_scaled_matmul_reduce_scatter_fallback,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -26,7 +29,9 @@ from torch.testing._internal.common_utils import (
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
-        torch.cuda.is_available() and torch.cuda.device_count() >= 2
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (8, 0)
+        and torch.cuda.device_count() >= 2
     )
     num_devices = torch.cuda.device_count()
     for i in range(num_devices - 1):
@@ -40,6 +45,17 @@ def requires_cuda_p2p_access():
     return skip_but_pass_in_sandcastle_if(
         not cuda_p2p_access_available,
         "cuda p2p access is not available",
+    )
+
+
+def requires_multicast_support():
+    has_multicast_support = (
+        torch.cuda.is_available()
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not has_multicast_support,
+        "multicast support is not available",
     )
 
 
@@ -68,11 +84,15 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             store=store,
         )
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
 
     def _verify_symmetric_memory(self, symm_mem):
         self.assertEqual(symm_mem.world_size, 2)
 
         buf = symm_mem.get_buffer(0, (64, 64), torch.float32)
+        self.assertEqual(buf.storage_offset(), 0)
+        self.assertEqual(buf.storage().size(), 64 * 64)
+
         if symm_mem.rank == 0:
             symm_mem.wait_signal(src_rank=1)
             self.assertTrue(buf.eq(42).all())
@@ -94,7 +114,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_cuda_nvlink_connectivity_detection(self) -> None:
-        from torch._C._autograd import DeviceType
         from torch._C._distributed_c10d import _detect_dma_connectivity
 
         connectivity = _detect_dma_connectivity(DeviceType.CUDA, "nvlink")
@@ -117,8 +136,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         alloc_args = (shape, stride, dtype, device, group_name)
 
         t = torch.empty(shape, dtype=dtype, device=device)
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.rendezvous(t)
+        self.assertIsNone(_SymmetricMemory.rendezvous(t))
 
         t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
         symm_mem = _SymmetricMemory.rendezvous(t)
@@ -173,7 +191,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -182,7 +200,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(B, M // self.world_size, K, device="cuda")
+        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
@@ -206,7 +224,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_scaled_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -215,7 +233,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(B, M // self.world_size, K, device="cuda").to(
+        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda").to(
             torch.float8_e4m3fn
         )
         A_scale = torch.tensor(0.1, device="cuda")
@@ -223,6 +241,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
         ]
         B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+        out_dtypes = [None, torch.bfloat16, torch.float32]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
             A_shard,
@@ -231,6 +250,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             B_scales,
             gather_dim=gather_dim,
             group_name=group.group_name,
+            biases=[None] * len(Bs),
+            result_scales=[None] * len(Bs),
+            out_dtypes=out_dtypes,
+            use_fast_accum=[None] * len(Bs),
         )
         ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
             A_shard,
@@ -239,17 +262,27 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             B_scales,
             gather_dim=gather_dim,
             group_name=group.group_name,
+            biases=[None] * len(Bs),
+            result_scales=[None] * len(Bs),
+            out_dtypes=out_dtypes,
+            use_fast_accum=[None] * len(Bs),
         )
 
-        assert torch.allclose(
-            ag_output_0.to(torch.bfloat16), ag_output_1.to(torch.bfloat16)
-        )
-        assert ag_output_0.stride() == ag_output_1.stride()
-        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
-            assert torch.allclose(
-                mm_output_0.to(torch.bfloat16), mm_output_1.to(torch.bfloat16)
+        self.assertTrue(
+            torch.allclose(
+                ag_output_0.to(torch.float32),
+                ag_output_1.to(torch.float32),
             )
-            assert mm_output_0.stride(), mm_output_1.stride()
+        )
+        self.assertEqual(ag_output_0.stride(), ag_output_1.stride())
+        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+            self.assertTrue(
+                torch.allclose(
+                    mm_output_0.to(torch.float32), mm_output_1.to(torch.float32)
+                )
+            )
+            self.assertEqual(mm_output_0.stride(), mm_output_1.stride())
+            self.assertEqual(mm_output_0.dtype, mm_output_1.dtype)
 
         dist.destroy_process_group()
 
@@ -259,7 +292,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
         self._init_process()
 
-        B = 8
+        BATCH = 8
         M = 64
         N = 16
         K = 32
@@ -268,7 +301,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         world_size = self.world_size
 
         torch.manual_seed(42 + rank)
-        A = torch.rand(B, M, K, device="cuda")
+        A = torch.rand(BATCH, M, K, device="cuda")
         B = torch.rand(K, N, device="cuda")
 
         output_0 = _fused_matmul_reduce_scatter_fallback(
@@ -283,6 +316,53 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @parametrize("scatter_dim", [0, 1])
+    def test_fused_scaled_matmul_reduce_scatter(self, scatter_dim: int) -> None:
+        self._init_process()
+
+        BATCH = 8
+        M = 64
+        N = 16
+        K = 32
+        group = dist.group.WORLD
+        rank = self.rank
+        world_size = self.world_size
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
+        A_scale = torch.tensor(0.1, device="cuda")
+        B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
+        B_scale = torch.tensor(0.1, device="cuda")
+
+        output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            "avg",
+            scatter_dim,
+            group.group_name,
+            out_dtype=torch.bfloat16,
+        )
+        output_1 = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            "avg",
+            scatter_dim,
+            group.group_name,
+            out_dtype=torch.bfloat16,
+        )
+
+        assert torch.allclose(output_0, output_1)
+        assert output_0.stride() == output_1.stride()
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
     @parametrize("dim", [0, 1, 2])
     def test_optimal_layout(self, dim: int) -> None:
         t = torch.rand(8, 64, 32, 16)
@@ -294,6 +374,265 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         x = restride_A_for_fused_matmul_reduce_scatter(t, dim)
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
         self.assertTrue(torch.allclose(x, t))
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            ).fill_(self.rank)
+        else:
+            t = torch.full((64, 64), self.rank, dtype=torch.float32, device=self.device)
+
+        res = torch.ops.symm_mem._low_contention_all_gather(t, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 * self.world_size, 64))
+
+        chunks = res.chunk(self.world_size)
+        for r in range(self.world_size):
+            self.assertTrue(chunks[r].eq(r).all())
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @parametrize("reduce_op", ["sum", "avg"])
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_reduce_scatter(
+        self, reduce_op: str, symm_mem_input: bool
+    ) -> None:
+        self._init_process()
+
+        if symm_mem_input:
+            t = _SymmetricMemory.empty_strided_p2p(
+                size=(64, 64),
+                stride=(64, 1),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            )
+        else:
+            t = torch.empty((64, 64), dtype=torch.float32, device=self.device)
+
+        chunks = t.chunk(self.world_size)
+        for r in range(self.world_size):
+            chunks[r].fill_(r)
+
+        res = torch.ops.symm_mem._low_contention_reduce_scatter(t, reduce_op, "0")
+        res = torch.ops._c10d_functional.wait_tensor(res)
+        self.assertEqual(res.shape, (64 // self.world_size, 64))
+
+        if reduce_op == "sum":
+            expect = self.rank * self.world_size
+        elif reduce_op == "avg":
+            expect = self.rank
+        else:
+            raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
+        self.assertTrue(res.eq(expect).all())
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_stream_write_value(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(64,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(self.rank + 42)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
+        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
+
+        for i in range(4):
+            symm_mem.stream_write_value32(
+                int(tensor.data_ptr()) + i * tensor.element_size(), 1
+            )
+            torch.testing.assert_close(tensor, expect[i])
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemAllReduceTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        # world_size > 2 is needed to verify accumulation order
+        return 4
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(f"cuda:{self.rank}")
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_multimem_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(16384,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(0)
+
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
+
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        res = t[shift : shift + numel]
+        res.normal_()
+        inp = res.clone()
+
+        torch.ops.symm_mem.multimem_all_reduce_(res, "sum", group_name)
+
+        # Head and tail should not be written
+        self.assertTrue(t[:shift].eq(0).all().item())
+        self.assertTrue(t[shift + numel :].eq(0).all().item())
+        self._verify_all_reduce_result(inp, res)
+
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_multimem_one_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        inp = _SymmetricMemory.empty_strided_p2p(
+            size=(size_bytes,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).normal_()
+
+        res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
+
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        # Only verify that the results are close to the sum of inputs across
+        # ranks (see Note [multimem_one_shot_all_reduce]).
+        torch.testing.assert_close(
+            gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
+        )
+
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_one_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        inp = _SymmetricMemory.empty_strided_p2p(
+            size=(size_bytes,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).normal_()
+
+        res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+        self._verify_all_reduce_result(inp, res)
+
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_two_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(16384,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(0)
+
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
+
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        res = t[shift : shift + numel]
+        res.normal_()
+        inp = res.clone()
+
+        torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
+
+        # Head and tail should not be written
+        self.assertTrue(t[:shift].eq(0).all().item())
+        self.assertTrue(t[shift + numel :].eq(0).all().item())
+        self._verify_all_reduce_result(inp, res)
+
+        dist.destroy_process_group()
+
+    def _verify_all_reduce_result(self, inp, res):
+        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
+        # Verify that the results across ranks are identical
+        self.assertEqual(
+            (gathered_res == gathered_res[0, :]).all(dim=0).sum(), inp.numel()
+        )
+
+        # Verify that the result are close to the sum of inputs across ranks
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        torch.testing.assert_close(
+            gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
+        )
 
 
 if __name__ == "__main__":

@@ -388,7 +388,6 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
-        -Wno-strict-overflow
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=unused-function
@@ -405,14 +404,9 @@ function(torch_compile_options libname)
   target_compile_options(${libname} PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
-    string(FIND "${private_compile_options}" " " space_position)
-    if(NOT space_position EQUAL -1)
-      message(FATAL_ERROR "Found spaces in private_compile_options='${private_compile_options}'")
-    endif()
-    # Convert CMake list to comma-separated list
-    string(REPLACE ";" "," private_compile_options "${private_compile_options}")
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
+    foreach(option IN LISTS private_compile_options)
+      target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
+    endforeach()
   endif()
 
   if(NOT WIN32 AND NOT USE_ASAN)

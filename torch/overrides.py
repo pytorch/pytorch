@@ -192,7 +192,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
         torch.export.register_dataclass,
@@ -1253,6 +1252,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vsplit: lambda input, indices_or_sections: -1,
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
+        torch._wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
+        torch._wrapped_quantized_linear_prepacked: (
+            lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
+        ),
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
         torch._make_dual_copy: lambda primal, tangent, level: -1,
@@ -1341,6 +1344,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
+        Tensor._clear_non_serializable_cached_data: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
@@ -1404,6 +1408,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
@@ -1502,18 +1507,16 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack__: lambda self, stream=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
-    }
+    }  # fmt: skip
 
     privateuse1_backend_name = (
         torch.utils.backend_registration._privateuse1_backend_name
     )
     if hasattr(Tensor, privateuse1_backend_name):
-        ret[
-            getattr(Tensor, privateuse1_backend_name)
-        ] = lambda self, device=None, non_blocking=False, **kwargs: -1
-        ret[
-            getattr(Tensor, f"is_{privateuse1_backend_name}").__get__
-        ] = lambda self: -1  # noqa: B009
+        ret[getattr(Tensor, privateuse1_backend_name)] = (
+            lambda self, device=None, non_blocking=False, **kwargs: -1
+        )
+        ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = lambda self: -1
 
     ret2 = {}
     ignored = get_ignored_functions()
@@ -1562,10 +1565,10 @@ def wrap_torch_function(dispatcher: Callable):
 
     Examples
     --------
-    >>> def dispatcher(a): # Must have the same signature as func
+    >>> def dispatcher(a):  # Must have the same signature as func
     ...     return (a,)
     >>> @torch.overrides.wrap_torch_function(dispatcher)
-    >>> def func(a): # This will make func dispatchable by __torch_function__
+    >>> def func(a):  # This will make func dispatchable by __torch_function__
     ...     return a + 0
     """
 
@@ -2024,7 +2027,7 @@ class TorchFunctionMode:
     inner: "TorchFunctionMode"
 
     # Force metaclass to generate constructor at the base of the hierarchy
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):

@@ -15,7 +15,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -27,7 +27,12 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
-from .autotune_process import TensorMeta, TritonBenchmarkRequest
+from .autotune_process import (
+    TensorMeta,
+    TritonBenchmarkRequest,
+    TritonCPUBenchmarkRequest,
+    TritonGPUBenchmarkRequest,
+)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
@@ -40,8 +45,8 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
-from .runtime.runtime_utils import do_bench
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -78,7 +83,7 @@ class PartialRender:
     of replacements after the initial render.
     """
 
-    def __init__(self, code, replacement_hooks):
+    def __init__(self, code, replacement_hooks) -> None:
         super().__init__()
         self.code = code
         self.replacement_hooks = replacement_hooks
@@ -134,7 +139,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         *,
         index_dtype,
-    ):
+    ) -> None:
         super().__init__(
             sympy_product(output_node.get_size()),
             sympy.Integer(1),
@@ -203,7 +208,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(inp.get_size())
-            numel = functools.reduce(operator.mul, size)
+            numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
@@ -214,13 +219,15 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -352,6 +359,7 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
+        outer_self = self
         num = 0
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
@@ -379,12 +387,13 @@ class TritonTemplateKernel(TritonKernel):
                     if name not in fixed_inputs:
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
+                        index_str = outer_self.kexpr(index)
                         var = add_input(name)
-                        return f"tl.load({var} + {index})"
+                        return f"tl.load({var} + {index_str})"
 
                     return f"({fixed_inputs[name]})"
 
-                def indirect_indexing(self, index_var, size, check):
+                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -400,7 +409,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(set())  # type: ignore[arg-type]
             return body_val
 
     def store_output(
@@ -573,6 +582,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
+                gpu="cpu" not in V.graph.device_types,
             )
 
 
@@ -592,7 +602,7 @@ class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: Dict[str, "TritonTemplate"] = {}
 
-    def __init__(self, name: str, grid: Any, source: str, debug=False):
+    def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
         self.grid = grid
         self.template = self._template_from_string(source)
@@ -600,7 +610,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
         input_nodes,
         layout,
@@ -742,7 +752,12 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
-        bmreq = TritonBenchmarkRequest(
+        bmreq_cls: Type[TritonBenchmarkRequest]
+        if layout.device.type == "cpu":
+            bmreq_cls = TritonCPUBenchmarkRequest
+        else:
+            bmreq_cls = TritonGPUBenchmarkRequest
+        bmreq = bmreq_cls(
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
@@ -751,7 +766,7 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
@@ -790,7 +805,7 @@ class ExternKernelChoice:
         op_overload=None,
         use_fallback_kernel=False,
         kernel_creator=None,
-    ):
+    ) -> None:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
@@ -849,7 +864,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
-    ):
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
@@ -875,7 +890,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
@@ -907,6 +922,19 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def get_make_kernel_render(self):
         return self.make_kernel_render
 
+    def autoheuristic_id(self):
+        type_name = "triton"
+        info = self.info_dict()
+        # TODO(AlnisM): Does tile_shape always exist?
+        tile = info["tile_shape"]
+        tile_vals = eval(tile)  # type: ignore[arg-type]
+        BLOCK_M = tile_vals[0]
+        BLOCK_K = tile_vals[1]
+        BLOCK_N = tile_vals[2]
+        num_stages = info["num_stages"]
+        num_warps = info["num_warps"]
+        return f"type={type_name}_BLOCK-M={BLOCK_M}_BLOCK-K={BLOCK_K}_BLOCK-N={BLOCK_N}_numstages={num_stages}_numwarps={num_warps}"
+
 
 class ExternKernelCaller(ChoiceCaller):
     def __init__(
@@ -917,13 +945,13 @@ class ExternKernelCaller(ChoiceCaller):
         kwargs=None,
         *,
         has_out_variant=True,
-    ):
+    ) -> None:
         super().__init__(choice.name, input_nodes, layout)
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
@@ -939,7 +967,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(algo, args, {})
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -991,6 +1019,9 @@ class ExternKernelCaller(ChoiceCaller):
             "kernel_call_name": self.choice.call_name(),
         }
 
+    def autoheuristic_id(self):
+        return f"extern_{self.choice.name}"
+
 
 @functools.lru_cache(None)
 def get_mm_log_filename() -> Optional[str]:
@@ -1021,7 +1052,7 @@ def append_to_log(filename, data):
 
 
 class DataProcessorChoiceCallerWrapper:
-    def __init__(self, wrapped, preprocessor, postprocessor):
+    def __init__(self, wrapped, preprocessor, postprocessor) -> None:
         self._wrapped = wrapped
         if preprocessor is not None:
             self._preprocessor = preprocessor
@@ -1068,7 +1099,7 @@ class DataProcessorTemplateWrapper:
         preprocessor,
         postprocessor,
         **kwargs,
-    ):
+    ) -> None:
         if preprocessor is not None:
             self._preprocessor = preprocessor
         else:
@@ -1101,7 +1132,7 @@ class DataProcessorTemplateWrapper:
 
 
 class ErrorFromChoice(RuntimeError):
-    def __init__(self, msg, choice: ChoiceCaller, inputs_str):
+    def __init__(self, msg, choice: ChoiceCaller, inputs_str) -> None:
         msg += f"\nFrom choice {choice}\n{inputs_str}"
         super().__init__(msg)
         self.choice = choice
@@ -1118,8 +1149,25 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
+def create_inputs_key(input_nodes) -> str:
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+
+
+def create_precompile_key(
+    name: str, inputs_key: str, choices: List[ChoiceCaller]
+) -> str:
+    return ":".join(
+        [
+            name,
+            inputs_key,
+            torch.get_float32_matmul_precision(),
+        ]
+        + [choice.hash_key() for choice in choices]
+    )
+
+
 class AlgorithmSelectorCache(PersistentCache):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # the autotuning will get occur in the scheduler, so there is
@@ -1127,6 +1175,12 @@ class AlgorithmSelectorCache(PersistentCache):
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
         self.precompile_cache: Dict[str, Callable[[], None]] = {}
+        # list of callbacks that are called after benchmarking
+        self.feedback_saver_fns: List[
+            Callable[
+                [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+            ]
+        ] = []
 
     def __call__(
         self,
@@ -1162,8 +1216,13 @@ class AlgorithmSelectorCache(PersistentCache):
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
+            backend_config = (
+                "max_autotune_gemm_backends"
+                if name != "convolution"
+                else "max_autotune_conv_backends"
+            )
             raise NoValidChoicesError(
-                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
@@ -1177,7 +1236,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        inputs_key = repr([self.key_of(x) for x in input_nodes])
+        inputs_key = create_inputs_key(input_nodes)
 
         def precompile(choices) -> Callable[[], None]:
             def no_op(*args, **kwargs):
@@ -1219,14 +1278,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 return no_op
 
-            precompile_key = ":".join(
-                [
-                    name,
-                    inputs_key,
-                    torch.get_float32_matmul_precision(),
-                ]
-                + [choice.hash_key() for choice in choices]
-            )
+            precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
 
@@ -1246,7 +1298,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    return choice.precompile()
+                    start_time = time.time()
+                    choice.precompile()
+                    return time.time() - start_time
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
 
@@ -1267,6 +1321,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     if e := future.exception():
                         log.error(
                             "Exception %s for benchmark choice %s", e, futures[future]
+                        )
+                    else:
+                        log.info(
+                            "Precompiling benchmark choice %s took %.02fs",
+                            futures[future],
+                            future.result(),
                         )
 
                 executor.shutdown(wait=True)
@@ -1315,6 +1375,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
+            for feedback_fn in self.feedback_saver_fns:
+                feedback_fn(timings, name, input_nodes, choices)
+
             return timings
 
         precompile_fn = precompile(choices)
@@ -1344,6 +1407,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     layout,
                     input_nodes,
                     get_timings,
+                    choices,
                 )
             )
 
@@ -1377,22 +1441,24 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
-                    unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hint(
-                        input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
-                    ),
+                (
+                    unique_example_inputs[input_node.get_name()]
+                    if unique_example_inputs[input_node.get_name()].is_mkldnn
+                    else torch.as_strided(
+                        unique_example_inputs[input_node.get_name()],
+                        V.graph.sizevars.size_hints(
+                            input_node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hints(
+                            input_node.get_stride(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hint(
+                            input_node.get_layout().offset,
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
                 )
                 for input_node in input_nodes
             ]
@@ -1664,6 +1730,14 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
+    def add_feedback_saver(
+        self,
+        fn: Callable[
+            [Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None
+        ],
+    ):
+        self.feedback_saver_fns.append(fn)
+
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -1679,6 +1753,15 @@ def autotune_select_algorithm(*args, **kwargs):
         ] = torch._inductor.config.benchmark_epilogue_fusion
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
+
+
+def add_feedback_saver(
+    fn: Callable[[Dict[ChoiceCaller, float], str, List[Any], List[ChoiceCaller]], None]
+):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
 
 
 def realize_inputs(*args):

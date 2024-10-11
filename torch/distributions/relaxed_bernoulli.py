@@ -13,6 +13,8 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch.types import _size
+
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
 
@@ -87,7 +89,7 @@ class LogitRelaxedBernoulli(Distribution):
     def param_shape(self):
         return self._param.size()
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(

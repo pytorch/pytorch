@@ -36,7 +36,7 @@ namespace at::functorch {
 // `Tensor sum(const Tensor& self, int64_t dim)`. The signature of the
 // batch rule has an additional std::optional<int64_t> argument after each
 // Tensor argument and return. So, in this case, the batch rule has signature
-//   tuple<Tensor,optional<int64_t>> sum_batch_rule(
+//   tuple<Tensor, std::optional<int64_t>> sum_batch_rule(
 //       const Tensor& self, std::optional<int64_t> self_bdim, int64_t dim);
 //
 // The vmap call above invokes the batch rule with `self = tensor`,
@@ -90,7 +90,7 @@ namespace at::functorch {
 
 namespace{
 
-std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     int64_t dim) {
@@ -101,7 +101,7 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
 }
 
 // NB: repeat is not actually a view, but it is in this file
-std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> repeat_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     c10::SymIntArrayRef sizes) {
@@ -116,7 +116,7 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
 }
 
 
-std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     c10::SymIntArrayRef size) {
@@ -137,7 +137,7 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
   return std::make_tuple(at::_unsafe_view_symint(self_, view_size), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, IntArrayRef dims) {
+std::tuple<Tensor, std::optional<int64_t>> flip_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim, IntArrayRef dims) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
   for (auto i: dims) {
@@ -259,7 +259,7 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_dim_batch_rule(
 
 std::tuple<Tensor, std::optional<int64_t>> select_batching_rule(const Tensor& self, std::optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select_symint(dim, std::move(index)), nullopt);
+    return std::make_tuple(self.select_symint(dim, std::move(index)), std::nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);
@@ -317,7 +317,7 @@ std::tuple<Tensor, std::optional<int64_t>> diagonal_batching_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> diagonal_backward_batch_rule(
     const Tensor& grad_input, std::optional<int64_t> grad_input_bdim,
     c10::SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
@@ -331,7 +331,7 @@ std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> slice_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     int64_t dim,
@@ -349,7 +349,7 @@ static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 
-std::tuple<Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 transpose_int_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -389,7 +389,7 @@ std::tuple<Tensor, std::optional<int64_t>> permute_batching_rule(
   return std::make_tuple(self_.permute(dims_), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> select_backward_batch_rule(
     const Tensor& grad_input, std::optional<int64_t> grad_input_bdim,
     c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
@@ -402,7 +402,7 @@ std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> slice_backward_batch_rule(
     const Tensor& grad_input, std::optional<int64_t> grad_input_bdim,
     SymIntArrayRef input_sizes, int64_t dim, c10::SymInt start, c10::SymInt end, c10::SymInt step) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
@@ -427,7 +427,7 @@ std::tuple<Tensor, std::optional<int64_t>> view_batching_rule(
   return std::make_tuple(self_.view_symint(size_), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> view_copy_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> view_copy_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     c10::SymIntArrayRef size) {
@@ -530,7 +530,7 @@ Tensor trace_decomp(const Tensor& tensor) {
   return tensor.diagonal().sum();
 }
 
-std::tuple<Tensor,optional<int64_t>> tril_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> tril_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     int64_t diagonal = 0) {
@@ -540,7 +540,7 @@ std::tuple<Tensor,optional<int64_t>> tril_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> triu_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
     int64_t diagonal = 0) {

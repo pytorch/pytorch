@@ -7,6 +7,7 @@ import torch._lazy
 import torch._lazy.ts_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 torch._lazy.ts_backend.init()
 
 

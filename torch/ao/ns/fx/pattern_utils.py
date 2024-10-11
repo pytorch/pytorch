@@ -1,21 +1,19 @@
+from typing import Any, Callable, Dict, List, Set, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-toq = torch.ops.quantized
-
-from torch.fx import GraphModule
-from torch.fx.graph import Node
-
+from torch.ao.quantization import FakeQuantizeBase, ObserverBase
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.utils import getattr_from_fqn
-from .ns_types import NSNodeTargetType
-from torch.ao.quantization import (
-    ObserverBase,
-    FakeQuantizeBase,
-)
+from torch.fx import GraphModule
+from torch.fx.graph import Node
 
-from typing import Dict, Tuple, Set, Callable, Any, Union, List
+from .ns_types import NSNodeTargetType
+
+
+toq = torch.ops.quantized
 
 
 def get_type_a_related_to_b(
@@ -40,12 +38,15 @@ def get_type_a_related_to_b(
 NSFusionElType = Union[
     Callable,  # call_function or call_module type, example: F.linear or nn.Conv2d
     str,  # call_method name, example: "dequantize"
-    Tuple[str, Any],  # call_method name and first argument, example: ("to", torch.float16)
+    Tuple[
+        str, Any
+    ],  # call_method name and first argument, example: ("to", torch.float16)
 ]
 NSFusionType = Union[
     Tuple[NSFusionElType, NSFusionElType],
     Tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType],
 ]
+
 
 def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     """
@@ -74,8 +75,12 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
         # TODO: this is a temporary hack to flatten the patterns from quantization so
         # that it works with the ns matcher function, maybe we should use `_is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns
-        if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
-           isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
+        if (
+            isinstance(quant_pattern, tuple)
+            and len(quant_pattern) == 2
+            and isinstance(quant_pattern[1], tuple)
+            and len(quant_pattern[1]) == 2
+        ):
             # flatten the pattern with form (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d))
             quant_pattern = (quant_pattern[0], quant_pattern[1][0], quant_pattern[1][1])
 
@@ -96,7 +101,6 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
                 new_pattern = (cls, quant_pattern)
             results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
 
-
     # After this point, results contains values such as
     # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]
 
@@ -106,7 +110,10 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     patterns_to_add = [
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
-        ((("to", torch.float16), F.relu, F.linear, "dequantize"), fp16_em_base_op_idx,),
+        (
+            (("to", torch.float16), F.relu, F.linear, "dequantize"),
+            fp16_em_base_op_idx,
+        ),
         # Conv-BN fusion (this happens outside of quantization patterns,
         # which is why it is defined separately here).
         ((nn.BatchNorm1d, nn.Conv1d), default_base_op_idx),
@@ -142,9 +149,10 @@ def end_node_matches_reversed_fusion(
 
         cur_fusion_el = reversed_fusion[fusion_idx]
 
-        if cur_node.op == 'call_function':
-            fusion_el_is_fun = (not isinstance(cur_fusion_el, str)) and \
-                (not isinstance(cur_fusion_el, type))
+        if cur_node.op == "call_function":
+            fusion_el_is_fun = (not isinstance(cur_fusion_el, str)) and (
+                not isinstance(cur_fusion_el, type)
+            )
             if fusion_el_is_fun:
                 if cur_node.target != cur_fusion_el:
                     return False
@@ -155,7 +163,7 @@ def end_node_matches_reversed_fusion(
             else:
                 return False
 
-        elif cur_node.op == 'call_module':
+        elif cur_node.op == "call_module":
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
                 assert isinstance(cur_node.target, str)
@@ -171,9 +179,10 @@ def end_node_matches_reversed_fusion(
             else:
                 return False
 
-        elif cur_node.op == 'call_method':
-            fusion_el_is_meth_with_second_arg = \
+        elif cur_node.op == "call_method":
+            fusion_el_is_meth_with_second_arg = (
                 isinstance(cur_fusion_el, tuple) and len(cur_fusion_el) == 2
+            )
             fusion_el_is_meth_without_args = isinstance(cur_fusion_el, str)
             if fusion_el_is_meth_without_args or fusion_el_is_meth_with_second_arg:
                 if fusion_el_is_meth_without_args:

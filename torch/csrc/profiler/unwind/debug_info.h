@@ -16,7 +16,7 @@ struct DebugInfo {
     auto L = parseHeader(offset);
     parseCompileUnit(L);
   }
-  unwind::optional<uint64_t> lineNumberProgramOffset() {
+  std::optional<uint64_t> lineNumberProgramOffset() {
     return line_number_program_offset_;
   }
   uint64_t nextOffset() {

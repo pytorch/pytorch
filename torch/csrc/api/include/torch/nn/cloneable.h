@@ -10,8 +10,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 /// The `clone()` method in the base `Module` class does not have knowledge of
 /// the concrete runtime type of its subclasses. Therefore, `clone()` must
 /// either be called from within the subclass, or from a base class that has
@@ -33,7 +32,7 @@ class Cloneable : public Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
@@ -94,5 +93,4 @@ class Cloneable : public Module {
   }
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -509,5 +509,12 @@ class Transformer(Interpreter):
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
-            self.new_graph.output(map_aggregate(result, strip_proxy))
+            new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
+            # also preserve the metadata from the old output node, if it exists
+            old_output_node = list(self.graph.nodes)[-1]
+            assert old_output_node.op == "output"
+            for k, v in old_output_node.meta.items():
+                new_output_node.meta[k] = v
+
+
         return _make_graph_module(self.module, self.new_graph)

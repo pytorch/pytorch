@@ -15,10 +15,12 @@ from torch.sparse._semi_structured_ops import (
     semi_sparse_indices,
     semi_sparse_linear,
     semi_sparse_mm,
+    semi_sparse_scaled_mm,
     semi_sparse_t,
     semi_sparse_values,
     semi_sparse_view,
 )
+
 
 __all__ = [
     "SparseSemiStructuredTensor",
@@ -53,7 +55,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     _DEFAULT_ALG_ID: int = 0
     _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
-    _FORCE_CUTLASS: bool = True
+    _FORCE_CUTLASS: bool = False
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
@@ -224,6 +226,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.addmm: semi_sparse_addmm,
                 torch.ops.aten.linear: semi_sparse_linear,
                 torch.ops.aten._to_copy: fallback_dispatcher,
+                torch.ops.aten._scaled_mm: semi_sparse_scaled_mm,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -257,8 +260,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # check dtype
         if original_tensor.dtype not in cls._DTYPE_SHAPE_CONSTRAINTS:
             raise RuntimeError(
-                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                "dtype must be one of: {cls._DTYPE_SHAPE_CONSTRAINTS}"
+                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype for {cls}!"
             )
 
         # check shape
@@ -294,7 +296,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             return dense_input
 
-    def to_dense(self):
+    def to_dense(self):  # type:ignore[override]
         col = self.shape[-1]
         return torch.mm(self, torch.eye(col, dtype=self.dtype, device=self.device))
 
@@ -419,7 +421,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             requires_grad=original_tensor.requires_grad,
         )
 
-    def to_dense(self):
+    def to_dense(self):  # type: ignore[override]
         assert self.meta is not None and self.packed is not None
         return (
             sparse_semi_structured_to_dense_cutlass(
@@ -533,10 +535,10 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
     BACKEND = "cusparselt"
     _DTYPE_SHAPE_CONSTRAINTS = {
+        torch.float8_e4m3fn: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
-        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4),
     }
 
     @classmethod
@@ -630,8 +632,15 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         if bias is not None and bias.dtype != self.dtype:
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)} + C`, "
-                "with A.dtype=B.dtype={self.dtype} and C.dtype={B.dtype}. "
+                f"with A.dtype=B.dtype={self.dtype} and C.dtype={B.dtype}. "
                 "This operation is only supported when A, B and C have the same data type."
+            )
+        # Force fp8 mm to error to be consistent with torch
+        if self.dtype == torch.float8_e4m3fn:
+            raise NotImplementedError(
+                f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)}`, "
+                f"with A.dtype=B.dtype={self.dtype}. "
+                "mm is not supported for float8_e4m3fn, please use `torch._scaled_mm` instead."
             )
         if self.packed is None:
             raise NotImplementedError(

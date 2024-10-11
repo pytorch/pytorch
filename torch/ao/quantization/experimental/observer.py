@@ -4,14 +4,18 @@ This module implements nonuniform observers used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 """
 
-import torch
 import itertools
+
 import matplotlib.pyplot as plt
+
+import torch
+from torch.ao.quantization.experimental.apot_utils import apot_to_float, float_to_apot
 from torch.ao.quantization.observer import ObserverBase
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
+
 
 # TODO: Consider adding NonUniformQuantizationObserverBase class
 # when more than one non-uniform method is implemented
+
 
 class APoTObserver(ObserverBase):
     b: int
@@ -20,11 +24,7 @@ class APoTObserver(ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
-    def __init__(
-        self,
-        b,
-        k,
-            dtype=torch.quint8) -> None:
+    def __init__(self, b, k, dtype=torch.quint8) -> None:
         super().__init__(dtype)
         self.b = b
         self.k = k
@@ -34,7 +34,7 @@ class APoTObserver(ObserverBase):
 
     # min_val and max_val are optional args to override
     # the min_val and max_val observed by forward
-    def calculate_qparams(self, signed):
+    def calculate_qparams(self, signed):  # type:ignore[override]
         return self._calculate_qparams(signed, self.min_val, self.max_val)
 
     r""" Calculates nonuniform quantization parameters according to APoT paper:
@@ -49,6 +49,7 @@ class APoTObserver(ObserverBase):
         quantization_levels: non-uniform quantization levels (fp representation)
         level_indices: int representation of quantization_levels indices
     """
+
     def _calculate_qparams(self, signed: bool, min_val=None, max_val=None):
         if min_val is not None:
             self.min_val = min_val
@@ -72,8 +73,8 @@ class APoTObserver(ObserverBase):
         for i in range(0, self.n):
             p_curr = torch.tensor([0])
 
-            for j in range(0, (2 ** self.k - 2) + 1):
-                curr_ele = 2 ** (- (i + j * self.n))
+            for j in range(0, (2**self.k - 2) + 1):
+                curr_ele = 2 ** (-(i + j * self.n))
                 p_append = torch.tensor([curr_ele])
                 p_curr = torch.cat((p_curr, p_append))
                 # introduce signed numbers
@@ -114,7 +115,9 @@ class APoTObserver(ObserverBase):
                 sum += ele
             quantization_levels_list.append(sum)
 
-        quantization_levels_gamma = [float(gamma) * ele for ele in quantization_levels_list]
+        quantization_levels_gamma = [
+            float(gamma) * ele for ele in quantization_levels_list
+        ]
         quantization_levels = torch.tensor(quantization_levels_gamma)
         level_indices = torch.tensor([])
         quantization_levels, level_indices = quantization_levels.sort()
@@ -124,6 +127,7 @@ class APoTObserver(ObserverBase):
     r"""Records the running minimum and maximum of ``x``.
         Args:
             x_orig: Tensor to be observed for min and max val"""
+
     def forward(self, x_orig):
         if x_orig.numel() == 0:
             return x_orig
@@ -142,12 +146,21 @@ class APoTObserver(ObserverBase):
             observer: APoTObserver to calculate qparams
             signed: bool to indicate if qparams should be signed/unsigned
     """
+
     def quant_levels_visualization(self, signed=False):
-        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(signed)
+        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(
+            signed
+        )
 
         xs = [float(x) / 1000.0 for x in range(1000)]
-        ys = [apot_to_float(float_to_apot(x, quantization_levels, level_indices, alpha),
-                            quantization_levels, level_indices).item() for x in xs]
+        ys = [
+            apot_to_float(
+                float_to_apot(x, quantization_levels, level_indices, alpha),
+                quantization_levels,
+                level_indices,
+            ).item()
+            for x in xs
+        ]
 
         f = plt.figure(figsize=(15, 10))
 

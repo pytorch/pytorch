@@ -154,7 +154,7 @@ class TestLayoutOptim(TestCase):
     @torch.no_grad()
     def test_keep_output_layout_infer(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False

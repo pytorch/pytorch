@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/rl/main.py
@@ -44,7 +44,7 @@ class Policy(nn.Module):
     Copying the code to make these two examples independent.
     See https://github.com/pytorch/examples/tree/master/reinforcement_learning
     """
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.affine1 = nn.Linear(4, 128)
         self.dropout = nn.Dropout(p=0.6)
@@ -97,7 +97,7 @@ class Observer:
     select an action. Then, the observer applies the action to its environment
     and reports the reward to the agent.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.id = rpc.get_worker_info().id
         self.env = DummyEnv()
         self.env.seed(SEED)

@@ -11,7 +11,7 @@ class ExampleCode(torch.nn.Module):
         super().__init__()
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
-        self.register_buffer("cval", torch.randn((d_hid,), requires_grad=False))
+        self.cval = torch.nn.Buffer(torch.randn((d_hid,), requires_grad=False))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
 

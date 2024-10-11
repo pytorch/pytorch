@@ -8,7 +8,7 @@ from torch.testing._internal.jit_utils import JitTestCase, make_global
 class TestDCE(JitTestCase):
     def test_setattr_no_aliasdb(self):
         class Net(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.empty([2, 2])
 
@@ -23,7 +23,7 @@ class TestDCE(JitTestCase):
     def test_setattr_removed(self):
         @torch.jit.script
         class Thing1:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.x = torch.zeros([2, 2])
 
         make_global(Thing1)

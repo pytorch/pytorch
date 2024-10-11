@@ -145,7 +145,7 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   if (nullptr == ptr) {
     return self.fill_(0);
   }
-  int64_t size_bytes = nelements * self.dtype().itemsize();
+  auto size_bytes = nelements * self.dtype().itemsize();
   if (size_bytes > 0) {
     std::memset(ptr, 0, size_bytes);
   }

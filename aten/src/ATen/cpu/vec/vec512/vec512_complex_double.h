@@ -363,16 +363,16 @@ public:
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
-  Vectorized<c10::complex<double>> operator<(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator<(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator<=(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator<=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator>(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator>(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<double>> operator>=(const Vectorized<c10::complex<double>>& other) const {
+  Vectorized<c10::complex<double>> operator>=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

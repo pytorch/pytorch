@@ -147,7 +147,7 @@ struct LineNumberProgram {
     uint32_t file = 1;
     int64_t line = 1;
   };
-  unwind::optional<Entry> find(uint64_t address) {
+  std::optional<Entry> find(uint64_t address) {
     auto e = program_index_.find(address);
     if (!e) {
       return std::nullopt;

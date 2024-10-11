@@ -3,8 +3,8 @@ import logging
 from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import torch
-
 from torch._library.utils import parse_namespace
+
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class HasStaticMethodFromReal(Protocol):
 
 
 class FakeClassRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self._registered_class: Dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:
@@ -55,7 +55,7 @@ class FakeClassRegistry:
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
             log.warning(
-                "%s is already registered. Previous fake class is overrided with  %s.",
+                "%s is already registered. Previous fake class is overridden with  %s.",
                 full_qualname,
                 fake_class,
             )
@@ -159,7 +159,9 @@ def maybe_to_fake_obj(
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            log.warning("fake object of %s doesn't implement method %s.", x, name)
+            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            if name not in override_skip_list:
+                log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped
 
 

@@ -66,6 +66,9 @@ class GuardManager:
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_global_state_guard(self, verbose_code_parts: list[str]) -> None: ...
+    def add_torch_function_mode_stack_guard(
+        self, initial_stack, verbose_code_parts: list[str]
+    ) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -91,7 +94,7 @@ class DictGuardManager(GuardManager):
         guard_manager_enum,
     ) -> GuardManager: ...
 
-def install_tensor_aliasing_guard(
+def install_object_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
     verbose_code_parts: list[str],

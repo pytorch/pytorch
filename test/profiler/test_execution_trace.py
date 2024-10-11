@@ -33,7 +33,6 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -41,8 +40,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-
 from torch.utils._triton import has_triton
+
 
 Json = Dict[str, Any]
 

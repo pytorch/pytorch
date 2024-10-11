@@ -5,10 +5,9 @@ import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat
 import torch.ao.nn.quantized as nnq
 
-__all__ = [
-    "BNReLU2d",
-    "BNReLU3d"
-]
+
+__all__ = ["BNReLU2d", "BNReLU3d"]
+
 
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
@@ -23,7 +22,9 @@ class BNReLU2d(nnq.BatchNorm2d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU2d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(
+            num_features, eps=eps, momentum=momentum, device=device, dtype=dtype
+        )
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -31,20 +32,30 @@ class BNReLU2d(nnq.BatchNorm2d):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return torch.ops.quantized.batch_norm2d_relu(
-            input, self.weight, self.bias, self.running_mean,
-            self.running_var, self.eps, self.scale, self.zero_point)
+            input,
+            self.weight,
+            self.bias,
+            self.running_mean,
+            self.running_var,
+            self.eps,
+            self.scale,
+            self.zero_point,
+        )
 
     def _get_name(self):
-        return 'QuantizedBNReLU2d'
+        return "QuantizedBNReLU2d"
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         # TODO: Add qat support for BNReLU2d
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+        return super().from_float(
+            mod, use_precomputed_fake_quant=use_precomputed_fake_quant
+        )
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):
         return super().from_reference(bn_relu[0], output_scale, output_zero_point)
+
 
 class BNReLU3d(nnq.BatchNorm3d):
     r"""
@@ -59,7 +70,9 @@ class BNReLU3d(nnq.BatchNorm3d):
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
-        super().__init__(num_features, eps=eps, momentum=momentum, device=device, dtype=dtype)
+        super().__init__(
+            num_features, eps=eps, momentum=momentum, device=device, dtype=dtype
+        )
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -67,16 +80,25 @@ class BNReLU3d(nnq.BatchNorm3d):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
         return torch.ops.quantized.batch_norm3d_relu(
-            input, self.weight, self.bias, self.running_mean,
-            self.running_var, self.eps, self.scale, self.zero_point)
+            input,
+            self.weight,
+            self.bias,
+            self.running_mean,
+            self.running_var,
+            self.eps,
+            self.scale,
+            self.zero_point,
+        )
 
     def _get_name(self):
-        return 'QuantizedBNReLU3d'
+        return "QuantizedBNReLU3d"
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         # TODO: Add qat support for BNReLU3d
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+        return super().from_float(
+            mod, use_precomputed_fake_quant=use_precomputed_fake_quant
+        )
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):

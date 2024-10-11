@@ -1,10 +1,14 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import torch
-import torch.fx
+from typing import TYPE_CHECKING
 
+import torch
 from torch.onnx._internal.fx import _pass
+
+
+if TYPE_CHECKING:
+    import torch.fx
 
 
 class MovePlaceholderToFront(_pass.Transform):

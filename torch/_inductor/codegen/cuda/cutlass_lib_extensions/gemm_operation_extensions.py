@@ -15,7 +15,7 @@ if try_import_cutlass():
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
 
-        def __init__(self, operation_suffix=""):
+        def __init__(self, operation_suffix="") -> None:
             self.operation_suffix = operation_suffix
             self.includes = [
                 "cutlass/cutlass.h",

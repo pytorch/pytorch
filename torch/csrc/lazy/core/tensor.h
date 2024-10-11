@@ -7,8 +7,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 class TORCH_API SymNodeImpl : public c10::SymNodeImpl {
  public:
@@ -57,7 +56,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
       const at::Tensor& tensor,
       const BackendDevice& device);
   static LazyTensorPtr Create(Value ir_value, const BackendDevice& device);
-  static LazyTensorPtr Create(BackendDataPtr handle);
+  static LazyTensorPtr Create(const BackendDataPtr& handle);
   static LazyTensorPtr Create(std::shared_ptr<Data> data);
 
   // The default ctor previously created a null LazyTensor (one with no 'data'
@@ -82,13 +81,13 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // Override it to use your own graph executor.
   virtual at::Tensor ToTensor(bool detached);
 
-  void ShallowCopyTo(LazyTensorPtr dest) const;
+  void ShallowCopyTo(const LazyTensorPtr& dest) const;
 
   // Assigns the tensor value to the lazy tensor.
   void SetTensor(at::Tensor tensor);
 
-  void UpdateFromTensor(at::Tensor tensor, bool sync);
-  void UpdateFromTensorOut(at::Tensor tensor);
+  void UpdateFromTensor(const at::Tensor& tensor, bool sync);
+  void UpdateFromTensorOut(const at::Tensor& tensor);
   void UpdateFromTensorOut(const LazyTensorPtr& tensor);
 
   const std::shared_ptr<Data>& data() const;
@@ -126,7 +125,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
   std::optional<at::Tensor> CurrentTensorData() const;
 
-  std::vector<LazyTensorPtr> MakeOutputTensors(NodePtr node) const;
+  std::vector<LazyTensorPtr> MakeOutputTensors(const NodePtr& node) const;
 
   LazyTensorPtr CopyTensorToDevice(const BackendDevice& device);
 
@@ -154,12 +153,12 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
       const at::Tensor& tensor,
       const BackendDevice& device) const;
 
-  Value CreateTensorNode(BackendDataPtr data, bool read_only) const;
+  Value CreateTensorNode(const BackendDataPtr& data, bool read_only) const;
 
  private:
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
   LazyTensor(Value ir_value, const BackendDevice& device);
-  explicit LazyTensor(BackendDataPtr handle);
+  explicit LazyTensor(const BackendDataPtr& handle);
 
   static int64_t GetNextTensorId();
 
@@ -255,5 +254,4 @@ auto TupleAtenFromLtcTensors(const std::vector<LazyTensorPtr>& tensors) {
   return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
