@@ -124,8 +124,8 @@ at::Tensor all_reduce(
   return all_reduce_(output, std::move(reduce_op), std::move(group_name));
 }
 
-std::vector<at::Tensor>& all_reduce_coalesced_(
-    std::vector<at::Tensor>& inputs,
+std::vector<at::Tensor> all_reduce_coalesced_(
+    std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)

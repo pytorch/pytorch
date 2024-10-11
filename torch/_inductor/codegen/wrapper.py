@@ -90,8 +90,11 @@ def convert_arg_type(arg: torch.Argument) -> str:
         left, right = ("<", ">") if cpp_container else ("", "")
         const = "" if alias_info is not None and alias_info.is_write else " const"
 
+        # TODO: this is needed for all_reduce_coalesced_
+        ref = "" if python_type == "Tensor" and cpp_container == "torch::List" else "&"
+
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        return f"{cpp_container}{left}at::{python_type}{right}{const}&"
+        return f"{cpp_container}{left}at::{python_type}{right}{const}{ref}"
 
     if python_type == "Tensor":
         return type_alias(python_type, arg.alias_info)
