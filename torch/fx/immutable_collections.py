@@ -38,32 +38,23 @@ def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-class _ImmutableMixin:
-    def __init_subclass__(cls, mutable_methods_to_disable: Iterable[str]) -> None:
-        super().__init_subclass__()
-        for method in mutable_methods_to_disable:
-            setattr(cls, method, _no_mutation)
-
-
 @compatibility(is_backward_compatible=True)
-class immutable_list(
-    _ImmutableMixin,
-    List[_T],
-    mutable_methods_to_disable=(
-        "__delitem__",
-        "__iadd__",
-        "__imul__",
-        "__setitem__",
-        "append",
-        "clear",
-        "extend",
-        "insert",
-        "pop",
-        "remove",
-        "reverse",
-        "sort",
-    ),
-):
+class immutable_list(List[_T]):
+    """An immutable version of :class:`list`."""
+
+    __delitem__ = _no_mutation
+    __iadd__ = _no_mutation
+    __imul__ = _no_mutation
+    __setitem__ = _no_mutation
+    append = _no_mutation
+    clear = _no_mutation
+    extend = _no_mutation
+    insert = _no_mutation
+    pop = _no_mutation
+    remove = _no_mutation
+    reverse = _no_mutation
+    sort = _no_mutation
+
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self))
 
@@ -72,20 +63,18 @@ class immutable_list(
 
 
 @compatibility(is_backward_compatible=True)
-class immutable_dict(
-    _ImmutableMixin,
-    Dict[_KT, _VT],
-    mutable_methods_to_disable=(
-        "__delitem__",
-        "__ior__",
-        "__setitem__",
-        "clear",
-        "pop",
-        "popitem",
-        "setdefault",
-        "update",
-    ),
-):
+class immutable_dict(Dict[_KT, _VT]):
+    """An immutable version of :class:`dict`."""
+
+    __delitem__ = _no_mutation
+    __ior__ = _no_mutation
+    __setitem__ = _no_mutation
+    clear = _no_mutation
+    pop = _no_mutation
+    popitem = _no_mutation
+    setdefault = _no_mutation
+    update = _no_mutation
+
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self.items()))
 
