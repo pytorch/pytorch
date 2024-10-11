@@ -415,6 +415,13 @@ if(USE_ROCM)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
 endif()
 
+# Preserve XPU arch flags
+if(USE_XPU)
+  torch_xpu_get_arch_list(TORCH_XPU_ARCH_LIST)
+  message(FATAL_ERROR ${TORCH_XPU_ARCH_LIST})
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${TORCH_XPU_ARCH_LIST}\"")
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
