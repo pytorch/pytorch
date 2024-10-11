@@ -3482,6 +3482,11 @@ def check_verbose(obj, is_inlined_call=False):
             py_obj = None
         fi = FunctionInfo(py_obj, obj.get_name(), obj.get_filename(), obj.get_code())
     elif isinstance(obj, types.CodeType):
+        if obj in torch._dynamo.decorators.disable_if_graph_break_codes:
+            from .exc import SkipCodeRecursiveException
+
+            raise SkipCodeRecursiveException(f"{obj} marked disable_if_graph_break")
+
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         fi = FunctionInfo(

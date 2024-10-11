@@ -37,6 +37,8 @@ else:
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
+disable_if_graph_break_codes = set()
+
 
 def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
@@ -586,3 +588,7 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+
+
+def disable_if_graph_break(fn):
+    disable_if_graph_break_codes.add(fn.__code__)

@@ -1261,7 +1261,10 @@ class CatchErrorsWrapper:
     ) -> Optional[GuardedCode]:
         assert frame_state is not None
 
-        is_skipfile = trace_rules.check(frame.f_code)
+        try:
+            is_skipfile = trace_rules.check(frame.f_code)
+        except SkipCodeRecursiveException:
+            return torch._C._dynamo.eval_frame.skip_code_recursive_flag
         if sys.version_info >= (3, 13):
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:

@@ -624,6 +624,42 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_disable_if_graph_break(self):
+        def hn(x):
+            return torch.sigmoid(x)
+
+        def gn(x):
+            torch._dynamo.graph_break()
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        torch._dynamo.disable_if_graph_break(gn)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnts.frame_count, 0)
+
+        def hn(x):
+            return torch.sigmoid(x)
+
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        torch._dynamo.disable_if_graph_break(gn)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
