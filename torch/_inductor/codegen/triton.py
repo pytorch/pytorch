@@ -1357,16 +1357,20 @@ class TritonKernel(SIMDKernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
-        threshold = {
-            ReductionHint.INNER: 1024,
-        }.get(self.reduction_hint, 64)
 
-        # If multi_kernel is enabled, we do more aggressive persistent reduction.
-        # This may result in some persistent reductions slower than the
-        # corresponding non-persistent reductions. MultiKernel will do benchmarking
-        # to pick the faster one.
-        if config.triton.multi_kernel:
-            threshold *= 16
+        if config.triton.force_persistent_reductions_threshold:
+            threshold = config.triton.force_persistent_reductions_threshold
+        else:
+            threshold = {
+                ReductionHint.INNER: 1024,
+            }.get(self.reduction_hint, 64)
+            # If multi_kernel is enabled, we do more aggressive persistent reduction.
+            # This may result in some persistent reductions slower than the
+            # corresponding non-persistent reductions. MultiKernel will do benchmarking
+            # to pick the faster one.
+            if config.triton.multi_kernel:
+                threshold *= 16
+
         last_numel = self.numels[-1]
         return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
