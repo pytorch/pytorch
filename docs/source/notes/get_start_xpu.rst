@@ -42,7 +42,7 @@ For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
 
 For nightly wheels
 
@@ -59,7 +59,7 @@ For release wheels
 
 .. code-block::
 
-    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
+    pip3 install torch --index-url https://download.pytorch.org/whl/test/xpu
 
 For nightly wheels
 
