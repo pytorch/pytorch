@@ -684,6 +684,18 @@ print("arf")
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
+    @make_logging_test(perf_hints=True)
+    @requires_cuda
+    def test_optimizer_non_static_param(self, records):
+        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        for param in params:
+            param.grad = torch.zeros_like(param)
+        opt = torch.optim.Adam(params)
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")
+        compiled_opt_step()
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 3)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
