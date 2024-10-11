@@ -2669,7 +2669,7 @@ def _automatic_dynamic(
             and assume_outer_dim_dynamic_by_default_knob
         ):
             dynamic_size = DimDynamic.DYNAMIC
-            # dynamic_size = DimDynamic.DUCK
+            # dynamic_size = DimDynamic.STATIC
         elif config.assume_static_by_default:
             dynamic_size = DimDynamic.STATIC
         else:

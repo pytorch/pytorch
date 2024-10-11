@@ -565,6 +565,7 @@ def _export_to_torch_ir(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
                     assume_static_by_default=True,
+                    assume_outer_dim_dynamic_by_default=False,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
