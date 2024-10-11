@@ -200,7 +200,6 @@ class BuiltinVariable(VariableTracker):
             operator.ne,
             operator.eq,
             operator.sub,
-            operator.getitem,
             operator.length_hint,
             operator.lshift,
             operator.rshift,
@@ -212,6 +211,7 @@ class BuiltinVariable(VariableTracker):
             operator.imatmul,
             operator.ifloordiv,
             operator.itruediv,
+            operator.getitem,
             operator.imod,
             operator.iadd,
             operator.isub,
@@ -857,6 +857,39 @@ class BuiltinVariable(VariableTracker):
 
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return
+
+        # insert handling for torch function here
+        from .builder import SourcelessBuilder
+        from .torch_function import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+            can_dispatch_torch_function,
+            dispatch_torch_function,
+        )
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            # Only remap the fn to tensor methods if we aren't exporting
+            # export serde does not handle method descriptors today
+            if not tx.export:
+                # Use sourceless builder, we built the map ourselves
+                if not isinstance(args[0], TensorVariable):
+                    if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
+                        func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
+                    else:
+                        func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+
+                    tmp = args[0]
+                    # swap args and call reverse version of func
+                    args[0] = args[1]
+                    args[1] = tmp
+                else:
+                    func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+            else:
+                func = self.fn
+
+            fn_var = SourcelessBuilder.create(tx, func)
+
+            return dispatch_torch_function(tx, fn_var, args, kwargs)
 
         fn = self.fn
         try:
@@ -1583,50 +1616,6 @@ class BuiltinVariable(VariableTracker):
                 return variables.TupleVariable(items)
             except NotImplementedError:
                 return
-
-    def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
-        # Special case for sum on tuple of floats and ints
-        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
-            isinstance(x, variables.ConstantVariable)
-            and isinstance(x.value, (int, float))
-            for x in seq.items
-        ):
-            if start is self._SENTINEL:
-                return variables.ConstantVariable.create(
-                    sum(x.value for x in seq.items),
-                )
-            if isinstance(start, variables.ConstantVariable) and isinstance(
-                start.value, (int, float)
-            ):
-                return variables.ConstantVariable.create(
-                    sum((x.value for x in seq.items), start=start.value),
-                )
-        if seq.has_force_unpack_var_sequence(tx):
-            if start is self._SENTINEL:
-                start = variables.ConstantVariable.create(0)
-            items = seq.force_unpack_var_sequence(tx)
-            return BuiltinVariable(functools.reduce).call_function(
-                tx,
-                [
-                    BuiltinVariable(operator.add),
-                    variables.TupleVariable(items),
-                    start,
-                ],
-                {},
-            )
-
-    def call_reduce(
-        self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
-    ):
-        if iterable.has_force_unpack_var_sequence(tx):
-            items = iterable.force_unpack_var_sequence(tx)
-            if initial is self._SENTINEL:
-                value, items = items[0], items[1:]
-            else:
-                value = initial
-            for element in items:
-                value = function.call_function(tx, [value, element], {})
-            return value
 
     def call_getattr(
         self,

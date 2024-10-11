@@ -64,8 +64,8 @@ std::string create_temp_dir() {
 
 namespace torch::inductor {
 
-const nlohmann::json& AOTIModelPackageLoader::load_json_file(
-    std::string json_path) {
+namespace {
+const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
     throw std::runtime_error("File found: " + json_path);
   }
@@ -78,25 +78,11 @@ const nlohmann::json& AOTIModelPackageLoader::load_json_file(
   return json_obj;
 }
 
-void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
-  // Parse metadata json file (if it exists) into the metadata_ map
-  size_t lastindex = cpp_filename.find_last_of('.');
-  std::string metadata_json_path =
-      cpp_filename.substr(0, lastindex) + "_metadata.json";
-
-  const nlohmann::json metadata_json_obj = load_json_file(metadata_json_path);
-
-  for (auto& item : metadata_json_obj.items()) {
-    metadata_[item.key()] = item.value().get<std::string>();
-  }
-}
-
-std::tuple<std::string, std::string> AOTIModelPackageLoader::
-    get_cpp_compile_command(
-        const std::string& filename,
-        const std::vector<std::string>& sources,
-        const nlohmann::json& compile_options,
-        const std::string& output_dir = "") {
+std::tuple<std::string, std::string> get_cpp_compile_command(
+    const std::string& filename,
+    const std::vector<std::string>& sources,
+    const nlohmann::json& compile_options,
+    const std::string& output_dir = "") {
   // Construct the cpp command
 
   std::string compiler = compile_options["compiler"].get<std::string>();
@@ -164,7 +150,7 @@ std::tuple<std::string, std::string> AOTIModelPackageLoader::
   return std::make_tuple(cmd, target_file);
 }
 
-bool AOTIModelPackageLoader::recursive_mkdir(const std::string& dir) {
+bool recursive_mkdir(const std::string& dir) {
   // Creates directories recursively, copied from jit_utils.cpp
   // Check if current dir exists
   const char* p_dir = dir.c_str();
@@ -204,7 +190,7 @@ bool AOTIModelPackageLoader::recursive_mkdir(const std::string& dir) {
   return ret == 0;
 }
 
-std::string AOTIModelPackageLoader::compile_so(
+std::string compile_so(
     const std::string& cpp_filename,
     const std::string& consts_filename) {
   // Compile the cpp file into a .so
@@ -268,6 +254,20 @@ std::string AOTIModelPackageLoader::compile_so(
   }
 
   return output_so;
+}
+} // namespace
+
+void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
+  // Parse metadata json file (if it exists) into the metadata_ map
+  size_t lastindex = cpp_filename.find_last_of('.');
+  std::string metadata_json_path =
+      cpp_filename.substr(0, lastindex) + "_metadata.json";
+
+  const nlohmann::json metadata_json_obj = load_json_file(metadata_json_path);
+
+  for (auto& item : metadata_json_obj.items()) {
+    metadata_[item.key()] = item.value().get<std::string>();
+  }
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(

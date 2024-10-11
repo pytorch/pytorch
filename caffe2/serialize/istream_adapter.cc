@@ -1,7 +1,8 @@
 #include "caffe2/serialize/istream_adapter.h"
 #include <c10/util/Exception.h>
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
 IStreamAdapter::IStreamAdapter(std::istream* istream) : istream_(istream) {}
 
@@ -32,6 +33,8 @@ void IStreamAdapter::validate(const char* what) const {
   }
 }
 
-IStreamAdapter::~IStreamAdapter() = default;
+// NOLINTNEXTLINE(modernize-use-equals-default)
+IStreamAdapter::~IStreamAdapter() {}
 
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2

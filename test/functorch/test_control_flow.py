@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
+    skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -1333,7 +1334,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_compile(
@@ -1556,7 +1557,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_dim(self, combine_mode, reverse, device):
@@ -1630,7 +1631,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_binary_operator(self, combine_mode, reverse, device):
@@ -1706,7 +1707,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_tuple(self, combine_mode, reverse, device):
@@ -1803,7 +1804,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_complex_pytree(self, combine_mode, reverse, device):
@@ -1911,7 +1912,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_matmul(
@@ -1951,7 +1952,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_scan(
@@ -2003,7 +2004,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
@@ -2882,6 +2883,7 @@ def forward(self, pred_1, x_1):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
     @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -2988,6 +2990,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -3250,6 +3253,7 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
         fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -4898,6 +4902,7 @@ def forward(self, arg0_1, arg1_1):
     return [getitem]""",  # noqa: B950
         )
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
         def true_fn(x):
             return x + x.cos()
@@ -5213,10 +5218,11 @@ def forward(self, arg0_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
-    def test_vmap_vmap(self):
+    @parametrize("boolcond", [True, False])
+    def test_vmap_vmap(self, boolcond):
         def fn(x):
             return torch.cond(
-                pred=torch.tensor([True]),
+                pred=torch.tensor([True]) if not boolcond else True,
                 true_fn=lambda x: x + 1,
                 false_fn=lambda x: x - 1,
                 operands=(x,),
@@ -5247,6 +5253,7 @@ def forward(self, arg0_1):
         ):
             torch.cond(inp.sum() > 0, f, f, (inp, tmp))
 
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_trace_set__and_mutate_intermediate(self):
         def f(a, tmp):
             a = a.clone()

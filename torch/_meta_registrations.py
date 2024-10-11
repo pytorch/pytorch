@@ -16,10 +16,12 @@ from torch._decomp import (
 from torch._ops import OpOverload
 from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
+    BoolLike,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
     IntLike,
     make_contiguous_strides_for,
     Number,
@@ -3563,6 +3565,45 @@ def meta_binop_inplace(self, other):
     ],
 )
 def meta_binop_inplace_alpha(self, other, alpha=1):
+    """
+    Some checks for inplace ops.
+    Checks for promotion rules for some dtypes.
+    int.add/sub_(float) and bool.add/sub_(others) are rejected.
+    Promoting in these in-place operations would require reallocating
+    and copying over elements, hence not allowed.
+    Checks for alpha param.
+    """
+
+    def is_integeric(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_integer_dtype(arg.dtype)
+        else:
+            return isinstance(arg, IntLike)
+
+    def is_floatic(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_float_dtype(arg.dtype)
+        else:
+            return isinstance(arg, FloatLike)
+
+    def is_booleanic(arg):
+        if isinstance(arg, TensorLike):
+            return utils.is_boolean_dtype(arg.dtype)
+        else:
+            return isinstance(arg, BoolLike)
+
+    # Do not allow int+float->int in-place
+    if is_integeric(self) and is_floatic(other):
+        raise RuntimeError(
+            "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change."
+        )
+
+    # Do not allow bool+other->bool in-place
+    if is_booleanic(self) and not is_booleanic(other):
+        raise RuntimeError(
+            "Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change."
+        )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
@@ -4286,134 +4327,6 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
             device=self.device,
         ),
     )
-
-
-@register_meta(aten.max_unpool2d)
-@out_wrapper()
-def meta_max_unpool2d(self, indices, output_size):
-    utils.alert_not_deterministic("max_unpooling2d_forward_out")
-
-    torch._check(
-        indices.dtype == torch.int64,
-        lambda: f"elements in indices should be type int64 but got: {indices.dtype}",
-    )
-    torch._check(
-        len(output_size) == 2,
-        lambda: (
-            f"There should be exactly two elements (height, width) in output_size, "
-            f"but got {len(output_size)} elements."
-        ),
-    )
-
-    oheight, owidth = output_size
-
-    torch._check(
-        self.ndim in (3, 4),
-        lambda: (
-            f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
-            f"but got a tensor with {self.ndim} dimensions."
-        ),
-    )
-    torch._check(
-        self.shape == indices.shape,
-        lambda: (
-            f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
-            f"but got indices tensor with shape: {indices.shape}"
-        ),
-    )
-
-    for i in range(1, self.ndim):
-        torch._check(
-            self.size(i) > 0,
-            lambda: (
-                f"max_unpooling2d(): "
-                f"Expected input to have non-zero size for non-batch dimensions, "
-                f"but got {self.shape} with dimension {i} being empty."
-            ),
-        )
-
-    self = self.contiguous()
-
-    if self.ndim == 3:
-        nchannels = self.size(0)
-        result = self.new_empty((nchannels, oheight, owidth))
-    else:
-        nbatch = self.size(0)
-        nchannels = self.size(1)
-        result = self.new_empty((nbatch, nchannels, oheight, owidth))
-
-    return result
-
-
-def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding, fn_name):
-    torch._check(
-        indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
-    )
-    torch._check(
-        input.ndim in (4, 5),
-        lambda: f"Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with {input.ndim} dimensions.",
-    )
-    torch._check(
-        len(output_size) == 3,
-        lambda: (
-            f"There should be exactly three elements (depth, height, width) in output_size, "
-            f"but got {len(output_size)} elements."
-        ),
-    )
-    torch._check(
-        len(stride) == 3,
-        lambda: f"There should be exactly three elements (depth, height, width) in stride, but got: {len(stride)} elements.",
-    )
-    torch._check(
-        len(padding) == 3,
-        lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
-    )
-    torch._check(
-        input.shape == indices.shape,
-        lambda: (
-            f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
-            f"but got indices tensor with shape: {indices.shape}"
-        ),
-    )
-
-    for i in range(1, input.ndim):
-        torch._check(
-            input.size(i) > 0,
-            lambda: (
-                f"{fn_name}: "
-                f"Expected input to have non-zero size for non-batch dimensions, "
-                f"but got {input.shape} with dimension {i} being empty."
-            ),
-        )
-
-    torch._check(
-        stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
-        lambda: f"strides should be greater than zero, but got stride: {stride}",
-    )
-
-
-@register_meta(aten.max_unpool3d)
-@out_wrapper()
-def meta_max_unpool3d(self, indices, output_size, stride, padding):
-    utils.alert_not_deterministic("max_unpooling3d_forward_out")
-
-    _max_unpooling3d_shape_check(
-        self, indices, output_size, stride, padding, "max_unpooling3d()"
-    )
-
-    self = self.contiguous()
-
-    odepth, oheight, owidth = output_size
-
-    if self.ndim == 4:
-        nchannels = self.size(0)
-        result = self.new_empty((nchannels, odepth, oheight, owidth))
-    else:
-        nbatch = self.size(0)
-        nchannels = self.size(1)
-        result = self.new_empty((nbatch, nchannels, odepth, oheight, owidth))
-
-    return result
 
 
 @register_meta(aten.max_pool3d_with_indices)
@@ -6065,6 +5978,24 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
+@register_meta(aten._segment_reduce_backward)
+@out_wrapper()
+def meta__segment_reduce_backward(
+    grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None
+):
+    assert (
+        lengths is not None or offsets is not None
+    ), "segment_reduce(): Either lengths or offsets must be defined"
+    data_contig = data.contiguous()
+    grad_contig = grad.contiguous()
+    return torch.empty_like(
+        data_contig,
+        dtype=grad_contig.dtype,
+        device=grad_contig.device,
+        layout=grad_contig.layout,
+    )
+
+
 @register_meta([aten.kthvalue.default, aten.kthvalue.values])
 @out_wrapper("values", "indices")
 def kthvalue_meta(self, k, dim=-1, keepdim=False):
@@ -6334,6 +6265,36 @@ def meta_searchsorted(
     side=None,
     sorter=None,
 ):
+    # If the sorted_sequence is not one-dimensional, its shape must match that of values
+    # in all but the last dimension.
+    torch._check(
+        len(sorted_sequence.shape) <= 1
+        or sorted_sequence.shape[:-1] == self.shape[:-1],
+        lambda: (
+            "torch.searchsorted(): boundaries tensor should be 1 dimension or the "
+            "first N-1 dimensions of boundaries tensor and input value tensor must "
+            f"match, but we got boundaries tensor {list(sorted_sequence.shape)} and "
+            f"input value tensor {list(self.shape)}"
+        ),
+    )
+
+    # If a sorter array is provided, its dimensions must exactly match sorted_sequence.
+    torch._check(
+        sorter is None or sorted_sequence.shape == sorter.shape,
+        lambda: (
+            "torch.searchsorted(): boundary and sorter must have the same size, but "
+            f"got boundary tensor {list(sorted_sequence.shape)} and got sorter tensor "
+            f"{list(sorter.shape) if sorter is not None else []}"
+        ),
+    )
+
+    # Per the docs, if side == "left" and right is True, we error.
+    torch._check(
+        side != "left" or not right,
+        "torch.searchsorted(): side and right can't be set to opposites, got side of "
+        "left while right was True",
+    )
+
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
         return torch.empty_like(self, dtype=dtype).contiguous()
@@ -6343,7 +6304,7 @@ def meta_searchsorted(
 
 def _check_for_unsupported_isin_dtype(dtype):
     torch._check(
-        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        dtype not in (torch.bool, torch.complex128, torch.complex64),
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
 
@@ -6489,28 +6450,6 @@ def meta__jagged_to_padded_dense_forward(
     S = max_lengths[0]
     output_shape = (B, S, *values.shape[1:])
     return values.new_empty(output_shape)
-
-
-@register_meta(aten._padded_dense_to_jagged_forward.default)
-def meta__padded_dense_to_jagged_forward(
-    padded: Tensor,
-    offsets: List[Tensor],
-    total_L: Optional[int] = None,
-):
-    # only one jagged dim is supported for now
-    assert len(offsets) == 1
-
-    if not total_L:
-        assert isinstance(padded, torch._subclasses.FakeTensor)
-        shape_env = padded.fake_mode.shape_env
-        assert shape_env is not None
-        total_L = shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            total_L, min=0, max=None
-        )
-
-    output_shape = (total_L, *padded.shape[2:])
-    return padded.new_empty(output_shape)
 
 
 def _create_unary_float_meta_func(func):

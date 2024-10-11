@@ -258,41 +258,75 @@ def in_namespace(op, namespace):
     return False
 
 
-def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
-    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-    if (type_promotion_kind or convert_input_to_bool) and indices:
+def transform_args(
+    args: List[Any],
+    kwargs: Dict[str, Any],
+    broadcast: bool,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool: bool,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
+    # check that there's something to transform
+    if not args_indices and not kwargs_indices:
+        return args, kwargs
+
+    if type_promotion_kind or convert_input_to_bool:
         if convert_input_to_bool:
             dtype = torch.bool
         else:
-            # FIXME that's a crude approximation for promoting args
+            # FIXME this is a crude approximation for promoting args
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Basic))
-                or getattr(a, "dtype", None) is not None
+                if isinstance(a, (Number, sympy.Basic)) or hasattr(a, "dtype")
             ]
+            # only consider tensor kwargs for promotion, for now
+            promoting_args.extend(a for a in kwargs.values() if hasattr(a, "dtype"))
             dtype = get_promoted_dtype(
-                *promoting_args, type_promotion_kind=type_promotion_kind
+                *promoting_args, type_promotion_kind=type_promotion_kind  # type: ignore[arg-type]
             )
+
+        device = (
+            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
+        ).get_device()
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
+                return ir.Constant(arg.value, dtype, device)
             else:
                 return arg
 
         args = [promote(a) for a in args]
-    if broadcast and indices:
-        for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+        kwargs = {k: promote(v) for k, v in kwargs.items()}
+
+    if broadcast:
+        broadcasted = broadcast_tensors(
+            *list(
+                itertools.chain(
+                    (args[i] for i in args_indices),
+                    (kwargs[k] for k in kwargs_indices),
+                )
+            )
+        )
+        size = list(broadcasted[0].get_size())
+
+        for i, x in zip(args_indices, broadcasted[: len(args_indices)]):
             args[i] = x
+        for k, x in zip(kwargs_indices, broadcasted[len(args_indices) :]):
+            kwargs[k] = x
+
         for i in range(len(args)):
             if isinstance(args[i], ir.Constant):
-                args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
+                args[i] = ExpandView.create(args[i], size)
+        for k in kwargs:
+            if isinstance(kwargs[k], ir.Constant):
+                kwargs[k] = ExpandView.create(kwargs[k], size)
 
-    return args
+    return args, kwargs
 
 
 def _register_foreach_lowering(aten_fn, decomp_fn):
@@ -321,7 +355,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool,
 ):
     """
     Add a lowering to lowerings dict
@@ -336,25 +374,24 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
+        args: List[Any] = list(args)
+        kwargs: Dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
-            args = args[0]
+            args = list(args[0])
 
-        # kwargs tensors not supported yet unless it's a fallback op
         if not all(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
-            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
                 x == "out" for x in kwargs.keys()
             ), "out= ops aren't yet supported"
 
-        args = transform_args(
-            args, broadcast, type_promotion_kind, convert_input_to_bool
+        args, kwargs = transform_args(
+            args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
         )
 
         if unpacked:
@@ -374,7 +411,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: Optional[
+        ELEMENTWISE_TYPE_PROMOTION_KIND
+    ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
 ):
     """
@@ -683,16 +722,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device))
+    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device):
-    return to_device(x, device, copy=True)
+def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 
 def register_pointwise(
@@ -2039,6 +2078,113 @@ def inductor_randint(
     )
 
 
+def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    return (
+        tb.get_name(),
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
+    )
+
+
+def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+    return tb.get_name(), tb.get_stride()[-1]
+
+
+@register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
+def searchsorted(
+    sorted_sequence: TensorBox,
+    self: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[TensorBox] = None,
+) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    if (
+        not validate_bucketize(sorted_sequence)
+        or not validate_bucketize(self)
+        or (sorter is not None and not validate_bucketize(sorter))
+    ):
+        return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
+            sorted_sequence,
+            self,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            sorter=sorter,
+        )
+
+    # If side is present, override the value of right if needed.  This assumes that
+    # validation of the two options being non-contradictory is already done by the
+    # searchsorted meta-function.
+    if side is not None and side == "right":
+        right = True
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    values_loader = self.make_loader()
+
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
+
+    if sorter is not None:
+        sorter.realize()
+
+    if len(sorted_sequence.get_size()) == 1:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                0,
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else 0,
+            )
+
+    else:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+
+            # Get index to the beginning of the sorted sequence within a flattened
+            # version of the array.
+            def get_flattened_index(tb: TensorBox):
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
+
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                get_flattened_index(sorted_sequence),
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else get_flattened_index(sorter),
+            )
+
+    device = self.get_device()
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=self.shape,
+    )
+
+
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
     input: TensorBox,
@@ -2062,7 +2208,6 @@ def bucketize(
     # guarantee that boundaries.get_name() (used below) will exist unless
     # we call boundaries.realize().
     boundaries.realize()
-    boundaries_size = boundaries.get_size()[0]
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2072,8 +2217,8 @@ def bucketize(
         val = input_loader(index)
         indices = ops.bucketize(
             val,
-            boundaries.get_name(),
-            boundaries_size,
+            _boundaries_helper(boundaries),
+            0,
             index_dtype,
             right,
         )
@@ -2207,7 +2352,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible
@@ -2215,8 +2359,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 
@@ -2656,6 +2798,7 @@ def _local_scalar_dense(data):
     unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
     )
+    assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
@@ -4276,23 +4419,10 @@ def adaptive_max_pool2d(x, output_size):
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
             o_size, dtype=torch.int64, device=x.get_device()
         )
+
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
-            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
-        else:
-            v, offsets = _low_memory_max_pool2d_with_offsets(
-                x,
-                kernel_size,
-                stride=kernel_size,
-                padding=[0, 0],
-                dilation=[1, 1],
-                ceil_mode=False,
-            )
-            indices = _low_memory_max_pool2d_offsets_to_indices(
-                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
-            )
-            return v, indices
+        # This is handled by a decomposition
+        raise ValueError
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -6257,7 +6387,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
@@ -6293,6 +6423,7 @@ try:
             # in-place reuse. Therefore, we tell the scheduler to not fuse it.
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )

@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import os
@@ -20,7 +21,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
@@ -62,6 +63,10 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+
+HAS_MSGSPEC = importlib.util.find_spec("msgspec")
+if HAS_MSGSPEC:
+    import msgspec
 
 
 def exists(val):
@@ -457,7 +462,7 @@ class PartialT5(torch.nn.Module):
         if past_key_value is not None:
             assert (
                 len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -3699,9 +3704,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             torch.jit.trace(f, torch.randn(3))
 
-        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -4545,6 +4547,84 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             f(*args)
         self.assertEqual(num_compiles, 1)
+
+    def test_issue134451(self):
+        class BoundingBox2DIndex(IntEnum):
+            _X = 0
+            _Y = 1
+            _HEADING = 2
+            _LENGTH = 3
+            _WIDTH = 4
+
+            @classmethod
+            def size(cls):
+                return 5
+
+            @classmethod
+            @property
+            def X(cls):
+                return cls._X
+
+            @classmethod
+            @property
+            def Y(cls):
+                return cls._Y
+
+            @classmethod
+            @property
+            def HEADING(cls):
+                return cls._HEADING
+
+            @classmethod
+            @property
+            def LENGTH(cls):
+                return cls._LENGTH
+
+            @classmethod
+            @property
+            def WIDTH(cls):
+                return cls._WIDTH
+
+            @classmethod
+            @property
+            def POINT(cls):
+                # assumes X, Y have subsequent indices
+                return slice(cls._X, cls._Y + 1)
+
+            @classmethod
+            @property
+            def STATE_SE2(cls):
+                # assumes X, Y, HEADING have subsequent indices
+                return slice(cls._X, cls._HEADING + 1)
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._mlp_states = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, BoundingBox2DIndex.size()),
+                )
+
+            def forward(self, x):
+                agent_states = self._mlp_states(x)
+                agent_states[..., BoundingBox2DIndex.POINT] = (
+                    agent_states[..., BoundingBox2DIndex.POINT].tanh() * 32
+                )
+                agent_states[..., BoundingBox2DIndex.HEADING] = (
+                    agent_states[..., BoundingBox2DIndex.HEADING].tanh() * torch.pi
+                )
+                return agent_states
+
+        model = SimpleModel().eval()
+        input_tensor = torch.randn(1, 10, dtype=torch.float32)
+        opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
+        actual = opt(input_tensor)
+        try:
+            expected = model(input_tensor)
+        except Exception as e:
+            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
+        self.assertEqual(actual, expected)
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
@@ -5913,20 +5993,51 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         )
 
     def test_torch_compile_in_compile_frame(self):
-        # TODO(anijain2305/yanboliang) - Dont graph break on torch.compile.
         def gn(x, c=None):
             if c is None:
                 c = 2
             return c * x
 
         def outer_func(x):
-            return torch.compile(gn)(x)
+            return torch.compile(gn, backend="eager")(x)
 
-        compile_outer = torch.compile(outer_func, backend="eager")
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
         x = torch.randn(4)
         ref = outer_func(x)
         res = compile_outer(x)
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
+
+    @unittest.skipIf(not HAS_MSGSPEC, "missing msgspec package")
+    def test_c_defined_metaclass(self):
+        class User(msgspec.Struct):
+            """A new type describing a User"""
+
+            name: str
+            value: int
+
+        def fn(x):
+            u = User("alice", 10)
+            return x * u.value
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(ReproTests)
