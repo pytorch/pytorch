@@ -64,7 +64,7 @@ specialize_int = False
 # Whether or not to specialize on float inputs.  Dynamo will always promote
 # float inputs into Tensor inputs, but at the moment, backends inconsistently
 # support codegen on float (this is to be fixed).
-specialize_float = True
+specialize_float = False
 
 # legacy config, does nothing now!
 dynamic_shapes = True
