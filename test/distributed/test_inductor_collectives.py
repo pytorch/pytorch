@@ -262,7 +262,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             else:
                 req.wait()
             # Under compile, if `wait_tensor(y)` above is correctly executed,
-            # `y`'s data is in its final form and the computation output here will match eager.
+            # `y`'s data is in its final form and the computation output here will match eager;
+            # otherwise, it will not match eager.
             return y * y
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
