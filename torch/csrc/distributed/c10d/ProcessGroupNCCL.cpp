@@ -1841,7 +1841,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
-        if (work.futureWorkResult_) {
+        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
           work.futureWorkResult_->markCompleted(
               at::IValue(static_cast<uint8_t>(WorkResult::FAILURE)));
         }
@@ -1949,7 +1949,8 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        if (work.futureWorkResult_ && work.finishedGPUExecutionInternal()) {
+        if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
+            !work.futureWorkResult_->completed()) {
           work.futureWorkResult_->markCompleted(
               at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
         }
