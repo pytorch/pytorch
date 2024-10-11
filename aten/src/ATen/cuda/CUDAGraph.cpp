@@ -126,7 +126,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
       cudaStreamCaptureStatus status;
       CaptureId_t stream_capture_id;
@@ -162,31 +161,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
 }
 
-std::vector<TrackedAllocation> combineRanges(const std::vector<TrackedAllocation>& input) {
-    std::vector<TrackedAllocation> ranges = input;
-
-    // Sort ranges by start address
-    std::sort(ranges.begin(), ranges.end(), [](const TrackedAllocation& a, const TrackedAllocation& b) {
-        return a.ptr < b.ptr;
-    });
-
-    std::vector<TrackedAllocation> result;
-    for (const auto& range : ranges) {
-        if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
-            // No overlap, add new range
-            result.push_back(range);
-        } else {
-            // Overlap found, extend the previous range
-            auto& last = result.back();
-            char* last_end = last.ptr + last.size;
-            char* range_end = range.ptr + range.size;
-            last.size = std::max(last_end, range_end) - last.ptr;
-        }
-    }
-
-    return result;
-}
-
 void CUDAGraph::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -196,15 +170,6 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-
-  if (dynamic_graph) {
-    std::cout << "capture_end, recorded allocation sizes were: ";
-    for (auto& capture : allocations) std::cout << capture.size << " ";
-    allocations = combineRanges(allocations);
-    std::cout << "and after combining ranges the sizes were: ";
-    for (auto& capture : allocations) std::cout << capture.size << " ";
-    std::cout << std::endl;
-  }
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
@@ -379,8 +344,33 @@ std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, 
   return std::nullopt;
 };
 
-void CUDAGraph::introspect_dynamic_graph() {
+std::vector<TrackedAllocation> combineRanges(const std::vector<TrackedAllocation>& input) {
+    std::vector<TrackedAllocation> ranges = input;
 
+    // Sort ranges by start address
+    std::sort(ranges.begin(), ranges.end(), [](const TrackedAllocation& a, const TrackedAllocation& b) {
+        return a.ptr < b.ptr;
+    });
+
+    std::vector<TrackedAllocation> result;
+    for (const auto& range : ranges) {
+        if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
+            // No overlap, add new range
+            result.push_back(range);
+        } else {
+            // Overlap found, extend the previous range
+            auto& last = result.back();
+            char* last_end = last.ptr + last.size;
+            char* range_end = range.ptr + range.size;
+            last.size = std::max(last_end, range_end) - last.ptr;
+        }
+    }
+
+    return result;
+}
+
+void CUDAGraph::introspect_dynamic_graph() {
+  allocations = combineRanges(allocations);
   size_t num_nodes;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
   std::cout << "number of nodes captured " << num_nodes << std::endl;
