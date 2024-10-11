@@ -10054,9 +10054,8 @@ class DistributedTest:
                         loss = a.sum() + b.sum()
                         loss.backward()
 
-                    ws = dist.get_world_size()
                     for p in local_model.parameters():
-                        p.grad.data = p.grad / dist.get_world_size()
+                        p.grad.data = p.grad / 2
 
                     for p_ddp, p_local in zip(
                         model.parameters(),
