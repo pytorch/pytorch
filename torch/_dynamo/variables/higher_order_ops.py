@@ -1502,17 +1502,14 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def add_subgraph_to_root_module(
+    def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
-        body_name = add_subgraph(
+        return add_subgraph(
             tx,
             f"{attr_name}",
             body_gmod,
         )
-
-        body_node = make_attr(tx, body_name)
-        return body_name, body_node
 
     def create_wrapped_node(
         self,
@@ -1541,9 +1538,10 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name, body_node = self.add_subgraph_to_root_module(
+        body_name = self.install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod
         )
+        body_node = make_attr(tx, body_name)
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
