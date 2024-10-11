@@ -512,11 +512,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             old_len = len(choices)
             for swizzle in [1, 2, 4, 8]:
                 # breakpoint()
-                self.maybe_append_choice(
-                    choices,
-                    op=op,
-                    swizzle=swizzle
-                )
+                self.maybe_append_choice(choices, op=op, swizzle=swizzle)
                 if len(choices) > old_len:
                     choices[-1].debug_extra = name + f" swizzle={swizzle}"
         if len(ops) == 0:
@@ -525,10 +521,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             output_layout = layout
             warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
             log.warning(warning_msg)
-        log.debug(
+        log.info(
             "Added %d Cutlass gemm configs.",
             len(ops),
         )
+        print("cutlass gemm configs: ", len(ops))
 
     def header(self) -> IndentedBuffer:
         """
@@ -963,7 +960,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
-            swizzle=kwargs['swizzle'],
+            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -1291,7 +1288,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                     new_stride,
                     old_layout.offset,
                 )
-                return Buffer(node.get_name(), new_layout)
+                return Buffer(name=node.get_name(), layout=new_layout)
 
             new_X = clone_with_transposed_stride(X)
             new_W = clone_with_transposed_stride(W)
