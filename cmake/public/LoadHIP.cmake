@@ -66,10 +66,7 @@ if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
   # Find ROCM version for checks
-  # ROCM 5.0 and later will have header api for version management
-  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
-    set(ROCM_HEADER_FILE ${ROCM_INCLUDE_DIRS}/rocm_version.h)
-  elseif(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
+  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
     set(ROCM_HEADER_FILE ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
   else()
     message(FATAL_ERROR "********************* rocm_version.h could not be found ******************\n")
