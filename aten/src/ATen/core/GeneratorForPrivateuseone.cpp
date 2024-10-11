@@ -15,7 +15,7 @@ _GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
   std::lock_guard<std::mutex> lock(_generator_mutex_lock);
 
   TORCH_WARN_DEPRECATION(
-      "REGISTER_GENERATOR_PRIVATEUSE1 is deprecated.
+      "REGISTER_GENERATOR_PRIVATEUSE1 is deprecated. \
       Please derive PrivateUse1HooksInterface to implememt getNewGenerator instead.")
 
   TORCH_CHECK(
