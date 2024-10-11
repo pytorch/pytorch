@@ -145,9 +145,13 @@ ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
 FROM cpu_final as xpu_final
+# XPU CD use rolling driver
+ENV XPU_DRIVER_TYPE ROLLING
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
+# Install setuptools and wheel for python 3.13
+RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
 ADD ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd
