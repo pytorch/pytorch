@@ -2,8 +2,9 @@
 import functools
 import os
 import pickle
+import tempfile
 import unittest
-from typing import List
+from typing import List, Optional, Union
 from unittest import mock
 
 import torch
@@ -20,6 +21,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
@@ -804,6 +806,61 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details3),
         )
 
+    def test_hash_custom_passes(self):
+        """
+        Test CustomGraphPass usage.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return self._uuid
+
+        custom_pass = TestCustomGraphPass()
+        with config.patch({"post_grad_custom_pre_pass": custom_pass}):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            self.assertEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details3),
+            )
+
+    def test_get_hash_for_files(self):
+        """
+        Test the get_hash_for_files helper.
+        """
+        with tempfile.NamedTemporaryFile(delete=True) as temp:
+            temp.write(b"contents")
+            temp.flush()
+
+            hash1 = get_hash_for_files((temp.name,))
+            get_hash_for_files.cache_clear()
+            hash2 = get_hash_for_files((temp.name,))
+
+            temp.write(b" ")
+            temp.flush()
+            get_hash_for_files.cache_clear()
+            hash3 = get_hash_for_files((temp.name,))
+
+            self.assertEqual(hash1, hash2)
+            self.assertNotEqual(hash1, hash3)
+
+
+class TestCudaCompileCommand(TestCase):
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):
@@ -855,6 +912,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
     @config.patch({"autotune_remote_cache": True})
+    @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
@@ -886,6 +944,51 @@ class TestAutotuneCache(TestCase):
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
             for k in global_stats.triton.cache.keys():
                 self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": True})
+    @config.patch({"autotune_remote_cache": False})
+    @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    def test_bundled_autotune_remote_cache(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d, e, f):
+                return a + b, c + d, e + f
+
+        def f(a, b, c, d, e, f):
+            return Model()(a, b, c, d, e, f)
+
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        a = torch.randn(101, 100).cuda()
+        b = torch.randn(101, 100).cuda()
+        c = torch.randn(102, 100).cuda()
+        d = torch.randn(102, 100).cuda()
+        e = torch.randn(103, 100).cuda()
+        f = torch.randn(103, 100).cuda()
+
+        with PatchCaches():
+            f_compiled(a, b, c, d, e, f)
+
+            self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+            self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
+
+            self.reset()
+            f_compiled(a, b, c, d, e, f)
+
+        self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+        self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
+
+        # Check that the cache entries seem reasonable
+        for k in global_stats.autotune_local.cache.keys():
+            self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
+        for k in global_stats.bundled_autotune.cache.keys():
+            self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
+        for k in global_stats.triton.cache.keys():
+            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
 
 class TestRemoteAOTAutogradCache(TestCase):

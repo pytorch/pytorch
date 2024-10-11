@@ -624,20 +624,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
-    def test_set_phase_force_eager(self):
+    def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
             if torch._dynamo.is_compiling():
                 return x + 1
             return x + 2
 
-        @torch.compiler.set_phase("force_eager")
+        @torch.compiler.set_stance("force_eager")
         def b(x):
             return a(x)
 
         def c(x):
             out0 = a(x)
-            with torch.compiler.set_phase("force_eager"):
+            with torch.compiler.set_stance("force_eager"):
                 out1 = a(x)
             return out0, out1, a(x)
 
@@ -645,8 +645,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(b(inp), inp + 2)
         self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
 
-    def test_set_phase_forbid_in_graph(self):
-        @torch.compiler.set_phase("force_eager")
+    def test_set_stance_forbid_in_graph(self):
+        @torch.compiler.set_stance("force_eager")
         def a(x):
             return x + 1
 
@@ -661,7 +661,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager")
         def c(x):
-            with torch.compiler.set_phase("force_eager"):
+            with torch.compiler.set_stance("force_eager"):
                 return x + 1
 
         with self.assertRaisesRegex(
@@ -670,7 +670,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             c(torch.ones(3))
 
         @torch.compile(backend="eager")
-        @torch.compiler.set_phase("force_eager")
+        @torch.compiler.set_stance("force_eager")
         def d(x):
             return x + 1
 
@@ -681,7 +681,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager")
         def e(x):
-            with torch._dynamo.set_phase("force_eager"):
+            with torch._dynamo.set_stance("force_eager"):
                 return x + 1
 
         with self.assertRaisesRegex(
@@ -691,7 +691,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager")
         def f(x):
-            torch._dynamo.eval_frame._set_phase("force_eager")
+            torch._dynamo.eval_frame._set_stance("force_eager")
             return x + 1
 
         with self.assertRaisesRegex(

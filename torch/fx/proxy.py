@@ -22,7 +22,7 @@ from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
-           'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
+           'Proxy', 'MetaProxy', 'Attribute', 'ParameterProxy', 'Scope',
            'ScopeContextManager']
 
 
@@ -528,6 +528,40 @@ class Proxy:
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 
+
+@compatibility(is_backward_compatible=False)
+class MetaProxy(Proxy):
+    """
+    A Proxy subclass that propagates metadata (meta['val']) during graph tracing.
+    """
+
+    def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None, fake_mode=None):
+        super().__init__(node, tracer)
+        self.fake_mode = fake_mode
+
+    def __repr__(self) -> str:
+        return f'MetaProxy({self.node.name})'
+
+    @classmethod
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
+
+        meta_proxy = None
+        for arg in args:
+            if isinstance(arg, MetaProxy):
+                meta_proxy = arg
+                break
+
+        assert meta_proxy is not None, "No MetaProxy found in arguments, but one is expected."
+
+        proxy = super().__torch_function__(orig_method, types, args, kwargs)
+        with meta_proxy.fake_mode:
+            proxy.node.meta["val"] = orig_method(
+                *[a.node.meta["val"] if isinstance(a, Proxy) else a for a in args],
+                **kwargs
+            )
+        return MetaProxy(proxy.node, proxy.tracer, meta_proxy.fake_mode)
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):

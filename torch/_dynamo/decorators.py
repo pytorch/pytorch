@@ -6,16 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
 import torch
+from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import (
-    DisableContext,
-    innermost_fn,
-    RunOnlyContext,
-    SetPhaseCtxMgrDecorator,
-)
+from .eval_frame import _set_stance, DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import is_function
@@ -86,17 +82,34 @@ def skip(fn=None):
     return fn
 
 
-def set_phase(phase: str):
+class set_stance(_DecoratorContextManager):
     """
-    Decorator and context manager to set the current phase of the compiler.
+    Decorator, context manager, function to set the current stance of the compiler.
 
-    Options documented in corresponding function in torch/compiler/__init__.py
+    Stances documented in corresponding function in torch/compiler/__init__.py
     """
-    return SetPhaseCtxMgrDecorator(phase)
 
+    _dynamo_forbidden = True
 
-# forbid set_phase in graph
-set_phase._dynamo_forbidden = True  # type: ignore[attr-defined]
+    def __init__(self, stance: str) -> None:
+        self.stance = stance
+        self.prev = _set_stance(stance)
+
+    def __call__(self, fn):
+        _set_stance(self.prev)
+        wrapper = super().__call__(fn)
+        # forbid wrapper in graph
+        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
+        return wrapper
+
+    def __enter__(self):
+        _set_stance(self.stance)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_stance(self.prev)
+
+    def clone(self):
+        return self.__class__(self.stance)
 
 
 def assume_constant_result(fn):

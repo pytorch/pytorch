@@ -114,52 +114,39 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return set_eval_frame(callback)
 
 
-_phase = "default"
+_stance = threading.local()
+_stance.value = "default"
 
 
-def _set_phase(phase: str):
-    global _phase
-    from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
-
-    if phase == "default":
-        set_eval_frame_callback_enabled(True)
-    elif phase == "force_eager":
-        set_eval_frame_callback_enabled(False)
-    else:
-        raise AttributeError(f"unsupported torch.compiler phase: {phase}")
-
-    prior = _phase
-    _phase = phase
+def _set_stance(stance: str):
+    prior = _stance.value
+    _stance.value = stance
     return prior
 
 
-# forbid in graph
-_set_phase._dynamo_forbidden = True  # type: ignore[attr-defined]
+_set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
-class SetPhaseCtxMgrDecorator:
-    """
-    Context manager and decorator to set dynamo phase
-    """
+def _callback_from_stance(callback):
+    if _stance.value == "default":
+        # TODO force_backend here
+        return callback
+    elif _stance.value == "force_eager":
+        # disable
+        return None
+    elif _stance.value == "eager_on_recompile":
+        # run mode
+        return False
+    elif _stance.value == "fail_on_recompile":
 
-    def __init__(self, phase: str):
-        self.phase = phase
+        def fail_callback(*args, **kwargs):
+            raise RuntimeError(
+                "Dected recompile when torch.compile stance is 'fail_on_recompile'"
+            )
 
-    def __call__(self, fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            with self:
-                return fn(*args, **kwargs)
-
-        # forbid wrapper in graph
-        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
-        return wrapper
-
-    def __enter__(self):
-        self.prior = _set_phase(self.phase)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_phase(self.prior)
+        return fail_callback
+    else:
+        raise RuntimeError(f"invalid torch.compile stance '{_stance.value}'")
 
 
 def _reset_guarded_backend_cache():
@@ -519,7 +506,7 @@ class _TorchDynamoContext:
                 )
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(callback))
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -693,11 +680,9 @@ class DisableContext(_TorchDynamoContext):
 
         assert callable(fn)
 
-        callback = self.callback
-
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
             try:
                 return fn(*args, **kwargs)
             finally:

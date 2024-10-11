@@ -12,7 +12,7 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
-    "set_phase",
+    "set_stance",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -229,23 +229,24 @@ def disable(fn=None, recursive=True):
     return torch._dynamo.disable(fn, recursive)
 
 
-def set_phase(phase: str):
+def set_stance(stance: str):
     """
-    Decorator and context manager to set the current phase of the compiler.
+    Set the current stance of the compiler.
+    Can be used as a function, context manager, or decorator.
     Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
 
     Args:
-        phase: The phase to set the compiler to. Valid values are:
-            - "default": The default phase, used for normal compilation.
+        stance: The stance to set the compiler to. Valid values are:
+            - "default": The default stance, used for normal compilation.
             - "force_eager": Ignore all `torch.compile` directives.
     """
     import torch._dynamo
 
-    return torch._dynamo.set_phase(phase)
+    return torch._dynamo.set_stance(stance)
 
 
 # forbid in graph
-set_phase._dynamo_forbidden = True  # type: ignore[attr-defined]
+set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def cudagraph_mark_step_begin():
