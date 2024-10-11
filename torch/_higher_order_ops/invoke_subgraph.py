@@ -211,8 +211,11 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
 
 @invoke_subgraph.py_impl(FakeTensorMode)
 def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
-    # TODO(anijain2305) - Implement fake tensor caching.
-    return subgraph(*operands)
+    outputs = mode.has_traced_invoke_subgraph_before(identifier)
+    if outputs is None:
+        outputs = subgraph(*operands)
+        mode.add_traced_invoke_subgraph(identifier, outputs)
+    return outputs
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)

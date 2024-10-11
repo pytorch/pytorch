@@ -1185,6 +1185,8 @@ class FakeTensorMode(TorchDispatchMode):
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
+        self.traced_invoke_subgraphs = dict()
+
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
@@ -2277,6 +2279,12 @@ class FakeTensorMode(TorchDispatchMode):
             symbolic_context=symbolic_context,
             trace=trace,
         )
+
+    def has_traced_invoke_subgraph_before(self, identifier: str) -> object:
+        return self.traced_invoke_subgraphs.get(identifier, None)
+
+    def add_traced_invoke_subgraph(self, identifier: str, value: object) -> None:
+        self.traced_invoke_subgraphs[identifier] = value
 
 
 _StoragePointer = object
