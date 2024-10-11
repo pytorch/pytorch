@@ -125,7 +125,7 @@ at::Tensor all_reduce(
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
-    std::vector<at::Tensor> inputs,
+    std::vector<at::Tensor>& inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
