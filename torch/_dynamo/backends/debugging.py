@@ -139,7 +139,13 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
+def aot_eager_decomp_partition(
+    gm,
+    fake_tensor_inputs,
+    fw_compiler=None,
+    bw_compiler=None,
+    **kwargs,
+):
     if kwargs:
         log.warning(
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
@@ -148,8 +154,8 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
     with functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=boxed_nop,
-            bw_compiler=boxed_nop,
+            fw_compiler=fw_compiler or boxed_nop,
+            bw_compiler=bw_compiler or boxed_nop,
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
