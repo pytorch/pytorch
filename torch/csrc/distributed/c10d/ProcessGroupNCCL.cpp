@@ -30,6 +30,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -2778,6 +2779,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  for (const auto& output : outputs) {
+    c10d::register_work(output, work);
+  }
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
