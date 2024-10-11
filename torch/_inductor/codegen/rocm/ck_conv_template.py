@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 import logging
@@ -8,6 +9,7 @@ import subprocess
 from typing import Tuple, Optional, List
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
+from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.utils import IndentedBuffer
 
 from ck4inductor.util import library_path
@@ -117,6 +119,7 @@ def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
             return s
 
     op_instances = []
+    # TODO: maybe use libclang for parsing C++ code in the future to avoid this hacky parsing logic below ? :) - copilot
     for line in str_instances:
         s_template_args = line.split("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3")[-1].strip("<>, ")
         template_args = []
@@ -146,9 +149,9 @@ def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
             if i_next == -1:
                 break
 
-        template_args[0] = -1
-        template_args[3] = tuple()
-        template_args[9] = tuple()
+        template_args[0] = -1       # n_dim_spatial
+        template_args[3] = tuple()  # ds_layout
+        template_args[9] = tuple()  # ds_element_dtype
 
         new_instance = CKConvOp(
             *template_args,  # type: ignore[arg-type]
@@ -231,28 +234,76 @@ class CKConvTemplate(CKTemplate):
 
         using ck::index_t;
 
-        constexpr index_t NumDTensor = {{NumDTensor}};
-        constexpr index_t NDimSpatial = {{NDimSpatial}};
+        constexpr index_t NumDTensor = {{n_d_tensors}};
+        constexpr index_t NDimSpatial = {{n_dim_spatial}};
+        constexpr index_t GroupCount = {{group_count}};
+        constexpr index_t NBatch = {{batch_size}};
+        constexpr index_t NOutChannels = {{n_output_channels}};
+        constexpr index_t NInChannels = {{n_input_channels}};
+        const std::vector<index_t> FilterSize = { {{filter_size}} };
+        const std::vector<index_t> InputSize = { {{input_size}} };
+        const std::vector<index_t> ConvolutionStrides = { {{convolution_strides}} };
+        const std::vector<index_t> Dilations = { {{dilations}} };
+        const std::vector<index_t> LeftPads = { {{left_pads}} };
+        const std::vector<index_t> RightPads = { {{right_pads}} };
 
-        const void* p_a;
-        const void* p_b;
+        ck::utils::conv::ConvParam conv_param {
+            NDimSpatial,
+            GroupCount,
+            NBatch,
+            NOutChannels,
+            NInChannels,
+            FilterSize,
+            InputSize,
+            ConvolutionStrides,
+            Dilations,
+            LeftPads,
+            RightPads,
+        };
+
+        using InLayout  = ck::tensor_layout::convolution::{{input_layout}};
+        using WeiLayout = ck::tensor_layout::convolution::{{weight_layout}};
+        using OutLayout = ck::tensor_layout::convolution::{{output_layout}};
+
+        const auto in_g_n_c_wis_desc =
+            ck::utils::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
+        const auto wei_g_k_c_xs_desc =
+            ck::utils::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
+        const auto out_g_n_k_wos_desc =
+            ck::utils::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
+
+        const void* p_a = input;
+        const void* p_b = weight;
         const std::array<const void*, NumDTensor> p_ds;
-        void* p_e;
-        const std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths;
-        const std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides;
-        const std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths;
-        const std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides;
-        const std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_lengths;
-        const std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_strides;
-        const std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_lengths;
-        const std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_strides;
-        const std::array<index_t, NDimSpatial> conv_filter_strides;
-        const std::array<index_t, NDimSpatial> conv_filter_dilations;
-        const std::array<index_t, NDimSpatial> input_left_pads;
-        const std::array<index_t, NDimSpatial> input_right_pads;
-        const AElementwiseOperation a_element_op = PassThrough;
-        const BElementwiseOperation b_element_op = PassThrough;
-        const CDEElementwiseOperation cde_element_op = PassThrough;
+        void* p_e = output;
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths;
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_lengths;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_k_wos_strides;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_lengths;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_strides;
+        std::array<index_t, NDimSpatial> conv_filter_strides;
+        std::array<index_t, NDimSpatial> conv_filter_dilations;
+        std::array<index_t, NDimSpatial> input_left_pads;
+        std::array<index_t, NDimSpatial> input_right_pads;
+        const AElementwiseOperation a_element_op = PassThrough {};
+        const BElementwiseOperation b_element_op = PassThrough {};
+        const CDEElementwiseOperation cde_element_op = PassThrough {};
+
+        auto copy = [](auto& x, auto& y) { ck::ranges::copy(x, y.begin()); };
+
+        copy(in_g_n_c_wis_desc.GetLengths(), a_g_n_c_wis_lengths);
+        copy(in_g_n_c_wis_desc.GetStrides(), a_g_n_c_wis_strides);
+        copy(wei_g_k_c_xs_desc.GetLengths(), b_g_k_c_xs_lengths);
+        copy(wei_g_k_c_xs_desc.GetStrides(), b_g_k_c_xs_strides);
+        copy(out_g_n_k_wos_desc.GetLengths(), e_g_n_k_wos_lengths);
+        copy(out_g_n_k_wos_desc.GetStrides(), e_g_n_k_wos_strides);
+        copy(conv_param.conv_filter_strides_, conv_filter_strides);
+        copy(conv_param.conv_filter_dilations_, conv_filter_dilations);
+        copy(conv_param.input_left_pads_, input_left_pads);
+        copy(conv_param.input_right_pads_, input_right_pads);
 
         auto argument = conv.MakeArgument(
             p_a,
@@ -362,6 +413,9 @@ class CKConvTemplate(CKTemplate):
                 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
                 #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
                 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
+
+                #include "ck/library/utility/convolution_parameter.hpp"
+                #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp
             """
         )
         return res
@@ -387,12 +441,19 @@ class CKConvTemplate(CKTemplate):
         self,
         input_nodes,
         layout,
+        *,
+        stride,
+        padding,
+        dilation,
     ):
         super().__init__(
             "ck_conv_template",
             input_nodes,
             layout,
         )
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
 
     def filter_op(self, op: CKConvOp) -> bool:
         metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
@@ -430,3 +491,63 @@ class CKConvTemplate(CKTemplate):
             chosen_instances,
         )
         return chosen_instances
+
+    def emit_ck_instance(self, op: "CKConvOp") -> Tuple[str, str]:
+        # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
+        template_definition = r"""
+    // Gemm operator {{operation_name}}
+    using Operation_{{operation_name}} =
+        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<
+            {{template_params}}>;
+
+"""
+        # The Jinja template for generating a C++ type alias *usage* for a Universal GEMM instance
+        template_type = r"""
+    Operation_{{operation_name}}
+"""
+        template_params = []
+        for field_name, field_value in op.dict_items():
+            if isinstance(field_value, tuple):
+                tuple_elements = ", ".join(map(str, iter(field_value)))
+                if "ds" in field_name:  # element type and layout for bias
+                    arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
+                else:  # tile shape
+                    arg = f"/* {field_name} */ S<{tuple_elements}>"
+                template_params.append(arg)
+            else:
+                if field_value is not None:
+                    template_params.append(f"/* {field_name} */ {field_value}")
+        return self._template_from_string(template_definition).render(
+            operation_name=op.name(),
+            template_params=(",\n" + 12 * " ").join(template_params),
+        ), self._template_from_string(template_type).render(operation_name=op.name())
+
+    def render(self, kernel: ROCmTemplateKernel, op: "CKConvOp", **kwargs) -> str:  # type: ignore[override]
+        template_buffer_node = kwargs.get("template_buffer_node", None)
+        if template_buffer_node is not None:
+            self.output_node = template_buffer_node
+        X, W = self.input_nodes[0], self.input_nodes[1]
+        Y = self.output_node
+        Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
+
+        op = copy.deepcopy(op)
+
+        instance_definition, instance_type = self.emit_ck_instance(op)
+
+        return self._template_from_string(self.conv_template).render(
+            headers=self.header().getvalue(),
+            globals=self.globals().getvalue(),
+            instance_definition=instance_definition,
+            instance_type=instance_type,
+            kernel_definition=kernel.def_kernel(
+                inputs=[X, W, Bias],
+                outputs=[Y],
+                names_str="input, weight, bias, output",
+                size_args=[
+                    f"int32_t {arg}"
+                    for arg in ["N", "H", "W", "G", "C", "K", "X", "Y"]
+                ],
+            ),
+            n_d_tensors=1 if Bias is not None else 0,
+            n_dim_spatial=2,
+        )
