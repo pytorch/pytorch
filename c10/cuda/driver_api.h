@@ -19,6 +19,7 @@
   } while (0)
 
 #define C10_LIBCUDA_DRIVER_API(_)   \
+  _(cuDeviceGetAttribute)           \
   _(cuMemAddressReserve)            \
   _(cuMemRelease)                   \
   _(cuMemMap)                       \

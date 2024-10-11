@@ -478,6 +478,12 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -2440,6 +2446,12 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    from torch._inductor.bisect_helper import BisectionManager
+
+    if bisect_backend := BisectionManager.get_backend():
+        backend = bisect_backend
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:

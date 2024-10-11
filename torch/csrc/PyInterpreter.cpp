@@ -367,9 +367,12 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  // TODO: allow this to be non-owning
-  auto handler = py::reinterpret_borrow<py::object>(
-      PyDict_GetItem(cache.ptr(), py::cast(k).ptr()));
+  PyObject* raw_handler = nullptr;
+  if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
+    // There was an error that is not missing key (which would return 0)
+    throw python_error();
+  }
+  auto handler = py::reinterpret_steal<py::object>(raw_handler);
   if (handler.ptr() == nullptr) {
     // Slow path
     handler = torch_api_function_overload.attr("_get_dispatch")(k);

@@ -172,7 +172,7 @@ class SkipCodeRecursiveException(TorchDynamoException):
     pass
 
 
-class CacheLimitExceeded(SkipCodeRecursiveException, Unsupported):
+class CacheLimitExceeded(Unsupported):
     pass
 
 

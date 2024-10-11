@@ -671,6 +671,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             grid=self.grid,
             **warmup_arg,
             stream=stream,
+            benchmark_run=True,
         )
 
     def precompile(self):
