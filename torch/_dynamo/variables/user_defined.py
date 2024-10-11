@@ -1029,8 +1029,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                if getattr_fn is unpatched_nn_module_getattr and isinstance(
-                    self, variables.UnspecializedNNModuleVariable
+                if (
+                    getattr_fn is unpatched_nn_module_getattr
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    # prevent against overwriting of params/buffers/submodules
+                    and istype(self.value._parameters, dict)
+                    and istype(self.value._buffers, dict)
+                    and istype(self.value._modules, dict)
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
