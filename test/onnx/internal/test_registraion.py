@@ -49,9 +49,9 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 class TestOverrideDict(common_utils.TestCase):
     def setUp(self):
-        self.override_dict: registration.OverrideDict[
-            str, int
-        ] = registration.OverrideDict()
+        self.override_dict: registration.OverrideDict[str, int] = (
+            registration.OverrideDict()
+        )
 
     def test_get_item_returns_base_value_when_no_override(self):
         self.override_dict.set_base("a", 42)
