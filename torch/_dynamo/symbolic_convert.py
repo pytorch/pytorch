@@ -3279,12 +3279,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # `UserFunctionVariable::bind_args`.
             return self.symbolic_locals[name]
 
-    def check_replace_is_safe(self, oldvar):
-        if not is_side_effect_safe(oldvar.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
-            )
-
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
 
