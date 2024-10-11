@@ -4,15 +4,13 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 struct TensorInfo {
   std::vector<int64_t> dims;
   c10::ScalarType dtype;
 };
-std::optional<TensorInfo> getTensorInfo(BufHandle b);
+std::optional<TensorInfo> getTensorInfo(const BufHandle& b);
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
@@ -39,7 +37,7 @@ ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes);
 ExprHandle scalarOrConstant(const ArgValue& v);
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes);
 ExprHandle constant(const ArgValue& v);
 
 ExprHandle clamp(
@@ -93,6 +91,4 @@ Tensor computeEmbedding(
     const std::optional<ScalarType>& outputType,
     at::Device device);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

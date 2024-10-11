@@ -59,6 +59,7 @@ from torchgen.model import (
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
     is_ufunc_dispatch_key,
+    is_xpu_dispatch_key,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
@@ -184,7 +185,7 @@ def parse_native_yaml_struct(
             use_out_as_primary=True,
             external=False,
             # Only cuda-like devices in tree require device guards
-            device_guard=is_cuda_dispatch_key(k),
+            device_guard=is_cuda_dispatch_key(k) or is_xpu_dispatch_key(k),
             index=v,
         )
     return ParsedYaml(rs, indices)
@@ -2664,7 +2665,9 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             ]
             + [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is also important for correct visibility
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )

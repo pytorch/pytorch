@@ -40,9 +40,7 @@ if __name__ == "__main__":
                 f"Treespec version downgraded from {commit.base['TREESPEC_VERSION']} to {commit.result['TREESPEC_VERSION']}."
             )
     else:
-        assert (
-            args.force_unsafe
-        ), "Existing schema yaml file not found, please use --force-unsafe to try again."
+        assert args.force_unsafe, "Existing schema yaml file not found, please use --force-unsafe to try again."
 
     next_version, reason = schema_check.check(commit, args.force_unsafe)
 

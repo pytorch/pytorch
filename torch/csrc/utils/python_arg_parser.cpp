@@ -95,7 +95,8 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
       "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out"};
+      "floor_divide", "floor_divide_", "floor_divide_out",
+      "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
 
@@ -265,10 +266,22 @@ static py::object maybe_get_registered_torch_dispatch_rule(
   // This is a static object, so we must leak the Python object
   // "release()" is used here to preserve 1 refcount on the
   // object, preventing it from ever being de-allocated by CPython.
+#if IS_PYBIND_2_13_PLUS
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  py::object find_torch_dispatch_rule =
+      storage
+          .call_once_and_store_result([]() -> py::object {
+            return py::module_::import("torch._library.simple_registry")
+                .attr("find_torch_dispatch_rule");
+          })
+          .get_stored();
+#else
   static const py::handle find_torch_dispatch_rule =
       py::object(py::module_::import("torch._library.simple_registry")
                      .attr("find_torch_dispatch_rule"))
           .release();
+#endif
   auto result = find_torch_dispatch_rule(
       py::reinterpret_borrow<py::object>(torch_api_function),
       torch_dispatch_object.get_type());
@@ -307,7 +320,7 @@ static py::object dispatch_on_subclass(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
             .is(py::handle(arg)) &&
         torch_function.ptr() != torch::disabled_torch_function_impl()) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Defining your `",
           torch_function_name_str,
           "` as a plain method is deprecated ",
@@ -787,7 +800,7 @@ static bool is_scalar_list(PyObject* obj) {
 bool is_tensor_list_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args,
-    int argnum,
+    size_t argnum,
     bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -983,8 +996,10 @@ auto FunctionParameter::check(
     case ParameterType::QSCHEME:
       return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
+      // Allow symint to be passed in as device, but we'll specialize and
+      // guard in this case.
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) ||
-          THPDevice_Check(obj);
+          THPDevice_Check(obj) || torch::is_symint(py::handle(obj));
     case ParameterType::STREAM:
       return THPStream_Check(obj);
     case ParameterType::STRING:
@@ -1432,6 +1447,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
 
+  // Note that this dict traversal is NoGil safe as the kwargs dict is only
+  // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
       throw TypeError("keywords must be strings");
@@ -1503,6 +1520,8 @@ bool FunctionSignature::parse(
       }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
+      // Note that this call is NoGil safe as it works on kwargs which are local
+      // to the current function call.
       obj = PyDict_GetItem(kwargs, param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {

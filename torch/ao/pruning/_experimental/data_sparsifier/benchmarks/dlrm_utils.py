@@ -1,10 +1,15 @@
 # mypy: allow-untyped-defs
-import torch
-from dlrm_s_pytorch import DLRM_Net  # type: ignore[import]
-import numpy as np  # type: ignore[import]
-from dlrm_data_pytorch import CriteoDataset, collate_wrapper_criteo_offset  # type: ignore[import]
-import zipfile
 import os
+import zipfile
+
+import numpy as np  # type: ignore[import]
+from dlrm_data_pytorch import (  # type: ignore[import]
+    collate_wrapper_criteo_offset,
+    CriteoDataset,
+)
+from dlrm_s_pytorch import DLRM_Net  # type: ignore[import]
+
+import torch
 
 
 class SparseDLRM(DLRM_Net):
@@ -13,6 +18,7 @@ class SparseDLRM(DLRM_Net):
     call. The idea is to do a simple torch.mm() with the weight matrix of the first linear
     layer of the top layer.
     """
+
     def __init__(self, **args):
         super().__init__(**args)
 
@@ -30,9 +36,8 @@ class SparseDLRM(DLRM_Net):
 
 
 def get_valid_name(name):
-    """Replaces '.' with '_' as names with '.' are invalid in data sparsifier
-    """
-    return name.replace('.', '_')
+    """Replaces '.' with '_' as names with '.' are invalid in data sparsifier"""
+    return name.replace(".", "_")
 
 
 def get_dlrm_model(sparse_dlrm=False):
@@ -41,29 +46,55 @@ def get_dlrm_model(sparse_dlrm=False):
     for benchmarking on data sparsifier.
     """
     dlrm_model_config = {
-        'm_spa': 16,
-        'ln_emb': np.array([1460, 583, 10131227, 2202608, 305, 24,
-                            12517, 633, 3, 93145, 5683, 8351593,
-                            3194, 27, 14992, 5461306, 10, 5652,
-                            2173, 4, 7046547, 18, 15, 286181,
-                            105, 142572], dtype=np.int32),
-        'ln_bot': np.array([13, 512, 256, 64, 16]),
-        'ln_top': np.array([367, 512, 256, 1]),
-        'arch_interaction_op': 'dot',
-        'arch_interaction_itself': False,
-        'sigmoid_bot': -1,
-        'sigmoid_top': 2,
-        'sync_dense_params': True,
-        'loss_threshold': 0.0,
-        'ndevices': 1,
-        'qr_flag': False,
-        'qr_operation': 'mult',
-        'qr_collisions': 4,
-        'qr_threshold': 200,
-        'md_flag': False,
-        'md_threshold': 200,
-        'weighted_pooling': None,
-        'loss_function': 'bce'
+        "m_spa": 16,
+        "ln_emb": np.array(
+            [
+                1460,
+                583,
+                10131227,
+                2202608,
+                305,
+                24,
+                12517,
+                633,
+                3,
+                93145,
+                5683,
+                8351593,
+                3194,
+                27,
+                14992,
+                5461306,
+                10,
+                5652,
+                2173,
+                4,
+                7046547,
+                18,
+                15,
+                286181,
+                105,
+                142572,
+            ],
+            dtype=np.int32,
+        ),
+        "ln_bot": np.array([13, 512, 256, 64, 16]),
+        "ln_top": np.array([367, 512, 256, 1]),
+        "arch_interaction_op": "dot",
+        "arch_interaction_itself": False,
+        "sigmoid_bot": -1,
+        "sigmoid_top": 2,
+        "sync_dense_params": True,
+        "loss_threshold": 0.0,
+        "ndevices": 1,
+        "qr_flag": False,
+        "qr_operation": "mult",
+        "qr_collisions": 4,
+        "qr_threshold": 200,
+        "md_flag": False,
+        "md_threshold": 200,
+        "weighted_pooling": None,
+        "loss_function": "bce",
     }
     if sparse_dlrm:
         dlrm_model = SparseDLRM(**dlrm_model_config)
@@ -129,9 +160,9 @@ def fetch_model(model_path, device, sparse_dlrm=False):
             device to which model needs to be loaded to
     """
     if zipfile.is_zipfile(model_path):
-        with zipfile.ZipFile(model_path, 'r', zipfile.ZIP_DEFLATED) as zip_ref:
+        with zipfile.ZipFile(model_path, "r", zipfile.ZIP_DEFLATED) as zip_ref:
             zip_ref.extractall(os.path.dirname(model_path))
-            unzip_path = model_path.replace('.zip', '.ckpt')
+            unzip_path = model_path.replace(".zip", ".ckpt")
     else:
         unzip_path = model_path
 

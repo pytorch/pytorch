@@ -42,7 +42,7 @@ def gpus_for_rank(world_size):
 
 
 class Task(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.p = nn.Parameter(torch.randn(40, 20))
@@ -52,7 +52,7 @@ class Task(nn.Module):
 
 
 class TestDdpCommHook(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.t0 = Task()
 

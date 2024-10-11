@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
@@ -32,8 +31,8 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_flatten, tree_map_only
-
 from torch.utils.weak import WeakIdKeyDictionary, weakref
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -51,13 +50,9 @@ __all__ = ["MemTracker"]
 class _RefType(str, Enum):
     """Base Class for defining memory reference types, categorizing tensors based on their usage within a model."""
 
-    pass
-
 
 class _State(str, Enum):
     """Base Class for defining module state to capture snapshots ."""
-
-    pass
 
 
 class _MemRefType(_RefType):

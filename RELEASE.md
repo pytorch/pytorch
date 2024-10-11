@@ -34,7 +34,6 @@
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
-    - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
   - [Operating Systems](#operating-systems)
@@ -49,15 +48,16 @@
 
 Following is the Release Compatibility Matrix for PyTorch releases:
 
-| PyTorch version | Python | Stable CUDA | Experimental CUDA | Stable ROCm |
-| --- | --- | --- | --- | --- |
-| 2.4 | >=3.8, <=3.12 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
-| 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
-| 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
-| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.6 |
-| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
-| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
-| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
+| PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
+| --- | --- | --- | --- | --- | --- |
+| 2.5 | >=3.9, <=3.12, (3.13 experimental) | C++17 | CUDA 11.8, CUDA 12.1, CUDA 12.4, CUDNN 9.1.0.70  | None | ROCm 6.2 |
+| 2.4 | >=3.8, <=3.12 | C++17 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
+| 2.3 | >=3.8, <=3.11, (3.12 experimental) | C++17 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
+| 2.2 | >=3.8, <=3.11, (3.12 experimental) | C++17 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
+| 2.1 | >=3.8, <=3.11 | C++17 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.6 |
+| 2.0 | >=3.8, <=3.11 | C++14 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
+| 1.13 | >=3.7, <=3.10 | C++14 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
+| 1.12 | >=3.7, <=3.10 | C++14 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
 
 ## Release Cadence
 
@@ -69,10 +69,10 @@ Following is the release cadence for year 2023/2024. All dates below are tentati
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
 | 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
 | 2.4 | Jun 2024 | Jul 2024 | (Sept 2024) | Not planned |
-| 2.5 | Aug 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
+| 2.5 | Sep 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
 | 2.6 | Dec 2024 | Jan 2025 | (Feb 2025) | (Mar 2025) |
 | 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
-| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sept 2025) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
 | 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 
 ## General Overview
@@ -234,7 +234,7 @@ Typically, within a release cycle fixes are necessary for regressions, test fixe
 For fixes that are to go into a release after the release branch has been cut we typically employ the use of a cherry pick tracker.
 
 An example of this would look like:
-* https://github.com/pytorch/pytorch/issues/51886
+* https://github.com/pytorch/pytorch/issues/128436
 
 Please also make sure to add milestone target to the PR/issue, especially if it needs to be considered for inclusion into the dot release.
 
@@ -243,7 +243,9 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 #### How to do Cherry Picking
 
 You can now use `pytorchbot` to cherry pick a PyTorch PR that has been committed
-to the main branch using `@pytorchbot cherry-pick` command as follows.
+to the main branch using `@pytorchbot cherry-pick` command as follows (make sure
+that the cherry-pick tracker issue for the target release labelled as "release tracker" -
+this will allow the bot to find it and post comments).
 
 ```
 usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
@@ -380,7 +382,7 @@ Patch release process takes around 4-5 weeks to complete.
 ### Issue Tracker for Patch releases
 
 For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority GitHub issue or a CI failure from previous RC. An example of this would look like:
-* https://github.com/pytorch/pytorch/issues/51886
+* https://github.com/pytorch/pytorch/issues/128436
 
 Only following issues are accepted:
 1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
@@ -412,12 +414,13 @@ PyTorch has a support matrix across a couple of different axis. This section sho
 
 ## Python
 
-For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
+PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/
 
-### TL;DR
+For each minor release independently, we only support patch releases as follows:
+- If the latest patch release is a bugfix release, we only support this one.
+- Otherwise, we support all the non-bugfix patch releases.
 
-* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
-* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
+See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for details on the rules and process for upgrade and sunset of each version.
 
 ## Accelerator Software
 

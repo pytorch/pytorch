@@ -1,20 +1,35 @@
 # mypy: allow-untyped-defs
 import contextlib
 import copy
+import functools
 import math
+import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
 import torch
+from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..dependencies import Dep
+from ..loop_body import LoopBody
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
-from ..virtualized import V
-from .common import CSEVariable, ExprPrinter, Kernel, KernelArgs
+from ..virtualized import ops, OpsValue, V
+from .common import (
+    CSEVariable,
+    deduce_output_dtype_by_name,
+    ExprPrinter,
+    Kernel,
+    KernelArgs,
+    OptimizationContext,
+)
 
 
 DTYPE_TO_CPP = {
@@ -31,9 +46,11 @@ DTYPE_TO_CPP = {
     torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
-    torch.complex64: "complex64",
+    torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
+    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -71,14 +88,150 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+_IS_WINDOWS = sys.platform == "win32"
+
+INDEX_TYPE = "int64_t"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 
+def get_promote_dtype(args):
+    return (
+        functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
+        )
+        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
+        else None  # not enough info to calculate the promote dtype
+    )
+
+
+def promote_args(new_args):
+    def promote_arg(arg, promote_type):
+        if (
+            isinstance(arg, CppCSEVariable)
+            and arg.dtype
+            and promote_type
+            and arg.dtype != promote_type
+        ):
+            arg = ops.to_dtype(arg, promote_type)
+            arg = arg.value if isinstance(arg, OpsValue) else arg
+            arg.dtype = promote_type
+        return arg
+
+    promote_type = get_promote_dtype(new_args)
+    promote_fn = functools.partial(
+        promote_arg,
+        promote_type=promote_type,
+    )
+    if (
+        all(
+            new_arg.dtype is not None
+            for new_arg in new_args
+            if isinstance(new_arg, CppCSEVariable)
+        )
+        and promote_type
+    ):
+        new_args = list(map(promote_fn, new_args))
+    return new_args
+
+
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
+def get_current_node_opt_ctx() -> OptimizationContext:
+    assert V.interpreter.current_node
+    return get_opt_ctx(V.interpreter.current_node)
+
+
+def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
+    if (
+        output_dtype := deduce_output_dtype_by_name(
+            name,
+            *args,
+            **kwargs,
+        )
+    ) is not None:
+        return output_dtype
+    elif name == "masked":
+        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
+        # inputs' CppCseVariable like other. Let's check it if any
+        # unexpected failures.
+        assert (
+            hasattr(V.interpreter, "current_node")
+            and V.interpreter.current_node.target.startswith("masked_subblock")
+            and get_current_node_opt_ctx() is not None
+        )
+        return get_current_node_opt_ctx().dtype
+    else:
+        # deduce output dtype by inputs' dtype
+        assert all(
+            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
+        )
+        return functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
+        )
+
+
+class CppCSEVariable(CSEVariable):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+        super().__init__(name, bounds)
+        self.is_vec = False
+        self.dtype: Optional[torch.dtype] = None
+        self.dependent_itervars: Set[sympy.Symbol] = set()
+
+    def __repr__(self) -> str:
+        return (
+            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
+            f"dependent_itervars: {self.dependent_itervars})"
+        )
+
+    def update_on_args(self, name, args, kwargs):
+        if name == "load":
+            # args[2] is index
+            self._set_dependent_itervars(args[2])
+        else:
+            # propagate relevant itervars and is_vec from args
+            self.dependent_itervars.update(
+                *[
+                    arg.dependent_itervars
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable)
+                ]
+            )
+            if name == "index_expr":
+                self._set_dependent_itervars(args[0])
+            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
+                self.is_vec = True
+        # NOTE [Deduce dtype of CppCSEVariable at runtime]
+        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        assert self.dtype is not None
+
+    def _set_dependent_itervars(self, index: sympy.Expr):
+        """
+        Set the relevant itervars for this variable based on the `index` expression.
+        This includes the itervars directly used in the `index` as well as relevant itervars
+        of other cse variables used in the `index`.
+        """
+        for s in index.free_symbols:
+            if s in V.kernel.itervars:
+                self.dependent_itervars.add(s)  # type: ignore[arg-type]
+            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
+                self.dependent_itervars.update(
+                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
+                )
+
+    def depends_on(self, itervar: sympy.Symbol):
+        return itervar in self.dependent_itervars
+
+
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return (
+            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
+        )
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
@@ -92,7 +245,7 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"c10::div_floor_integer({x}, {div})"
+                x = f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
             else:
                 x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
@@ -103,7 +256,7 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
+            return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
@@ -201,7 +354,7 @@ class CppPrinter(ExprPrinter):
     def _print_Min(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
+            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -210,7 +363,7 @@ class CppPrinter(ExprPrinter):
     def _print_Max(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
+            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -351,7 +504,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         inner,
         global_to_local: Dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
-    ):
+    ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
         self.rewrite_index = rewrite_index
@@ -393,7 +546,7 @@ class LocalBufferContext:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel_args: KernelArgs):
+    def __init__(self, kernel_args: KernelArgs) -> None:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
@@ -464,7 +617,7 @@ class LocalBufferContext:
             ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_function,
     ):
-        def inner(node, *index_vars):
+        def inner(*args, **kwargs):
             with V.set_ops_handler(
                 LocalizeBufferHandler(
                     V.get_ops_handler(),
@@ -472,7 +625,7 @@ class LocalBufferContext:
                     rewrite_index=rewrite_index,
                 )
             ):
-                return fn(node, *index_vars)
+                return fn(*args, **kwargs)
 
         return inner
 
@@ -535,8 +688,302 @@ def unify_mask_base_type(
     return new_vars
 
 
+def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
+    assert is_integer_dtype(offset.dtype)
+    code.writeline("[&]()")
+    with code.indent():
+        code.writeline(
+            f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
+        )
+        code.writeline(f"{DTYPE_TO_CPP[dst_dtype]} result[{V.kernel.tiling_factor}];")
+        code.writeline(f"{offset}.store(offset);")
+        code.writeline(
+            f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
+        )
+        with code.indent():
+            code.writeline(rand_function)
+        num_vectors = V.kernel._get_num_vectors(dtype=dst_dtype)
+        if num_vectors == 1:
+            code.writeline(
+                f"return at::vec::Vectorized<{DTYPE_TO_CPP[dst_dtype]}>::loadu(result);"
+            )
+        else:
+            code.writeline(
+                f"return at::vec::VectorizedN<{DTYPE_TO_CPP[dst_dtype]}, {num_vectors}>::loadu(result);"
+            )
+    code.writeline("()")
+    return code
+
+
 def get_gemm_template_output_and_compute_dtype(input_dtype):
     if input_dtype == torch.uint8:
         return (torch.int32, torch.int32)
     else:
         return (torch.float32, torch.float32)
+
+
+def create_epilogue_with_attr(input_buffer, attr, **kwargs):
+    input_loader = input_buffer.make_loader()
+    dtype = input_buffer.get_dtype()
+    if attr == "relu":
+
+        def inner_fn(index):
+            input = input_loader(index)
+            zero = ops.constant(0, dtype)
+            return ops.maximum(input, zero)
+
+    elif attr == "gelu":
+        assert "algorithm" in kwargs
+        if kwargs["algorithm"] == "none":
+
+            def inner_fn(index):
+                input = input_loader(index)
+                if dtype != torch.float:
+                    input = ops.to_dtype(input, torch.float)
+                half = ops.constant(0.5, torch.float)
+                one = ops.constant(1.0, torch.float)
+                const = ops.constant(0.7071067811865476, torch.float)
+                result = input * half * (ops.erf(input * const) + one)
+                if dtype != torch.float:
+                    result = ops.to_dtype(result, dtype)
+                return result
+
+        else:
+            assert kwargs["algorithm"] == "tanh"
+
+            def inner_fn(index):
+                input = input_loader(index)
+                if dtype != torch.float:
+                    input = ops.to_dtype(input, torch.float)
+                half = ops.constant(0.5, torch.float)
+                one = ops.constant(1.0, torch.float)
+                const1 = ops.constant(0.7978845608028654, torch.float)
+                const2 = ops.constant(0.044715, torch.float)
+                result = (
+                    half
+                    * input
+                    * (
+                        one
+                        + ops.tanh(const1 * (input + const2 * input * input * input))
+                    )
+                )
+                if dtype != torch.float:
+                    result = ops.to_dtype(result, dtype)
+                return result
+
+    elif attr == "swish":
+
+        def inner_fn(index):
+            input = input_loader(index)
+            result = input * ops.sigmoid(input)
+            return result
+
+    elif attr == "sigmoid":
+
+        def inner_fn(index):
+            return ops.sigmoid(input_loader(index))
+
+    elif attr == "tanh":
+
+        def inner_fn(index):
+            return ops.tanh(input_loader(index))
+
+    elif attr == "hardswish" or attr == "hardsigmoid":
+
+        def hardsigmoid_float(input):
+            zero = ops.constant(0, torch.float)
+            six = ops.constant(6, torch.float)
+            three = ops.constant(3, torch.float)
+            one_over_six = ops.constant(0.16666666666666666, torch.float)
+            max = ops.maximum(input + three, zero)
+            min = ops.minimum(max, six)
+            return min * one_over_six
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            result = hardsigmoid_float(input)
+            if attr == "hardswish":
+                result = input * result
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr == "leaky_relu":
+        assert "scalars" in kwargs
+        assert len(kwargs["scalars"]) == 1
+        negative_slope = kwargs["scalars"][0]
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            zero = ops.constant(0, torch.float)
+            result = ops.where(
+                input > zero, input, input * ops.constant(negative_slope, torch.float)
+            )
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr == "hardtanh":
+        assert "scalars" in kwargs
+        assert len(kwargs["scalars"]) == 2
+        min_value = kwargs["scalars"][0]
+        max_value = kwargs["scalars"][1]
+
+        def inner_fn(index):
+            input = input_loader(index)
+            if dtype != torch.float:
+                input = ops.to_dtype(input, torch.float)
+            result = ops.minimum(
+                ops.maximum(input, ops.constant(min_value, torch.float)),
+                ops.constant(max_value, torch.float),
+            )
+            if dtype != torch.float:
+                result = ops.to_dtype(result, dtype)
+            return result
+
+    elif attr in ["add", "sub", "mul"]:
+        assert "other" in kwargs
+        other = kwargs["other"]
+        num_input_dims = len(input_buffer.get_size())
+        num_other_dims = len(other.get_size())
+        dims_diff = num_input_dims - num_other_dims
+        other_loader = other.make_loader()
+
+        def inner_fn(index):
+            op = getattr(ops, attr)
+            if dims_diff != 0:
+                return op(input_loader(index), other_loader(index[dims_diff:]))
+            else:
+                return op(input_loader(index), other_loader(index))
+
+    elif attr == "bias_add":
+        assert "other" in kwargs
+        assert "beta" in kwargs
+        assert "dtype" in kwargs
+        beta = kwargs["beta"]
+        other = kwargs["other"]
+        dtype = kwargs["dtype"]
+        bias_loader = other.make_loader()
+
+        def inner_fn(index):
+            bias = bias_loader(index)
+            input = input_loader(index)
+            if beta != 1:
+                result = ops.constant(beta, torch.float) * bias + input
+            else:
+                result = bias + input
+            return result
+
+    else:
+        raise ValueError(f"Unsupported epilogue attribute: {attr}")
+    return ir.Pointwise(
+        device=input_buffer.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input_buffer.get_size(),
+    )
+
+
+def _get_loop_body(fn_list):
+    if all(isinstance(fn, LoopBody) for fn in fn_list):
+        loop_bodies = fn_list
+    else:
+        if hasattr(fn_list[0], "original_fn"):
+            # For the case of local buffer, we wrap the fn with localize_function
+            assert all(hasattr(fn, "original_fn") for fn in fn_list)
+            assert all(
+                isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
+            )
+            loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+    assert loop_bodies is not None
+    return loop_bodies
+
+
+def _get_dtype_from_loopbodies(loop_bodies):
+    dtypes = set()
+    for loop_body in loop_bodies:
+        graphs = [loop_body.root_block.graph] + [
+            body.graph for body in list(loop_body.subblocks.values())
+        ]
+        for graph in graphs:
+            for node in graph.nodes:
+                if node.op != "call_method":
+                    continue
+                dtypes.add(node.meta[OptimizationContext.key].dtype)
+    return dtypes
+
+
+def template_fusion_with_epilogues_supported(
+    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+) -> Tuple[bool, bool]:
+    def _get_indexes_of_template_buf_read(
+        epilogue_node: ir.Operation, template_buf_names: List[str]
+    ) -> List[sympy.Expr]:
+        return [
+            read.index
+            for read in epilogue_node.get_reads()
+            if read.name in template_buf_names
+        ]
+
+    def _check_supported_and_same_indexes(
+        index_of_template_buf_read: Sequence[sympy.Expr],
+        epilogue_writes: OrderedSet[Dep],
+    ) -> Tuple[bool, bool]:
+        num_indexes = len(set(index_of_template_buf_read))
+
+        if num_indexes > 1:
+            same_index = False
+            supported = False  # Different read indexes not supported
+        elif num_indexes == 0:
+            same_index = True
+            supported = True  # No reads, automatically supported
+        elif num_indexes == 1:
+            iotbr = index_of_template_buf_read[0]
+            same_index = all(write.index == iotbr for write in epilogue_writes)
+            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+            # in the epilogue node don't have the same index and change supported to True
+            supported = same_index
+        else:
+            raise AssertionError("Should not reach here")
+
+        return supported, same_index
+
+    def _template_fusion_supported(
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
+    ) -> Tuple[bool, bool]:
+        template_buf_names = [x.get_name() for x in template_outputs]
+        indexes_of_template_buf_reads = [
+            _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
+            for epilogue_node in epilogue_nodes
+        ]
+        epilogue_nodes_writes = [
+            epilogue_node.get_read_writes().writes for epilogue_node in epilogue_nodes
+        ]
+
+        results = [
+            _check_supported_and_same_indexes(reads, writes)
+            for reads, writes in zip(
+                indexes_of_template_buf_reads, epilogue_nodes_writes
+            )
+        ]
+        supported, same_indexes = zip(*results)
+        return all(supported), all(same_indexes)
+
+    assert template.is_template()
+    template_outputs = template.get_outputs()
+
+    epilogue_nodes = [
+        n.node
+        for epilogue in epilogues
+        for n in epilogue.get_nodes()
+        if n.node is not None
+    ]
+    return _template_fusion_supported(template_outputs, epilogue_nodes)

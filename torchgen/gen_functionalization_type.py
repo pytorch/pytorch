@@ -590,10 +590,12 @@ def wrap_propagate_mutations_and_return(
     ):
         updates.append(
             f"""\
-  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
+  auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
-  at::functionalization::impl::sync({outer_arg});"""
+  at::functionalization::impl::sync({outer_arg});
+  auto {outer_arg}_inner_updated = at::functionalization::impl::from_functional_tensor({outer_arg});
+  at::functionalization::impl::propagate_xla_data_direct({outer_arg}_inner, {outer_arg}_inner_updated);"""
         )
 
     # Finally, we return:

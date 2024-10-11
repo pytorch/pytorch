@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import sys
 from contextlib import contextmanager
-
 from typing import TYPE_CHECKING
 
 import torch

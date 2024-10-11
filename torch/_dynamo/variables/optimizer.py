@@ -1,9 +1,11 @@
 # mypy: ignore-errors
 
+import logging
 import weakref
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
+from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_only
 
 from ..guards import GuardBuilder, install_guard
@@ -15,14 +17,16 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX
-
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
+
 if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
     from .base import VariableTracker
 
 
@@ -32,6 +36,27 @@ class ArgMappingException(Exception):
 
 class GuardInstallException(Exception):
     pass
+
+
+perf_hint_log = getArtifactLogger(__name__, "perf_hints")
+
+
+def _is_static_for_cudagraphs(x):
+    from torch._inductor.cudagraph_trees import get_manager
+
+    if x.is_cuda:
+        manager = get_manager(x.device.index, False)
+        is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
+        if manager:
+            return (
+                is_static_address
+                or manager.current_node._is_cuda_graph_recorded_tensor(x)
+            )
+        else:
+            return is_static_address
+    else:
+        # Don't print a warning for non-cuda tensors
+        return True
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
@@ -49,7 +74,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         static_tensor_names=None,
         tensor_to_source=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value, **kwargs)
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
@@ -88,7 +113,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
@@ -128,13 +153,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # and the state is not initialized
         def safe_to_set_capturable(group):
             all_uninitialized = True
-            all_cuda = True
+            all_gpu = True
 
             for p in group.get("params", []):
-                all_cuda &= p.is_cuda
+                all_gpu &= p.is_cuda or p.is_xpu
                 all_uninitialized &= p not in self.value.state
 
-            return "capturable" in group and all_uninitialized and all_cuda
+            return "capturable" in group and all_uninitialized and all_gpu
 
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state
@@ -253,7 +278,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             break
 
             group_source = group_vt.source
-            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
+            all_static = True
+            non_static_grads = []
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
@@ -266,8 +293,22 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
+                    if not _is_static_for_cudagraphs(p.grad):
+                        all_static = False
+                        non_static_grads.append(grad_source)
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+
+            if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
+                non_static_grads = [src.name() for src in non_static_grads]
+                perf_hint_log.warning(
+                    (
+                        "Grad tensors %s will be copied during cudagraphs execution."
+                        "If using cudagraphs and the grad tensor addresses will be the same across runs,"
+                        " use torch._dynamo.decorators.mark_static_address to elide this copy.",
+                    ),
+                    non_static_grads,
+                )
 
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
@@ -284,7 +325,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
 
-    def wrap_tensor(self, tx, tensor_value):
+    def wrap_tensor(self, tx: "InstructionTranslator", tensor_value):
         """Wrap state tensor in a TensorVariable"""
         from ..decorators import mark_static_address
         from .builder import VariableBuilder
@@ -312,7 +353,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         result = builder(tensor_value)
         return result
 
-    def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
+    def update_list_args(
+        self, tx: "InstructionTranslator", args, kwargs, py_args, py_kwargs
+    ):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
@@ -345,6 +388,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     gm._parameters.pop(name, None)
                     if tc.params_flat:
                         tc.params_flat.clear()
+                    if tc.params_flat_unwrap_subclasses:
+                        tc.params_flat_unwrap_subclasses.clear()
 
             weakref.finalize(value, clear_static_tensor_refs)
 

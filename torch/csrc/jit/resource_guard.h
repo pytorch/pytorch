@@ -1,8 +1,7 @@
 #pragma once
 #include <functional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class ResourceGuard {
   std::function<void()> _destructor;
@@ -23,5 +22,4 @@ class ResourceGuard {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

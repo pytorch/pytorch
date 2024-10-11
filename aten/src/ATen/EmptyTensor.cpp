@@ -18,10 +18,12 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasMTIA()) {
+      return at::detail::getMTIAHooks().getPinnedMemoryAllocator();
     } else if (at::globalContext().hasXPU()) {
       return at::detail::getXPUHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {
-      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
+      return at::detail::getPrivateUse1Hooks().getPinnedMemoryAllocator();
     } else {
       TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
     }
@@ -444,8 +446,7 @@ TensorBase empty_strided_symint_meta(
     SymIntArrayRef stride,
     std::optional<ScalarType> dtype_opt,
     std::optional<Layout> layout_opt,
-    std::optional<Device> device_opt,
-    std::optional<bool> pin_memory_opt) {
+    std::optional<Device> device_opt) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
@@ -462,8 +463,7 @@ TensorBase empty_strided_symint_meta(
       stride,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
-      options.device_opt(),
-      options.pinned_memory_opt());
+      options.device_opt());
 }
 
 } // namespace at::detail

@@ -175,12 +175,6 @@ SymbolizedTracebacks symbolize(
     for (; py_it != py_end; ++py_it) {
       append_python(*py_it);
     }
-
-    // Gather all user defined frames
-    for (const auto& f : sc->user_defined_frames_) {
-      r.tracebacks.back().push_back(r.all_frames.size());
-      r.all_frames.emplace_back(f);
-    }
   }
   return r;
 }

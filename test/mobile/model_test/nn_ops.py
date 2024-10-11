@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 # https://pytorch.org/docs/stable/nn.html
 class NNConvolutionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.input1d = torch.randn(1, 4, 36)
         self.input2d = torch.randn(1, 4, 30, 10)
@@ -42,7 +42,7 @@ class NNConvolutionModule(torch.nn.Module):
 
 
 class NNPoolingModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.input1d = torch.randn(1, 16, 50)
         self.module1d = nn.ModuleList(
@@ -90,7 +90,7 @@ class NNPoolingModule(torch.nn.Module):
 
 
 class NNPaddingModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.input1d = torch.randn(1, 4, 50)
         self.module1d = nn.ModuleList(
@@ -131,7 +131,7 @@ class NNPaddingModule(torch.nn.Module):
 
 
 class NNNormalizationModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.input1d = torch.randn(1, 4, 50)
         self.module1d = nn.ModuleList(
@@ -172,7 +172,7 @@ class NNNormalizationModule(torch.nn.Module):
 
 
 class NNActivationModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.activations = nn.ModuleList(
             [
@@ -215,7 +215,7 @@ class NNActivationModule(torch.nn.Module):
 
 
 class NNRecurrentModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.rnn = nn.ModuleList(
             [
@@ -245,7 +245,7 @@ class NNRecurrentModule(torch.nn.Module):
 
 
 class NNTransformerModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.transformers = nn.ModuleList(
             [
@@ -271,7 +271,7 @@ class NNTransformerModule(torch.nn.Module):
 
 
 class NNLinearModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linears = nn.ModuleList(
             [
@@ -329,7 +329,7 @@ class NNDistanceModule(torch.nn.Module):
 
 
 class NNLossFunctionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
         self.y = torch.LongTensor([[3, 0, -1, 1]])
@@ -368,7 +368,7 @@ class NNLossFunctionModule(torch.nn.Module):
 
 
 class NNVisionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.input = torch.randn(1, 4, 9, 9)
         self.vision_modules = nn.ModuleList(
@@ -398,7 +398,7 @@ class NNVisionModule(torch.nn.Module):
 
 
 class NNShuffleModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.shuffle = nn.ChannelShuffle(2)
 
@@ -409,7 +409,7 @@ class NNShuffleModule(torch.nn.Module):
 
 
 class NNUtilsModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.flatten = nn.Sequential(nn.Linear(50, 50), nn.Unflatten(1, (2, 5, 5)))
 

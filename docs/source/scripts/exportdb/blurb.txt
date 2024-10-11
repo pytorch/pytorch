@@ -6,4 +6,4 @@ everything that is supported by exportdb, but it covers the
 most common and confusing use cases that users will run into.
 
 If you have a feature that you think needs a stronger guarantee from us to
-support in export please create an issue in the pytorch/pytorch repo wih a module:export tag.
+support in export please create an issue in the pytorch/pytorch repo with a module:export tag.

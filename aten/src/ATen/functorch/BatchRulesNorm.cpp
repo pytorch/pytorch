@@ -42,7 +42,7 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
 }
 
 template<typename F, F Func>
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 batch_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const std::optional<Tensor>& weight_opt, std::optional<int64_t> weight_bdim,
@@ -114,7 +114,7 @@ batch_norm_batch_rule(
   if (bias.defined()) {
     const auto result_logical_rank = rankWithoutBatchDim(
         result0,
-        bdim_size.has_value() || weight_bdim.has_value() ? std::optional<int64_t>(0) : std::optional<int64_t>(nullopt));
+        bdim_size.has_value() || weight_bdim.has_value() ? std::optional<int64_t>(0) : std::optional<int64_t>(std::nullopt));
     auto bias_ = moveBatchDimToFront(bias, bias_bdim);
     bias_ = padRight(bias_, bias_bdim, result_logical_rank);
     result0 = result0 + bias_;
@@ -124,7 +124,7 @@ batch_norm_batch_rule(
 }
 
 template<typename F, F Func>
-std::tuple<at::Tensor,optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
+std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const std::optional<at::Tensor> & running_mean_opt, std::optional<int64_t> running_mean_bdim,
@@ -144,7 +144,7 @@ std::tuple<at::Tensor,optional<int64_t>> batch_norm_backward_no_weight_bias_batc
     const auto dummy_weight = at::ones(input.size(1), input.options());
     const auto result = Func(
         grad_out, input, dummy_weight, running_mean_opt, running_var_opt, mean, rstd, training, eps, {true, false, false});
-    return std::make_tuple(std::get<0>(result), nullopt);
+    return std::make_tuple(std::get<0>(result), std::nullopt);
   }
 
   auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
@@ -259,13 +259,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
     // NB: output isn't saved...
     auto mean = training ? save_mean : running_mean;
     auto var = training ? save_rstd : (1 / at::sqrt(running_var + eps));
-    const auto normalized_input = (input.transpose(0, 1) - padRight(mean, nullopt, input.dim())) * padRight(var, nullopt, input.dim());
+    const auto normalized_input = (input.transpose(0, 1) - padRight(mean, std::nullopt, input.dim())) * padRight(var, std::nullopt, input.dim());
     const auto expanded_grad_weight = normalized_input * grad_out.transpose(0, 1);
     grad_weight = expanded_grad_weight.sum(range(1, grad_out.dim()));
   }
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
-      grad_out.transpose(0, 1) * padRight(weight, nullopt, grad_out.dim()) : grad_out.transpose(0, 1);           // [B0, C, B, *]
+      grad_out.transpose(0, 1) * padRight(weight, std::nullopt, grad_out.dim()) : grad_out.transpose(0, 1);           // [B0, C, B, *]
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
@@ -312,32 +312,32 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     const auto bdim_size = input_value.size(*input_bdim);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = at::native_group_norm(input_, nullopt, nullopt, N * bdim_size, C, HxW, group, eps);
+    const auto result = at::native_group_norm(input_, std::nullopt, std::nullopt, N * bdim_size, C, HxW, group, eps);
     result0 = makeBatched(reshape_dim_outof(0, bdim_size, std::get<0>(result)), 0, cur_level);
     mean = makeBatched(reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0, cur_level);
     rstd = makeBatched(reshape_dim_outof(0, bdim_size, std::get<2>(result)), 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = at::native_group_norm(input_value, nullopt, nullopt, N, C, HxW, group, eps);
+    const auto result = at::native_group_norm(input_value, std::nullopt, std::nullopt, N, C, HxW, group, eps);
     result0 = std::get<0>(result);
     mean = std::get<1>(result);
     rstd = std::get<2>(result);
   }
 
   if (weight.defined()) {
-    const auto padded_weight = padRight(weight, nullopt, result0.dim() - 1);
+    const auto padded_weight = padRight(weight, std::nullopt, result0.dim() - 1);
     result0 = result0 * padded_weight;
   }
 
   if (bias.defined()) {
-    const auto padded_bias = padRight(bias, nullopt, result0.dim() - 1);
+    const auto padded_bias = padRight(bias, std::nullopt, result0.dim() - 1);
     result0 = result0 + padded_bias;
   }
 
   return std::make_tuple(result0, mean, rstd);
 }
 
-static std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor, std::optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
@@ -364,7 +364,7 @@ static std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bi
       input_.contiguous(),
       mean_.contiguous(),
       rstd_.contiguous(),
-      nullopt, N * bdim_size, C, HxW, group, {true, false, false});
+      std::nullopt, N * bdim_size, C, HxW, group, {true, false, false});
   auto result0 = std::get<0>(result);
   result0 = reshape_dim_outof(0, bdim_size, result0);
   return std::make_tuple(result0, 0);
@@ -410,14 +410,14 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
   if (output_mask[1] && weight.defined()) {
     const auto reshaped_input = reshape_dim_outof(1, group, input);
-    const auto normalized_input = (reshaped_input - padRight(mean, nullopt, reshaped_input.dim())) * padRight(rstd, nullopt, reshaped_input.dim());
+    const auto normalized_input = (reshaped_input - padRight(mean, std::nullopt, reshaped_input.dim())) * padRight(rstd, std::nullopt, reshaped_input.dim());
     const auto expanded_grad_weight = reshape_dim_into(1, 1, normalized_input) * grad_out;
     grad_weight = expanded_grad_weight.transpose(0, 1).sum(range(1, expanded_grad_weight.dim()));
   }
 
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
-      grad_out * padRight(weight, nullopt, grad_out.dim() - 1) : grad_out;
+      grad_out * padRight(weight, std::nullopt, grad_out.dim() - 1) : grad_out;
     auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
@@ -484,7 +484,7 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
   check_same_shape(bias, bias_bdim, normalized_shape, "weight");
 }
 
-static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 native_layer_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
     c10::SymIntArrayRef normalized_shape,
@@ -508,7 +508,7 @@ native_layer_norm_batch_rule(
   _check_layer_norm_inputs(normalized_shape, weight, weight_bdim, bias, bias_bdim);
 
   const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
-  const auto result = at::native_layer_norm_symint(input_, normalized_shape, nullopt, nullopt, eps);
+  const auto result = at::native_layer_norm_symint(input_, normalized_shape, std::nullopt, std::nullopt, eps);
   auto result0 = std::get<0>(result);
   const auto mean = std::get<1>(result);
   const auto rstd = std::get<2>(result);
@@ -522,7 +522,7 @@ native_layer_norm_batch_rule(
   if (bias.defined()) {
     const auto result_logical_rank = rankWithoutBatchDim(
         result0,
-        input_bdim.has_value() || weight_bdim.has_value() ? std::optional<int64_t>(0) : std::optional<int64_t>(nullopt));
+        input_bdim.has_value() || weight_bdim.has_value() ? std::optional<int64_t>(0) : std::optional<int64_t>(std::nullopt));
     auto bias_ = moveBatchDimToFront(bias, bias_bdim);
     bias_ = maybePadToLogicalRank(bias_, /*has_bdim*/bias_bdim, result_logical_rank);
     result0 = result0 + bias_;
@@ -530,7 +530,7 @@ native_layer_norm_batch_rule(
   return std::make_tuple(result0, 0, mean, stats_bdim, rstd, stats_bdim);
 }
 
-static std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     at::IntArrayRef normalized_shape,
@@ -540,8 +540,8 @@ static std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_we
   if (!grad_out_bdim.has_value() && !input_bdim.has_value() &&
       !mean_bdim.has_value() && !rstd_bdim.has_value()) {
     const auto result = at::native_layer_norm_backward(
-        grad_out, input, normalized_shape, mean, rstd, nullopt, nullopt, {true, false, false});
-    return std::make_tuple(std::get<0>(result), nullopt);
+        grad_out, input, normalized_shape, mean, rstd, std::nullopt, std::nullopt, {true, false, false});
+    return std::make_tuple(std::get<0>(result), std::nullopt);
   }
 
   auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
@@ -562,7 +562,7 @@ static std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_we
       normalized_shape,
       mean_.contiguous(),
       rstd_.contiguous(),
-      nullopt, nullopt, {true, false, false});
+      std::nullopt, std::nullopt, {true, false, false});
 
   return std::make_tuple(std::get<0>(result), 0);
 }
@@ -651,7 +651,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
 
 template <typename F, F Func>
 struct NativeBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const std::optional<Tensor>& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,
@@ -666,7 +666,7 @@ struct NativeBatchNormBatchRuleHelper {
 
 template <typename F, F Func>
 struct CudnnBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,
@@ -677,13 +677,13 @@ struct CudnnBatchNormBatchRuleHelper {
     auto res = batch_norm_batch_rule<F, Func>(
         input, input_bdim, weight_opt, weight_bdim, bias_opt, bias_bdim,
         running_mean_opt, running_mean_bdim, running_var_opt, running_var_bdim, training, momentum, eps);
-    return std::tuple_cat(res, std::make_tuple(reserve, nullopt));
+    return std::tuple_cat(res, std::make_tuple(reserve, std::nullopt));
   }
 };
 
 template <typename F, F Func>
 struct MiopenBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,

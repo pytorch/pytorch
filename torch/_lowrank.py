@@ -1,5 +1,4 @@
-"""Implement various linear algebra algorithms for low rank matrices.
-"""
+"""Implement various linear algebra algorithms for low rank matrices."""
 
 __all__ = ["svd_lowrank", "pca_lowrank"]
 

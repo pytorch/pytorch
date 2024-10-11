@@ -34,8 +34,8 @@ from torch.testing._internal.common_utils import (
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
-
 from torchgen.utils import dataclass_repr
+
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -875,6 +875,8 @@ class OpInfo:
     supports_sparse_bsr: bool = None
     # whether the op supports sparse bsc inputs, defaults to False
     supports_sparse_bsc: bool = None
+    # whether the op supports nested jagged inputs, defaults to False
+    supports_njt: bool = None
 
     # whether the op promotes integer inputs to float
     promotes_int_to_float: bool = False
@@ -893,6 +895,8 @@ class OpInfo:
     supports_expanded_weight: bool = False
 
     is_factory_function: bool = False
+
+    skip_correctness_check_compile_vs_eager: bool = False
 
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
@@ -1050,6 +1054,9 @@ class OpInfo:
             self.supports_sparse_bsc = self.sample_inputs_sparse_bsc_func is not None
         if self.sample_inputs_sparse_bsc_func is None:
             self.sample_inputs_sparse_bsc_func = self._sample_inputs_unspecified
+
+        if self.supports_njt is None:
+            self.supports_njt = False
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
@@ -1425,7 +1432,7 @@ class OpInfo:
                 else self.backward_dtypesIfCUDA
             )
         elif device_type == "hpu":
-            backward_dtype = self.backward_dtypesIfHpu
+            backward_dtypes = self.backward_dtypesIfHpu
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1438,14 +1445,16 @@ class OpInfo:
         return dtype in self.supported_dtypes(device_type)
 
     @property
+    def full_name(self):
+        """Returns a full name that helps to uniquely identify this OpInfo."""
+        variant = "." + self.variant_test_name if self.variant_test_name else ""
+        # example: "normal.in_place" where "normal" is the name and "in_place" is the variant
+        return f"{self.name}{variant}"
+
+    @property
     def formatted_name(self):
         """Returns a formatted full name for this OpInfo that can be used in test names."""
-        variant = (
-            "_" + self.variant_test_name.replace(".", "_")
-            if self.variant_test_name
-            else ""
-        )
-        return f"{self.name.replace('.', '_')}{variant}"
+        return self.full_name.replace(".", "_")
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):

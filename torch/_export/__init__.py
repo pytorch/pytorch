@@ -27,7 +27,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     ExportGraphSignature,
@@ -40,7 +39,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
@@ -65,10 +65,44 @@ def capture_pre_autograd_graph_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
-    log.warning("Please switch to use torch.export instead.")
+    log.warning("Please switch to use torch.export.export_for_training instead.")
     if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
+        log.warning("For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
 
+@lru_cache
+def print_export_warning():
+    log.warning("Using torch.export.export_for_training(...,strict=True)")
+
+def gm_using_training_ir(graph_module):
+    """
+    Returns true if the graph module is detected to use training IR.
+
+    This function checks for two specific conditions within the nodes of the graph module:
+    1. The presence of the `torch.ops.aten.batch_norm.default` operation which indicates the use of training IR.
+    2. The presence of deprecated IR tags on node meta or batch norm ops produced by the deprecated IR.
+
+    The function raises a RuntimeError if both conditions are met, indicating a conflict in the IR.
+    """
+    # TODO: clean up this code after training IR migration.
+    # T199018392
+    has_training_ir_batch_norm = False
+    has_deprecated_ir_tag = getattr(graph_module, "capture_pre_autograd_graph_tag", False)
+    for node in graph_module.graph.nodes:
+        if node.op == "call_function":
+            if node.target == torch.ops.aten.batch_norm.default:
+                has_training_ir_batch_norm = True
+            if node.meta.get("capture_pre_autograd_graph_tag", False):
+                has_deprecated_ir_tag = True
+            if node.target in [
+                torch.ops.aten._native_batch_norm_legit.default,
+                torch.ops.aten.cudnn_batch_norm.default,
+                torch.ops.aten.miopen_batch_norm.default,
+            ]:
+                has_deprecated_ir_tag = True
+
+    if has_deprecated_ir_tag and has_training_ir_batch_norm:
+        raise RuntimeError("Conflicting IR detected.")
+    return has_training_ir_batch_norm or not has_deprecated_ir_tag
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
@@ -108,8 +142,8 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
-    from torch._utils_internal import export_api_rollout_check
+    from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
+    from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
     from torch.export._unlift import _create_stateful_graph_module
@@ -117,17 +151,17 @@ def capture_pre_autograd_graph(
 
     capture_pre_autograd_graph_warning()
 
+    if sys.platform == "win32":
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
+
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
     if kwargs is None:
         kwargs = {}
 
-    if export_api_rollout_check():
-        @lru_cache
-        def print_export_warning():
-            log.warning("Using torch.export._trace._export")
+    if capture_pre_autograd_graph_using_training_ir():
         print_export_warning()
-        module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
+        module = torch.export.export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
@@ -154,7 +188,7 @@ def capture_pre_autograd_graph(
                 **kwargs,
             )[0]
 
-            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+            _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
 
             m.meta["inline_constraints"] = {
                 k: v
@@ -181,20 +215,24 @@ def capture_pre_autograd_graph(
                 range_constraints=range_constraints,
             )
 
-        error_message = \
-            """
-            Calling train() or eval() is not supported for exported models.
-            Alternatively, you may override these methods to do custom user behavior as follows:
+            setattr(module, "capture_pre_autograd_graph_tag", True)  # noqa: B010
+            for node in module.graph.nodes:
+                node.meta["capture_pre_autograd_graph_tag"] = True
 
-                def _my_train(self, mode: bool = True):
-                    ...
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
 
-                def _my_eval(self):
-                    ...
+            def _my_train(self, mode: bool = True):
+                ...
 
-                model.train = types.MethodType(_my_train, model)
-                model.eval = types.MethodType(_my_eval, model)
-            """
+            def _my_eval(self):
+                ...
+
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)
@@ -204,112 +242,27 @@ def capture_pre_autograd_graph(
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    if hasattr(module, "_buffers"):
+        torch._export.utils.remove_proxy_from_state_dict(
+            module._buffers, in_place=True
+        )
     return module
 
 
-def save(
-    ep,
-    f: Union[str, os.PathLike, io.BytesIO],
-    *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    opset_version: Optional[Dict[str, int]] = None,
-) -> None:
-    from torch.export.exported_program import ExportedProgram
-    if not isinstance(ep, ExportedProgram):
-        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
+# We only want to print this once to avoid flooding logs in workflows where aot_compile_warning
+# is called multiple times.
+@lru_cache
+def aot_compile_warning():
+    from torch._inductor import config
 
-    from .serde.serialize import serialize, SerializedArtifact
-    from .serde.schema import SCHEMA_VERSION
-    artifact: SerializedArtifact = serialize(ep, opset_version)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    with zipfile.ZipFile(f, 'w') as zipf:
-        # Save every field in the SerializedArtifact to a file.
-        assert isinstance(artifact.exported_program, bytes)
-        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
-        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
-        zipf.writestr("serialized_constants.pt", artifact.constants)
-        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
-
-        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
-
-        # Add extra files if provided
-        if extra_files:
-            for extra_file_name, content in extra_files.items():
-                encoded_content = content.encode('utf-8')
-                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
-
-
-def load(
-    f: Union[str, os.PathLike, io.BytesIO],
-    *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    expected_opset_version: Optional[Dict[str, int]] = None,
-):
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    extra_files = extra_files or {}
-
-    with zipfile.ZipFile(f, 'r') as zipf:
-        # Check the version
-        version = zipf.read('version').decode().split('.')
-        from .serde.schema import SCHEMA_VERSION
-
-        assert len(version) == len(SCHEMA_VERSION)
-        if version[0] != str(SCHEMA_VERSION[0]):
-            raise RuntimeError(
-                f"Serialized version {version} does not match our current "
-                f"schema version {SCHEMA_VERSION}."
-            )
-
-        from .serde.serialize import deserialize, SerializedArtifact
-
-        # Load serialized_ep and serialized_state_dict from the zip file
-
-        serialized_exported_program: Optional[bytes] = None
-        serialized_state_dict: Optional[bytes] = None
-        serialized_constants: Optional[bytes] = None
-        serialized_example_inputs: Optional[bytes] = None
-
-        for file_info in zipf.infolist():
-            file_content = zipf.read(file_info.filename)
-
-            if file_info.filename == "serialized_exported_program.json":
-                serialized_exported_program = file_content
-            elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_state_dict.pt":
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.pt":
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_example_inputs.pt":
-                serialized_example_inputs = file_content
-            elif file_info.filename.startswith("extra_files"):
-                filename = file_info.filename.split("/", 1)[1]
-                extra_files[filename] = file_content.decode('utf-8')
-
-        assert serialized_exported_program is not None
-        assert serialized_state_dict is not None
-        assert serialized_constants is not None
-        assert serialized_example_inputs is not None
-        artifact: SerializedArtifact = SerializedArtifact(
-            serialized_exported_program,
-            serialized_state_dict,
-            serialized_constants,
-            serialized_example_inputs,
-        )
-
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
-
-        return ep
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning(
+        "torch._export.aot_compile() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
 
 
 def aot_compile(
@@ -362,6 +315,8 @@ def aot_compile(
     from torch._inductor.decomposition import select_decomp_table
     from torch._inductor import config
 
+    aot_compile_warning()
+
     if config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
@@ -406,6 +361,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 

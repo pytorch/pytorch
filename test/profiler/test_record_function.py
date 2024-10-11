@@ -27,6 +27,7 @@ from torch.autograd.profiler import profile as _profile
 from torch.profiler import kineto_available, record_function
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 Json = Dict[str, Any]
 
 
@@ -95,7 +96,7 @@ class TestRecordFunction(TestCase):
 
     def test_datapipe_delegation_with_profiler(self):
         class IDPIterator(torch.utils.data.IterDataPipe):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = list(range(10))
                 self._idx = 0
 

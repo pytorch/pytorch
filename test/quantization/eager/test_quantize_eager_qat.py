@@ -95,9 +95,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.beta = nn.Parameter(torch.empty(out_channels))
         self.affine = True
         self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+        self.running_mean = nn.Buffer(torch.zeros(out_channels))
+        self.running_var = nn.Buffer(torch.ones(out_channels))
+        self.num_batches_tracked = nn.Buffer(torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
@@ -555,7 +555,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
     def test_add_scalar_uses_input_qparams(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.ff = torch.ao.nn.quantized.FloatFunctional()
@@ -576,7 +576,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
     def test_mul_scalar_uses_input_qparams(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.ff = torch.ao.nn.quantized.FloatFunctional()
@@ -642,7 +642,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 class TestQuantizeEagerQATNumerics(QuantizationTestCase):
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.act = Act()
                 self.quant = QuantStub()
@@ -664,7 +664,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
     def test_fixed_qparam_ops(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
@@ -717,7 +717,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
     def test_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = nn.ReLU()
 

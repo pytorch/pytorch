@@ -4,8 +4,7 @@ from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch._utils import ExceptionWrapper
 from torch.cuda._utils import _get_device_index
-
-from ..modules import Module
+from torch.nn.modules import Module
 
 
 __all__ = ["get_a_var", "parallel_apply"]

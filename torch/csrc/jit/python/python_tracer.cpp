@@ -74,7 +74,7 @@ SourceRange getPythonInterpreterSourceRange() {
 std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
     const py::function& func,
     const py::dict& inputs_dict,
-    Stack trace_inputs,
+    const Stack& trace_inputs,
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
@@ -110,7 +110,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
 
   auto outs = tracer::trace(
       std::move(compact_trace_inputs),
-      [&](Stack inputs) -> Stack {
+      [&](const Stack& inputs) -> Stack {
         // We just leave the inputs_dict as it was and pass it to forward
         // method.
         auto out = func(**inputs_dict);

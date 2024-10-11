@@ -22,10 +22,9 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
-from torch.utils._triton import has_triton
 
 
-@unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+@unittest.skipIf(not HAS_CUDA, "Inductor+gpu needs triton and CUDA")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
@@ -65,15 +64,15 @@ class TestMemoryPlanning(TestCase):
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with config.patch("cpp_wrapper", True):
+        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<long>(s0*s0)))), }, {1L, }"
+            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<int64_t>(s0*s0)))), }, {1L, }"
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<long>(s0*s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<int64_t>(s0*s0))),"
         ).run(
             code
         )
@@ -84,7 +83,9 @@ class TestMemoryPlanning(TestCase):
         try:
             from .test_aot_inductor import AOTIRunnerUtil
         except ImportError:
-            from test_aot_inductor import AOTIRunnerUtil
+            from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
+                AOTIRunnerUtil,
+            )
 
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)

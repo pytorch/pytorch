@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any, Optional, Dict, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
 import pytorch_lightning as pl  # type: ignore[import]
 
 from ._data_sparstity_utils import (
     _attach_model_to_data_sparsifier,
+    _get_valid_name,
     _log_sparsified_level,
-    _get_valid_name
 )
+
 
 if TYPE_CHECKING:
     import torch
@@ -40,6 +42,7 @@ class PostTrainingDataSparsity(pl.callbacks.Callback):
             2. sparsier step() is called
             3. squashes the mask()
     """
+
     def __init__(self, data_sparsifier_class, data_sparsifier_args):
         super().__init__()
         self.data_sparsifier_class = data_sparsifier_class
@@ -106,8 +109,14 @@ class TrainingAwareDataSparsity(pl.callbacks.Callback):
         on_train_end()
             squash mask
     """
-    def __init__(self, data_sparsifier_class, data_sparsifier_args,
-                 data_scheduler_class, data_scheduler_args):
+
+    def __init__(
+        self,
+        data_sparsifier_class,
+        data_sparsifier_args,
+        data_scheduler_class,
+        data_scheduler_args,
+    ):
         super().__init__()
         # data sparsifier objects
         self.data_sparsifier_class = data_sparsifier_class
@@ -129,11 +138,13 @@ class TrainingAwareDataSparsity(pl.callbacks.Callback):
         self.data_sparsifier = self.data_sparsifier_class(**self.data_sparsifier_args)
         self.sparsified = deepcopy(pl_module.model)
 
-        _attach_model_to_data_sparsifier(self.sparsified, self.data_sparsifier)  # just to populate the base_sl in the scheduler
+        _attach_model_to_data_sparsifier(
+            self.sparsified, self.data_sparsifier
+        )  # just to populate the base_sl in the scheduler
 
         # create scheduler
         args = deepcopy(self.data_scheduler_args)
-        args['data_sparsifier'] = self.data_sparsifier
+        args["data_sparsifier"] = self.data_sparsifier
         self.data_scheduler = self.data_scheduler_class(**args)
 
     def on_train_epoch_start(self, trainer, pl_module):
@@ -158,7 +169,9 @@ class TrainingAwareDataSparsity(pl.callbacks.Callback):
         config = self.__create_config_based_on_state(pl_module)
 
         # attach model to the data sparsifier
-        _attach_model_to_data_sparsifier(self.sparsified, self.data_sparsifier, config=config)
+        _attach_model_to_data_sparsifier(
+            self.sparsified, self.data_sparsifier, config=config
+        )
         self.data_sparsifier.step()
         self.data_scheduler.step()
 

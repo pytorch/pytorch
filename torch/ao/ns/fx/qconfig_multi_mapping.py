@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
+
 
 if TYPE_CHECKING:
     from torch.ao.quantization.qconfig import QConfigAny
@@ -21,6 +22,7 @@ _QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
     "module_name_object_type_order_qconfigs": "set_module_name_object_type_order",
 }
 
+
 def _remove_duplicates_and_none(qconfig_list: List[QConfigAny]) -> None:
     to_remove = []
     for index, cur_qconfig in enumerate(qconfig_list):
@@ -33,6 +35,7 @@ def _remove_duplicates_and_none(qconfig_list: List[QConfigAny]) -> None:
                 break
     for index in to_remove[::-1]:
         qconfig_list.pop(index)
+
 
 class QConfigMultiMapping:
     """
@@ -69,7 +72,7 @@ class QConfigMultiMapping:
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # initialize this with 1 QConfigMapping to avoid corner cases
         self.qconfig_mappings_list: List[QConfigMapping] = [QConfigMapping()]
 
@@ -98,7 +101,6 @@ class QConfigMultiMapping:
             # searches other QConfigMappings for qconfig style+keys
             # that need to be inserted as `None` into the new QConfigMapping
             for qconfig_mapping in self.qconfig_mappings_list:
-
                 # global_qconfig has None by default
                 for check_style in _QCONFIG_STYLE_ORDER[1:]:
                     qconfigs_dict = getattr(qconfig_mapping, check_style)
@@ -125,7 +127,6 @@ class QConfigMultiMapping:
         args: List[Union[str, int, Callable]],
         qconfig_list: List[QConfigAny],
     ) -> None:
-
         # we remove duplicates and None to make the ordering of qconfigs
         # deterministic upon insertion.
         _remove_duplicates_and_none(qconfig_list)
@@ -197,10 +198,13 @@ class QConfigMultiMapping:
 
     def __repr__(self):
         return (
-            self.__class__.__name__ +
-            " [" +
-            "".join(f"\n{qconfig_mapping.__repr__()}," for qconfig_mapping in self.qconfig_mappings_list) +
-            "\n]"
+            self.__class__.__name__
+            + " ["
+            + "".join(
+                f"\n{qconfig_mapping.__repr__()},"
+                for qconfig_mapping in self.qconfig_mappings_list
+            )
+            + "\n]"
         )
 
     @classmethod
@@ -223,7 +227,6 @@ class QConfigMultiMapping:
         # go through all qconfig styles
         # note: global can be ignored since it is None by default
         for style in _QCONFIG_STYLE_ORDER[1:]:
-
             # gather all key+qconfigs for current style
             # into qconfig_dict_list
             qconfig_dict_list: Dict[Any, List[QConfigAny]] = {}

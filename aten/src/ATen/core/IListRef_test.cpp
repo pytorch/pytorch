@@ -22,7 +22,7 @@ static std::vector<std::optional<at::Tensor>> get_boxed_opt_tensor_vector() {
   std::vector<std::optional<at::Tensor>> optional_tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
-    auto opt_tensor = (i % 2 == 0) ? std::optional<at::Tensor>(at::empty({0})) : nullopt;
+    auto opt_tensor = (i % 2 == 0) ? std::optional<at::Tensor>(at::empty({0})) : std::nullopt;
     optional_tensors.emplace_back(opt_tensor);
   }
   return optional_tensors;

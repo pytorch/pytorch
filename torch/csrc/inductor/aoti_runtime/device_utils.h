@@ -24,13 +24,11 @@
     }                                                      \
   } while (0)
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 using DeviceStreamType = cudaStream_t;
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor
 
 #else // !USE_CUDA
 

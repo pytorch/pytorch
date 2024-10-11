@@ -14,14 +14,12 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // A class that analyzes the given program relevant for Block backend.
 class BlockAnalysis : public IRVisitor {
  public:
-  bool is_buf_store_target(BufPtr buf) const {
+  bool is_buf_store_target(const BufPtr& buf) const {
     return store_targets_.count(buf) > 0;
   }
 
@@ -33,18 +31,18 @@ class BlockAnalysis : public IRVisitor {
     return store_targets_;
   }
 
-  int block_size() const {
+  int64_t block_size() const {
     return block_size_;
   }
 
   bool areBufsInMap(const std::unordered_set<BufPtr>& bufs) const;
 
-  BufPtr getMultiDimBuf(BufPtr buf) const;
+  BufPtr getMultiDimBuf(const BufPtr& buf) const;
 
-  std::string getInputName(BufPtr buf) const;
+  std::string getInputName(const BufPtr& buf) const;
 
-  std::string getFlatInputName(BufPtr buf) const {
-    return getInputName(std::move(buf)) + "_flat";
+  std::string getFlatInputName(const BufPtr& buf) const {
+    return getInputName(buf) + "_flat";
   }
 
   std::unordered_map<std::string, BufPtr> getBufferMap() const {
@@ -52,14 +50,14 @@ class BlockAnalysis : public IRVisitor {
   }
 
  private:
-  void visit(StorePtr v) override;
-  void visit(LoadPtr v) override;
-  void visit(ForPtr v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const ForPtr& v) override;
 
   std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
   std::unordered_set<BufPtr> store_targets_;
   std::unordered_set<BufPtr> loads_;
-  int block_size_ = 32;
+  int64_t block_size_ = 32;
 };
 
 // A class that overrides the underlying IRPrinter to produce Block.
@@ -87,12 +85,12 @@ class BlockPrinter : public IRPrinter {
   void PrintDMAs(const std::unordered_set<BufPtr>& bufs);
   void PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs);
 
-  void visit(ForPtr v) override;
-  void visit(LoadPtr v) override;
-  void visit(StorePtr v) override;
-  void visit(BlockPtr v) override;
-  void visit(AddPtr v) override;
-  void visit(MulPtr v) override;
+  void visit(const ForPtr& v) override;
+  void visit(const LoadPtr& v) override;
+  void visit(const StorePtr& v) override;
+  void visit(const BlockPtr& v) override;
+  void visit(const AddPtr& v) override;
+  void visit(const MulPtr& v) override;
 };
 
 class TORCH_API BlockCodeGen : public CodeGen {
@@ -112,7 +110,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::Device(at::kCPU),
       const std::string& kernel_func_name = "func")
-      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
+      : CodeGen(std::move(stmt), buffer_args, device, kernel_func_name) {
     Initialize();
   }
 
@@ -145,6 +143,4 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

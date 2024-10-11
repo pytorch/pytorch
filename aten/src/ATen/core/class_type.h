@@ -341,10 +341,10 @@ struct TORCH_API ClassType : public NamedType {
   const std::vector<torch::jit::Function*>& getForwardPreHooks() const;
 
   void checkForwardPreHookSchema(
-      int pre_hook_idx,
+      size_t pre_hook_idx,
       const FunctionSchema& pre_hook_schema) const;
   void checkForwardHookSchema(
-      int hook_idx,
+      size_t hook_idx,
       const FunctionSchema& hook_schema) const;
 
   void addMethod(torch::jit::Function* method);
@@ -396,8 +396,8 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   void addAttribute(ClassAttribute classAttribute);
-  std::string getForwardPreHookErrorMessage(int pre_hook_idx) const;
-  std::string getForwardHookErrorMessage(int hook_idx) const;
+  std::string getForwardPreHookErrorMessage(size_t pre_hook_idx) const;
+  std::string getForwardHookErrorMessage(size_t hook_idx) const;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
