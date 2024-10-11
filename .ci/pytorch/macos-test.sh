@@ -9,15 +9,13 @@ if [[ -n "$CONDA_ENV" ]]; then
   export PATH="$CONDA_ENV/bin":$PATH
 fi
 
-# Test that OpenMP is enabled for non-arm64 build
-if [[ ${BUILD_ENVIRONMENT} != *arm64* ]]; then
-  pushd test
-  if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
-    echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
-    exit 1
-  fi
-  popd
+# Test that OpenMP is enabled
+pushd test
+if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
+  echo "Build should have OpenMP enabled, but torch.backends.openmp.is_available() is False"
+  exit 1
 fi
+popd
 
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
@@ -27,8 +25,9 @@ setup_test_python() {
   echo "Ninja version: $(ninja --version)"
   echo "Python version: $(which python) ($(python --version))"
 
-  # Increase default limit on open file handles from 256 to 1024
-  ulimit -n 1024
+  # Set the limit on open file handles to 16384
+  # might help with intermittent compiler test failures
+  ulimit -n 16384
 }
 
 test_python_all() {

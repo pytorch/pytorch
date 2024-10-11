@@ -94,7 +94,9 @@ class _PyTreeExtensionContext:
 
         for _, class_type in named_model_output_classes:
             self.register_pytree_node(
-                class_type, model_output_flatten, model_output_unflatten  # type: ignore[arg-type ]
+                class_type,
+                model_output_flatten,
+                model_output_unflatten,  # type: ignore[arg-type ]
             )
 
 

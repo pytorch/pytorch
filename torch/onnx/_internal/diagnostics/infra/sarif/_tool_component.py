@@ -21,10 +21,10 @@ class ToolComponent(object):
     """A component, such as a plug-in or the driver, of the analysis tool that was run."""
 
     name: str = dataclasses.field(metadata={"schema_property_name": "name"})
-    associated_component: Optional[
-        _tool_component_reference.ToolComponentReference
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "associatedComponent"}
+    associated_component: Optional[_tool_component_reference.ToolComponentReference] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "associatedComponent"}
+        )
     )
     contents: List[Literal["localizedData", "nonLocalizedData"]] = dataclasses.field(
         default_factory=lambda: ["localizedData", "nonLocalizedData"],
@@ -36,10 +36,10 @@ class ToolComponent(object):
     download_uri: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "downloadUri"}
     )
-    full_description: Optional[
-        _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "fullDescription"}
+    full_description: Optional[_multiformat_message_string.MultiformatMessageString] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "fullDescription"}
+        )
     )
     full_name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullName"}
@@ -71,10 +71,10 @@ class ToolComponent(object):
             "schema_property_name": "minimumRequiredLocalizedDataSemanticVersion"
         },
     )
-    notifications: Optional[
-        List[_reporting_descriptor.ReportingDescriptor]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "notifications"}
+    notifications: Optional[List[_reporting_descriptor.ReportingDescriptor]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "notifications"}
+        )
     )
     organization: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "organization"}
@@ -91,9 +91,9 @@ class ToolComponent(object):
     release_date_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "releaseDateUtc"}
     )
-    rules: Optional[
-        List[_reporting_descriptor.ReportingDescriptor]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rules"})
+    rules: Optional[List[_reporting_descriptor.ReportingDescriptor]] = (
+        dataclasses.field(default=None, metadata={"schema_property_name": "rules"})
+    )
     semantic_version: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "semanticVersion"}
     )
@@ -110,10 +110,10 @@ class ToolComponent(object):
     taxa: Optional[List[_reporting_descriptor.ReportingDescriptor]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "taxa"}
     )
-    translation_metadata: Optional[
-        _translation_metadata.TranslationMetadata
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "translationMetadata"}
+    translation_metadata: Optional[_translation_metadata.TranslationMetadata] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "translationMetadata"}
+        )
     )
     version: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}

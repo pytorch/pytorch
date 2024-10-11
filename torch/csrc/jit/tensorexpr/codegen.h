@@ -244,13 +244,12 @@ class RegisterCodeGen {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
-        [](StmtPtr stmt,
+        [](const StmtPtr& stmt,
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
            const std::string& kernel_func_name) {
-          std::unique_ptr<CodeGen> method(
-              new CodeGenType(stmt, params, device, kernel_func_name));
-          return method;
+          return std::make_unique<CodeGenType>(
+              stmt, params, device, kernel_func_name);
         });
   }
 };
