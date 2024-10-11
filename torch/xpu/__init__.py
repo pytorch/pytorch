@@ -402,7 +402,7 @@ def get_arch_list() -> List[str]:
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:
         return []
-    return arch_flags.split(",")
+    return arch_flags.split()
 
 
 def get_gencode_flags() -> str:
