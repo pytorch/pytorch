@@ -226,6 +226,11 @@ class TestBasics(TestCase):
         for mt, t in zip(masked_tensors, data_tensors):
             _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
+        # Free up the masked tensors manually to avoid memory leak
+        for mt in masked_tensors:
+            del mt._masked_mask
+            del mt._masked_data
+
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
             data = sample.input
