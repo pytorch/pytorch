@@ -439,7 +439,6 @@ jobs:
               fleet_prefix = ""
               prefixes = []
               for experiment_name, experiment_settings in settings.experiments.items():
-
                   if not experiment_settings.all_branches and is_exception_branch(branch):
                       log.info(
                           f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
