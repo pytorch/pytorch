@@ -38,7 +38,7 @@ Platform Linux
 
 Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-For release wheels
+For release candidate wheels
 
 .. code-block::
 
@@ -55,7 +55,7 @@ Platform Windows
 
 Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch`` on Windows, build from source for ``torchvision`` and ``torchaudio``.
 
-For release wheels
+For release candidate wheels
 
 .. code-block::
 
