@@ -1909,7 +1909,7 @@ def flex_njt(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
 
-    # need to pass dense tensor of shape (B, n_heads, seq_len, D)
+    # need to pass dense tensor of shape (B, n_heads, sum(seq_len), D)
     output = flex_attention_hop(
         query.values().unsqueeze(0),
         key.values().unsqueeze(0),

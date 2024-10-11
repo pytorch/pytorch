@@ -7,7 +7,7 @@ import inspect
 import itertools
 import math
 import operator
-from contextlib import nullcontext
+import warnings
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -29,8 +29,10 @@ __all__ = [
     "flex_attention",
     "create_block_mask",
     "create_mask",
+    "create_njt_block_mask",
     "or_masks",
     "and_masks",
+    "njt_mask_mod_adapter",
     "noop_mask",
 ]
 
@@ -656,6 +658,19 @@ def _convert_mask_to_block_mask(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
+
+    def padding_needed_for_multiple(x, multiple):
+        return _round_up_to_multiple(x, multiple) - x
+
+    mask = torch.nn.functional.pad(
+        mask,
+        (
+            0,
+            padding_needed_for_multiple(mask.shape[-1], KV_BLOCK_SIZE),
+            0,
+            padding_needed_for_multiple(mask.shape[-2], Q_BLOCK_SIZE),
+        ),
+    )
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
@@ -754,7 +769,6 @@ def create_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    _compile: bool = False,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -777,15 +791,9 @@ def create_mask(
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
     n = torch.arange(0, KV_LEN, device=device)
-    # TODO: fix this
-    # Lack instantiation support for __torch_function__ mode support under compile
-    if _compile:
-        ctx = nullcontext()
-    else:
-        ctx = TransformGetItemToIndex()  # type: ignore[assignment]
     mod_type = _get_mod_type(mod_fn)
 
-    with ctx:
+    with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
@@ -799,30 +807,6 @@ def create_mask(
             return mask
         else:
             raise AssertionError
-
-
-def _create_block_mask_inner(
-    mask_mod: Callable,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device: str,
-    Q_BLOCK_SIZE: int,
-    KV_BLOCK_SIZE: int,
-):
-    r"""Work around for being unable to instantiate __torch_function__ mode under compile.
-    `create_block_mask` will compile this inner function and wrap the call to this
-    with the __torch_function__ mode.
-    """
-    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device, _compile=True)
-    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
-        mask_tensor,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        separate_full_blocks=True,
-    )
-    return partial_block_mask, full_block_mask
 
 
 def create_block_mask(
@@ -849,7 +833,6 @@ def create_block_mask(
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
         BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
-        _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -870,7 +853,6 @@ def create_block_mask(
     assert (
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
-    inner_func = _create_block_mask_inner
     if B is None:
         B = 1
     if H is None:
@@ -881,20 +863,25 @@ def create_block_mask(
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
-    if Q_LEN < 128:
-        Q_BLOCK_SIZE = Q_LEN
-    else:
-        Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True)
-    with TransformGetItemToIndex():
-        partial_block_mask, full_block_mask = inner_func(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+        warnings.warn(
+            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
+            DeprecationWarning,
         )
-        block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+        return torch.compile(create_block_mask)(
+            mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
         )
+
+    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
+    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
+        mask_tensor,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        separate_full_blocks=True,
+    )
+    block_mask = _create_sparse_block_from_block_mask(
+        (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+    )
     return block_mask
 
 
@@ -909,6 +896,118 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
+    )
+
+
+# TODO: Add njt_score_mod_adapter too
+
+
+def njt_mask_mod_adapter(
+    orig_mask_mod: _mask_mod_signature,
+    njt: torch.Tensor,
+):
+    r"""Adapter to convert a mask_mod to an NJT-compatible mask_mod. The given mask_mod
+    should be written as if operating over a single sequence at a item. This adapter will
+    handle conversion from indices operating over a "stacked sequence" of length ``sum(S)``
+    for sequence length ``S`` in the NJT to "sequence relative" indices in range ``[0, S)``.
+
+    Args:
+        orig_mask_mod (Callable):  mask_mod function. This is a callable that defines the
+            masking pattern for the attention mechanism. It takes four arguments:
+            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
+            It should return a boolean tensor indicating which attention connections are allowed
+            (True) or masked out (False).
+        njt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query / key / value.
+
+    Returns:
+        njt_mask_mod: An NJT-compatible version of orig_mask_mod
+    """
+
+    # Used to convert indices within the "stacked" sequence (range [0, sum(*)))
+    # to "sequence local" indices (range [0, S) for each S).
+    def _build_seq_idx(offsets, total_length):
+        range_tensor = torch.arange(
+            total_length, device=offsets.device, dtype=torch.int32
+        )
+
+        # Use searchsorted to find the index for each position
+        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
+        # If we ever loosen this restriction, this logic will need to be updated.
+        seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
+        return seq_idx
+
+    offsets = njt._offsets  # type: ignore[attr-defined]
+    total_length = njt._values.shape[njt._ragged_idx - 1]  # type: ignore[attr-defined]
+    seq_idx = _build_seq_idx(offsets, total_length)
+
+    def njt_mask_mod(b, h, q_idx, kv_idx):
+        # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
+        # to the sequence length for each sequence in the NJT, for use in given
+        # mask_mod. This allows the user to write a mask_mod as if it were
+        # operating on a single sequence and the "stacked sequence" is split
+        # automatically into individual sequences for them.
+        q_nested = q_idx - offsets[seq_idx[q_idx]]
+        kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+        is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+        return orig_mask_mod(b, h, q_nested, kv_nested) & is_same_sequence
+
+    return njt_mask_mod
+
+
+def create_njt_block_mask(
+    njt_mask_mod: _mask_mod_signature,
+    B: Optional[int],
+    H: Optional[int],
+    njt: torch.Tensor,
+    BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    _compile=False,
+) -> BlockMask:
+    r"""This function creates a block mask tuple from a mask_mod function. The given mask_mod
+    is expected to be NJT-compatible (i.e. an output from ``njt_mask_mod_adapter()``). The
+    returned BlockMask will be on the device specified by the input NJT.
+
+    Args:
+        njt_mask_mod (Callable): mask_mod function. This is a callable that defines the
+            masking pattern for the attention mechanism. It takes four arguments:
+            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
+            It should return a boolean tensor indicating which attention connections are allowed
+            (True) or masked out (False).
+        B (int): Batch size.
+        H (int): Number of query heads.
+        njt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query / key / value. The block mask will be constructed to operate on
+            a "stacked sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is
+            provided it is used for both query and key/value.
+
+    Returns:
+        BlockMask:  A BlockMask object that contains the block mask information.
+
+    Example Usage:
+        .. code-block:: python
+
+            def causal_mask(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+            njt_causal_mask = njt_mask_mod_adapter(causal_mask, njt)
+            block_mask = create_njt_block_mask(njt_causal_mask, 1, 1, njt, device="cuda")
+            query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            output = flex_attention(query, key, value, block_mask=block_mask)
+    """
+    return create_block_mask(
+        njt_mask_mod,
+        B,
+        H,
+        njt._values.shape[njt._ragged_idx - 1],  # type: ignore[attr-defined]
+        njt._values.shape[njt._ragged_idx - 1],  # type: ignore[attr-defined]
+        device=njt.device,  # type: ignore[arg-type]
+        # compile is important so we don't materialize a mask_tensor of
+        # shape (1, 1, total_seqlen, total_seqlen)
+        BLOCK_SIZE=BLOCK_SIZE,
+        _compile=_compile,
     )
 
 
@@ -1045,11 +1144,13 @@ def flex_attention(
                 f"but got Hq={Hq} and Hkv={Hkv}."
             )
 
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
     if score_mod is None:
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
-    elif (
+    elif not is_nested_int(query.size(-2)) and (
         query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
         or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
     ):

@@ -26,7 +26,11 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    create_njt_block_mask,
+    flex_attention,
+    njt_mask_mod_adapter,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -6975,52 +6979,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @flex_attention_supported_platform
     @dtypes(torch.float32)
     def test_flex_attention(self, device, dtype):
-        # TODO: Move these alongside other helpers in torch.nn.attention.flex_attention.
-        # Need to nail down the right level of abstraction here.
-        def create_njt_block_mask(score_mod, njt):
-            return create_block_mask(
-                score_mod,
-                1,
-                1,
-                njt._values.shape[0],
-                njt._values.shape[0],
-                device=njt.device,
-            )
-
-        def create_njt_wrapper(orig_mask_mod, offsets):
-            """Generic Wrapper that converts Dense mask_mod functions to NJT mask_mod functions"""
-
-            # computes "reverse offsets"
-            def _build_seq_idx(offsets: torch.Tensor):
-                total_length = offsets[-1].item()
-                # Create a range tensor from 0 to total_length
-                range_tensor = torch.arange(
-                    total_length, device="cuda", dtype=torch.int32
-                )
-
-                # Use searchsorted to find the index for each position
-                seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
-
-                return seq_idx
-
-            def njt_score_mod(b, h, q_idx, kv_idx, seq_idx=_build_seq_idx(offsets)):
-                q_nested = q_idx - offsets[seq_idx[q_idx]]
-                kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
-                is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
-                return orig_mask_mod(b, h, q_nested, kv_nested) & is_same_sequence
-
-            return njt_score_mod
-
-        # Dense Score Mod
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
-            # return torch.where(q_idx >= kv_idx, score, -float("inf"))
 
         batch_size = 8
         n_heads = 8
         D = 16
 
-        sentence_lengths = [random.randint(1, 1024) for _ in range(batch_size - 1)]
+        sentence_lengths = [random.randint(1, 1023) for _ in range(batch_size - 1)]
         total = sum(sentence_lengths)
 
         # shape (B, *, D_total) where D_total = n_heads * D
@@ -7041,8 +7007,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
 
         # Build the seq_idx lookup table for query's offsets
-        causal_score_mod_njt = create_njt_wrapper(causal_mask, query.offsets())
-        block_mask = create_njt_block_mask(causal_score_mod_njt, query)
+        njt_causal_mask = njt_mask_mod_adapter(causal_mask, query)
+        block_mask = create_njt_block_mask(njt_causal_mask, 1, 1, query, _compile=True)
 
         # Run FlexAttention with a causal mask
         out_flex = flex_attention(query, key, value, block_mask=block_mask)

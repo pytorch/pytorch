@@ -32,6 +32,9 @@ class Allocator:
             del self.allocated[ptr]
             return True
 
+    def is_allocated(self, ptr):
+        return ptr in self.allocated
+
     def tensor_from_meta(self, meta):
         # Usual case, we're receiving a known Tensor
         found_base = self.allocated.get(meta.data_ptr, None)
@@ -92,6 +95,7 @@ class Driver:
         self.num_devices = 2
         # Allocated memory belongs to which device
         self.memory_belong = {}
+        self.host_allocator = Allocator()
         self.devices = []
 
         for i in range(self.num_devices):
@@ -163,6 +167,18 @@ class Driver:
         if device_idx is None:
             return False
         return self.run_on_executor(device_idx, "free", ptr)
+
+    @register(registry)
+    def isPinnedPtr(self, ptr):
+        return self.host_allocator.is_allocated(ptr)
+
+    @register(registry)
+    def hostMalloc(self, size):
+        return self.host_allocator.malloc(size)
+
+    @register(registry)
+    def hostFree(self, ptr):
+        return self.host_allocator.free(ptr)
 
 
 class _Executor:
