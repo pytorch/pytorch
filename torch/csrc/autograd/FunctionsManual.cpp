@@ -1924,7 +1924,7 @@ Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   //               = sym(L^{-1}dL)
   // where sym(X) = X + X^H
   // A short computation gives that the inverse of sym is given by
-  // \pi(X) = X.tril() - 0.5*diag(X) when X is lower triangular,
+  // \pi(X) = X.tril() - 0.5*diag(X)
   // so
   // dL = L\pi(L^{-1}dA(L^{-H}))
 
