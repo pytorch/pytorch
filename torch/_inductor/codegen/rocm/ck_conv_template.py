@@ -247,7 +247,7 @@ class CKConvTemplate(CKTemplate):
         const std::vector<index_t> LeftPads = { {{left_pads}} };
         const std::vector<index_t> RightPads = { {{right_pads}} };
 
-        ck::utils::conv::ConvParam conv_param {
+        auto conv_param = ck::utils::conv::ConvParam {
             NDimSpatial,
             GroupCount,
             NBatch,
@@ -336,6 +336,7 @@ class CKConvTemplate(CKTemplate):
             *workspace_size = conv.GetWorkSpaceSize(&argument);
             return 0;
         }
+        printf("before invoker.run:\n");
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
@@ -400,6 +401,84 @@ class CKConvTemplate(CKTemplate):
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
 
                 using ConvolutionForwardSpecialization = ck::tensor_operation::device::ConvolutionForwardSpecialization;
+
+                namespace ck {
+                namespace utils {
+                namespace conv {
+
+                ConvParam::ConvParam(ck::index_t n_dim,
+                                    ck::index_t group_count,
+                                    ck::index_t n_batch,
+                                    ck::index_t n_out_channels,
+                                    ck::index_t n_in_channels,
+                                    const std::vector<ck::index_t>& filters_len,
+                                    const std::vector<ck::index_t>& input_len,
+                                    const std::vector<ck::index_t>& strides,
+                                    const std::vector<ck::index_t>& dilations,
+                                    const std::vector<ck::index_t>& left_pads,
+                                    const std::vector<ck::index_t>& right_pads)
+                    : num_dim_spatial_(static_cast<ck::long_index_t>(n_dim)),
+                    G_(static_cast<ck::long_index_t>(group_count)),
+                    N_(static_cast<ck::long_index_t>(n_batch)),
+                    K_(static_cast<ck::long_index_t>(n_out_channels)),
+                    C_(static_cast<ck::long_index_t>(n_in_channels)),
+                    filter_spatial_lengths_(num_dim_spatial_),
+                    input_spatial_lengths_(num_dim_spatial_),
+                    output_spatial_lengths_(num_dim_spatial_),
+                    conv_filter_strides_(num_dim_spatial_),
+                    conv_filter_dilations_(num_dim_spatial_),
+                    input_left_pads_(num_dim_spatial_),
+                    input_right_pads_(num_dim_spatial_)
+                {
+                    if(static_cast<ck::index_t>(filter_spatial_lengths_.size()) != num_dim_spatial_ ||
+                    static_cast<ck::index_t>(input_spatial_lengths_.size()) != num_dim_spatial_ ||
+                    static_cast<ck::index_t>(conv_filter_strides_.size()) != num_dim_spatial_ ||
+                    static_cast<ck::index_t>(conv_filter_dilations_.size()) != num_dim_spatial_ ||
+                    static_cast<ck::index_t>(input_left_pads_.size()) != num_dim_spatial_ ||
+                    static_cast<ck::index_t>(input_right_pads_.size()) != num_dim_spatial_)
+                    {
+                        throw(
+                            std::runtime_error("ConvParam::ConvParam: "
+                                            "parameter size is different from number of declared dimensions!"));
+                    }
+
+                    for(ck::index_t i = 0; i < num_dim_spatial_; ++i)
+                    {
+                        filter_spatial_lengths_[i] = static_cast<ck::long_index_t>(filters_len[i]);
+                        input_spatial_lengths_[i]  = static_cast<ck::long_index_t>(input_len[i]);
+                        conv_filter_strides_[i]    = static_cast<ck::long_index_t>(strides[i]);
+                        conv_filter_dilations_[i]  = static_cast<ck::long_index_t>(dilations[i]);
+                        input_left_pads_[i]        = static_cast<ck::long_index_t>(left_pads[i]);
+                        input_right_pads_[i]       = static_cast<ck::long_index_t>(right_pads[i]);
+
+                        // XEff = (X - 1) * conv_dilation_w + 1;
+                        // Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
+                        const ck::long_index_t x_eff =
+                            (filter_spatial_lengths_[i] - 1) * conv_filter_dilations_[i] + 1;
+
+                        output_spatial_lengths_[i] =
+                            (input_spatial_lengths_[i] + input_left_pads_[i] + input_right_pads_[i] - x_eff) /
+                                conv_filter_strides_[i] +
+                            1;
+                    }
+                }
+                } // namespace conv
+                } // namespace utils
+                } // namespace ck
+
+                const std::vector<std::size_t>& HostTensorDescriptor::GetLengths() const { return mLens; }
+                const std::vector<std::size_t>& HostTensorDescriptor::GetStrides() const { return mStrides; }
+                std::size_t HostTensorDescriptor::GetNumOfDimension() const { return mLens.size(); }
+                void HostTensorDescriptor::CalculateStrides() {
+                    mStrides.clear();
+                    mStrides.resize(mLens.size(), 0);
+                    if(mStrides.empty())
+                        return;
+
+                    mStrides.back() = 1;
+                    std::partial_sum(
+                        mLens.rbegin(), mLens.rend() - 1, mStrides.rbegin() + 1, std::multiplies<std::size_t>());
+                }
             """
         )
         return res
