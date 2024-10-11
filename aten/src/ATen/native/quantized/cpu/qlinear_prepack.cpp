@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/Context.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -18,6 +19,9 @@
 #else
 #include <ATen/ops/_saturate_weight_to_fp16.h>
 #include <ATen/ops/_saturate_weight_to_fp16_native.h>
+#include <ATen/ops/dequantize.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -57,6 +61,7 @@ void calc_col_offsets_transpose(
 } // namespace
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
     std::optional<at::Tensor> bias) {
   TORCH_CHECK(
@@ -72,7 +77,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
   const auto qtype = weight.qscheme();
   std::vector<int32_t> weight_zero_points_int32(1, 0);
   if (qtype == c10::kPerTensorAffine) {
-    weight_zero_points_int32[0] = weight.q_zero_point();
+    weight_zero_points_int32[0] = {static_cast<int32_t>(weight.q_zero_point())};
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
     for (const auto i : c10::irange(N)) {
@@ -82,7 +87,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
   }
   std::vector<float> weight_scales_float(1, 0.0);
   if (qtype == c10::kPerTensorAffine) {
-    weight_scales_float[0] = weight.q_scale();
+    weight_scales_float[0] = {static_cast<float>(weight.q_scale())};
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
     for (const auto i : c10::irange(N)) {
@@ -95,8 +100,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
 
   std::vector<int32_t> col_offsets(N);
   calc_col_offsets_transpose(
-      /*K=*/K,
-      /*N=*/N,
+      /*K=*/static_cast<int>(K),
+      /*N=*/static_cast<int>(N),
       /*Bint8=*/weight_ptr_int8,
       /*B_zero_point=*/weight_zero_points_int32.data(),
       /*col_offsets=*/col_offsets.data(),
@@ -131,6 +136,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
 
 #ifdef USE_PYTORCH_QNNPACK
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
     std::optional<at::Tensor> bias_in) {
   TORCH_CHECK(
@@ -180,7 +186,9 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 #ifdef USE_FBGEMM
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::optional<at::Tensor> bias) {
 
   weight = at::_saturate_weight_to_fp16(weight);
@@ -303,14 +311,252 @@ inline at::Tensor pack_weight_to_onednn_tensor(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
   float* weight_contig_ptr = weight_contig.data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
+}
+
+template <class... Inputs>
+inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+  return {std::forward<Inputs>(inputs)...};
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByHandle(
+    const c10::OperatorHandle& op,
+    Args... args) {
+  auto stack = makeStack(std::forward<Args>(args)...);
+  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  return stack;
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByName(
+    const char* func_name,
+    const char* overload_name,
+    Args... args) {
+  const std::optional<c10::OperatorHandle> op_handle =
+      c10::Dispatcher::singleton().findSchema({func_name, overload_name});
+  assert(op_handle.has_value());
+  return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
+
+at::Tensor wrapped_quantized_linear(
+    at::Tensor input,
+    const at::Tensor& input_scale,
+    const at::Tensor& input_zero_point,
+    const at::Tensor& weight,
+    const at::Tensor& weight_scale,
+    const at::Tensor& weight_zero_point,
+    const at::Tensor& bias,
+    const at::Tensor& output_scale,
+    const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel);
+
+at::Tensor wrapped_quantized_linear(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    at::Tensor input,
+    const at::Tensor& input_scale,
+    const at::Tensor& input_zero_point,
+    const at::Tensor& weight,
+    const at::Tensor& weight_scale,
+    const at::Tensor& weight_zero_point,
+    const at::Tensor& bias,
+    const at::Tensor& output_scale,
+    const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel) {
+  //This op does four things:
+  // 1. Use quantize_per_tensor to quantize the input
+  // 2. Use quantized::linear_prepack to prepack the weight and bias
+  // 3. Use quantized::linear to do the int8 linear quantized computation
+  // 4. Use dequantize to dequantize the result of quantized::linear
+  // The reason we do this is because we want to have such wrapper op to
+  // bypass the issue from torch.export
+#ifdef USE_FBGEMM
+  auto qw = at::quantize_per_tensor(
+      weight, weight_scale, weight_zero_point, c10::ScalarType::QInt8);
+  auto op = Dispatcher::singleton()
+                .findSchemaOrThrow("quantized::linear_prepack", "")
+                .typed<c10::intrusive_ptr<LinearPackedParamsBase>(
+                    at::Tensor, std::optional<at::Tensor>)>();
+  auto packed_params = op.call(qw, bias);
+
+  auto qx = at::quantize_per_tensor(
+      input, input_scale, input_zero_point, c10::ScalarType::QUInt8);
+
+  const auto scale_val = output_scale.item().toFloat();
+  const auto zero_point_val = output_zero_point.item().toLong();
+
+  auto result = callOpByName(
+      "quantized::linear", "", qx, packed_params, scale_val, zero_point_val);
+
+  return at::dequantize(result[0].toTensor());
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor wrapped_quantized_linear_meta(
+    at::Tensor input,
+    [[maybe_unused]] const at::Tensor& input_scale,
+    [[maybe_unused]] const at::Tensor& input_zero_point,
+    const at::Tensor& weight,
+    [[maybe_unused]] const at::Tensor& weight_scale,
+    [[maybe_unused]] const at::Tensor& weight_zero_point,
+    [[maybe_unused]] const at::Tensor& bias,
+    [[maybe_unused]] const at::Tensor& output_scale,
+    [[maybe_unused]] const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel);
+
+at::Tensor wrapped_quantized_linear_meta(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    at::Tensor input,
+    [[maybe_unused]] const at::Tensor& input_scale,
+    [[maybe_unused]] const at::Tensor& input_zero_point,
+    const at::Tensor& weight,
+    [[maybe_unused]] const at::Tensor& weight_scale,
+    [[maybe_unused]] const at::Tensor& weight_zero_point,
+    [[maybe_unused]] const at::Tensor& bias,
+    [[maybe_unused]] const at::Tensor& output_scale,
+    [[maybe_unused]] const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel) {
+#ifdef USE_FBGEMM
+  const at::SymInt M = input.sym_size(0);
+  const at::SymInt N = weight.sym_size(0);
+  auto Y = at::empty_symint({M, N}, input.options().dtype(at::kFloat));
+  return Y;
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
+    const at::Tensor& weight_scale,
+    const at::Tensor& weight_zero_point,
+    const at::Tensor& bias);
+
+at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
+    const at::Tensor& weight_scale,
+    const at::Tensor& weight_zero_point,
+    const at::Tensor& bias) {
+  // This op does two things
+  // 1. Use quantize_per_tensor to quantize the weight
+  // 2. Use quantized::linear_prepack to prepack the weight and bias
+  // The reason we do this is because we want to have such wrapper op to
+  // save the quantized weight as constants for AOTI
+#ifdef USE_FBGEMM
+  TORCH_CHECK(
+      weight.dim() == 2,
+      "fbgemm weight packing only packs matrices not vectors.");
+  auto qw = at::quantize_per_tensor(
+      weight, weight_scale, weight_zero_point, c10::ScalarType::QInt8);
+
+  auto op = Dispatcher::singleton()
+                .findSchemaOrThrow("quantized::linear_prepack", "")
+                .typed<c10::intrusive_ptr<LinearPackedParamsBase>(
+                    at::Tensor, std::optional<at::Tensor>)>();
+  auto packed_params = op.call(qw, bias);
+
+  auto unique_ptr_wrapper =
+      std::make_unique<decltype(packed_params)>(std::move(packed_params));
+  auto ret = cpp_custom_type_hack::create(
+      std::move(unique_ptr_wrapper), weight.options());
+  return ret;
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
+    const at::Tensor& input_zero_point,
+    const at::Tensor& packed_weight,
+    const at::Tensor& output_scale,
+    const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel);
+
+at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
+    const at::Tensor& input_zero_point,
+    const at::Tensor& packed_weight,
+    const at::Tensor& output_scale,
+    const at::Tensor& output_zero_point,
+    [[maybe_unused]] const int64_t out_channel) {
+  // This op is similar to wrapped_quantized_linear, but it takes the prepacked weight
+#ifdef USE_FBGEMM
+  auto qx = at::quantize_per_tensor(
+      input, input_scale, input_zero_point, c10::ScalarType::QUInt8);
+  const auto scale_val = output_scale.item().toFloat();
+  const auto zero_point_val = output_zero_point.item().toLong();
+  auto packed_weight_ptr =
+      // @lint-ignore CLANGTIDY facebook-hte-Deprecated
+      cpp_custom_type_hack::cast<c10::intrusive_ptr<LinearPackedParamsBase>>(
+          packed_weight);
+  auto result = callOpByName(
+      "quantized::linear", "", qx, packed_weight_ptr, scale_val, zero_point_val);
+
+  return at::dequantize(result[0].toTensor());
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
+    [[maybe_unused]] const at::Tensor& weight_scale,
+    [[maybe_unused]] const at::Tensor& weight_zero_point,
+    [[maybe_unused]] const at::Tensor& bias);
+
+at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
+    [[maybe_unused]] const at::Tensor& weight_scale,
+    [[maybe_unused]] const at::Tensor& weight_zero_point,
+    [[maybe_unused]] const at::Tensor& bias) {
+#ifdef USE_FBGEMM
+  TORCH_CHECK(
+      weight.dim() == 2,
+      "fbgemm weight packing only packs matrices not vectors.");
+  const at::SymInt M = weight.sym_size(0);
+  const at::SymInt N = weight.sym_size(1);
+  auto Y = at::empty_symint({M, N}, weight.options().dtype(at::kFloat));
+  return Y;
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
+}
+
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+    [[maybe_unused]] const at::Tensor& input_scale,
+    [[maybe_unused]] const at::Tensor& input_zero_point,
+    [[maybe_unused]] const at::Tensor& packed_weight,
+    [[maybe_unused]] const at::Tensor& output_scale,
+    [[maybe_unused]] const at::Tensor& output_zero_point,
+    const int64_t out_channel);
+
+at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+    [[maybe_unused]] const at::Tensor& input_scale,
+    [[maybe_unused]] const at::Tensor& input_zero_point,
+    [[maybe_unused]] const at::Tensor& packed_weight,
+    [[maybe_unused]] const at::Tensor& output_scale,
+    [[maybe_unused]] const at::Tensor& output_zero_point,
+    const int64_t out_channel) {
+#ifdef USE_FBGEMM
+  auto out_sizes = input.sym_sizes().vec();
+  TORCH_CHECK(
+        out_sizes.size() == 2,
+        "The dimension of weight tensor should be equal to 2");
+  out_sizes[out_sizes.size() - 1] = out_channel;
+
+  return at::empty_symint(out_sizes, input.options());
+#else // USE_FBGEMM
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+#endif // USE_FBGEMM
 }
 
 namespace {
@@ -387,7 +633,11 @@ class QLinearPackWeightFp16 final {
 
 class QLinearPackWeightInt8Legacy final {
  public:
-  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
+  static Tensor run(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] at::Tensor weight,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -396,7 +646,11 @@ class QLinearPackWeightInt8Legacy final {
 
 class QLinearPackWeightFp16Legacy final {
  public:
-  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
+  static Tensor run(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] at::Tensor weight,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack_fp16. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -406,8 +660,10 @@ class QLinearPackWeightFp16Legacy final {
 class QLinearPackWeightInt8Onednn final {
  public:
   static at::Tensor run(
-    at::Tensor weight, // Not QTensor
-    std::optional<torch::List<int64_t>> input_shape) {
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] at::Tensor weight, // Not QTensor
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] std::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else
@@ -437,6 +693,23 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear"), TORCH_FN(wrapped_quantized_linear));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_linear_prepack"),
+      _wrapped_linear_prepack);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_quantized_linear_prepacked"),
+      _wrapped_quantized_linear_prepacked);
+}
+
+TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::wrapped_quantized_linear"), TORCH_FN(wrapped_quantized_linear_meta));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_linear_prepack"),
+      _wrapped_linear_prepack_meta);
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::_wrapped_quantized_linear_prepacked"),
+      _wrapped_quantized_linear_prepacked_meta);
 }
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
@@ -444,5 +717,4 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
