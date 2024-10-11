@@ -39,16 +39,25 @@ class TORCH_API Context {
 
   const Generator& defaultGenerator(Device device) {
     c10::DeviceType device_type = device.type();
-    lazyInitDevice(device_type);
-
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kPrivateUse1) {
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
+          device.index());
     } else {
-      return getAcceleratorHooksInterface(device_type)
-          .getDefaultGenerator(device.index());
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
       std::optional<c10::DeviceType> opt_device_type = std::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
@@ -71,10 +80,10 @@ class TORCH_API Context {
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
     }
   }
-
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
-    lazyInitDevice(device_type);
-
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
+    initXPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
@@ -87,7 +96,6 @@ class TORCH_API Context {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-
   bool isPinnedPtr(
       const void* data,
       std::optional<c10::DeviceType> device_type = std::nullopt) {
@@ -100,20 +108,10 @@ class TORCH_API Context {
     }
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
-
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
-
-  void lazyInitDevice(c10::DeviceType device_type) {
-    if (device_type != at::kCPU) {
-      c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
-        getAcceleratorHooksInterface(device_type).init();
-      });
-    }
-  }
-
   static bool hasOpenMP();
   static bool hasMKL();
   static bool hasLAPACK();
@@ -165,6 +163,27 @@ class TORCH_API Context {
   }
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
+  }
+  // defined in header so that getNonVariableType has ability to inline
+  // call_once check. getNonVariableType is called fairly frequently
+  void lazyInitCUDA() {
+    c10::call_once(thc_init, [&] { detail::getCUDAHooks().initCUDA(); });
+  }
+  void lazyInitHIP() {
+    c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
+  }
+  void lazyInitXPU() {
+    c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
+  }
+  void lazyInitMTIA() {
+    c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
+  }
+  void lazyInitPrivateUse1() {
+    c10::call_once(thp_init, [&] {
+      if (isPrivateUse1HooksRegistered()) {
+        at::detail::getPrivateUse1Hooks().initPrivateUse1();
+      }
+    });
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
@@ -341,8 +360,27 @@ class TORCH_API Context {
   void setAllowFP16ReductionCPU(bool);
 
  private:
+  void initCUDAIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::CUDA) {
+      lazyInitCUDA();
+    }
+  }
+  void initHIPIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::HIP) {
+      lazyInitHIP();
+    }
+  }
+  void initXPUIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::XPU) {
+      lazyInitXPU();
+    }
+  }
   static bool checkCuBLASConfigDeterministic();
-  std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
+  c10::once_flag thc_init;
+  c10::once_flag thh_init;
+  c10::once_flag thx_init;
+  c10::once_flag th_mtia_init;
+  c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool deterministic_onednn = false;
