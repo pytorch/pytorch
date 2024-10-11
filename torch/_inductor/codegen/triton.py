@@ -2187,7 +2187,6 @@ class TritonKernel(SIMDKernel):
             return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
-            assert not self.cooperative_reduction, "TODO"
             default = ir.Reduction.default_value(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
 
@@ -2357,10 +2356,11 @@ class TritonKernel(SIMDKernel):
                 """,
                 strip=True,
             )
+            expand = "" if self.no_x_dim else "[None,:]"
             self.post_loop_store.splice(
                 f"""
                 if RSPLIT > 1:
-                    {result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT)[None, :]),
+                    {result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT)){expand},
                                                  {mask}, eviction_policy='evict_first')
                     {result_var} = {final_reduction(f"{result_var}_peers")}
                 """,
@@ -2654,7 +2654,6 @@ class TritonKernel(SIMDKernel):
             self.cse.invalidate(self.outside_loop_vars)
             self.range_trees[-1].cache_clear()
         else:
-            assert not (self.cooperative_reduction and self.inside_reduction), "TODO"
             self.body.splice(self.indexing_code)
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -2801,7 +2800,6 @@ class TritonKernel(SIMDKernel):
 
     def _get_heuristic(self):
         if self.cooperative_reduction:
-            assert self.inside_reduction and not self.persistent_reduction
             return "cooperative_reduction"
         elif self.persistent_reduction:
             assert self.inside_reduction
@@ -2956,6 +2954,8 @@ class TritonKernel(SIMDKernel):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+        if self.cooperative_reduction:
+            inductor_meta["persistent_reduction"] = self.persistent_reduction
 
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
@@ -3085,6 +3085,8 @@ class TritonKernel(SIMDKernel):
 
             if tree.prefix == "r" and self.persistent_reduction:
                 val = self._get_persistent_RBLOCK(tree.numel)
+                if self.cooperative_reduction:
+                    val = f"{val} // RSPLIT"
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
@@ -3177,8 +3179,14 @@ class TritonKernel(SIMDKernel):
         assert entry.tensor_dim is not None
         size = self.indexing_size_str(entry.tensor_dim)
         index_dtype = self.index_dtype
-        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
-        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{convert}"
+        suffix = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        if (
+            self.cooperative_reduction
+            and self.persistent_reduction
+            and entry.prefix == "r"
+        ):
+            suffix = f"{suffix} + rsplit_start"
+        return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{suffix}"
 
     def iteration_ranges_scalar_code(self, entry, value):
         index_dtype = self.index_dtype

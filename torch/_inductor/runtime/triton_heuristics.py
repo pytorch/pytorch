@@ -285,6 +285,7 @@ class CachingAutotuner(KernelInterface):
 
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
+                and not self.inductor_meta.get("persistent_reduction", False)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
                 # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
@@ -1612,9 +1613,14 @@ def cooperative_reduction(
     split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
-    configs = _reduction_configs(
-        size_hints=[xnumel, rnumel // split], inductor_meta=inductor_meta
-    )
+    if inductor_meta["persistent_reduction"]:
+        configs = _persistent_reductionc_configs(
+            size_hints, reduction_hint, inductor_meta
+        )
+    else:
+        configs = _reduction_configs(
+            size_hints=[xnumel, rnumel // split], inductor_meta=inductor_meta
+        )
     for config in configs:
         config.kwargs["RSPLIT"] = split
 
@@ -1630,18 +1636,11 @@ def cooperative_reduction(
     )
 
 
-def persistent_reduction(
+def _persistent_reductionc_configs(
     size_hints,
     reduction_hint=False,
-    triton_meta=None,
-    filename=None,
     inductor_meta=None,
 ):
-    inductor_meta = {} if inductor_meta is None else inductor_meta
-    inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
-
     xnumel, rnumel = size_hints
 
     configs = [
@@ -1667,6 +1666,23 @@ def persistent_reduction(
 
     if disable_pointwise_autotuning(inductor_meta):
         configs = configs[:1]
+
+    return configs
+
+
+def persistent_reduction(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
+
+    configs = _persistent_reductionc_configs(size_hints, reduction_hint, inductor_meta)
 
     return cached_autotune(
         size_hints,
@@ -1825,7 +1841,7 @@ def grid(*numels):
 
 def cooperative_reduction_grid(xnumel):
     def grid_fn(meta):
-        return (meta["RSPLIT"], ceildiv(xnumel, meta["XBLOCK"]), 1)
+        return (meta["RSPLIT"], ceildiv(xnumel, meta.get("XBLOCK", 1)), 1)
 
     grid_fn_str = f"cooperative_reduction_grid({xnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
