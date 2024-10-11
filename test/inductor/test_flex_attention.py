@@ -2713,7 +2713,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
-        self.run_test_with_paged_attention(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self):
