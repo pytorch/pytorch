@@ -50,7 +50,7 @@ class PyCodegen:
         tx=None,
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
-        tempvars=None,
+        tempvars: Dict[VariableTracker, str] = None,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
@@ -130,20 +130,16 @@ class PyCodegen:
 
         if self.mutable_side_effects_from_source:
             # this is needed to get aliasing relationships right
-            # value.mutable_local.source will get mutated to hold `value`
+            # value.source will get mutated to hold `value`
             # mutable_side_effects_from_source=False is used to codegen the mutation
             # mutable_side_effects_from_source=True is used to codegen a reference
             from .side_effects import MutableSideEffects
 
             if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.mutable_local.source)
+                self(value.source)
                 return
 
         if allow_cache:
-            if value.mutable_local and value.mutable_local in self.tempvars:
-                output.append(self.create_load(self.tempvars[value.mutable_local]))
-                self.top_of_stack = value
-                return
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
@@ -254,8 +250,6 @@ class PyCodegen:
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        if value.mutable_local:
-            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):
