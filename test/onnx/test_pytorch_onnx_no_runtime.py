@@ -201,7 +201,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         mte = ModuleToExport()
         f = io.BytesIO()
-        torch.onnx.export(mte, (torch.zeros(1, 2, 3),))
+        torch.onnx.export(mte, (torch.zeros(1, 2, 3),), f)
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -647,7 +647,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(1, 2, 3, requires_grad=True)
         f = io.BytesIO()
-        torch.onnx.export(Model(), x, f)
+        torch.onnx.export(Model(), (x,), f)
         model = onnx.load(f)
         model.ir_version = 0
 
