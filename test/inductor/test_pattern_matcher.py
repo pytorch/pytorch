@@ -30,7 +30,7 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -129,7 +129,7 @@ class TestPatternMatcher(TestCase):
             )  # also checks that dtype is correct
 
     @skipIfRocm
-    @expectedFailureXPU
+    @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul(self):
@@ -164,7 +164,7 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     @skipIfRocm
-    @expectedFailureXPU
+    @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul_gating(self):
