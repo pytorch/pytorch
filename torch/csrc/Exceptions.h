@@ -353,7 +353,6 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
-    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     std::bool_constant<release_gil>) {
