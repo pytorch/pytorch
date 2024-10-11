@@ -26,29 +26,48 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-# Attempt to import AttrsDescriptor from Triton
-try:
-    from triton.compiler.compiler import AttrsDescriptor
+def _is_triton_available():
+    try:
+        import triton  # noqa: F401
 
-    attrs_descriptor_available = True
-except ImportError:
-    attrs_descriptor_available = False
+        return True
+    except ImportError:
+        return False
+
 
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
-if attrs_descriptor_available:
+if _is_triton_available():
+    try:
+        from triton.backends.compiler import AttrsDescriptor
 
-    def AttrsDescriptorWrapper(
-        divisible_by_16=None,
-        equal_to_1=None,
-    ):
-        # Prepare the arguments for AttrsDescriptor
-        kwargs = {
-            "divisible_by_16": divisible_by_16,
-            "equal_to_1": equal_to_1,
-        }
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            # Prepare the arguments for AttrsDescriptor
+            kwargs = {
+                "tt.divisibility": divisible_by_16,
+                "tt.equal_to": equal_to_1,
+            }
 
-        # Instantiate AttrsDescriptor with the prepared arguments
-        return AttrsDescriptor(**kwargs)
+            # Instantiate AttrsDescriptor with the prepared arguments
+            return AttrsDescriptor.from_dict(kwargs)
+
+    except ImportError:
+        from triton.compiler.compiler import AttrsDescriptor
+
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            # Prepare the arguments for AttrsDescriptor
+            kwargs = {
+                "divisible_by_16": divisible_by_16,
+                "equal_to_1": equal_to_1,
+            }
+
+            # Instantiate AttrsDescriptor with the prepared arguments
+            return AttrsDescriptor(**kwargs)
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
