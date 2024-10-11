@@ -686,12 +686,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
+  // Destroy (shutdown) this backend -- normal exit.
+  void shutdown();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  // return true if abort is successful, otherwise false
-  bool abort(const std::optional<std::string>& abortReason = std::nullopt);
-
-  void shutdown(const std::optional<std::string>& reason = std::nullopt);
+  void abort();
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -752,6 +752,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
   bool dumpDebuggingInfo();
+
+  // Abort all communicators on this rank.
+  bool abortComms(std::optional<std::string> abortReason = std::nullopt);
 
  private:
   int globalRankStart;
