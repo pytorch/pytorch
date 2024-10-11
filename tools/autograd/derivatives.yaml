@@ -112,9 +112,9 @@
 #
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
-#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     variable in a graph. The result of this function is `std::optional<Tensor>`,
 #     and it is `::std::nullopt` when the condition evalutes to `false`,
-#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     otherwise it is the variable wrapped in `std::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
 #     or the third (grad_input_mask[2]) argument requires gradients.
