@@ -189,7 +189,7 @@ class IndexingOptions:
         return "tmp" in self.mask_str
 
     def has_rmask(self):
-        return any(mask[0] == "r" for mask in self.mask_vars)
+        return any(str(mask).startswith("r") for mask in self.mask_vars)
 
 
 @dataclasses.dataclass
