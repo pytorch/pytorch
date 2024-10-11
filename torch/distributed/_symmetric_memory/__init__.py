@@ -548,6 +548,7 @@ def _fused_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
     B: torch.Tensor,
+    A_scale: Optional[torch.Tensor],
     kwargs: Dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
@@ -571,16 +572,36 @@ def _fused_matmul_reduce_scatter_impl(
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix
+    # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
     leading_dims = [group.size()] + list(x.shape[:-1])
     leading_dims[1] //= group.size()
     x = x.flatten(0, -2)
-    shards = x.chunk(group.size())
+    A_shards = x.chunk(group.size())
+
+    A_scale_shards = None
+    if A_scale is None:
+        pass
+    elif A_scale.numel() == 1:
+        A_scale_shards = [A_scale] * group.size()
+    else:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale = A_scale.movedim(scatter_dim, 0).contiguous().flatten(0, -2)
+        A_scale_shards = list(A_scale.chunk(group.size()))
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        mm_out_op(shards[rank], B, **kwargs, out=out)
+        if A_scale_shards is not None:
+            mm_out_op(
+                A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out
+            )
+        else:
+            mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
     stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
 
@@ -640,6 +661,7 @@ def _fused_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
             B=B,
+            A_scale=None,
             kwargs={},
             out_dtype=A.dtype,
             reduce_op=reduce_op,
@@ -662,6 +684,20 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    if A_scale.numel() > 1:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale = A_scale.flatten(0, -2).contiguous()
+    elif A_scale.numel() != 1:
+        raise ValueError(
+            "Invalid A_scale shape "
+            f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+        )
+
     C = torch._scaled_mm(
         A.flatten(0, -2).contiguous(),
         B,
@@ -716,8 +752,8 @@ def _fused_scaled_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten._scaled_mm.out,
             A=A,
             B=B,
+            A_scale=A_scale,
             kwargs={
-                "scale_a": A_scale,
                 "scale_b": B_scale,
                 "bias": bias,
                 "scale_result": result_scale,
@@ -733,14 +769,14 @@ def _fused_scaled_matmul_reduce_scatter(
 
 def restride_A_for_fused_matmul_reduce_scatter(
     t: torch.Tensor,
-    gather_dim: int,
+    scatter_dim: int,
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
     perf. See the doc for `fused_matmul_reduce_scatter` for detail.
     """
     perm = list(range(len(t.shape)))
-    perm.insert(0, perm.pop(gather_dim))
+    perm.insert(0, perm.pop(scatter_dim))
     return make_contiguous_for_perm(t, perm)
 
 
