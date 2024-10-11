@@ -5045,14 +5045,11 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-@register_decomposition([aten.baddbmm])
-@out_wrapper()
 @pw_cast_for_opmath
-def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+def _baddmm_epilogue(self, result, beta, alpha):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
-    result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
     if beta == 0:
@@ -5060,6 +5057,13 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.baddbmm])
+@out_wrapper()
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    result = torch.bmm(batch1, batch2)
+    return _baddmm_epilogue(self, result, beta, alpha)
 
 
 @register_decomposition(aten.floor_divide)
