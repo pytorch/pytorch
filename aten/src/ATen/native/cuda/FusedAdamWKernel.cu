@@ -5,8 +5,7 @@
 #include <ATen/native/cuda/fused_adamw_amsgrad_impl.cuh>
 #include <ATen/native/cuda/fused_adamw_impl.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // note(crcrpar): To observe the CI rules, i.e. 20 minutes per file to compile,
 // defensively split instantiations into _impl files. this is only for CUDA 11.3
@@ -168,5 +167,4 @@ void _fused_adamw_kernel_cuda_(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

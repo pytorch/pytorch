@@ -65,6 +65,7 @@ post_grad_pass_names = [
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
+    "pad_aten_mm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -238,7 +239,9 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
         return
     # remove the dummy split whose split sections size is one
-    if len(split_sections) == 1:
+    # theoretically nodes with no users should be removed, but we have seen the corner case
+    # thus we add its uers check to walk around the StopIteration error.
+    if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
         user = next(iter(split_node.users.keys()))
@@ -446,6 +449,12 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
         log.debug("example value absent for node: %s", reshape_node)
         return
     reshape_input = get_arg_value(reshape_node, 0)
+
+    from torch.fx.experimental.symbolic_shapes import free_symbols
+
+    if free_symbols(reshape_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", reshape_node)
+        return
 
     with match.graph.inserting_after(reshape_node):
         new_reshape_node = match.graph.call_function(

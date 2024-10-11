@@ -4,7 +4,7 @@
 
 import io
 
-import cv2
+import cv2  # @manual
 
 import torch
 import torch.utils.bundled_inputs
