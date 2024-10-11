@@ -292,7 +292,12 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
-    def test_fused_all_gather_scaled_matmul(self, gather_dim: int) -> None:
+    @parametrize(
+        "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
+    )
+    def test_fused_all_gather_scaled_matmul(
+        self, gather_dim: int, scale_mode: str
+    ) -> None:
         self._init_process()
 
         BATCH = 8
@@ -303,16 +308,33 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         rank = self.rank
         world_size = self.world_size
 
+        if gather_dim == 0:
+            leading_dims = (BATCH // self.world_size, M)
+        elif gather_dim == 1:
+            leading_dims = (BATCH, M // self.world_size)
+        else:
+            raise AssertionError("Invalid scale_mode: {scale_mode}")
+
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        A_scale = torch.tensor(0.1, device="cuda")
+        A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fn)
         Bs = [
             torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
         ]
-        B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
-        out_dtypes = [None, torch.bfloat16, torch.float32]
+
+        if scale_mode == "tensor-wise":
+            A_scale = torch.tensor(0.1, device="cuda")
+            B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [None, torch.bfloat16, torch.float32]
+        elif scale_mode == "row-wise-sharded":
+            A_scale = torch.full((*leading_dims, 1), 0.1, device="cuda")
+            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [torch.bfloat16] * 3
+        elif scale_mode == "row-wise-replicated":
+            A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
+            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [torch.bfloat16] * 3
+        else:
+            raise AssertionError(f"Invalid scale_mode: {scale_mode}")
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
             A_shard,
