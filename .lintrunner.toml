@@ -153,7 +153,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0.1',
-    'optree==0.12.1',
+    'optree==0.13.0',
 ]
 
 [[linter]]
