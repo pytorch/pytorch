@@ -83,6 +83,7 @@ flex_decoding_template = TritonTemplate(
 
 
     Z = {{size("Q", 0)}}
+    ZKV = {{size("K", 0)}}
     HKV = {{size("Q", 1)}}
     G: tl.constexpr = GQA_SHARED_HEADS
     HQ = HKV * G
@@ -97,12 +98,13 @@ flex_decoding_template = TritonTemplate(
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
     off_z = tl.program_id(0) // HKV
+    off_zkv = off_z % ZKV
     off_hkv = tl.program_id(0) % HKV
     off_t = tl.program_id(1)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
-    k_offset = off_z * stride_kz + off_hkv * stride_kh
-    v_offset = off_z * stride_vz + off_hkv * stride_vh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -331,14 +333,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert Bq == Bkv, "Batch dimension must match"
+
+    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
+        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+
     B = Bq
     kernel_options = dict(kernel_options)
 
@@ -384,6 +389,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_indices,
         ]
     )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
@@ -469,6 +476,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
+    # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function

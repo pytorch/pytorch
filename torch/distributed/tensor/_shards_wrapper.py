@@ -309,7 +309,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `torch._tensor.Tensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"LocalShardsWrapper:{self._local_shards} {self._storage_meta}"
 
     def __str__(self) -> str:

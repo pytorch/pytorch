@@ -68,6 +68,7 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
   }
 }
 
+// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
 #if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
 // last argument to split() API is not used to support
 // multiple implementations
@@ -78,13 +79,16 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
   auto comm = std::make_shared<NCCLComm>();
+  // This call will block until the source communicator is initialized
+  auto sourceComm = source->getNcclComm();
   C10D_NCCL_CHECK(
-      ncclCommSplit(
-          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
-  comm->initialized_ = true;
+  if (!nccl_use_nonblocking()) {
+    comm->initialized_ = true;
+  }
   return comm;
 }
 #endif

@@ -63,6 +63,13 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
+// TODO: remove this change after a safe rollout.
+// Control whether we sleep after an exception is thrown.
+// This change is temporary and is used to safely remove the current sleep that
+// exists after an exception is thrown.
+static std::vector<std::string> TORCH_NCCL_SLEEP_AFTER_EXCEPTION = {
+    "TORCH_NCCL_SLEEP_AFTER_EXCEPTION"};
+
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -271,6 +278,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         int rank,
         OpType opType,
         uint64_t seq,
+        bool isP2P = false,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
@@ -294,14 +302,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     bool isSuccess() const override;
 
-    // Same as calling synchronize() for NCCL work.
+    // Same as calling synchronize() for NCCL work if timeout is not set.
+    // Otherwise, it will block the CPU thread until the NCCL work is completed
+    // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // Throws on exceptions. Blocking operation, which will wait for work
-    // completion.
+    // Let current stream wait on the completion of the NCCL work
+    // Throws on exceptions.
     void synchronize() override;
 
     // Synchronize streams by blocking each on the NCCL stream
@@ -354,14 +363,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The NCCL communicator used for this work item.
     std::shared_ptr<NCCLComm> ncclComm_;
 
-    // Tensors used for barrier op
-    at::Tensor barrierTensor_;
+    // whether this work is a barrier op
+    bool isBarrierOp_{false};
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
-    bool blockingWait_ = false;
+    bool blockingWait_{false};
 
     // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_ = false;
+    bool avoidRecordStreams_{false};
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
@@ -376,8 +385,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
 
-    // Record the collective sequential number.
+    // Record the sequential number of collective or p2p.
     uint64_t seq_;
+    bool isP2P_;
 
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
@@ -397,9 +407,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const WorkNCCL& workNCCL);
 
    private:
-    // Helper function for synchronize
-    void synchronizeInternal(std::chrono::milliseconds timeout);
-
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -735,6 +742,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Device& device,
       int rank,
       OpType opType,
+      bool isP2P,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
@@ -1139,6 +1147,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
   bool dumpOnTimeoutOrEx_;
+
+  // Whether or not to sleep after an exception is thrown in the watchdog.
+  bool sleepAfterException_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 import torch
-from torch.onnx._internal.exporter import testing as onnx_testing
+from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
 
@@ -195,6 +195,15 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assert_export(
             TestRefineDynamicShapeModel(), inps, dynamic_shapes=dynamic_shapes
         )
+
+    def test_zero_output_aten_node(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "assertion failed")
+                return x + x
+
+        input = torch.randn(2)
+        self.assert_export(Model(), (input))
 
 
 if __name__ == "__main__":

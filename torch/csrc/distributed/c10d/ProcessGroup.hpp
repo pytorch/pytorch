@@ -45,24 +45,6 @@ namespace c10d {
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
-  // ProcessGroup Options is a base struct that defines the basic options
-  // when constructing a ProcessGroup. Each ProcessGroup subclass should
-  // extend this struct and define its options if it wants to provide more
-  // config options (beyond basic ones defined here) to end user.
-  struct TORCH_API Options : torch::CustomClassHolder {
-    explicit Options(
-        std::string backend,
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
-        : timeout(timeout), backend(std::move(backend)) {}
-    ~Options() override = default;
-
-    std::chrono::milliseconds timeout;
-
-    // backend name
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const std::string backend;
-  };
-
   enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
@@ -72,6 +54,41 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 5,
   };
 
+  static std::string backendTypeToString(const BackendType& type) {
+    switch (type) {
+      case BackendType::GLOO:
+        return "gloo";
+      case BackendType::NCCL:
+        return "nccl";
+      case BackendType::UCC:
+        return "ucc";
+      case BackendType::MPI:
+        return "mpi";
+      case BackendType::UNDEFINED:
+        return "undefined";
+      case BackendType::CUSTOM:
+        return "custom";
+      default:
+        TORCH_CHECK(false, "THis should never happen!");
+    }
+  };
+
+  static BackendType strToBackendType(const std::string& backend) {
+    if (backend == "undefined") {
+      return BackendType::UNDEFINED;
+    } else if (backend == "gloo") {
+      return BackendType::GLOO;
+    } else if (backend == "nccl") {
+      return BackendType::NCCL;
+    } else if (backend == "ucc") {
+      return BackendType::UCC;
+    } else if (backend == "mpi") {
+      return BackendType::MPI;
+    } else {
+      return BackendType::CUSTOM;
+    }
+  };
+
   // Not used, set for backwards compatibility and only used for TypeDef in
   // Ops.cpp
   explicit ProcessGroup(int rank, int size);
@@ -79,8 +96,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   explicit ProcessGroup(
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
-      int size,
-      c10::intrusive_ptr<Options> options);
+      int size);
   ~ProcessGroup() override;
 
   int getRank() const {
@@ -103,7 +119,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual const std::string getBackendName() const {
-    return options_->backend;
+    return backendTypeToString(backendType_);
   };
 
   BackendType getBackendType() const {
@@ -609,10 +625,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.timeout.count());
   }
 
-  c10::intrusive_ptr<Options> getOptions() {
-    return options_;
-  }
-
   bool hasBackends() {
     return !deviceTypeToBackendType_.empty();
   }
@@ -651,6 +663,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         getBackendName(),
         ".");
     return backendTypeToBackend_.at(backendType_);
+  }
+
+  void setDefaultBackend(const BackendType& backendType) {
+    backendType_ = backendType;
+  }
+
+  void setDefaultBackend(const std::string& backend) {
+    backendType_ = strToBackendType(backend);
   }
 
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);
@@ -725,9 +745,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const c10::intrusive_ptr<Options> options_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const BackendType backendType_;
+  BackendType backendType_;
   std::string pg_desc_;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
