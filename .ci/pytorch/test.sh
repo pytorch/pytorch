@@ -49,16 +49,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
-  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
   # Conditional jump or move depends on uninitialised value(s)
   #    at 0x40303A: ~optional_base (Optional.h:281)
   #    by 0x40303A: call (Dispatcher.h:448)
-  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:10)
   #    by 0x403700: main (basic.cpp:16)
   #  Uninitialised value was created by a stack allocation
-  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:6)
   #
   # The problem does not appear with gcc or newer versions of clang (we tested
   # clang14).  So we suppress valgrind testing for clang9 specifically.
@@ -72,7 +72,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # using namespace at;
   #
-  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
   #   auto op = c10::Dispatcher::singleton()
   #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
   #       .typed<at::_ops::as_strided::schema>();
