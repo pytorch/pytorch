@@ -51,6 +51,7 @@ def _gen_cutlass_file(
 def try_import_cutlass() -> bool:
     if config.is_fbcode():
         return True
+    return True
 
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
@@ -125,6 +126,7 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
+    exclude_kernels = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
@@ -255,12 +257,7 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype == torch.half:
-        if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
-            return torch_dtype
-        else:
-            return torch.float
-    if torch_dtype in {torch.bfloat16, torch.float}:
+    if torch_dtype in {torch.float16, torch.bfloat16, torch.float}:
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32

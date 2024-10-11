@@ -11,6 +11,7 @@ import traceback
 from contextlib import nullcontext
 from dataclasses import field
 from functools import partial
+import sys
 from typing import (
     Any,
     Callable,
@@ -118,9 +119,10 @@ from typing_extensions import dataclass_transform
 @dataclass_transform()
 def ir_dataclass(_cls):
     def wrap(cls: T) -> T:
+        return dataclasses.dataclass(cls, kw_only=True)
         if sys.version_info >= (3, 10):
             # Use native kw_only for Python 3.10+
-            return dataclasses.dataclass(cls, kw_only=True, **kwargs)
+            return dataclasses.dataclass(cls, kw_only=True)
         else:
             # Polyfill for Python 3.9
             def __init__(_self, **init_kwargs):
@@ -4159,7 +4161,11 @@ class CppTemplateBuffer(TemplateBuffer):
 
 @ir_dataclass
 class InputsKernel(OperationBuffer):
+<<<<<<< HEAD
+    inputs: List[Buffer] 
+=======
     inputs: List[Buffer] = []
+>>>>>>> b14ec7fb31f (Port Inductor dataclasses to be kw_only)
 
     def get_read_writes(self):
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
