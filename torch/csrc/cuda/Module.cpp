@@ -1536,6 +1536,32 @@ PyObject* THCPModule_cuda_tunableop_tuning_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cuda_record_untuned_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cuda_record_untuned_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  at::cuda::tunable::getTuningContext()->EnableRecordUntuned(
+      THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_record_untuned_is_enabled(
+    PyObject* _unused,
+    PyObject* noarg) {
+  HANDLE_TH_ERRORS
+  if (at::cuda::tunable::getTuningContext()->IsRecordUntunedEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cuda_tunableop_write_file_on_exit(
     PyObject* _unused,
     PyObject* arg) {
@@ -1948,6 +1974,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_tuning_is_enabled",
      THCPModule_cuda_tunableop_tuning_is_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_record_untuned_enable",
+     THCPModule_cuda_record_untuned_enable,
+     METH_O,
+     nullptr},
+    {"_cuda_record_untuned_is_enabled",
+     THCPModule_cuda_record_untuned_is_enabled,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_write_file_on_exit",

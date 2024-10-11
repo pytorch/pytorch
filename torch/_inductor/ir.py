@@ -4473,9 +4473,9 @@ class ExternKernel(InputsKernel):
             # Try to construct cpp_kernel_name from op_overload
             if kernel.namespace == "aten":
                 # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
+                # repeat_interleave(const at::Tensor & repeats, std::optional<int64_t> output_size=std::nullopt)
                 # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
+                #       std::optional<int64_t> dim=std::nullopt, std::optional<int64_t> output_size=std::nullopt)
                 opname = (
                     kernel.__name__.split(".")[0]
                     if kernel._overloadname == "default"
@@ -6978,6 +6978,7 @@ class _WaitKernel(_CollectiveKernel):
         packed.mutation_outputs.append(
             MutationOutput(NoneLayout(inp.get_device()), inp, packed)
         )
+        packed.outputs = [packed]
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
