@@ -132,7 +132,6 @@ def _test_results_re() -> None:
     {'file': 'file.py', 'line': '8', 'column': '-10', 'code': 'W605',
      'message': "invalid escape sequence '/'"}
     """
-    pass
 
 
 def _run_command(

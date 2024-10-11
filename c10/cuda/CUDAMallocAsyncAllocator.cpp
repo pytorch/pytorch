@@ -11,6 +11,8 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
+using namespace c10::CachingDeviceAllocator;
+
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
@@ -492,6 +494,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolTrimTo(mempool, 0);
       }
     }
+  }
+
+  void enable(bool) override {
+    // cannot disable
+  }
+
+  bool isEnabled() const override {
+    return true;
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {

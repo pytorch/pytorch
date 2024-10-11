@@ -251,6 +251,16 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
+# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
+# Using TH_BINARY_BUILD to check whether is binary build.
+# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
+if(DEFINED ENV{TH_BINARY_BUILD})
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
+                         "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
+else()
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
+endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -295,7 +305,6 @@ if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(USE_VULKAN "Use Vulkan GPU backend" ON "ANDROID" OFF)
 endif()
 
-option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
 cmake_dependent_option(
@@ -359,7 +368,7 @@ cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+    "USE_DISTRIBUTED AND NOT WIN32" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -479,10 +488,6 @@ if(USE_SYSTEM_LIBS)
     set(USE_SYSTEM_NCCL ON)
   endif()
 endif()
-
-# Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS
-       "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 
 # /Z7 override option When generating debug symbols, CMake default to use the
 # flag /Zi. However, it is not compatible with sccache. So we rewrite it off.
@@ -877,6 +882,16 @@ cmake_dependent_option(
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
 
+#
+# Cannot be put into Dependencies.cmake due circular dependency:
+# USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
+#
+if(USE_ROCM)
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+    include(cmake/External/aotriton.cmake)
+  endif()
+endif()
+
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
@@ -896,17 +911,20 @@ if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
 endif()
 
-if(USE_SLEEF_FOR_ARM_VEC256)
-  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
-endif()
-
 # Enable sleef on macOS with Apple silicon by default
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
+
+# Enable sleef on Arm(R) architecture by default (except Android)
+if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+  AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+endif()
+
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")
@@ -1036,8 +1054,6 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
-                               CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
@@ -1067,8 +1083,16 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
-  string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-  string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+      message(Warning "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
+    endif()
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
+  else()
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  endif()
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
@@ -1290,6 +1314,10 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDSS.cmake
+    DESTINATION share/cmake/Caffe2/
+    COMPONENT dev)
+  install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
@@ -1342,6 +1370,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
     if(BUILD_LIBTORCHLESS)
+      caffe2_update_option(USE_CUDA OFF)
       set(ALL_PT_TARGETS "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
     else()
       # @todo test if we can remove this

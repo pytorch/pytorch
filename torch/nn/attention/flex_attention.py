@@ -13,15 +13,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch._higher_order_ops.flex_attention import (
-    flex_attention as flex_attention_hop,
-    TransformGetItemToIndex,
-)
+from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _validate_sdpa_input
+from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -51,7 +50,6 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
-@torch._dynamo.assume_constant_result
 def _get_mod_type(fn: Callable) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
@@ -141,9 +139,10 @@ def noop_mask(
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
+_LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row, col_indices):
+def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     num_rows = col_indices.shape[-2]
     num_cols = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
@@ -183,9 +182,24 @@ def _dense_to_ordered(dense_mask) -> Tuple:
     )
 
 
-def _transpose_ordered(num_blocks_in_row, col_indices):
+def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
+
+
+def _adjust_num_blocks_and_indices(
+    num_blocks: Tensor,
+    indices: Tensor,
+    new_num_rows: int,
+    new_num_cols: int,
+):
+    num_rows = indices.shape[-2]
+    num_columns = indices.shape[-1]
+    indices = indices[:, :, :new_num_rows, :new_num_cols]
+    num_blocks = num_blocks[:, :, :new_num_rows]
+    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
+    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    return num_blocks, indices
 
 
 class BlockMask:
@@ -252,8 +266,8 @@ class BlockMask:
     kv_indices: Tensor
     full_kv_num_blocks: Optional[Tensor]
     full_kv_indices: Optional[Tensor]
-    q_num_blocks: Tensor
-    q_indices: Tensor
+    q_num_blocks: Optional[Tensor]
+    q_indices: Optional[Tensor]
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
     BLOCK_SIZE: Tuple[int, int]
@@ -263,48 +277,101 @@ class BlockMask:
         self,
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Optional[Tensor] = None,
-        full_kv_indices: Optional[Tensor] = None,
-        q_num_blocks: Optional[Tensor] = None,
-        q_indices: Optional[Tensor] = None,
-        full_q_num_blocks: Optional[Tensor] = None,
-        full_q_indices: Optional[Tensor] = None,
-        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-        mask_mod: Optional[_mask_mod_signature] = None,
+        full_kv_num_blocks: Optional[Tensor],
+        full_kv_indices: Optional[Tensor],
+        q_num_blocks: Optional[Tensor],
+        q_indices: Optional[Tensor],
+        full_q_num_blocks: Optional[Tensor],
+        full_q_indices: Optional[Tensor],
+        BLOCK_SIZE: Tuple[int, int],
+        mask_mod: _mask_mod_signature,
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
+        assert kv_num_blocks is not None, "kv_num_blocks must be provided"
+        assert kv_indices is not None, "kv_indices must be provided"
+        assert q_num_blocks is not None, "q_num_blocks must be provided"
+        assert q_indices is not None, "q_indices must be provided"
+        assert (full_kv_num_blocks is None) == (
+            full_kv_indices is None
+        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        assert (full_q_num_blocks is None) == (
+            full_q_indices is None
+        ), "full_q_num_blocks and full_q_indices must be both provided or omitted"
 
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
+        self.q_num_blocks = q_num_blocks
+        self.q_indices = q_indices
+        self.full_q_num_blocks = full_q_num_blocks
+        self.full_q_indices = full_q_indices
+        self.BLOCK_SIZE = BLOCK_SIZE
+        self.mask_mod = mask_mod
 
-        # Set q_num_blocks and q_indices if provided, otherwise generate them
-        if q_num_blocks is not None and q_indices is not None:
-            self.q_num_blocks = q_num_blocks
-            self.q_indices = q_indices
-        else:
-            self.q_num_blocks, self.q_indices = _transpose_ordered(
-                kv_num_blocks, kv_indices
-            )
+    @classmethod
+    def from_kv_blocks(
+        cls,
+        kv_num_blocks: Tensor,
+        kv_indices: Tensor,
+        full_kv_num_blocks: Optional[Tensor] = None,
+        full_kv_indices: Optional[Tensor] = None,
+        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+        mask_mod: Optional[_mask_mod_signature] = None,
+    ):
+        """
+        Creates a BlockMask instance from key-value block information.
 
-        # Set full_q_num_blocks and full_q_indices if provided, otherwise generate them if full_kv tensors are available
-        if full_q_num_blocks is not None and full_q_indices is not None:
-            self.full_q_num_blocks = full_q_num_blocks
-            self.full_q_indices = full_q_indices
-        elif full_kv_num_blocks is not None and full_kv_indices is not None:
-            self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
+        Args:
+            kv_num_blocks (Tensor): Number of kv_blocks in each Q_BLOCK_SIZE row tile.
+            kv_indices (Tensor): Indices of key-value blocks in each Q_BLOCK_SIZE row tile.
+            full_kv_num_blocks (Optional[Tensor]): Number of full kv_blocks in each Q_BLOCK_SIZE row tile.
+            full_kv_indices (Optional[Tensor]): Indices of full key-value blocks in each Q_BLOCK_SIZE row tile.
+            BLOCK_SIZE (Union[int, Tuple[int, int]]): Size of KV_BLOCK_SIZE x Q_BLOCK_SIZE tiles.
+            mask_mod (Optional[Callable]): Function to modify the mask.
+
+        Returns:
+            BlockMask: Instance with full Q information generated via _transposed_ordered
+
+        Raises:
+            RuntimeError: If kv_indices has < 2 dimensions.
+            AssertionError: If only one of full_kv_* args is provided.
+        """
+        if kv_indices.dim() < 2:
+            raise RuntimeError("BlockMask must have at least 2 dimensions")
+
+        assert (full_kv_num_blocks is None) == (
+            full_kv_indices is None
+        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+
+        # Generate q_num_blocks and q_indices
+        q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+        if full_kv_num_blocks is not None:
+            assert full_kv_indices is not None
+            full_q_num_blocks, full_q_indices = _transpose_ordered(
                 full_kv_num_blocks, full_kv_indices
             )
         else:
-            self.full_q_num_blocks, self.full_q_indices = None, None
+            full_q_num_blocks, full_q_indices = None, None
 
         if isinstance(BLOCK_SIZE, int):
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
-        self.BLOCK_SIZE = BLOCK_SIZE
 
-        self.mask_mod = mask_mod if mask_mod is not None else noop_mask
+        mask_mod = mask_mod if mask_mod is not None else noop_mask
+
+        return cls(
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            q_num_blocks=q_num_blocks,
+            q_indices=q_indices,
+            full_q_num_blocks=full_q_num_blocks,
+            full_q_indices=full_q_indices,
+            BLOCK_SIZE=BLOCK_SIZE,
+            mask_mod=mask_mod,
+        )
 
     def as_tuple(self, flatten: bool = True):
         """
@@ -338,41 +405,108 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
+        """
+        Returns a new BlockMask instance by getting the mask for the given index position.
+
+        Args:
+            index: Index to apply to all attributes.
+
+        Example Usage:
+            .. code-block:: python
+
+                def causal_mask(b, h, q_idx, kv_idx):
+                    return q_idx >= kv_idx
+
+                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
+                assert block_mask.kv_num_blocks.shape == (4,2,4)
+                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                # Index on batch dimension
+                new_block_mask = block_mask[0]
+                assert new_block_mask.kv_num_blocks.shape == (2,4)
+                assert new_block_mask.kv_indices.shape == (2,4,4)
+
+                # Index on batch and head dimension
+                new_block_mask = block_mask[0, 1]
+                assert new_block_mask.kv_num_blocks.shape == (4,)
+                assert new_block_mask.kv_indices.shape == (4,4)
+
+                # slicing on batch and head dimension
+                new_block_mask = block_mask[0:2, 1:2]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
+                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+
+                # slicing on batch, head, and query dimension
+                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
+                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
+                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+        """
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
-        new_kv_num_blocks_full = (
-            self.full_kv_num_blocks[index]
-            if self.full_kv_num_blocks is not None
-            else None
-        )
-        new_kv_indices_full = (
-            self.full_kv_indices[index] if self.full_kv_indices is not None else None
-        )
-        return BlockMask(
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            new_full_kv_num_blocks = self.full_kv_num_blocks[index]
+            new_full_kv_indices = self.full_kv_indices[index]
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
-            full_kv_num_blocks=new_kv_num_blocks_full,
-            full_kv_indices=new_kv_indices_full,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=self.mask_mod,
+            mask_mod=None,
         )
 
     def __repr__(self):
+        def shape_or_none(x: Optional[torch.Tensor]):
+            return x.shape if x is not None else None
+
         return (
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={self.full_kv_num_blocks.shape if self.full_kv_num_blocks is not None else None},\n"
-            f"    full_kv_indices={self.full_kv_indices.shape if self.full_kv_indices is not None else None},\n"
-            f"    q_num_blocks={self.q_num_blocks.shape},\n"
-            f"    q_indices={self.q_indices.shape},\n"
-            f"    full_q_num_blocks={self.full_q_num_blocks.shape if self.full_q_num_blocks is not None else None},\n"
-            f"    full_q_indices={self.full_q_indices.shape if self.full_q_indices is not None else None},\n"
+            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
+            f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
+            f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
+            f"    q_indices={shape_or_none(self.q_indices)},\n"
+            f"    full_q_num_blocks={shape_or_none(self.full_q_num_blocks)},\n"
+            f"    full_q_indices={shape_or_none(self.full_q_indices)},\n"
             f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
             f"    shape={self.shape},\n"
             f"    sparsity={self.sparsity():.2f}%,\n"
             f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
             f")"
+        )
+
+    def _adjust(self, new_q_len: int, new_kv_len: int):
+        new_num_rows = new_q_len // self.BLOCK_SIZE[0]
+        new_num_cols = new_kv_len // self.BLOCK_SIZE[1]
+        new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
+            self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
+        )
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            (
+                new_full_kv_num_blocks,
+                new_full_kv_indices,
+            ) = _adjust_num_blocks_and_indices(
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                new_num_rows,
+                new_num_cols,
+            )
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return self.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            self.BLOCK_SIZE,
+            self.mask_mod,
         )
 
     @property
@@ -407,6 +541,7 @@ class BlockMask:
         """Returns a dense block that is equivalent to the block mask."""
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
             )
@@ -515,8 +650,8 @@ def _round_up_to_multiple(x, multiple):
 
 def _convert_mask_to_block_mask(
     mask: Tensor,
-    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
@@ -591,8 +726,8 @@ def _convert_block_mask_to_mask(
 def _create_sparse_block_from_block_mask(
     block_mask: Tuple[Tensor, Optional[Tensor]],
     mask_mod: Optional[Callable],
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
     partial_blocks, full_blocks = block_mask
 
@@ -602,20 +737,20 @@ def _create_sparse_block_from_block_mask(
     else:
         full_bm = (None, None)
 
-    return BlockMask(  # type: ignore[call-arg]
+    return BlockMask.from_kv_blocks(
         partial_bm[0],
         partial_bm[1],
         full_bm[0],
         full_bm[1],
-        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
 
 
 def create_mask(
     mod_fn: Union[_score_mod_signature, _mask_mod_signature],
-    B: int,
-    H: int,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
@@ -634,7 +769,10 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
-
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
@@ -670,8 +808,8 @@ def _create_block_mask_inner(
     Q_LEN: int,
     KV_LEN: int,
     device: str,
-    KV_BLOCK_SIZE: int,
     Q_BLOCK_SIZE: int,
+    KV_BLOCK_SIZE: int,
 ):
     r"""Work around for being unable to instantiate __torch_function__ mode under compile.
     `create_block_mask` will compile this inner function and wrap the call to this
@@ -680,13 +818,11 @@ def _create_block_mask_inner(
     mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device, _compile=True)
     partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
         separate_full_blocks=True,
     )
-    return _create_sparse_block_from_block_mask(
-        (partial_block_mask, full_block_mask), mask_mod
-    )
+    return partial_block_mask, full_block_mask
 
 
 def create_block_mask(
@@ -712,9 +848,8 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        KV_BLOCK_SIZE (int): Block size of block mask for each query.
-        Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
-        _compile (bool): Whether to compile the mask creation.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -752,10 +887,13 @@ def create_block_mask(
         Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
+        inner_func = torch.compile(inner_func, fullgraph=True)
     with TransformGetItemToIndex():
-        block_mask = inner_func(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+        partial_block_mask, full_block_mask = inner_func(
+            mask_mod, B, H, Q_LEN, KV_LEN, device, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+        )
+        block_mask = _create_sparse_block_from_block_mask(
+            (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
         )
     return block_mask
 
@@ -767,34 +905,60 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = _round_up_to_multiple(key.size()[-2], 128)
-    q_len = _round_up_to_multiple(query.size()[-2], 128)
-    return BlockMask(
+    return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        full_kv_num_blocks=None,
-        full_kv_indices=None,
-        BLOCK_SIZE=(kv_len, q_len),
+        BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
     )
 
 
-def _apply_kernel_options(query, key, value, kernel_options):
+def _apply_kernel_options(
+    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    if "ROWS_GUARANTEED_SAFE" not in kernel_options:
-        kernel_options["ROWS_GUARANTEED_SAFE"] = False
-    if "PRESCALE_QK" not in kernel_options:
-        kernel_options["PRESCALE_QK"] = False
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("PRESCALE_QK", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
-    any_inputs_require_grad = (
-        query.requires_grad or key.requires_grad or value.requires_grad
-    )
-    output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+    kernel_options["OUTPUT_LOGSUMEXP"] = True
+    if not return_lse:
+        any_inputs_require_grad = (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        )
+        output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
+        kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
     return kernel_options
+
+
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+    if query.size(-1) != key.size(-1):
+        raise ValueError(
+            f"Expect query and key/value to have the same embedding dimension "
+            f"but got E={query.size(-1)} and E={key.size(-1)}."
+        )
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    if not (
+        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
+    ):
+        raise ValueError(
+            f"NYI: Currently non power of 2 embedding dimension are not supported. "
+            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
+        )
+
+
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
+    """
+    if query.device.type != "cuda":
+        raise ValueError(
+            "FlexAttention is only supported on CUDA devices. "
+            f"Found input tensors on {query.device.type} device."
+        )
 
 
 def flex_attention(
@@ -862,13 +1026,10 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    _validate_embed_dim(query, key, value)
+    _validate_device(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
-    if query.size(-2) >= 32:  # use Attention Kernel
-        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
-            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
-    if key.size(-2) % 128 != 0:
-        raise NotImplementedError("NYI: L must be a multiple of 128")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
         raise ValueError(
             f"Expect query and key/value to have the same number of heads "
@@ -888,13 +1049,27 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+    elif (
+        query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
+        or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
+    ):
+        new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
+        new_kv_len = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
+        block_mask = block_mask._adjust(new_q_len, new_kv_len)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
+
+    if query.device != block_mask.kv_num_blocks.device:  # type: ignore[union-attr]
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
+        )
 
     kernel_options = _apply_kernel_options(
         query,
         key,
         value,
+        return_lse,
         kernel_options,
     )
 
@@ -904,7 +1079,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)
@@ -914,6 +1089,10 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
@@ -922,18 +1101,25 @@ def flex_attention(
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, lse = torch.compile(
-                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                    scale,
-                    kernel_options,
-                )
-                if return_lse:
-                    return out, lse * math.log(2)
-                else:
-                    return out
+                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                    if metadata_mode:
+                        backend = make_eager_backend_with_torch_function_mode(
+                            metadata_mode
+                        )
+                    else:
+                        backend = "eager"
+                    out, lse = torch.compile(
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    )(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask.as_tuple(),  # type: ignore[union-attr]
+                        scale,
+                        kernel_options,
+                    )
+                    if return_lse:
+                        return out, lse * math.log(2)
+                    else:
+                        return out
