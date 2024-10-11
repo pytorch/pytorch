@@ -30,6 +30,7 @@ from .hints import (
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
     cache_dir,
@@ -1592,6 +1593,43 @@ def reduction(
     )
 
 
+def cooperative_reduction(
+    size_hints,
+    reduction_hint,
+    triton_meta,
+    filename,
+    inductor_meta,
+):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
+    xnumel, rnumel = size_hints
+
+    target = 64
+    if rnumel < 1048576:
+        target = 32
+    split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
+    assert rnumel >= split
+    assert split <= TRITON_MAX_RSPLIT
+    configs = _reduction_configs(
+        size_hints=[xnumel, rnumel // split], inductor_meta=inductor_meta
+    )
+    for config in configs:
+        config.kwargs["RSPLIT"] = split
+
+    # TODO(jansel): add more configs in max_autotune
+
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
+
+
 def persistent_reduction(
     size_hints,
     reduction_hint=False,
@@ -1782,6 +1820,15 @@ def grid(*numels):
 
     setattr(grid_fn, "grid_fn_str", f"grid{numels}")  # noqa: B010
 
+    return grid_fn
+
+
+def cooperative_reduction_grid(xnumel):
+    def grid_fn(meta):
+        return (meta["RSPLIT"], ceildiv(xnumel, meta["XBLOCK"]), 1)
+
+    grid_fn_str = f"cooperative_reduction_grid({xnumel})"
+    setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
     return grid_fn
 
 

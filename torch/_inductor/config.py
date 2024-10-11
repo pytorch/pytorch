@@ -441,9 +441,16 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
-# Enable split reductions for better utilization when the dimension
-# being reduced over is large (by splitting it)
-split_reductions = True
+# For reductions with a small output size (usually 1, e.g. x.sum()) there is not enough
+# parallelism to saturate the GPU.  We have two ways of handling this, either `split_reductions`
+# or `cooperative_reductions` which are mutually exclusive.
+#   split_reductions: uses multiple kernels to gain more parallelism
+#   cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
+split_reductions = False
+cooperative_reductions = True
+
+# used for debugging cooperative reduction codegen
+force_cooperative_reductions = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 

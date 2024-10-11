@@ -614,3 +614,46 @@ def select_one(x, mask, dim, keep_dims=False):
     ix = x.to(idtype, bitcast=True)
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
     return iy.to(x.dtype, bitcast=True)
+
+
+@triton.jit
+def gpu_barrier(state, total):
+    """
+    Wait for all other thread blocks to reach this barrier before returning.
+
+    Args:
+        state: scratch space for two int32 semaphores, zero initialized
+        total: how many other blocks are running
+
+    Returns:
+        True on the first thread leaving the barrier
+
+    """
+    # TODO(jansel): try to do this with a single value and shifting
+    count_up = state
+    count_down = state + 1
+
+    # ensure stores before this are visible
+    tl.debug_barrier()
+
+    # all threads must exit prior barrier before we start
+    # expect this to already be true in common case
+    while tl.load(count_down, volatile=True) != 0:
+        pass
+
+    # count threads entering barrier
+    num_here = tl.atomic_add(count_up, 1) + 1  # acts as a memory fence
+    if num_here == total:
+        # all other threads are spinning on count_down
+        # the last thread flips from count_up mode to count_down mode
+        tl.store(count_up, 0)
+        tl.atomic_xchg(count_down, total - 1, sem="release")
+        return True
+    else:
+        prior = 0
+        while prior == 0:  # wait for last thread to flip the mode to count_down
+            prior = tl.atomic_cas(count_down, total - 1, total - 2, sem="relaxed")
+        if prior != total - 1:  # did the cas decrement already?
+            tl.atomic_add(count_down, -1, sem="relaxed")
+            # when last thread reaches here count_down is back to 0
+        return False
