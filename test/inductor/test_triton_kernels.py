@@ -1523,6 +1523,73 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
+    @common_utils.parametrize("autotune", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_special_params(self, autotune, backend):
+        @triton.jit
+        def special_params_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            num_warps: "tl.constexpr",
+            num_stages: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x * num_stages + num_warps
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        NUM_WARPS = 4
+        NUM_STAGES = 3
+
+        if autotune:
+            special_params_kernel = triton.autotune(
+                configs=[
+                    triton.Config(
+                        {"BLOCK_SIZE": 128},
+                        num_stages=NUM_STAGES,
+                        num_warps=NUM_WARPS,
+                    ),
+                    triton.Config(
+                        {"BLOCK_SIZE": 64},
+                        num_stages=NUM_STAGES,
+                        num_warps=NUM_WARPS,
+                    ),
+                ],
+                key=["n_elements"],
+            )(special_params_kernel)
+            kwargs = {}
+        else:
+            kwargs = {
+                "BLOCK_SIZE": 128,
+                "num_stages": NUM_STAGES,
+                "num_warps": NUM_WARPS,
+            }
+
+        def f(x):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            special_params_kernel[grid](
+                x,
+                output,
+                n_elements,
+                **kwargs,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+        expected_out = x * NUM_STAGES + NUM_WARPS
+        self.assertEqual(eager_out, expected_out)
+        self.assertEqual(compiled_out, expected_out)
+
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_multiple_outputs(self, dynamic, backend):
@@ -2843,6 +2910,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
+    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
@@ -2951,8 +3019,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             return z
 
         M, K, N = 128, 64, 32
-        x = torch.randn(M, K, device="cuda")
-        w = torch.randn(K, N, device="cuda")
+        x = torch.randn(M, K, device=GPU_TYPE)
+        w = torch.randn(K, N, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._logging.set_logs(output_code=True)

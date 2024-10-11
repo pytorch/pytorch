@@ -18,7 +18,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer
+from .common import IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
     DEVICE_TO_ATEN,
@@ -66,6 +66,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        # For GEMM kernels that must be initialized and are resolved at linking.
+        self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
 
     def generate_kernel_call(
@@ -667,11 +669,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
+
+        # Tell compiler we need to link with the non-mangled symbols
+        for kernel in self.initialized_kernels.values():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            signature = kernel.get_signature()
+            self.prefix.writeline(f'extern "C" {signature};')
+
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel = set(self.src_to_kernel.values()) - set(
+            self.initialized_kernels.keys()
+        )
         declare_kernel.update(
             entry[0] for entry in self.user_defined_kernel_cache.values()
         )
@@ -683,6 +696,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.prefix.writeline(
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
+        for name, kernel in self.initialized_kernels.items():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            kernel_ptr = f"(*{name})"
+            signature = kernel.get_signature().replace(name, kernel_ptr)
+            self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
@@ -1275,7 +1295,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            if hasattr(extern_kernel, "outputs"):
+            if getattr(extern_kernel, "outputs", None):
                 # ir.ExternKernelAlloc may have outputs if it returns a tuple
                 self.generate_c_shim_fallback_kernel(extern_kernel, args)
             else:
@@ -1960,7 +1980,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline("}")
 
     def generate_extern_kernel_args_decl_if_needed(
-        self, op_overload, raw_args, output_args
+        self,
+        op_overload,
+        raw_args,
+        output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -2048,13 +2072,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type):
+        def fill_output_arg(arg, return_type, is_mutated_output: bool):
             if isinstance(return_type, torch.TensorType):
-                self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
-                )
-                self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
+                if not is_mutated_output:
+                    self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
+                    )
+                    self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
@@ -2078,13 +2103,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg in output_args:
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
             assert output_arg is not None, "Optional return types are not yet supported"
             if isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
-                    fill_output_arg(out, torch.TensorType.get())
+                    fill_output_arg(
+                        out,
+                        torch.TensorType.get(),
+                        isinstance(raw_output_arg, ir.MutationOutput),
+                    )
             else:
-                fill_output_arg(output_arg, torch.TensorType.get())
+                fill_output_arg(
+                    output_arg,
+                    torch.TensorType.get(),
+                    isinstance(raw_output_arg, ir.MutationOutput),
+                )
 
         return new_tensor_args, new_int_args
 
@@ -2106,32 +2139,37 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
+            elif isinstance(out, ir.MutationOutput):
+                mutated_buf_names = out.get_mutation_names()
+                assert (
+                    isinstance(mutated_buf_names, list) and len(mutated_buf_names) == 1
+                ), "Expect only one mutated buffer in MutationOutput"
+                return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
             else:
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = None
-        if config.abi_compatible:
-            if outputs is None:
-                # outputs is not specified, the default is to write to buf_name
-                output_args = [buf_name]
-            else:
-                output_args = extract_output_name(outputs)
-                if isinstance(output_args, str):
-                    output_args = [output_args]
+        if outputs is None:
+            # outputs is not specified, the default is to write to buf_name
+            output_args = [buf_name]
+        else:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
-            assert outputs is not None
+            assert output_args is not None
 
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
         else:
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
@@ -2145,6 +2183,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
@@ -2288,6 +2327,7 @@ if (custom_op_wrapper.get() == NULL) {
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
@@ -2351,11 +2391,19 @@ if (py_{buf_name}.get() == NULL) {{
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
-                if output_arg is not None
-            ]
+            if raw_outputs:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                    if output_arg is not None
+                    and not isinstance(raw_output_arg, ir.MutationOutput)
+                ]
+            else:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg in output_args  # type: ignore[arg-type]
+                    if output_arg is not None
+                ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines
             )
@@ -2367,12 +2415,16 @@ if (py_{buf_name}.get() == NULL) {{
         op_overload,
         raw_args,  # contains both args and flatten kwargs
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,
             int_call_args,
         ) = self.generate_extern_kernel_args_decl_if_needed(
-            op_overload, raw_args, output_args
+            op_overload,
+            raw_args,
+            output_args,
+            raw_outputs,
         )
 
         tensor_call_args_str = ", ".join(tensor_call_args)
@@ -2416,9 +2468,7 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(type_, torch.NumberType):
             if isinstance(val, bool):
                 return "int32_t"
-            elif isinstance(val, int):
-                return "int64_t"
-            elif isinstance(val, float):
+            elif isinstance(val, (int, float)):
                 return "double"
             elif val is None:
                 # This could happen when val is an optional value

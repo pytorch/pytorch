@@ -186,7 +186,6 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
   return is_contiguous() | compute_non_overlapping_and_dense();
 }
 
-// NOLINTNEXTLINE(performance-unnecessary-value-param)
 void SymbolicShapeMeta::set_numel(SymInt val) const {
   std::scoped_lock lock(mutables_);
   if (has_numel()) {
