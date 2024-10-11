@@ -549,6 +549,25 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     return state
 
 
+def _verify_managed_params(module: nn.Module, params: List[nn.Parameter]) -> None:
+    """
+    Verify if the parameters are accepted by FSDP. The only restriction now
+    is that the parameter cannot be a scalar tensor (param.shape == []).
+    """
+    for param in params:
+        if len(param.shape) == 0:
+            param_name = ""
+            for name, param_ in module.named_parameters():
+                if param is param_:
+                    param_name = name
+                    break
+            assert param_name
+            raise ValueError(
+                "FSDP doesn't support salar parameters. "
+                f"Change {param_name} to a 1D tensor with numel equal to 1."
+            )
+
+
 @no_type_check
 def _init_param_handle_from_module(
     state: _FSDPState,
@@ -605,6 +624,7 @@ def _init_param_handle_from_module(
     )
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
+    _verify_managed_params(fully_sharded_module, managed_params)
     if sync_module_states:
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group

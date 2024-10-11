@@ -95,7 +95,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 
 struct cublasCommonArgs {
   cublasCommonArgs(const Tensor& mat1, const Tensor& mat2, Tensor& c) {
-    bool transpose_result, transpose_mat1, transpose_mat2;
+    bool transpose_result = false, transpose_mat1 = false, transpose_mat2 = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
     matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
@@ -180,12 +180,6 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
 #ifdef USE_ROCM
-    // if we enable tunable op, it'll take priority over just hipblaslt (heuristics)
-    // note the current tunable op is not the hipblaslt path (gemm_and_bias)
-    auto tuning_ctx = at::cuda::tunable::getTuningContext();
-    if (tuning_ctx->IsTunableOpEnabled()) {
-      return true;
-    }
     // allow both CUDA and HIP env var names for ROCm builds
     // also, current default for ROCm builds is disable by default
     if (env_value == nullptr) {
@@ -219,6 +213,46 @@ static bool isSupportedHipLtROCmArch(int index) {
 }
 #endif
 
+template <typename scalar_t>
+static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+  bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+  bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+  at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+  params.transa = args.transa;
+  params.transb = args.transb;
+  params.m = args.m;
+  params.n = args.n;
+  params.k = args.k;
+  params.alpha = alpha.to<at::opmath_type<scalar_t>>();
+  params.a = args.mata->const_data_ptr<scalar_t>();
+  params.lda = args.lda;
+  params.b = args.matb->const_data_ptr<scalar_t>();
+  params.ldb = args.ldb;
+  params.c = args.result->data_ptr<scalar_t>();
+  params.ldc = args.result_ld;
+  params.bias = bias;
+  params.activation = activation;
+  if (transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else {
+    TORCH_CHECK(false, "unreachable");
+  }
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -229,6 +263,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
   )
 
+  // NOLINTNEXTLINE(*c-array*)
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
 
@@ -346,6 +381,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+              activation_to_gemm_and_blas_arg(activation));
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -364,7 +408,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_to_gemm_and_blas_arg(activation)
           );
-        });
+        }});
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -382,6 +426,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          launchTunableGemmAndBias<scalar_t>(
+              args,
+              alpha,
+              self.const_data_ptr<scalar_t>(),
+              activation_epilogue);
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -398,7 +451,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_epilogue
           );
-        });
+        }});
 #endif
   } else
   {
@@ -431,9 +484,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         });
     switch (activation) {
       case Activation::RELU:
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         at::relu_(const_cast<Tensor&>(*args.result));
         break;
       case Activation::GELU:
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
         break;
       default: break;
@@ -490,8 +545,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   int64_t n = result_sizes[leading_dim];
   int64_t k = (transpose_result ? batch2 : batch1).sizes()[leading_dim];
 
-  int64_t lda, ldb, ldc;
-  bool transpose_batch1, transpose_batch2;
+  int64_t lda = 0, ldb = 0, ldc = 0;
+  bool transpose_batch1 = false, transpose_batch2 = false;
   auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
   auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
 
@@ -541,14 +596,17 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 } // anonymous namespace
 
 TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, use_gelu ? Activation::GELU : Activation::RELU);
 }
 
 TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
 }
 
@@ -713,6 +771,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       result.zero_();
     } else {
       at::mul_out(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
@@ -720,6 +779,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
+                                                            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
@@ -912,9 +972,9 @@ ScalingType get_scaling_type(
 
 } // namespace
 
-// Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
+// Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
-// If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
+// If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
@@ -988,6 +1048,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     auto bias_ = bias.value_or(Tensor());
     auto scale_result_ = scale_result.value_or(Tensor());
 
+    // NOLINTNEXTLINE(*c-array*)
     TensorArg targs[]{{out, "out", 0}, {mat1, "mat1", 1}, {mat2, "mat2", 2},
                       {bias_, "bias", 3}, {scale_a, "scale_a", 4}, {scale_b, "scale_b", 5},
                       {scale_result_, "scale_result", 6}};
@@ -1015,9 +1076,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-
-  // Some scaled_gemms require an amax to populate lets create one here
-  Tensor amax = at::empty({0}, mat1.options().dtype(ScalarType::Float));
 
 #ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
@@ -1074,7 +1132,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.c_scale_ptr = scale_result ? scale_result->data_ptr() : nullptr;
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
-      params.amax_ptr = amax.data_ptr();
       params.use_fast_accum = use_fast_accum;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
@@ -1098,11 +1155,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-  // hipBlasLT requires scaleD to be set to something in order to use AMAX
-    auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
-    auto dummy_scale = at::ones(1, dummy_options);
-#endif
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1120,14 +1172,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-        scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
-#else
         scale_result ? scale_result->data_ptr() : nullptr,
-#endif
         args.result_ld,
         out_dtype_,
-        amax.data_ptr(),
         use_fast_accum);
   }
 
