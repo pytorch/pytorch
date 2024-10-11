@@ -278,7 +278,7 @@ def get_version_detail(version: str) -> Tuple[int, int]:
 
 
 def align_trace_from_beginning(
-    entries: Dict[int, List[Dict[str, Any]]]
+    entries: Dict[int, List[Dict[str, Any]]],
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
     Align the trace entries by record ID for entries.

@@ -12,6 +12,7 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -580,6 +581,23 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         run_checks(setups_and_oplists, skips, BUILTIN_TO_TENSOR_FN_MAP)
         run_checks(rsetups_and_oplists, rskips, BUILTIN_TO_TENSOR_RFN_MAP)
+
+    @requires_cuda
+    def test_flex_attention(self):
+        import torch
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        torch.set_default_device("cuda")
+
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        prefix_lengths = torch.arange(8)
+
+        def prefix_lm(b, h, q, kv):
+            return prefix_lengths[b] >= kv
+
+        # This runs in fullgraph already
+        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
 
 
 if __name__ == "__main__":
