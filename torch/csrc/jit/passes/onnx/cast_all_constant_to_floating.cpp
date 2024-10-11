@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
 }
@@ -31,8 +30,7 @@ void CastAllConstantToFloating(Block* block) {
       auto val_type = TensorType::create(val);
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
           dtype != at::ScalarType::Half) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int to_type;
+        int to_type = 0;
         switch (val.scalar_type()) {
           case at::ScalarType::Byte:
           case at::ScalarType::Char:
@@ -71,5 +69,4 @@ void CastAllConstantToFloating(Block* block) {
 void CastAllConstantToFloating(const std::shared_ptr<Graph>& graph) {
   CastAllConstantToFloating(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
