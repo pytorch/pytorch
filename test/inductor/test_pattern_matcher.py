@@ -1464,6 +1464,18 @@ class TestPatternMatcher(TestCase):
             expect=False,
         )
 
+        @torch.library.custom_op("vllm::fused_rms_norm_quant_static", mutates_args=[])
+        def fused_rms_norm_quant_static(out: torch.Tensor, input: torch.Tensor) -> None:
+            pass
+
+        check(
+            "call_function",
+            torch.ops.vllm.fused_rms_norm_quant_static,
+            (t, t),
+            {},
+            expect=False,
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
