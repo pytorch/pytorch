@@ -41,7 +41,6 @@ static void poison_fork() {
 
 PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
 #ifdef XPU_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
   return THPUtils_packString(flags);
