@@ -39,23 +39,23 @@ __host__ __device__ __forceinline__ int imax(int a, int b) {
 namespace {
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel1d(
-    PackedTensorAccessor64<scalar_t, 3> input,
+    PackedTensorAccessor64<const scalar_t, 3> input,
     PackedTensorAccessor64<scalar_t, 3> output,
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= output.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % output.size(2);
+  const auto outputPointX = outputPointId % output.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), input.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = input[batch][plane][inputPointX];
   output[batch][plane][outputPointX] = valueToCopy;
@@ -64,22 +64,22 @@ __global__ void replication_pad_forward_kernel1d(
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
     PackedTensorAccessor64<scalar_t, 3> gradInput,
-    PackedTensorAccessor64<scalar_t, 3> gradOutput,
+    PackedTensorAccessor64<const scalar_t, 3> gradOutput,
     const int padL,
     const int y_shift,
     const int z_shift) {
-  const int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  const int plane = blockIdx.y + y_shift;
-  const int batch = blockIdx.z + z_shift;
+  const int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2)) {
     return;
   }
-  const int outputPointX = outputPointId % gradOutput.size(2);
+  const auto outputPointX = outputPointId % gradOutput.size(2);
 
   const int iStartX = imax(0, -padL);
   const int oStartX = imax(0, padL);
 
-  const int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
+  const auto inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
   gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointX], valueToCopy);
@@ -87,7 +87,7 @@ __global__ void replication_pad_backward_kernel(
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel2d(
-    PackedTensorAccessor64<scalar_t, 4> input,
+    PackedTensorAccessor64<const scalar_t, 4> input,
     PackedTensorAccessor64<scalar_t, 4> output,
     const int padT,
     const int padL,
@@ -117,7 +117,7 @@ __global__ void replication_pad_forward_kernel2d(
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
     PackedTensorAccessor64<scalar_t, 4> gradInput,
-    PackedTensorAccessor64<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<const scalar_t, 4> gradOutput,
     const int padT,
     const int padL,
     const int y_shift,
@@ -145,7 +145,7 @@ __global__ void replication_pad_backward_kernel(
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel3d(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     const int pfront,
     const int ptop,
@@ -185,7 +185,7 @@ __global__ void replication_pad_forward_kernel3d(
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
     PackedTensorAccessor64<scalar_t, 5> gradInput,
-    PackedTensorAccessor64<scalar_t, 5> gradOutput,
+    PackedTensorAccessor64<const scalar_t, 5> gradOutput,
     const int pfront,
     const int ptop,
     const int pleft,
@@ -278,7 +278,7 @@ void replication_pad2d_backward_out_cuda_template(
           gradOutput_ = gradOutput.unsqueeze(0);
         }
         auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
-        auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
+        auto devGradOutput = gradOutput_.packed_accessor64<const scalar_t, 4>();
 
         int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
         int64_t size1 = devGradOutput.size(1);
@@ -392,7 +392,7 @@ void replication_pad3d_backward_out_cuda_template(
         gradOutput_ = gradOutput.unsqueeze(0);
       }
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 5>();
-      auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 5>();
+      auto devGradOutput = gradOutput_.packed_accessor64<const scalar_t, 5>();
 
       const int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3) * devGradOutput.size(4);
       const int64_t size1 = devGradOutput.size(1);
@@ -419,8 +419,8 @@ void replication_pad3d_backward_out_cuda_template(
 TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
 
   int64_t padL = paddingSize[0];
   int64_t padR = paddingSize[1];
@@ -446,7 +446,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
         output_ = output.unsqueeze(0);
       }
 
-      auto devInput = input_.packed_accessor64<scalar_t, 3>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 3>();
       auto devOutput = output_.packed_accessor64<scalar_t, 3>();
 
       int64_t outputPlaneSize = devOutput.size(2);
@@ -480,19 +480,19 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("replication_pad1d_backward_cuda");
 
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
-      "input tensor must fit into 32-bit index math");
-  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
-      "output gradient tensor must fit into 32-bit index math");
+  TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
+  TORCH_CHECK(gradOutput.numel() < std::numeric_limits<int64_t>::max(),
+      "replication_pad1d only supports output tensors with less than 2^63 - 1 elements");
 
-  const int padL = paddingSize[0];
-  int dimw = 1;
+  const int64_t padL = paddingSize[0];
+  int64_t dimw = 1;
 
-  int numInputDims = input.ndimension();
+  int64_t numInputDims = input.ndimension();
   if (numInputDims == 3) {
     dimw++;
   }
-  int iwidth = input.size(dimw);
+  int64_t iwidth = input.size(dimw);
 
   if (gradInput.numel() == 0) {
     return;
@@ -509,7 +509,7 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
         gradOutput_ = gradOutput.unsqueeze(0);
       }
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 3>();
-      auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 3>();
+      auto devGradOutput = gradOutput_.packed_accessor64<const scalar_t, 3>();
 
       int64_t outputPlaneSize = devGradOutput.size(2);
       int64_t size1 = devGradOutput.size(1);
@@ -551,7 +551,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
         input_ = input.unsqueeze(0);
         output_ = output.unsqueeze(0);
       }
-      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 4>();
       auto devOutput = output_.packed_accessor64<scalar_t, 4>();
       int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3);
       int64_t size1 = devOutput.size(1);
@@ -644,7 +644,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
         output_ = output.unsqueeze(0);
       }
 
-      auto devInput = input_.packed_accessor64<scalar_t, 5>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 5>();
       auto devOutput = output_.packed_accessor64<scalar_t, 5>();
 
       const int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);

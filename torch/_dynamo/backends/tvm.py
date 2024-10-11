@@ -1,20 +1,33 @@
+# mypy: ignore-errors
+
 import functools
 import importlib
 import logging
 import os
+import sys
 import tempfile
+from types import MappingProxyType
+from typing import Optional
 
 import torch
-from .common import device_from_inputs, fake_tensor_unsupported
 
+from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
+
 
 log = logging.getLogger(__name__)
 
 
 @register_backend
 @fake_tensor_unsupported
-def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
+def tvm(
+    gm,
+    example_inputs,
+    *,
+    options: Optional[MappingProxyType] = MappingProxyType(
+        {"scheduler": None, "trials": 20000, "opt_level": 3}
+    ),
+):
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -34,8 +47,12 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
         dev = tvm.cpu(0)
         target = tvm.target.Target(llvm_target())
 
+    scheduler = options.get("scheduler", None)
     if scheduler is None:
         scheduler = os.environ.get("TVM_SCHEDULER", None)
+
+    trials = options.get("trials", 20000)
+    opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
         from tvm import auto_scheduler
@@ -68,7 +85,7 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
 
         with auto_scheduler.ApplyHistoryBest(log_file):
             with tvm.transform.PassContext(
-                opt_level=3, config={"relay.backend.use_auto_scheduler": True}
+                opt_level=opt_level, config={"relay.backend.use_auto_scheduler": True}
             ):
                 lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
@@ -83,24 +100,27 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
+            assert trials > 0
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
                 work_dir=work_dir,
-                max_trials_global=20000,
+                max_trials_global=trials,
                 num_trials_per_iter=64,
                 params=params,
                 strategy="evolutionary",
+                opt_level=opt_level,
             )
             lib = ms.relay_integration.compile_relay(
                 database=database,
                 mod=mod,
                 target=target,
                 params=params,
+                opt_level=opt_level,
             )
     elif scheduler == "default" or not scheduler:
         # no autotuning
-        with tvm.transform.PassContext(opt_level=10):
+        with tvm.transform.PassContext(opt_level=opt_level):
             lib = relay.build(mod, target=target, params=params)
     else:
         raise NotImplementedError(
@@ -165,6 +185,10 @@ def has_tvm():
 
 @functools.lru_cache(None)
 def llvm_target():
-    if "avx512" in open("/proc/cpuinfo").read():
-        return "llvm -mcpu=skylake-avx512"
-    return "llvm -mcpu=core-avx2"
+    if sys.platform == "linux":
+        cpuinfo = open("/proc/cpuinfo").read()
+        if "avx512" in cpuinfo:
+            return "llvm -mcpu=skylake-avx512"
+        elif "avx2" in cpuinfo:
+            return "llvm -mcpu=core-avx2"
+    return "llvm"

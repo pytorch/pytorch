@@ -9,6 +9,10 @@ inputs:
   use-gha:
     description: If set to any value, use GHA to download the artifact. Otherwise use s3.
     required: false
+  s3-bucket:
+    description: S3 bucket to download builds
+    required: false
+    default: "gha-artifacts"
 
 runs:
   using: composite
@@ -18,9 +22,10 @@ runs:
       uses: seemethere/download-artifact-s3@v4
       with:
         name: ${{ inputs.name }}
+        s3-bucket: ${{ inputs.s3-bucket }}
 
     - name: Download PyTorch Build Artifacts from GHA
-      if: inputs.use-gha
+      if: ${{ inputs.use-gha }}
       uses: actions/download-artifact@v3
       with:
         name: ${{ inputs.name }}
@@ -28,6 +33,10 @@ runs:
     - name: Unzip artifacts
       shell: bash
       run: unzip -o artifacts.zip
+
+    - name: Remove artifacts.zip
+      shell: bash
+      run: rm artifacts.zip
 
     - name: Output disk space left
       shell: bash

@@ -138,7 +138,7 @@ class ProcessedNodeInputs {
 #pragma pack(push, 2)
   union Repr {
     C10_NODISCARD bool is_inline() const {
-      uint8_t tag;
+      uint8_t tag = 0;
       // Use of reinterpret_cast to pointer to char or unsigned char
       // is defined behavior; see
       // https://en.cppreference.com/w/cpp/language/reinterpret_cast .
@@ -215,8 +215,8 @@ class ProcessedNodeInputs {
 
     struct InlineRepr {
       uint8_t tag = 0x1;
-      uint8_t size;
-      uint16_t inputs[kMaxInlineInputs];
+      uint8_t size{};
+      uint16_t inputs[kMaxInlineInputs]{};
     };
 
     using OutlineRepr = HeapArrayPtr;

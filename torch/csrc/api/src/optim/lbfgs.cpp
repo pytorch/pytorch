@@ -67,8 +67,8 @@ bool if_container_equal(T lhs, T rhs) {
 }
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
-  auto isNull = [](const c10::optional<std::vector<Tensor>>& val) {
-    return val == c10::nullopt;
+  auto isNull = [](const std::optional<std::vector<Tensor>>& val) {
+    return val == std::nullopt;
   };
   return (lhs.func_evals() == rhs.func_evals()) &&
       (lhs.n_iter() == rhs.n_iter()) && (lhs.t() == rhs.t()) &&
@@ -97,7 +97,7 @@ void LBFGSParamState::serialize(
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(old_stps);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(ro);
   // Python version only serializes state vars if explicitly defined
-  if (al() != c10::nullopt) {
+  if (al() != std::nullopt) {
     _TORCH_OPTIM_SERIALIZE_TORCH_ARG(al);
   }
 }
@@ -131,7 +131,7 @@ Tensor LBFGS::_gather_flat_grad() {
 }
 
 int64_t LBFGS::_numel() {
-  if (_numel_cache == c10::nullopt) {
+  if (_numel_cache == std::nullopt) {
     auto res = 0;
     for (const auto& p : param_groups_.at(0).params()) {
       res += p.numel();
@@ -176,8 +176,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
     double t,
     const Tensor& d) {
   _add_grad(t, d);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double loss;
+  double loss = 0;
   {
     torch::AutoGradMode enable_grad(true);
     loss = closure().item<double>();
@@ -194,12 +193,12 @@ static double _cubic_interpolate(
     double x2,
     double f2,
     double g2,
-    c10::optional<std::tuple<double, double>> bounds = c10::nullopt) {
+    std::optional<std::tuple<double, double>> bounds = std::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double xmin_bound, xmax_bound;
-  if (bounds != c10::nullopt) {
+  if (bounds != std::nullopt) {
     std::tie(xmin_bound, xmax_bound) = *bounds;
   } else {
     std::tie(xmin_bound, xmax_bound) =
@@ -215,12 +214,9 @@ static double _cubic_interpolate(
 
   auto d1 = (g1 + g2) - (3 * (f1 - f2) / (x1 - x2));
   auto d2_square = std::pow(d1, 2) - g1 * g2;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double d2;
   if (d2_square >= 0) {
-    d2 = std::sqrt(d2_square);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double min_pos;
+    auto d2 = std::sqrt(d2_square);
+    double min_pos = 0;
     if (x1 <= x2) {
       min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
     } else {
@@ -254,10 +250,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   auto d_norm = val(d.abs().max());
   g = g.clone(at::MemoryFormat::Contiguous);
   // evaluate objective and gradient using initial step
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double f_new;
-  Tensor g_new;
-  std::tie(f_new, g_new) = obj_func(x, t, d);
+  auto [f_new, g_new] = obj_func(x, t, d);
   int64_t ls_func_evals = 1;
   auto gtd_new = g_new.dot(d);
 
@@ -330,9 +323,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   // exact point satisfying the criteria
   bool insuf_progress = false;
   // find high and low points in bracket
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t low_pos, high_pos;
-  std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1]
+  auto [low_pos, high_pos] = bracket_f[0] <= bracket_f[1]
       ? std::make_tuple(0, 1)
       : std::make_tuple(1, 0);
   while (!done && (ls_iter < max_ls)) {
@@ -514,7 +505,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // multiplied by the gradient
       int64_t num_old = static_cast<int64_t>(old_dirs.size());
 
-      if (state.al() == c10::nullopt) {
+      if (state.al() == std::nullopt) {
         state.al(std::vector<Tensor>(history_size));
       }
       auto& al = state.al();
@@ -562,7 +553,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
     // optional line search: user function
     auto ls_func_evals = 0;
-    if (line_search_fn != c10::nullopt) {
+    if (line_search_fn != std::nullopt) {
       TORCH_CHECK(
           *line_search_fn == "strong_wolfe",
           "only 'strong_wolfe' is supported");
@@ -632,7 +623,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     TORCH_WARN(
         "Your serialized LBFGS optimizer is still using the old serialization format. "
         "The func_evals and n_iter value in state will be set to 0, ro will be set to an empty deque "
-        "and al will be set to c10::nullopt because the old LBFGS optimizer didn't save these values."
+        "and al will be set to std::nullopt because the old LBFGS optimizer didn't save these values."
         "You should re-save your LBFGS optimizer to use the new serialization format.");
     Tensor d, t, H_diag, prev_flat_grad, prev_loss;
     std::deque<Tensor> old_dirs, old_stps;

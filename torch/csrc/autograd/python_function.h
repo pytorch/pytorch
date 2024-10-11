@@ -10,10 +10,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
-#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -27,7 +26,17 @@ namespace torch::autograd {
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
+  PyObject* to_py_args(
+      const variable_list& inputs,
+      at::OptionalDeviceGuard* device_guard);
+  variable_list to_variable_list(
+      const PyObject* r,
+      const std::vector<bool>& is_variable_input);
+
   variable_list apply(variable_list&& inputs) override;
+  variable_list defer_to_dynamo(
+      variable_list&& inputs,
+      std::optional<PyObject*> compiler);
 
   void release_variables() override;
   std::string name() const override;
@@ -38,9 +47,19 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  bool compiled_autograd_should_lift() const;
+
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
+  // The AutogradCompilerCall::hooks idx corresponding to this node's backward
+  std::optional<int> _backward_idx;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's
+  // backward_state
+  std::optional<int> _backward_state_idx;
+
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
@@ -75,7 +94,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 struct THPFunction {
   PyObject_HEAD
 
-      PyObject* needs_input_grad;
+  PyObject* needs_input_grad;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were
@@ -105,6 +124,7 @@ struct THPFunction {
   // This is enabled by compiled autograd as a way to signal to AotAutograd it
   // should call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
+  PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;

@@ -13,8 +13,7 @@
 
 #include <iostream>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
@@ -51,7 +50,7 @@ void TensorWrapper::refreshMetadata() {
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
@@ -82,6 +81,11 @@ static Tensor unsafeMakeTensorWrapper(
   auto result = at::detail::make_tensor<TensorWrapper>(
       key_set, tensor, level, life_handle, is_immutable);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
+
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    result.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+
   return result;
 }
 
@@ -204,5 +208,4 @@ TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 
-}
-} // namespace at
+} // namespace at::functorch

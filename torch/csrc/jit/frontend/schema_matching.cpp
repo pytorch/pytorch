@@ -3,7 +3,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
@@ -13,6 +12,7 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <optional>
 
 namespace torch::jit {
 
@@ -143,6 +143,12 @@ Value* tryConvertToType(
       } else if (concrete_int) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }
+    } else if (*value->type() == *BoolType::get()) {
+      if (concrete_float) {
+        value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_int || concrete_number) {
+        value = graph.insert(aten::Int, {value}, {}, loc);
+      }
     }
 
     // Convert strings to device
@@ -239,7 +245,7 @@ static Value* tryMatchArgument(
   return value;
 }
 
-c10::optional<size_t> findInputWithName(
+std::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs,
     bool is_aten) {
@@ -253,7 +259,7 @@ c10::optional<size_t> findInputWithName(
       return i;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 /// Creates a list with the provided values if each value's type can be matched
@@ -346,17 +352,17 @@ bool isBlockListedSchema(const FunctionSchema& schema) {
   return false;
 }
 
-static c10::optional<MatchedSchema> tryMatchSchema(
+static std::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    c10::optional<NamedValue> self,
+    std::optional<NamedValue> self,
     std::ostream* failure_messages,
     bool allow_conversions) {
   if (isBlockListedSchema(schema)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   auto err = [&]() -> std::ostream& {
@@ -381,10 +387,10 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   size_t used_args = 0;
   for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
-    c10::optional<NamedValue> actual_named_value;
+    std::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
       actual_named_value = self;
-      self = c10::nullopt;
+      self = std::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // Try to convert all the remaining non-kwarg arguments (used_args) to a
       // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
@@ -409,7 +415,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
               allow_conversions,
               type_env);
           if (!list) {
-            return c10::nullopt;
+            return std::nullopt;
           }
           used_args = args.size();
           positional_inputs.push_back(list);
@@ -429,7 +435,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
           err() << "Argument " << nv.name()
                 << " specified twice in schema, submit a bug report!\n";
         }
-        return c10::nullopt;
+        return std::nullopt;
       }
       used_kwarg[*kwarg_idx] = true;
       actual_named_value = nv;
@@ -442,7 +448,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
         err() << "Argument " << schema.arguments()[schema_i].name()
               << " not provided.\n";
       }
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     // Make sure the actual_named_value found matches the type of arg
@@ -456,16 +462,16 @@ static c10::optional<MatchedSchema> tryMatchSchema(
         allow_conversions,
         type_env);
     if (!positional) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
-  if (self != c10::nullopt) {
+  if (self != std::nullopt) {
     if (failure_messages) {
       err() << "Provided self argument not used in schema.\n";
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   if (schema.is_vararg()) {
@@ -480,7 +486,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
       err() << "Expected at most " << used_args << " arguments "
             << "but found " << args.size() << " positional arguments.\n";
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
   // check for unused kwargs
   for (const auto i : c10::irange(kwargs.size())) {
@@ -493,7 +499,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
           err() << "Keyword argument " << nv.name() << " specified twice.\n";
         }
       }
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -508,9 +514,9 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   // Therefore, either all or none returns has field names.
   bool return_has_field_names =
       std::all_of(returns.begin(), returns.end(), [&](const Argument& r) {
-        return r.name().length() > 0;
+        return !r.name().empty();
       });
-  c10::OptNameList return_field_names = c10::nullopt;
+  c10::OptNameList return_field_names = std::nullopt;
   if (return_has_field_names) {
     return_field_names =
         fmap(returns, [&](const Argument& r) { return r.name(); });
@@ -532,7 +538,7 @@ MatchedSchema matchSchema(
     Graph& graph,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self) {
+    const std::optional<NamedValue>& self) {
   std::stringstream failure_messages;
   if (auto result = tryMatchSchema(
           schema,
@@ -545,7 +551,7 @@ MatchedSchema matchSchema(
           /*allow_conversions=*/true)) {
     return *result;
   }
-  throw ErrorReport(loc) << failure_messages.str();
+  throw(ErrorReport(loc) << failure_messages.str());
 }
 
 static std::string prefixLine(
@@ -568,7 +574,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
     Graph& graph,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self,
+    const std::optional<NamedValue>& self,
     bool render_errors) {
   TORCH_INTERNAL_ASSERT(!schemas.empty());
   // if there is only one schema, we do not need to try without conversions
@@ -604,11 +610,12 @@ std::pair<size_t, MatchedSchema> matchSchemas(
         schemas, loc, graph, args, kwargs, self, /*render_errors=*/true);
   }
 
-  throw ErrorReport(loc) << "Arguments for call are not valid.\n"
-                         << "The following variants are available:\n"
-                         << prefixLine(failure_messages.str(), "  ")
-                         << "\nThe original call is";
-  throw ErrorReport(loc) << failure_messages.str();
+  throw(
+      ErrorReport(loc) << "Arguments for call are not valid.\n"
+                       << "The following variants are available:\n"
+                       << prefixLine(failure_messages.str(), "  ")
+                       << "\nThe original call is");
+  throw(ErrorReport(loc) << failure_messages.str());
 }
 
 // pack outputs of a function following python rules. If there is a single value
@@ -625,7 +632,7 @@ static Value* packOutputs(
   if (field_names) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
     named_tuple =
-        TupleType::createNamed(c10::nullopt, field_names.value(), types);
+        TupleType::createNamed(std::nullopt, field_names.value(), types);
   }
   return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
@@ -637,7 +644,7 @@ static Value* emitBuiltinNode(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    c10::optional<size_t> version) {
+    std::optional<size_t> version) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
                ->setSourceRange(loc);
 
@@ -673,14 +680,13 @@ Value* emitBuiltinCall(
     Symbol name,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self) {
+    const std::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   // first let's set the graph's version
   auto graph_version = graph.get_op_version();
 
-  std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   // we append them later to schemas because
   // parseSchema returns rvalue which can not
@@ -751,7 +757,7 @@ Value* emitBuiltinCall(
       }
       error << "\nThe original call is";
     }
-    throw error;
+    throw ErrorReport(error);
   }
 
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);

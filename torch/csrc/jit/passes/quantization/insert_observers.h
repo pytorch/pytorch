@@ -18,7 +18,7 @@ namespace torch {
 namespace jit {
 
 using QConfig = std::tuple<Module, Module>;
-using QConfigDict = std::unordered_map<std::string, c10::optional<QConfig>>;
+using QConfigDict = std::unordered_map<std::string, std::optional<QConfig>>;
 
 /** \brief Insert observer module and observer function call for
  *  the Tensors that needs to be observed.

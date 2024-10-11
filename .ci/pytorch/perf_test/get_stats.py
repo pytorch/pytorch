@@ -3,6 +3,7 @@ import sys
 
 import numpy
 
+
 sample_data_list = sys.argv[1:]
 sample_data_list = [float(v.strip()) for v in sample_data_list]
 

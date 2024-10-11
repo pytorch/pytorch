@@ -316,7 +316,7 @@ TEST(TestQTensor, TestArmVectorizedQuantizeDequantize) {
           quantize_val_with_datatype(scale, zero_point, x_values[i]).val_);
       }
       const Tensor r = q.dequantize();
-      const float* r_data = r.data_ptr<float>();
+      const float* r_data = r.const_data_ptr<float>();
       for (const auto i : c10::irange(numel)) {
         ASSERT_FLOAT_EQ(
           r_data[i],

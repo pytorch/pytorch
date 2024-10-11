@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
@@ -66,19 +66,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   policy.store(results, idx);
 }
 
-}}  // namespace at::native
+}  // namespace at::native
 
-// Note:
-// CUDA and ROCm get diverged in this PR:
-//   https://github.com/pytorch/pytorch/pull/32383
-// Because for some reason trying to enable vectorized
-// memory access introduce regression on ROCm.
-
-#if !defined(USE_ROCM)
-  #include <ATen/native/cuda/CUDALoops.cuh>
-#else
-  #include <ATen/native/cuda/ROCmLoops.cuh>
-#endif
+#include <ATen/native/cuda/CUDALoops.cuh>
 
 namespace at:: native {
 
@@ -214,7 +204,7 @@ void opmath_symmetric_gpu_kernel_with_scalars(TensorIteratorBase& iter, const fu
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
-  static_assert(std::is_same<opmath_arg_t, typename traits::template arg<1>::type>::value,
+  static_assert(std::is_same_v<opmath_arg_t, typename traits::template arg<1>::type>,
                 "f is not symmetric");
 
   OptionalDeviceGuard device_guard;

@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -54,47 +50,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,52
+detectron2_fasterrcnn_r_101_c4,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,52
+detectron2_fasterrcnn_r_101_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,56
+detectron2_fasterrcnn_r_101_fpn,pass,46
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,52
+detectron2_fasterrcnn_r_50_c4,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,52
+detectron2_fasterrcnn_r_50_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,56
+detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,44
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,67
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,74
+detectron2_maskrcnn_r_101_fpn,pass,63
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,67
+detectron2_maskrcnn_r_50_c4,pass,57
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,74
+detectron2_maskrcnn_r_50_fpn,pass,63
 
 
 
@@ -134,6 +130,18 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
+hf_BigBird,pass,13
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -146,7 +154,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,5
+
+
+
+hf_T5,pass,0
 
 
 
@@ -158,7 +174,7 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_clip,eager_fail_to_run,0
+hf_distil_whisper,pass,0
 
 
 
@@ -167,6 +183,10 @@ lennard_jones,pass,0
 
 
 llama,pass,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -182,7 +202,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
+mobilenet_v2_quantized_qat,pass,2
 
 
 
@@ -190,7 +210,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,model_fail_to_load,0
+moondream,pass,0
 
 
 
@@ -199,10 +219,6 @@ nvidia_deeprecommender,pass,0
 
 
 opacus_cifar10,pass,0
-
-
-
-phi_1_5,pass,0
 
 
 
@@ -250,7 +266,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
+resnet50_quantized_qat,pass,2
 
 
 
@@ -326,4 +342,4 @@ vision_maskrcnn,pass,29
 
 
 
-yolov3,pass,2
+yolov3,pass,0

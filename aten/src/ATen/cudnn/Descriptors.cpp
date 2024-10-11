@@ -6,7 +6,7 @@
 #include <iostream>
 #include <sstream>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -19,14 +19,12 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
   } else if (scalar_type == at::kDouble) {
     return CUDNN_DATA_DOUBLE;
   }
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
     else if (scalar_type == at::kBFloat16) {
     return CUDNN_DATA_BFLOAT16;
   } else if (scalar_type == at::kQInt8) {
     return CUDNN_DATA_INT8;
   }
-#endif
-  throw std::runtime_error("TensorDescriptor only supports double, float and half tensors");
+  TORCH_CHECK(false, "TensorDescriptor does not support ", scalar_type);
 }
 
 } // anonymous namespace
@@ -57,11 +55,7 @@ void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArr
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
   size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
-#define _STR(X) #X
-#define STR(X) _STR(X)
-    throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
-#undef _STR
-#undef STR
+    TORCH_CHECK(false, "cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
   int size[CUDNN_DIM_MAX];
   int stride[CUDNN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
@@ -83,22 +77,18 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
       return "CUDNN_DATA_DOUBLE";
     case CUDNN_DATA_HALF:
       return "CUDNN_DATA_HALF";
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
     case CUDNN_DATA_BFLOAT16:
       return "CUDNN_DATA_BFLOAT16";
-#endif
     case CUDNN_DATA_INT8:
       return "CUDNN_DATA_INT8";
     case CUDNN_DATA_INT32:
       return "CUDNN_DATA_INT32";
     case CUDNN_DATA_INT8x4:
       return "CUDNN_DATA_INT8x4";
-#if CUDNN_VERSION >= 7100
     case CUDNN_DATA_UINT8:
       return "CUDNN_DATA_UINT8";
     case CUDNN_DATA_UINT8x4:
       return "CUDNN_DATA_UINT8x4";
-#endif
     default:
       std::ostringstream oss;
       oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
@@ -108,7 +98,7 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims;
+  int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
   int strideA[CUDNN_DIM_MAX];
   cudnnDataType_t dtype;
@@ -134,11 +124,7 @@ void TensorDescriptor::print() { std::cout << *this; }
 void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
-#define _STR(X) #X
-#define STR(X) _STR(X)
-    throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
-#undef _STR
-#undef STR
+  TORCH_CHECK(false, "cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
   // NB: It is possible for this test to be insufficient, because the
   // Tensor passed in to set the filter descriptor may not be the actual
   // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
@@ -187,7 +173,7 @@ std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
   out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims;
+  int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
   cudnnDataType_t dtype;
   cudnnTensorFormat_t tformat;
@@ -206,4 +192,4 @@ std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
 
 void FilterDescriptor::print() { std::cout << *this; }
 
-}}
+}

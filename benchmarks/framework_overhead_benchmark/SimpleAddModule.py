@@ -1,5 +1,6 @@
-import torch
 from utils import NUM_LOOP_ITERS
+
+import torch
 
 
 def add_tensors_loop(x, y):

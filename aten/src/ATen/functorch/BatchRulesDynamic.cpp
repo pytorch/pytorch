@@ -15,7 +15,7 @@
 // errors for them.
 
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace {
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -76,4 +76,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     m.impl("allclose", torch::CppFunction::makeFromBoxedFunction<&unsupportedAllclose>());
 }
 
-}}
+} // namespace at::functorch

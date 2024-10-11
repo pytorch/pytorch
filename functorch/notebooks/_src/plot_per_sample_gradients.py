@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 torch.manual_seed(0)
 
 
@@ -93,6 +94,7 @@ print(per_sample_grads[0].shape)
 # First, let's create a stateless functional version of ``model`` by using
 # ``functorch.make_functional_with_buffers``.
 from functorch import grad, make_functional_with_buffers, vmap
+
 
 fmodel, params, buffers = make_functional_with_buffers(model)
 

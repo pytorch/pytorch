@@ -18,10 +18,8 @@ enum class GridSamplerPadding {Zeros, Border, Reflection};
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
 
-namespace {
-
 // See NOTE [ grid_sampler Native Functions ].
-void check_grid_sampler_common(
+inline void check_grid_sampler_common(
   const TensorBase& input,
   const TensorBase& grid
 ) {
@@ -60,7 +58,7 @@ void check_grid_sampler_common(
 }
 
 // See NOTE [ grid_sampler Native Functions ].
-void check_grid_sampler_2d(
+inline void check_grid_sampler_2d(
   const TensorBase& input,
   const TensorBase& grid
 ) {
@@ -72,7 +70,7 @@ void check_grid_sampler_2d(
 }
 
 // See NOTE [ grid_sampler Native Functions ].
-void check_grid_sampler_3d(
+inline void check_grid_sampler_3d(
   const TensorBase& input,
   const TensorBase& grid,
   int64_t interpolation_mode
@@ -91,7 +89,7 @@ void check_grid_sampler_3d(
 
 // See NOTE [ grid_sampler Native Functions ].
 // cudnn does not support inputs larger than 1024.
-bool cond_cudnn_grid_sampler(
+inline bool cond_cudnn_grid_sampler(
   const TensorBase& input,
   const TensorBase& grid
 ) {
@@ -103,7 +101,5 @@ bool cond_cudnn_grid_sampler(
     input.dim() == 4 &&
     input.sym_size(1) <= 1024);
 }
-
-} // anonymous namespace
 
 } // namespace at::native

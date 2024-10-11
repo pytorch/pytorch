@@ -36,13 +36,13 @@ hicpp-exception-baseclass,
 hicpp-avoid-goto,
 misc-*,
 -misc-const-correctness,
+-misc-include-cleaner,
 -misc-use-anonymous-namespace,
 -misc-unused-parameters,
 -misc-no-recursion,
 -misc-non-private-member-variables-in-classes,
 -misc-confusable-identifiers,
 modernize-*,
--modernize-concat-nested-namespaces,
 -modernize-macro-to-enum,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
@@ -61,6 +61,7 @@ readability-simplify-subscript-expr,
 readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
-AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
+CheckOptions:
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
 ...

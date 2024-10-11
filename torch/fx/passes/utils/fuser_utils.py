@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional as _Optional, Tuple
 
 import torch.fx
 from torch.fx.graph_module import GraphModule
@@ -13,7 +14,7 @@ from torch.fx._compatibility import compatibility
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
-    indegree_map = {node : 0 for node in nodes}
+    indegree_map = dict.fromkeys(nodes, 0)
     candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:
@@ -23,7 +24,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
         if indegree_map[node] == 0:
             candidates.put(node)
 
-    sorted_nodes: NodeList = list()
+    sorted_nodes: NodeList = []
     while not candidates.empty():
         node = candidates.get()
         sorted_nodes.append(node)
@@ -46,7 +47,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     partition_set = set(partition)
 
-    outputs: NodeList = list()
+    outputs: NodeList = []
     for node in partition_set:
         for user_node in node.users:
             if user_node not in partition_set:
@@ -89,9 +90,12 @@ def validate_partition(partition: NodeList) -> bool:
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_as_graphmodule(gm: GraphModule,
-                        nodes: NodeList,
-                        module_name: str) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
+def fuse_as_graphmodule(
+    gm: GraphModule,
+    nodes: NodeList,
+    module_name: str,
+    partition_lookup_table: _Optional[Dict[Node, None]] = None,
+) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
 
     """
     Fuse nodes in graph_module into a GraphModule.
@@ -102,6 +106,8 @@ def fuse_as_graphmodule(gm: GraphModule,
         nodes (List[Node]): list of nodes in `gm` to fuse, where the node must be topologically sorted
 
         module_name: class name for the fused GraphModule
+
+        partition_lookup_table (Optional[Dict[Node, None]]): optional dict of nodes to speed up lookup
 
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
@@ -117,10 +123,14 @@ def fuse_as_graphmodule(gm: GraphModule,
     for node in nodes:
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
+
+    # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
+    if partition_lookup_table is None:
+        partition_lookup_table = dict.fromkeys(nodes)
 
     subgraph = Graph()
 
@@ -134,7 +144,7 @@ def fuse_as_graphmodule(gm: GraphModule,
             # do something here
             pass
 
-        if x in nodes:
+        if x in partition_lookup_table:
             # x is inside subgraph, return the copied node
             # the node should have been copied aleady, as we are copying graph in the topological order
             return node_map[x]
@@ -158,7 +168,7 @@ def fuse_as_graphmodule(gm: GraphModule,
 
     for node in nodes:
         for user_node in node.users:
-            if user_node not in nodes:
+            if user_node not in partition_lookup_table:
                 # external user node, need to expose as an output
                 output_mapping[node] = node_map[node]
 
@@ -205,6 +215,8 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+
+        module_node.meta["val"] = tuple(orig_output.meta.get("val", None) for orig_output in orig_outputs)
     return gm
 
 @compatibility(is_backward_compatible=False)
@@ -216,12 +228,12 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
-    for partition_id, nodes in enumerate(partitions):
-        sorted_nodes = topo_sort(nodes)
+def fuse_by_partitions(gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_") -> GraphModule:
+    for partition_id, partition in enumerate(partitions):
+        sorted_nodes = topo_sort(list(partition))
 
-        submodule_name = "fused_" + str(partition_id)
-        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name)
+        submodule_name = prefix + str(partition_id)
+        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name, partition)
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
 

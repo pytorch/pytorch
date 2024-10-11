@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch._ops import OpOverload, OpOverloadPacket
 

@@ -6,9 +6,7 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/DynamicLayer.h>
 
-#include <utility>
-
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static DispatchKeySet get_all_dynlayer_keyset() {
   // NB: FULL_AFTER does not include the dispatch key
@@ -92,12 +90,12 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t) {
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()),
       [](const Tensor& tensor) {
         auto result = unwrapIfDead(tensor);
         auto* wrapper = maybeGetTensorWrapper(result);
         TORCH_INTERNAL_ASSERT(wrapper == nullptr);
-        auto* batched = maybeGetBatchedImpl(std::move(result));
+        auto* batched = maybeGetBatchedImpl(result);
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });
@@ -129,4 +127,4 @@ void Interpreter::sendToNextInterpreter(const c10::OperatorHandle& op, torch::ji
   INTERPRETER_DISPATCH(key_, SINGLE_ARG(sendToNextInterpreterImpl(op, stack, grad_special_case)));
 }
 
-}}
+} // namespace at::functorch

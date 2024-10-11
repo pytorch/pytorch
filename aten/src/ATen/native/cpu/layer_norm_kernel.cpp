@@ -36,9 +36,9 @@ void LayerNormKernelImplInternal(
     Tensor* mean,
     Tensor* rstd) {
   using Vec = vec::Vectorized<T>;
-  const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
   T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
@@ -51,9 +51,7 @@ void LayerNormKernelImplInternal(
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T mean_val;
-      T rstd_val;
-      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
+      auto [mean_val, rstd_val] = RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
       const T bias = - mean_val;
@@ -98,9 +96,9 @@ void layer_norm_kernel_mixed_type(
     Tensor* rstd) {
   using bVec = Vectorized<T>;
   using fVec = Vectorized<float>;
-  const T* X_data = X.data_ptr<T>();
-  const param_t* gamma_data = gamma.defined() ? gamma.data_ptr<param_t>() : nullptr;
-  const param_t* beta_data = beta.defined() ? beta.data_ptr<param_t>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const param_t* gamma_data = gamma.defined() ? gamma.const_data_ptr<param_t>() : nullptr;
+  const param_t* beta_data = beta.defined() ? beta.const_data_ptr<param_t>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   param_t* mean_data = mean ? mean->data_ptr<param_t>() : nullptr;
   param_t* rstd_data = rstd ? rstd->data_ptr<param_t>() : nullptr;
@@ -113,9 +111,7 @@ void layer_norm_kernel_mixed_type(
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      float mean_val;
-      float rstd_val;
-      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
+      auto [mean_val, rstd_val] = RowwiseMoments(X_ptr, N);
       rstd_val = float(1) / std::sqrt(rstd_val + eps);
       const float scale = rstd_val;
       const float bias = -rstd_val * mean_val;
@@ -373,10 +369,9 @@ void layer_norm_backward_frame(
       if (N < bVec::size()) {
         bVec x_bvec = bVec::loadu(X_ptr, N);
         bVec dy_bvec = bVec::loadu(dY_ptr, N);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
-        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data, N);
+        auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
+        auto [gamma_fvec0, gamma_fvec1] = load2f(gamma_data, N);
         if (N > fVec::size()) {
           fVec db_fvec0 = dy_fvec0 * gamma_fvec0;
           fVec db_fvec1 = dy_fvec1 * gamma_fvec1;
@@ -396,11 +391,10 @@ void layer_norm_backward_frame(
         int64_t d = bVec::size();
         bVec x_bvec = bVec::loadu(X_ptr);
         bVec dy_bvec = bVec::loadu(dY_ptr);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
         fVec ds_fvec0, ds_fvec1, db_fvec0, db_fvec1, acc_ds_fvec0, acc_ds_fvec1, acc_db_fvec0, acc_db_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
-        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data);
+        auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
+        auto [gamma_fvec0, gamma_fvec1] = load2f(gamma_data);
         acc_db_fvec0 = dy_fvec0 * gamma_fvec0;
         acc_db_fvec1 = dy_fvec1 * gamma_fvec1;
         acc_ds_fvec0 = x_fvec0 * acc_db_fvec0;
@@ -470,10 +464,9 @@ void layer_norm_backward_frame(
       for (; d < N - (N % bVec::size()); d += bVec::size()) {
         bVec x_bvec = bVec::loadu(X_ptr + d);
         bVec dy_bvec = bVec::loadu(dY_ptr + d);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
-        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d);
+        auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
+        auto [gamma_fvec0, gamma_fvec1] = load2f(gamma_data + d);
         fVec r_fvec0 = fVec(a) * dy_fvec0 * gamma_fvec0 + fVec(b) * x_fvec0 + fVec(c);
         fVec r_fvec1 = fVec(a) * dy_fvec1 * gamma_fvec1 + fVec(b) * x_fvec1 + fVec(c);
         bVec r_bvec = convert_from_float<T>(r_fvec0, r_fvec1);
@@ -482,10 +475,9 @@ void layer_norm_backward_frame(
       if (N - d > 0) {
         bVec x_bvec = bVec::loadu(X_ptr + d, N - d);
         bVec dy_bvec = bVec::loadu(dY_ptr + d, N - d);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
-        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d, N - d);
+        auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
+        auto [gamma_fvec0, gamma_fvec1] = load2f(gamma_data + d, N - d);
         fVec r_fvec0 = fVec(a) * dy_fvec0 * gamma_fvec0 + fVec(b) * x_fvec0 + fVec(c);
         fVec r_fvec1 = fVec(a) * dy_fvec1 * gamma_fvec1 + fVec(b) * x_fvec1 + fVec(c);
         bVec r_bvec = convert_from_float<T>(r_fvec0, r_fvec1);
@@ -513,12 +505,12 @@ void LayerNormBackwardKernelImplInternal(
   TORCH_DCHECK_EQ(mean.numel(), M);
   TORCH_DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T2* mean_data = mean.template data_ptr<T2>();
-  const T2* rstd_data = rstd.template data_ptr<T2>();
+  const T* dY_data = dY.template const_data_ptr<T>();
+  const T* X_data = X.template const_data_ptr<T>();
+  const T2* mean_data = mean.template const_data_ptr<T2>();
+  const T2* rstd_data = rstd.template const_data_ptr<T2>();
   const T2* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T2>() : nullptr;
+      gamma.defined() ? gamma.template const_data_ptr<T2>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   T2* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T2>() : nullptr;
   T2* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T2>() : nullptr;

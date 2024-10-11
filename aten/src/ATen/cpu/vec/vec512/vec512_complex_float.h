@@ -7,7 +7,8 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<c10::complex<float>> {
 private:
@@ -708,7 +709,7 @@ public:
     auto abs = abs_();
     auto zero = _mm512_setzero_ps();
     auto mask = _mm512_cmp_ps_mask(abs, zero, _CMP_EQ_OQ);
-    auto div = values / abs;
+    auto div = _mm512_div_ps(values, abs);
     return _mm512_mask_blend_ps(mask, div, zero);
   }
   __m512 real_() const {
@@ -863,16 +864,16 @@ public:
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
-  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other [[maybe_unused]]) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

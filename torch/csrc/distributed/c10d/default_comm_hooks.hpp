@@ -5,7 +5,7 @@
 
 namespace c10d {
 
-enum class BuiltinCommHookType {
+enum class BuiltinCommHookType : uint8_t {
   ALLREDUCE = 1,
   FP16_COMPRESS = 2,
 };

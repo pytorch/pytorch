@@ -6,7 +6,8 @@
 
 #include <c10/util/Registry.h>
 
-#include <cstddef>
+#include <ATen/detail/AcceleratorHooksInterface.h>
+
 #include <memory>
 
 namespace at {
@@ -20,10 +21,10 @@ namespace at {
 // which we may want to call into from CPU code (and thus must be dynamically
 // dispatched, to allow for separate compilation of HIP code).  See
 // CUDAHooksInterface for more detailed motivation.
-struct TORCH_API HIPHooksInterface {
+struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~HIPHooksInterface() = default;
+  ~HIPHooksInterface() override = default;
 
   // Initialize the HIP library state
   virtual void initHIP() const {
@@ -38,11 +39,15 @@ struct TORCH_API HIPHooksInterface {
     return false;
   }
 
-  virtual int64_t current_device() const {
+  virtual c10::DeviceIndex current_device() const {
     return -1;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
+  bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
     AT_ERROR("Pinned memory requires HIP.");
   }
 
@@ -52,6 +57,10 @@ struct TORCH_API HIPHooksInterface {
 
   virtual int getNumGPUs() const {
     return 0;
+  }
+
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
+    AT_ERROR("Cannot check primary context without ATen_hip library.");
   }
 };
 

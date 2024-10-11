@@ -26,10 +26,10 @@ class TORCH_API SequentialSampler : public Sampler<> {
   explicit SequentialSampler(size_t size);
 
   /// Resets the `SequentialSampler` to zero.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns the next batch of indices.
-  optional<std::vector<size_t>> next(size_t batch_size) override;
+  std::optional<std::vector<size_t>> next(size_t batch_size) override;
 
   /// Serializes the `SequentialSampler` to the `archive`.
   void save(serialize::OutputArchive& archive) const override;

@@ -12,8 +12,7 @@ namespace c10 {
 struct IValue;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class Pickler;
 class SourceRangeSerializer;
@@ -55,7 +54,7 @@ class SourceRangeDeserializer {
 
 class SourceRangeUnpickler {
  public:
-  virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
+  virtual std::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;
 
   virtual ~SourceRangeUnpickler() = default;
@@ -64,5 +63,4 @@ class SourceRangeUnpickler {
 TORCH_API void setShouldUseFormatWithStringTable(
     bool should_use_format_with_string_table);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

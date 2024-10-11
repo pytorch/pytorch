@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import re
 from typing import Iterable, Union
+
 
 GlobPattern = Union[str, Iterable[str]]
 

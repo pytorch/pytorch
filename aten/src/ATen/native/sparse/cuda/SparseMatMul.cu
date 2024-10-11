@@ -50,8 +50,7 @@
 #include <library_types.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -180,6 +179,18 @@ struct csrOutput {
     cusparseDestroyMatDescr(description_);
   }
 
+  csrOutput(const csrOutput&) = delete;
+  csrOutput& operator=(const csrOutput&) = delete;
+  csrOutput(csrOutput&& rhs) {
+    csr_indices_ = std::move(rhs.csr_indices_);
+    csr_pointers_ = std::move(rhs.csr_pointers_);
+    csr_values_ = std::move(rhs.csr_values_);
+    nnz_ = rhs.nnz_;
+    size_ = std::move(rhs.size_);
+    description_ = rhs.description_;
+    rhs.description_ = 0;
+  }
+  csrOutput& operator=(csrOutput&&) = delete;
   int size(int index) const {
     return size_.at(index);
   }
@@ -283,7 +294,7 @@ struct CusparseMatrixMultiplyOp {
 
     at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
     dBuffer1 = dataPtr1.get();
-    // inspect the matrices A and B to understand the memory requiremnent for
+    // inspect the matrices A and B to understand the memory requirement for
     // the next step
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
         handle,
@@ -388,7 +399,7 @@ struct CusparseMatrixMultiplyOp {
       Tensor &output_values,
       Tensor &output_indices)
   {
-    TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
+    static_assert(false&&sizeof(scalar_t), "cusparse csr sparse-sparse MM only supports data type of float and double.");
   }
 };
 
@@ -811,5 +822,4 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

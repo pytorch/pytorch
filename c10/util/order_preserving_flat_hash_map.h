@@ -582,8 +582,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   void rehash(uint64_t num_buckets) {
     num_buckets = std::max(
         num_buckets,
-        static_cast<uint64_t>(
-            std::ceil(num_elements / static_cast<double>(_max_load_factor))));
+        static_cast<uint64_t>(std::ceil(
+            static_cast<double>(num_elements) /
+            static_cast<double>(_max_load_factor))));
     if (num_buckets == 0) {
       reset_to_empty_state();
       return;
@@ -904,8 +905,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       Args&&... args) {
     using std::swap;
     if (num_slots_minus_one == 0 || distance_from_desired == max_lookups ||
-        num_elements + 1 >
-            (num_slots_minus_one + 1) * static_cast<double>(_max_load_factor)) {
+        static_cast<double>(num_elements + 1) >
+            static_cast<double>(num_slots_minus_one + 1) *
+                static_cast<double>(_max_load_factor)) {
       grow();
       return emplace(std::forward<Key>(key), std::forward<Args>(args)...);
     } else if (current_entry->is_empty()) {

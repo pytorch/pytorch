@@ -11,13 +11,13 @@ struct TORCH_API IPUHooksInterface {
   virtual ~IPUHooksInterface() = default;
 
   virtual const Generator& getDefaultIPUGenerator(
-      DeviceIndex device_index = -1) const {
+      DeviceIndex device_index [[maybe_unused]] = -1) const {
     AT_ERROR(
         "Cannot get the default IPU generator: the IPU backend is not "
         "available.");
   }
 
-  virtual Generator newIPUGenerator(DeviceIndex device_index = -1) const {
+  virtual Generator newIPUGenerator(DeviceIndex device_index [[maybe_unused]] = -1) const {
     AT_ERROR(
         "Cannot create a new IPU generator: the IPU backend is not available.");
   }

@@ -1,9 +1,12 @@
+# mypy: ignore-errors
+
 import collections
 import warnings
 from functools import partial, wraps
 from typing import Sequence
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -101,7 +104,7 @@ def dtypes_dispatch_hint(dtypes):
 
     # CUDA is not available, dtypes will be empty.
     if len(dtypes) == 0:
-        return return_type((), str(tuple()))
+        return return_type((), "()")
 
     set_dtypes = set(dtypes)
     for dispatch in COMPLETE_DTYPES_DISPATCH:
@@ -204,7 +207,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
     """
 
     @wraps(f)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         # Copy keys into a set
         keys = set(kwargs.keys())
 

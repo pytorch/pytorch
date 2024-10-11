@@ -17,11 +17,6 @@
 
 #include <chrono>
 #include <cstdio>
-#include <functional>
-#include <iostream>
-#include <limits>
-#include <sstream>
-#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -71,7 +66,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-typename c10::invoke_result_t<F> syscall(F fn) {
+auto syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {
@@ -81,6 +76,7 @@ typename c10::invoke_result_t<F> syscall(F fn) {
     }
     return rv;
   }
+  return typename std::invoke_result_t<F>{-1};
 }
 
 // For a comprehensive overview of file locking methods,
@@ -95,6 +91,7 @@ class Lock {
     flock(operation);
   }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Lock() {
     unlock();
   }
@@ -260,7 +257,7 @@ off_t refresh(
     File& file,
     off_t pos,
     std::unordered_map<std::string, std::vector<uint8_t>>& cache,
-    const std::string deletePrefix) {
+    const std::string& deletePrefix) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -295,6 +292,7 @@ FileStore::FileStore(std::string path, int numWorkers)
   addHelper(refCountKey_, 1);
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
@@ -429,7 +427,7 @@ int64_t FileStore::getNumKeys() {
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  return cache_.size();
+  return static_cast<int64_t>(cache_.size());
 }
 
 bool FileStore::deleteKey(const std::string& key) {

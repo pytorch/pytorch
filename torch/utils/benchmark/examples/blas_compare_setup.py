@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import os
 import shutil
@@ -183,7 +184,7 @@ def main():
         check_run = subprocess.run(
             # Shameless abuse of `python -c ...`
             f"source activate {env_path} && "
-            "python -c \""
+            'python -c "'
             "import torch;"
             "from torch.utils.benchmark import Timer;"
             "print(torch.__config__.show());"

@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import sys
 import unittest
 import uuid
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+
 
 if os.getenv("CIRCLECI"):
     print("T85992919 temporarily disabling in circle ci", file=sys.stderr)

@@ -14,7 +14,7 @@ namespace convolution {
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
-    c10::optional<Tensor> bias,
+    std::optional<Tensor> bias,
     std::vector<int64_t> stride,
     std::vector<int64_t> padding,
     std::vector<int64_t> dilation,
@@ -28,7 +28,7 @@ Tensor conv_run(
 
 ContextConv create(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,

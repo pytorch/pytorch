@@ -576,8 +576,8 @@ TYPED_TEST(SmallVectorTest, EraseTest) {
   SCOPED_TRACE("EraseTest");
 
   this->makeSequence(this->theVector, 1, 3);
-  const auto& theConstVector = this->theVector;
-  this->theVector.erase(theConstVector.begin());
+  auto& theVector = this->theVector;
+  this->theVector.erase(theVector.begin());
   this->assertValuesInOrder(this->theVector, 2u, 2, 3);
 }
 
@@ -586,8 +586,8 @@ TYPED_TEST(SmallVectorTest, EraseRangeTest) {
   SCOPED_TRACE("EraseRangeTest");
 
   this->makeSequence(this->theVector, 1, 3);
-  const auto& theConstVector = this->theVector;
-  this->theVector.erase(theConstVector.begin(), theConstVector.begin() + 2);
+  auto& theVector = this->theVector;
+  this->theVector.erase(theVector.begin(), theVector.begin() + 2);
   this->assertValuesInOrder(this->theVector, 1u, 3);
 }
 
@@ -888,8 +888,8 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
 }
 
 struct MovedFrom {
-  bool hasValue;
-  MovedFrom() : hasValue(true) {}
+  bool hasValue{true};
+  MovedFrom() = default;
   MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
     m.hasValue = false;
   }
@@ -1107,7 +1107,7 @@ class SmallVectorReferenceInvalidationTest : public SmallVectorTestBase {
 
   template <class T>
   static bool isValueType() {
-    return std::is_same<T, typename VectorT::value_type>::value;
+    return std::is_same_v<T, typename VectorT::value_type>;
   }
 
   void SetUp() override {

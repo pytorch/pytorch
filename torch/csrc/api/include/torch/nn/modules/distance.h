@@ -13,7 +13,7 @@ namespace nn {
 
 /// Returns the cosine similarity between :math:`x_1` and :math:`x_2`, computed
 /// along `dim`.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CosineSimilarity to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CosineSimilarity to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CosineSimilarityOptions` class to
@@ -49,7 +49,7 @@ TORCH_MODULE(CosineSimilarity);
 
 /// Returns the batchwise pairwise distance between vectors :math:`v_1`,
 /// :math:`v_2` using the p-norm.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.PairwiseDistance to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.PairwiseDistance to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PairwiseDistanceOptions` class to

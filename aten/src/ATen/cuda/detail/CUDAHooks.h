@@ -3,7 +3,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -27,6 +27,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
   bool hasCuSOLVER() const override;
+  bool hasCuBLASLt() const override;
   bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   DeviceIndex current_device() const override;
@@ -48,6 +49,12 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   int64_t cuFFTGetPlanCacheSize(DeviceIndex device_index) const override;
   void cuFFTClearPlanCache(DeviceIndex device_index) const override;
   int getNumGPUs() const override;
+  DeviceIndex deviceCount() const override;
+  DeviceIndex getCurrentDevice() const override;
+
+#ifdef USE_ROCM
+  bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
+#endif
   void deviceSynchronize(DeviceIndex device_index) const override;
 };
 

@@ -3,20 +3,19 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/util.h>
 
 #include <complex>
 #include <functional>
+#include <optional>
 #include <tuple>
 #include <vector>
 
 // TODO: Consolidate this file with util.h
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Converts an iterable container to a vector of int64's.
 template <typename S>
@@ -68,5 +67,4 @@ GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2);
 
 TORCH_API std::vector<std::string> StrSplit(c10::string_view text, char delim);
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

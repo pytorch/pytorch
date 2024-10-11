@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import inspect
 import numbers
@@ -51,6 +52,7 @@ _type_eval_globals = {'Tensor' : torch.Tensor, 'Device' : torch.device, 'Layout'
                       'number' : numbers.Number, 'Future' : torch.jit.Future,
                       'AnyEnumType' : enum.Enum, 'QScheme' : torch.qscheme,
                       '__torch__': _FakeGlobalNamespace(), 'NoneType': type(None),
+                      'Storage': torch.UntypedStorage,
                       't': typing.TypeVar('t')}
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
@@ -140,7 +142,6 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             # Matched exactly one schema, unambiguous
             _, schema_to_check = matched_schemas[0]
             throw_if_mutable(schema_to_check)
-            pass
         else:
             # Ambiguous schema match. Since mutability checking is best effort,
             # do nothing.
@@ -182,6 +183,17 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
 
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
+    """
+    Produces a type hint for the given argument.
+
+    The :func:`create_type_hint` looks for a type hint compatible with the input argument `x`.
+
+    If `x` is a `list` or `tuple`, it looks for an object in the list whose type is a superclass
+    of the rest, and uses that as `base_type` for the `List` or `Tuple` to be returned.
+    If no such object is found, it defaults to `List[Any]`.
+
+    If `x` is neither a `list` nor a `tuple`, it returns `x`.
+    """
     try:
         if isinstance(x, (list, tuple)):
             # todo(chilli): Figure out the right way for mypy to handle this
@@ -205,7 +217,6 @@ def create_type_hint(x):
     except Exception as e:
         # We tried to create a type hint for list but failed.
         warnings.warn(f"We were not able to successfully create type hint from the type {x}")
-        pass
     return x
 
 @compatibility(is_backward_compatible=False)

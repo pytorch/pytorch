@@ -1,13 +1,12 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import unittest
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
-requires_cuda = functools.partial(
-    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
-)
+
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class MinifierTests(MinifierTestBase):
@@ -42,19 +41,19 @@ inner(torch.randn(20, 20).to("{device}"))
             "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_compile_error(self):
         self._test_after_dynamo(
             "cuda", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_runtime_error(self):
         self._test_after_dynamo(
             "cuda", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_accuracy_error(self):
         self._test_after_dynamo(
             "cuda", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
@@ -95,38 +94,39 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
             "cpu", "relu_accuracy_error_TESTING_ONLY"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_compile_backend_passes(self):
         self._test_after_dynamo_backend_passes(
             "cuda", "relu_compile_error_TESTING_ONLY"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_runtime_backend_passes(self):
         self._test_after_dynamo_backend_passes(
             "cuda", "relu_runtime_error_TESTING_ONLY"
         )
 
-    @requires_cuda()
+    @requires_cuda
     def test_after_dynamo_cuda_accuracy_backend_passes(self):
         self._test_after_dynamo_backend_passes(
             "cuda", "relu_accuracy_error_TESTING_ONLY"
         )
 
     # Test that a module with mixed cpu/cuda parts with an error after dynamo can be repro'd
-    @requires_cuda()
+    @skipIfNNModuleInlined()
+    @requires_cuda
     def test_cpu_cuda_module_after_dynamo(self):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
 class CpuCudaModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.m_x = torch.nn.Linear(20, 20).cuda()
         self.m_y = torch.nn.Linear(20, 20)
         self.p_x = torch.nn.Parameter(torch.randn(20, 20).cuda())
         self.p_y = torch.nn.Parameter(torch.randn(20, 20))
-        self.register_buffer("b_x", torch.ones(20, 20).cuda())
-        self.register_buffer("b_y", torch.ones(20, 20))
+        self.b_x = torch.nn.Buffer(torch.ones(20, 20).cuda())
+        self.b_y = torch.nn.Buffer(torch.ones(20, 20))
 
     def forward(self, x, y):
         return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
@@ -149,7 +149,7 @@ inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
             res.minifier_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.G__mod___m_x = Linear(in_features=20, out_features=20, bias=True).cuda()
         self.G__mod___m_y = Linear(in_features=20, out_features=20, bias=True)
@@ -204,7 +204,7 @@ inner(torch.randn(20, 20))
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x_19):

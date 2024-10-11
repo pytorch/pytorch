@@ -38,7 +38,7 @@ class SharedBatchDataset : public BatchDataset<
   }
 
   /// Returns the `size` from the underlying dataset.
-  optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return dataset_->size();
   }
 

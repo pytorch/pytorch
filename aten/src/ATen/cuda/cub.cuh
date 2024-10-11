@@ -6,8 +6,6 @@
 #include <iterator>
 #include <limits>
 
-#include <c10/util/C++17.h>
-
 #include <ATen/cuda/cub_definitions.cuh>
 
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
@@ -53,8 +51,7 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
-     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
 
 #if !defined(USE_ROCM)
 namespace at_cuda_detail {
@@ -112,7 +109,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#elif defined(USE_ROCM)
 
 template<>
 struct cuda_type<c10::BFloat16> {
@@ -162,25 +159,18 @@ inline void segmented_sort_pairs(
 }
 
 #if CUB_SUPPORTS_UNIQUE_BY_KEY()
-template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename KeysOutputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
 inline void unique_by_key(
   KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
-  KeysOutputIteratorT keys_out, ValuesOutputIteratorT values_out,
+  ValuesOutputIteratorT values_out,
   NumSelectedIteratorT num_selected, int64_t num_input_items)
 {
   // TODO: use thrust::discard_iterator to handle null keys_out when https://github.com/NVIDIA/cub/issues/406 is fixed.
-  constexpr bool null_keys_out = std::is_same<KeysOutputIteratorT, std::nullptr_t>::value;
   using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
-  using RealKeysOutputIteratorT = typename std::conditional<null_keys_out, KeyT *, KeysOutputIteratorT>::type;
-  RealKeysOutputIteratorT keys_out_;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  if constexpr (null_keys_out) {
-    keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
-    keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
-  } else {
-    keys_out_ = keys_out;
-  }
+  keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+  auto keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
@@ -236,7 +226,7 @@ constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
 // so split at int_max/2
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, int max_cub_size=impl::max_cub_size>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::InclusiveScan,
       input,
@@ -303,7 +293,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::ExclusiveScan,
       input,

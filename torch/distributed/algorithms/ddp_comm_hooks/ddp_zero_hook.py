@@ -1,13 +1,13 @@
+# mypy: allow-untyped-defs
 import weakref
 from typing import Any, Callable, List, Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import (
-    _OverlapStatus,
-)
+from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 
 __all__ = ["hook_with_zero_step", "hook_with_zero_step_interleaved"]
 
@@ -15,7 +15,7 @@ __all__ = ["hook_with_zero_step", "hook_with_zero_step_interleaved"]
 # method, and ZeRO requires a functional optimizer to overlap with DDP
 # Passing a `None` instead of an actual gradient indicates to the optimizer
 # to not update the corresponding parameter
-_NO_PARAM_UPDATE = None
+_NO_PARAM_UPDATE: None = None
 
 
 def _perform_local_step(
@@ -24,7 +24,7 @@ def _perform_local_step(
     rank: int,
 ):
     r"""
-    Performs a local optimizer step using the gradients provided by ``bucket``.
+    Perform a local optimizer step using the gradients provided by ``bucket``.
 
     Arguments:
         bucket (dist.GradBucket): the bucket providing the gradients.
@@ -38,22 +38,25 @@ def _perform_local_step(
     """
     overlap_info = zero._overlap_info
     bucket_index = bucket.index()
-    assert len(zero.optim.param_groups) == 1, \
-        "Overlapping DDP with ZeRO only supports a single parameter group"
+    assert (
+        len(zero.optim.param_groups) == 1
+    ), "Overlapping DDP with ZeRO only supports a single parameter group"
 
     # Construct the `gradients` input for the local optimizer step, which
     # expects `None` in a list position to indicate that the corresponding
     # parameter should not be updated
     num_local_optim_params = len(zero.optim.param_groups[0]["params"])
-    gradients: List[Optional[torch.Tensor]] = \
-        [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
-    assert bucket_index in overlap_info.offsets, \
-        f"Bucket index {bucket_index} was not assigned to rank {rank}"
+    gradients: List[Optional[torch.Tensor]] = [
+        _NO_PARAM_UPDATE for _ in range(num_local_optim_params)
+    ]
+    assert (
+        bucket_index in overlap_info.offsets
+    ), f"Bucket index {bucket_index} was not assigned to rank {rank}"
     gradients_offset = overlap_info.offsets[bucket_index]
     bucket_assignment = zero._bucket_assignments_per_rank[rank][bucket_index]
     bucket_offset = bucket_assignment.offset
     length = len(bucket_assignment.parameters)
-    bucket_gradients = bucket.gradients()[bucket_offset:bucket_offset + length]
+    bucket_gradients = bucket.gradients()[bucket_offset : bucket_offset + length]
     for i, grad in enumerate(bucket_gradients):
         gradients[gradients_offset + i] = grad
 
@@ -74,12 +77,14 @@ def _broadcast_bucket(
             :class:`ZeroRedundancyOptimizer` instance.
     """
     overlap_info = zero._overlap_info
-    assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, \
-        "`assigned_ranks_per_bucket` is not fully constructed"
+    assert (
+        len(overlap_info.assigned_ranks_per_bucket) > bucket_index
+    ), "`assigned_ranks_per_bucket` is not fully constructed"
     # Sort to ensure the same ordering across ranks
     assigned_ranks = sorted(overlap_info.assigned_ranks_per_bucket[bucket_index])
-    assert len(assigned_ranks) > 0, f"Bucket {bucket_index} should be " \
-        "assigned to at least one rank"
+    assert len(assigned_ranks) > 0, (
+        f"Bucket {bucket_index} should be " "assigned to at least one rank"
+    )
     for assigned_rank in assigned_ranks:
         bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
         if bucket_index in bucket_assignments:
@@ -98,10 +103,10 @@ def _save_ddp_bucket_info(
     zero: ZeroRedundancyOptimizer,
 ):
     r"""
-    Saves :class:`DistributedDataParallel` gradient bucket information for the
-    :class:`ZeroRedundancyOptimizer` instance ``zero`` to use when overlapping.
+    Save :class:`DistributedDataParallel` gradient bucket information for :class:`ZeroRedundancyOptimizer` instance ``zero``.
+
     In particular, this function is meant to be called upon seeing each
-    gradient bucket, meaning it does not save or compute any global
+    gradient bucket to use when overlapping, meaning it does not save or compute any global
     information.
 
     Arguments:
@@ -130,8 +135,9 @@ def _hook_with_zero_step_setup(
     bucket: dist.GradBucket,
 ):
     r"""
-    Encapsulates the setup logic for :func:`hook_with_zero_step` and
-    :func:`hook_with_zero_step_interleaved`, meaning the logic to run in the
+    Encapsulate the setup logic for :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
+
+    This means the logic to run in the
     hook before the backward pass and optimizer step can actually be
     overlapped. This is factored out since it is common to both
     :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
@@ -172,16 +178,14 @@ def hook_with_zero_step(
     shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
-    Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
-    optimizer step with the :class:`DistributedDataParallel` backward pass,
-    where the optimizer step computation begins after the last gradient bucket
-    computation has finished.
+    Modify ``hook`` to overlap :class:`ZeroRedundancyOptimizer` optimizer step with :class:`DistributedDataParallel` backward pass.
 
     This approach overlaps the optimizer computation and communication with the
     backward communication. In particular, the backward computation proceeds
     contiguously, and the optimizer computation follows, overlapping with
     outstanding backward communication (i.e. all-reduces) and possibly other
     optimizer communication (i.e. broadcasts).
+    The optimizer step computation begins after the last gradient bucket computation has finished.
 
     This approach may be preferred over :meth:`hook_with_zero_step_interleaved`
     if communication is relatively slow compared to computation.
@@ -229,7 +233,7 @@ def hook_with_zero_step(
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL/HCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
     pg = dist.get_backend(ddp_ref().process_group)  # type: ignore[union-attr]
-    if ((pg != dist.Backend.NCCL) and (pg != 'hccl')):
+    if (pg != dist.Backend.NCCL) and (pg != "hccl"):
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL/HCCL backend to avoid hangs"
@@ -244,11 +248,11 @@ def hook_with_zero_step(
         bucket: dist.GradBucket,
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
-        Returns a :class:`Future` that gives a gradient bucket tensor and
-        performs the equivalent of a :class:`ZeroRedundancyOptimizer`
-        :meth:`step` if ``bucket`` is the last gradient bucket.
+        Return :class:`Future` that runs the optimizer step if this corresponds to the last gradient bucket.
 
-        The function performs additional computation on the iteration that
+        Perform equivalent of :class:`ZeroRedundancyOptimizer` :meth:`step` if ``bucket`` is last gradient bucket.
+        The function gives a gradient bucket tensor and
+        performs additional computation on the iteration that
         the :class:`DistributedDataParallel` buckets are rebuilt to collect
         information used to implement the modified hook.
 
@@ -267,9 +271,12 @@ def hook_with_zero_step(
         rank = zero.global_rank
 
         assert overlap_info.status == _OverlapStatus.INITIALIZED
-        assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, \
-            "`assigned_ranks_per_bucket` is not fully constructed"
-        assigned_to_bucket = rank in overlap_info.assigned_ranks_per_bucket[bucket_index]
+        assert (
+            len(overlap_info.assigned_ranks_per_bucket) > bucket_index
+        ), "`assigned_ranks_per_bucket` is not fully constructed"
+        assigned_to_bucket = (
+            rank in overlap_info.assigned_ranks_per_bucket[bucket_index]
+        )
 
         # Save the bucket reference and all-reduce future for the final bucket
         if assigned_to_bucket:
@@ -279,8 +286,9 @@ def hook_with_zero_step(
         # Check that buckets are indexed incrementally starting from 0 in the
         # order of their autograd hooks firing
         if len(overlap_info.bucket_indices_seen) > 0:
-            assert overlap_info.bucket_indices_seen[-1] == bucket_index - 1, \
-                "Bucket indices are not in incremental order"
+            assert (
+                overlap_info.bucket_indices_seen[-1] == bucket_index - 1
+            ), "Bucket indices are not in incremental order"
         else:
             assert bucket_index == 0, "Bucket indices do not start from 0"
         overlap_info.bucket_indices_seen.append(bucket_index)
@@ -302,9 +310,10 @@ def hook_with_zero_step(
             if rank in assigned_ranks:
                 # Wait on the bucket's all-reduce future to ensure correct
                 # gradients
-                assert bucket_index in overlap_info.bucket_index_to_future, \
-                    f"All-reduce future for bucket {bucket_index} not saved " \
+                assert bucket_index in overlap_info.bucket_index_to_future, (
+                    f"All-reduce future for bucket {bucket_index} not saved "
                     f"on rank {rank}"
+                )
                 allreduce_future = overlap_info.bucket_index_to_future[bucket_index]
                 allreduce_future.wait()
 
@@ -331,10 +340,7 @@ def hook_with_zero_step_interleaved(
     shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
-    Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
-    optimizer step with the :class:`DistributedDataParallel` backward pass,
-    where the optimizer step computation interleaves with the backward
-    computation.
+    Modify ``hook`` to overlap :class:`ZeroRedundancyOptimizer` optimizer step with :class:`DistributedDataParallel` backward pass
 
     This approach overlaps the optimizer computation and communication with the
     backward computation and communication. In particular, once a bucket's
@@ -389,7 +395,7 @@ def hook_with_zero_step_interleaved(
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL/HCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
     pg = dist.get_backend(ddp_ref().process_group)  # type: ignore[union-attr]
-    if ((pg != dist.Backend.NCCL) and (pg != 'hccl')):
+    if (pg != dist.Backend.NCCL) and (pg != "hccl"):
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL/HCCL backend to avoid hangs"
@@ -404,9 +410,11 @@ def hook_with_zero_step_interleaved(
         bucket: dist.GradBucket,
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
-        Returns a :class:`Future` that gives a gradient bucket tensor and
-        performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step` using
-        the gradients in that bucket.
+        Return :class:`Future` that gives gradient bucket tensor and performs partial :class:`ZeroRedundancyOptimizer` :meth:`step`.
+
+        This function uses the gradients in gradient in given bucket to perform a partial
+        :class:`ZeroRedundancyOptimizer` :meth:`step`
+
         Arguments:
             state: any state for the hook.
             bucket (dist.GradBucket): the :class:`DistributedDataParallel`
@@ -419,9 +427,7 @@ def hook_with_zero_step_interleaved(
 
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
             r"""
-            Performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step`
-            using the gradients in the given :class:`DistributedDataParallel`
-            gradient bucket.
+            Perform partial :class:`ZeroRedundancyOptimizer` :meth:`step` using gradients in the :class:`DistributedDataParallel`.
 
             Returns:
                 A :class:`torch.Tensor` representing the contents of the

@@ -1,3 +1,1 @@
-from .join import Join
-from .join import Joinable
-from .join import JoinHook
+from .join import Join, Joinable, JoinHook

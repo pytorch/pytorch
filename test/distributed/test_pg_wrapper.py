@@ -3,15 +3,19 @@
 import os
 import sys
 from datetime import timedelta
+from unittest.mock import patch
 
 import torch
 import torch.distributed as c10d
+from torch._C._distributed_c10d import _ProcessGroupWrapper
+
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from test_c10d_common import LOOPBACK
+
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
@@ -345,6 +349,36 @@ if not TEST_WITH_DEV_DBG_ASAN:
             pg._start_coalescing(torch.device(dev))
             pg.allreduce([torch.ones(1, device=dev)])
             pg._end_coalescing(torch.device(dev))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        def test_debug_level_detail_no_gloo(self):
+            with self.assertRaisesRegex(
+                AssertionError, "ProcessGroupWrapper unsupported without GLOO backend"
+            ):
+                self._create_wrapper_pg()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        def test_new_group_no_gloo(self):
+            def patched_isinstance(obj, clazz):
+                if clazz is _ProcessGroupWrapper:
+                    raise NameError
+                else:
+                    return isinstance(obj, clazz)
+
+            with patch(
+                "torch.distributed.distributed_c10d.isinstance",
+                side_effect=patched_isinstance,
+            ):
+                self._create_wrapper_pg(with_new_group=True)
+                # nothing to assert, isinstance(pg, _ProcessGroupWrapper)
+                # should never be invoked since it is preceeded by
+                # _GLOO_AVAILABLE check, this test will fail on
+                # an unexpected NameError if not.
 
 
 @requires_gloo()

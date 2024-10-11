@@ -65,7 +65,7 @@ C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
-    detail::TensorInfo<input_t, IndexType> b, /* input */
+    detail::TensorInfo<const input_t, IndexType> b, /* input */
     int64_t nbins,
     at::acc_type<input_t, /*is_cuda=*/true> minvalue,
     at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
@@ -86,7 +86,7 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<const input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
@@ -112,7 +112,7 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<const input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
@@ -192,7 +192,7 @@ bool CUDA_tensor_histogram(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int64_t curDevice = current_device();
+  auto curDevice = current_device();
   if (curDevice == -1 || !getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
@@ -219,7 +219,7 @@ bool CUDA_tensor_histogram(
 
   using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
-  auto bInfo = detail::getTensorInfo<input_t, IndexType>(b);
+  auto bInfo = detail::getTensorInfo<const input_t, IndexType>(b);
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
 
   if (HasWeights) {
@@ -257,12 +257,12 @@ Tensor _bincount_cuda_template(
     return at::zeros(
         {minlength},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         kCUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
-      (!std::is_same<input_t, uint8_t>::value &&
+      (!std::is_same_v<input_t, uint8_t> &&
        *self.min().cpu().const_data_ptr<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
@@ -295,9 +295,9 @@ Tensor _bincount_cuda_template(
     output = at::zeros(
         {nbins},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         DeviceType::CUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
     cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
@@ -317,9 +317,9 @@ Tensor _histc_cuda_template(
   Tensor output = at::zeros(
       {nbins},
       self.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       DeviceType::CUDA,
-      c10::nullopt /* pin_memory */);
+      std::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max && self.numel() > 0) {
@@ -360,7 +360,7 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self, const c10::optional<Tensor>& weights_opt,
+    const Tensor& self, const std::optional<Tensor>& weights_opt,
     int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);

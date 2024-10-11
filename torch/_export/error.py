@@ -5,13 +5,13 @@ class ExportErrorType(Enum):
     # User providing invalid inputs to either tracer, or other public facing APIs
     INVALID_INPUT_TYPE = 1
 
-    # User returning values from their models that we don’t support.
+    # User returning values from their models that we don't support.
     INVALID_OUTPUT_TYPE = 2
 
     # Generated IR does not conform to Export IR Specification.
     VIOLATION_OF_SPEC = 3
 
-    # User’s code contains types and functionalities we don’t support.
+    # User's code contains types and functionalities we don't support.
     NOT_SUPPORTED = 4
 
     # User's code didn't provide necessary details for us to successfully trace and export.

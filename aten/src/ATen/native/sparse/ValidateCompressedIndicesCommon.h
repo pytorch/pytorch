@@ -24,8 +24,7 @@
 
 #define INVARIANT_CHECK_FUNC_API static INLINE FUNCAPI void
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -313,7 +312,7 @@ void _validate_compressed_sparse_indices_kernel(
         idx.scalar_type(),
         NAME,
         [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
-          const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
+          const auto* RESTRICT ptr_idx = idx.const_data_ptr<index_t>();
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
@@ -412,5 +411,4 @@ void validate_compressed_sparse_indices_kernel(
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

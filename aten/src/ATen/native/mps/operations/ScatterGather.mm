@@ -26,6 +26,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
   TORCH_CHECK(!sparse_grad, "sparse_grad not supported in MPS yet")
   TORCH_CHECK(self.scalar_type() == output.scalar_type(), "gather(): self and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "gather(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(!self.is_complex(), "gather(): Yet not supported for complex");
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -52,10 +53,10 @@ TORCH_IMPL_FUNC(gather_out_mps)
     }
     auto input_type = getMPSDataType(self);
     auto output_type = getMPSDataType(output);
-    if (input_type == MPSDataTypeUInt8 || ((input_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (input_type == MPSDataTypeUInt8) {
       input_type = MPSDataTypeInt8;
     }
-    if (output_type == MPSDataTypeUInt8 || ((output_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (output_type == MPSDataTypeUInt8) {
       output_type = MPSDataTypeInt8;
     }
     string key = "gather_out_mps" + getTensorsStringKey({self, index, output}) + ":" + std::to_string(dim);
@@ -101,14 +102,8 @@ TORCH_IMPL_FUNC(gather_out_mps)
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, index_shape);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, nullptr, false, output_type);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -130,6 +125,7 @@ static void scatter_mps_general(const Tensor& self_arg,
   TORCH_CHECK(self.scalar_type() == output.scalar_type() && output.scalar_type() == src.scalar_type(),
               "scatter(): self, src and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(!self.is_complex(), "scatter(): Yet not supported for complex");
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -297,15 +293,8 @@ static void scatter_mps_general(const Tensor& self_arg,
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, index_shape);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      srcPlaceholder.getMPSGraphTensor() : srcPlaceholder.getMPSGraphTensorData(),
-      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, srcPlaceholder, indexPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -317,7 +306,7 @@ TORCH_IMPL_FUNC(scatter_src_out_mps)
 TORCH_IMPL_FUNC(scatter_value_out_mps)
 (const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value, const Tensor& output) {
   Tensor src =
-      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+      at::empty(index.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_out_mps", "set");
 }
@@ -340,7 +329,7 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out_mps)
  const c10::string_view reduce,
  const Tensor& output) {
   Tensor src =
-      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+      at::empty(index.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_reduce_out_mps", reduce);
 }

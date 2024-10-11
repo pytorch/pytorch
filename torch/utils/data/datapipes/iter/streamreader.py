@@ -1,11 +1,14 @@
+# mypy: allow-untyped-defs
 from typing import Tuple
+
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 
-__all__ = ["StreamReaderIterDataPipe", ]
+
+__all__ = ["StreamReaderIterDataPipe"]
 
 
-@functional_datapipe('read_from_stream')
+@functional_datapipe("read_from_stream")
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r"""
     Given IO streams and their label names, yield bytes with label name as tuple.

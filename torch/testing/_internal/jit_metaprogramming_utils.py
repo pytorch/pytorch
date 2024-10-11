@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 import torch.nn.functional as F
@@ -7,7 +9,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors
+from torch.testing._internal.common_utils import is_iterable_of_tensors, noncontiguous_like
 
 import collections
 from copy import deepcopy
@@ -331,7 +333,7 @@ def value_to_literal(value):
 def get_call(method_name, func_type, args, kwargs):
     kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
-    if(func_type == 'method'):
+    if func_type == 'method':
         args = args[1:]
 
     argument_str = ', '.join(args)
@@ -602,7 +604,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         class TheModule(torch.jit.ScriptModule):
             __constants__ = submodule_constants
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = nn_module(*constructor_args)
 

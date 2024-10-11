@@ -129,14 +129,19 @@ struct alignas(1) Float8_e5m2 {
 
   Float8_e5m2() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e5m2(uint8_t bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Float8_e5m2(uint8_t bits, from_bits_t) : x(bits) {}
   inline C10_HOST_DEVICE Float8_e5m2(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
   inline C10_HOST_DEVICE bool isinf() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e5m2& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e5m2& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

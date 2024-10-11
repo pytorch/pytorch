@@ -1,14 +1,13 @@
+# mypy: allow-untyped-defs
 import functools
 import operator
 from functools import reduce
 from typing import Any, Tuple
 
 import torch
-
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -18,13 +17,15 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
-from ..virtualized import ops
+from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_quantization_lowerings,
     _register_quantization_weight_pack_pass,
+    _register_woq_lowerings,
 )
+
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -68,13 +69,26 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
-        # only insert to_dtype if is_bf16 is True
+    def _to_fp16(input_call):
+        return CallFunction(
+            prims.convert_element_type.default,
+            input_call,
+            KeywordArg("to_fp16"),
+            _users=1,
+        )
+
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, lowp_dtype):
+        # only insert to_dtype if lowp_dtype is True
         computation_call = (
-            _to_float(call_fn(), users=users) if is_bf16 else call_fn(users=users)
+            _to_float(call_fn(), users=users) if lowp_dtype else call_fn(users=users)
         )
         out = unary_fusion(computation_call)
-        return _to_bf16(out) if is_bf16 else out
+        if lowp_dtype == torch.bfloat16:
+            return _to_bf16(out)
+        elif lowp_dtype == torch.float16:
+            return _to_fp16(out)
+        else:
+            return out
 
     def _gelu_fusion_1(computation_call):
         return CallFunction(
@@ -183,9 +197,15 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op):
+    def _is_single_computation_op(computation_op, lowp_dtype=None):
         def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
+
+            if lowp_dtype:
+                output_node_meta = match.output_node().meta.get("val")
+                if output_node_meta.dtype != lowp_dtype:
+                    return False
+
             if len(computation_nodes) < 1:
                 return False
             if any(n.args[-3] != "none" for n in computation_nodes):
@@ -194,11 +214,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, is_bf16=False):
+    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
-            matched = _is_single_computation_op(computation_op)(match)
+            matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
-            if is_bf16:
+            if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
                     match.nodes, prims.convert_element_type.default
                 )
@@ -207,23 +227,21 @@ if torch._C._has_mkldnn:
                 # fusion pattern is always in the form of computation_op + to_float32 + unary_op + to_bfloat16
                 if computation_node == conversion_dtype_nodes[0].args[0]:
                     to_float = conversion_dtype_nodes[0].args[1]
-                    to_bf16 = conversion_dtype_nodes[1].args[1]
+                    to_lp = conversion_dtype_nodes[1].args[1]
                 else:
                     to_float = conversion_dtype_nodes[1].args[1]
-                    to_bf16 = conversion_dtype_nodes[0].args[1]
-                matched = (
-                    matched and to_float == torch.float and to_bf16 == torch.bfloat16
-                )
+                    to_lp = conversion_dtype_nodes[0].args[1]
+                matched = matched and to_float == torch.float and to_lp == lowp_dtype
             return matched
 
         return fn
 
     def _register_unary_fusion_lowering(
-        pattern, unary_attr, computation_op, is_bf16=False
+        pattern, unary_attr, computation_op, lowp_dtype=None
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_unary_fusion(computation_op, is_bf16),
+            extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -235,9 +253,9 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16=False):
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -245,10 +263,14 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            if is_bf16:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
-                dtype2 = kwargs.get("to_bf16")
-                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -260,24 +282,22 @@ if torch._C._has_mkldnn:
             else:
                 # computation_args += ["none", [], ""]
                 out = L[computation_op](*computation_args)
-                if is_bf16:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.where](
                     L[aten.gt](out, 0),
                     out,
                     L[aten.mul](out, negative_slope),
                 )
-                if is_bf16:
-                    out = L[prims.convert_element_type.default](
-                        out, dtype=torch.bfloat16
-                    )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16=False):
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
@@ -289,10 +309,14 @@ if torch._C._has_mkldnn:
             else:  # inp is a Number
                 assert max_value is not None
                 matched = min_value <= max_value
-            if is_bf16:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
-                dtype2 = kwargs.get("to_bf16")
-                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -303,13 +327,11 @@ if torch._C._has_mkldnn:
                 return L[computation_op](*computation_args)
             else:
                 out = L[computation_op](*computation_args)
-                if is_bf16:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
-                if is_bf16:
-                    out = L[prims.convert_element_type.default](
-                        out, dtype=torch.bfloat16
-                    )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -325,15 +347,16 @@ if torch._C._has_mkldnn:
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
+
+        def get_meta_value(argument: torch.fx.node.Argument):
+            # Only torch.fx.Node is expected to have meta.
+            if isinstance(argument, torch.fx.Node):
+                return argument.meta.get("val", None)
+            return None
+
         if any(
-            not (
-                hasattr(n.args[0], "meta")
-                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)
-            )
-            or not (
-                hasattr(n.args[1], "meta")
-                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)
-            )
+            not isinstance(get_meta_value(n.args[0]), torch.Tensor)
+            or not isinstance(get_meta_value(n.args[1]), torch.Tensor)
             for n in binary_nodes
         ):
             return False
@@ -345,9 +368,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
-            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype
+            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
             return False
@@ -366,12 +389,73 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _get_remaining_users(extra_input_node, compute_node):
+        # Think about this pattern:
+        #      ReLU
+        #     /   \
+        #  Conv1
+        #   /      \
+        # Conv2
+        #   \      /
+        #      Add
+        # Although, the extra input node (ReLU) has more than 1 users: Conv1 and Add.
+        # The Conv1 is the ancestor node of the current compute node (Conv2).
+        # This indicates that the buffer of ReLU has completed all its usage,
+        # So we can safely make changes to it now by doing Conv2->Add inplace fusion.
+        # Take above case as example:
+        # * extra_input_node: ReLU
+        # * compute_node: Conv2
+        # _get_remaining_users will return the users of extra_input_node which are not
+        # ancestor node of compute_node.
+        def _is_ancestor_node(_current_node, _ancestor_node):
+            # Check whether _ancestor_node is the ancestor node of _current_node
+            _node_list = [_current_node]
+            _visited_nodes = set()
+            while len(_node_list) != 0:
+                _current_node = _node_list.pop(0)
+                if _current_node not in _visited_nodes:
+                    _visited_nodes.add(_current_node)
+                    if _current_node == _ancestor_node:
+                        return True
+                    elif isinstance(
+                        _current_node, torch.fx.Node
+                    ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
+                        for input in _current_node.all_input_nodes:
+                            _node_list.append(input)  # noqa: PERF402
+            return False
+
+        return [
+            user
+            for user in list(extra_input_node.users)
+            if not _is_ancestor_node(compute_node, user)
+        ]
+
     def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
         def fn(match):
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
-            if any(len(n.args[other_index].users) > 1 for n in binary_nodes):
+
+            def _get_compute_node(_binary_node, _other_index):
+                assert (
+                    len(_binary_node.all_input_nodes) == 2
+                ), "Binary node should have 2 input nodes."
+                _compute_index = 1 if (_other_index == 0) else 0
+                return _binary_node.args[_compute_index]
+
+            def _other_input_not_inplaceable(_binary_node, _other_index):
+                _compute_node = _get_compute_node(_binary_node, _other_index)
+                return (
+                    len(
+                        _get_remaining_users(
+                            _binary_node.args[_other_index], _compute_node
+                        )
+                    )
+                    > 1
+                    or _binary_node.args[_other_index] == _compute_node.args[0]
+                )
+
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -412,6 +496,15 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _can_be_inplace(_other):
+        if isinstance(_other.data, ir.View):
+            return _can_be_inplace(_other.data)
+        else:
+            return not (
+                isinstance(_other.data, ir.ReinterpretView)
+                or len(_other.get_inputs_that_alias_output()) > 0
+            )
+
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
@@ -445,11 +538,7 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            can_be_inplace = not (
-                isinstance(other.data, ir.ReinterpretView)
-                or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
-            )
-            if not can_be_inplace:
+            if not _can_be_inplace(other):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -462,7 +551,9 @@ if torch._C._has_mkldnn:
     ]
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -470,30 +561,30 @@ if torch._C._has_mkldnn:
     def _register_unary_fusion():
         computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        def _unary_fusion_patterns(is_bf16):
+        def _unary_fusion_patterns(lowp_dtype):
             replacement_unary_fusion_patterns = {
                 UnaryAttr("gelu", algorithm_attr="tanh"): [
-                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, is_bf16)
+                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("gelu", algorithm_attr="none"): [
-                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardswish"): [
-                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardsigmoid"): [
-                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, is_bf16)
+                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("swish"): [
-                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
             }
-            if not is_bf16:
+            if not lowp_dtype:
                 call_user1 = [call_fn(users=1) for call_fn in computation_call_fns]
                 replacement_unary_fusion_patterns.update(
                     {
@@ -511,30 +602,32 @@ if torch._C._has_mkldnn:
 
             return replacement_unary_fusion_patterns
 
-        for is_bf16 in [True, False]:
-            replace_patterns = _unary_fusion_patterns(is_bf16)
+        for lowp_dtype in [torch.bfloat16, torch.float16, None]:
+            replace_patterns = _unary_fusion_patterns(lowp_dtype)
             for unary_attr, patterns in replace_patterns.items():
                 _register_unary_fusion_lowering(
-                    patterns[0], unary_attr, computation_ops[0], is_bf16
+                    patterns[0], unary_attr, computation_ops[0], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[1], unary_attr, computation_ops[1], is_bf16
+                    patterns[1], unary_attr, computation_ops[1], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[2], unary_attr, computation_ops[2], is_bf16
+                    patterns[2], unary_attr, computation_ops[2], lowp_dtype
                 )
             _leaky_relu_patterns = [
-                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, is_bf16)
+                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
-                _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16)
+                _register_leaky_relu_fusion_lowering(
+                    pattern, computation_op, lowp_dtype
+                )
             hardtanh_patterns = [
-                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, is_bf16)
+                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
-                _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16)
+                _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype)
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
@@ -658,30 +751,30 @@ if torch._C._has_mkldnn:
             pass_number=1,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            def get_val(val):
+                return val if isinstance(val, int) else val.meta.get("val")
+
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
             assert isinstance(reshape_1, list)
             assert isinstance(reshape_2, list)
             assert len(reshape_1) == 2
-            dynamic_shapes = not all(
-                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
-            )
 
             graph = match.graph
             reshape_2_node = match.output_node()
             linear_input_node = reshape_2_node.args[0].args[0].args[0]
             # check linear's input's shape[:-1] == reshape_2[:-1]
             # and check product(reshape_2[:-1]) == reshape_1[0]
-            if dynamic_shapes:
-                # TODO: Haozhe investigate how add guard here
-                return
-            else:
-                can_remove_reshape = linear_input_node.meta.get("val").shape[
-                    :-1
-                ] == torch.Size(reshape_2[:-1])
-                can_remove_reshape = can_remove_reshape and (
-                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
+            can_remove_reshape = linear_input_node.meta.get("val").shape[
+                :-1
+            ] == torch.Size([get_val(val) for val in reshape_2[:-1]])
+            can_remove_reshape = can_remove_reshape and (
+                reduce(
+                    operator.mul,
+                    [get_val(val) for val in reshape_2[:-1]],
                 )
+                == get_val(reshape_1[0])
+            )
 
             if can_remove_reshape:
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
@@ -697,14 +790,28 @@ if torch._C._has_mkldnn:
         def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            weight_meta = linear_node.args[1].meta.get("val")
+            packed_weight_node = linear_node.args[1]
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
+            transpose_weight_node = packed_weight_node.args[0]
+            assert transpose_weight_node.target == aten.permute.default
+            weight_meta = transpose_weight_node.args[0].meta.get("val")
+            bias_node = add_node.args[1]
+            if isinstance(bias_node, int):
+                # we only folding bias if it is a constant
+                return False
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
+                return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
-                and bias_meta.size(0) == weight_meta.size(0)
+                and bias_meta.size(0) == weight_meta.size(1)
             )
 
         # convert linear+bias to a single linear for applying fusion path.
@@ -728,7 +835,7 @@ if torch._C._has_mkldnn:
             )
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
-            match.erase_nodes(graph)
+            match.erase_nodes()
 
     def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()
@@ -759,6 +866,12 @@ if torch._C._has_mkldnn:
             for POS_ARG in POS_ARGS
         ):
             return False
+        if any(
+            lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
+            and not mkldnn._is_mkldnn_fp16_supported()
+            for POS_ARG in POS_ARGS
+        ):
+            return False
 
         return True
 
@@ -778,7 +891,7 @@ if torch._C._has_mkldnn:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 4
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
         if (
@@ -786,6 +899,12 @@ if torch._C._has_mkldnn:
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+        if (
+            input_meta_value.dtype == torch.float16
+            or weight_meta_value.dtype == torch.float16
+        ):
+            if not mkldnn._is_mkldnn_fp16_supported():
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -812,6 +931,12 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN linear.
         """
         linear_node = match.output_node()
+        # mkldnn linear only supports beta=1or0 and alpha=1
+        if linear_node.target == aten.addmm.default:
+            alpha = linear_node.kwargs.get("alpha", 1.0)
+            beta = linear_node.kwargs.get("beta", 1.0)
+            if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
+                return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
         if linear_node.args[weight_idx].op != "get_attr":
@@ -821,11 +946,19 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
-        is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
+        if (
+            input_meta_value.dtype == torch.float64
+            or weight_meta_value.dtype == torch.float64
+        ):
+            return False
+        is_lp_weight = weight_meta_value.dtype in (
+            torch.bfloat16,
+            torch.float16,
+        )
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
-            not is_bf16_weight
+            not is_lp_weight
             and not mkldnn._is_mkldnn_acl_supported()
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
@@ -852,6 +985,12 @@ if torch._C._has_mkldnn:
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+        if (
+            input_meta_value.dtype == torch.float16
+            or weight_meta_value.dtype == torch.float16
+        ):
+            if not mkldnn._is_mkldnn_fp16_supported():
                 return False
         return True
 
@@ -980,7 +1119,14 @@ if torch._C._has_mkldnn:
                 graph.erase_node(lstm_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
+            CallFunction(
+                aten.addmm.default,
+                Arg(),
+                Arg(),
+                Arg(),
+                beta=KeywordArg("beta"),
+                alpha=KeywordArg("alpha"),
+            ),
             extra_check=_is_packable_linear,
         )
         @register_freezing_graph_pattern(
@@ -991,19 +1137,30 @@ if torch._C._has_mkldnn:
             graph = match.graph
             linear_node = match.output_node()
             input = args[0] if linear_node.target == aten.mm.default else args[1]
-            bias = None if linear_node.target == aten.mm.default else args[0]
+            bias = (
+                None
+                if linear_node.target == aten.mm.default
+                or (
+                    linear_node.target == aten.addmm.default
+                    and linear_node.kwargs.get("beta", 1.0) == 0.0
+                )
+                else args[0]
+            )
             weight = args[1] if linear_node.target == aten.mm.default else args[2]
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
                 weight_dtype = weight.meta.get("val").dtype
-                is_bf16_weight = weight_dtype == torch.bfloat16
+                is_lp_weight = weight_dtype in (
+                    torch.bfloat16,
+                    torch.float16,
+                )
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert (
-                        is_bf16_weight or mkldnn._is_mkldnn_acl_supported()
-                    ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                        is_lp_weight or mkldnn._is_mkldnn_acl_supported()
+                    ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
@@ -1011,9 +1168,18 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
+                # MKL packed matrix can't be copied to a different address because the internal implementation
+                # depends on the alignment of internally-stored metadata.
+                # In aot mode, we need to firstly save the packed weight, when loading it,
+                # it will be in a different address which doesn't work.
+                # Disable MKL prepack linear in AOT mode
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if (is_bf16_weight or mkldnn._is_mkldnn_acl_supported())
+                    if (
+                        is_lp_weight
+                        or mkldnn._is_mkldnn_acl_supported()
+                        or V.aot_compilation is True
+                    )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1021,7 +1187,11 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_bf16_weight or mkldnn._is_mkldnn_acl_supported():
+                if (
+                    is_lp_weight
+                    or mkldnn._is_mkldnn_acl_supported()
+                    or V.aot_compilation is True
+                ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -1039,7 +1209,7 @@ if torch._C._has_mkldnn:
         Combine packed weight nodes with the same inputs to reduce memory usage.
         for example:
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(32, 32, bias=True)
 
@@ -1053,6 +1223,7 @@ if torch._C._has_mkldnn:
 
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
+            torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,
@@ -1085,6 +1256,7 @@ if torch._C._has_mkldnn:
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
+            _register_woq_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

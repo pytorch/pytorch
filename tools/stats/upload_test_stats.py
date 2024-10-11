@@ -1,29 +1,22 @@
+from __future__ import annotations
+
 import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
+from multiprocessing import cpu_count, Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
+    get_job_id,
+    remove_nan_inf,
     unzip,
     upload_workflow_stats_to_s3,
 )
-
-
-def get_job_id(report: Path) -> Optional[int]:
-    # [Job id in artifacts]
-    # Retrieve the job id from the report path. In our GHA workflows, we append
-    # the job id to the end of the report name, so `report` looks like:
-    #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
-    # and we want to get `5596745227` out of it.
-    try:
-        return int(report.parts[0].rpartition("_")[2])
-    except ValueError:
-        return None
 
 
 def parse_xml_report(
@@ -31,14 +24,14 @@ def parse_xml_report(
     report: Path,
     workflow_id: int,
     workflow_run_attempt: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
     job_id = get_job_id(report)
     print(f"Found job id: {job_id}")
 
-    test_cases: List[Dict[str, Any]] = []
+    test_cases: list[dict[str, Any]] = []
 
     root = ET.parse(report)
     for test_case in root.iter(tag):
@@ -63,9 +56,9 @@ def parse_xml_report(
     return test_cases
 
 
-def process_xml_element(element: ET.Element) -> Dict[str, Any]:
+def process_xml_element(element: ET.Element) -> dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
-    ret: Dict[str, Any] = {}
+    ret: dict[str, Any] = {}
 
     # Convert attributes directly into dict elements.
     # e.g.
@@ -120,7 +113,7 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     return ret
 
 
-def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str, Any]]:
+def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str, Any]]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -132,30 +125,31 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
         for path in s3_paths:
             unzip(path)
 
-        artifact_paths = download_gha_artifacts(
-            "test-report", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
-
         # Parse the reports and transform them to JSON
         test_cases = []
+        mp = Pool(cpu_count())
         for xml_report in Path(".").glob("**/*.xml"):
-            test_cases.extend(
-                parse_xml_report(
-                    "testcase",
-                    xml_report,
-                    workflow_run_id,
-                    workflow_run_attempt,
+            test_cases.append(
+                mp.apply_async(
+                    parse_xml_report,
+                    args=(
+                        "testcase",
+                        xml_report,
+                        workflow_run_id,
+                        workflow_run_attempt,
+                    ),
                 )
             )
-
-        return test_cases
+        mp.close()
+        mp.join()
+        test_cases = [tc.get() for tc in test_cases]
+        flattened = [item for sublist in test_cases for item in sublist]
+        return flattened
 
 
 def get_tests_for_circleci(
     workflow_run_id: int, workflow_run_attempt: int
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     # Parse the reports and transform them to JSON
     test_cases = []
     for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
@@ -168,13 +162,13 @@ def get_tests_for_circleci(
     return test_cases
 
 
-def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group test cases by classname, file, and job_id. We perform the aggregation
     manually instead of using the `test-suite` XML tag because xmlrunner does
     not produce reliable output for it.
     """
 
-    def get_key(test_case: Dict[str, Any]) -> Any:
+    def get_key(test_case: dict[str, Any]) -> Any:
         return (
             test_case.get("file"),
             test_case.get("classname"),
@@ -185,7 +179,7 @@ def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any
             test_case["invoking_file"],
         )
 
-    def init_value(test_case: Dict[str, Any]) -> Dict[str, Any]:
+    def init_value(test_case: dict[str, Any]) -> dict[str, Any]:
         return {
             "file": test_case.get("file"),
             "classname": test_case.get("classname"),
@@ -273,7 +267,7 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
-        test_case_summary,
+        remove_nan_inf(test_case_summary),
     )
 
     # Separate out the failed test cases.
@@ -288,11 +282,16 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "failed_test_runs",
-        failed_tests_cases,
+        remove_nan_inf(failed_tests_cases),
     )
 
     if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
-            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+            args.workflow_run_id,
+            args.workflow_run_attempt,
+            "test_run",
+            remove_nan_inf(test_cases),
         )
+
+    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

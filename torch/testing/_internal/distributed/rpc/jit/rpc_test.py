@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import time
 import io
 from typing import Dict, List, Tuple, Any

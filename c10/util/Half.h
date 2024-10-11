@@ -12,11 +12,12 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cmath>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -30,6 +31,7 @@
 #include <cstring>
 #include <iosfwd>
 #include <limits>
+#include <ostream>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -43,6 +45,10 @@
 #include <CL/sycl.hpp> // for SYCL 1.2.1
 #elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
+#endif
+
+#if defined(__aarch64__) && !defined(__CUDACC__)
+#include <arm_neon.h>
 #endif
 
 namespace c10 {
@@ -324,6 +330,26 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
 }
 
+#if defined(__aarch64__) && !defined(__CUDACC__)
+inline float16_t fp16_from_bits(uint16_t h) {
+  return c10::bit_cast<float16_t>(h);
+}
+
+inline uint16_t fp16_to_bits(float16_t f) {
+  return c10::bit_cast<uint16_t>(f);
+}
+
+// According to https://godbolt.org/z/frExdbsWG it would translate to single
+// fcvt s0, h0
+inline float native_fp16_to_fp32_value(uint16_t h) {
+  return static_cast<float>(fp16_from_bits(h));
+}
+
+inline uint16_t native_fp16_from_fp32_value(float f) {
+  return fp16_to_bits(static_cast<float16_t>(f));
+}
+#endif
+
 } // namespace detail
 
 struct alignas(2) Half {
@@ -341,9 +367,14 @@ struct alignas(2) Half {
   Half() = default;
 #endif
 
-  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
+#if defined(__aarch64__) && !defined(__CUDACC__)
+  inline Half(float16_t value);
+  inline operator float16_t() const;
+#else
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
+#endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_HOST_DEVICE Half(const __half& value);
@@ -429,28 +460,34 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 // `error: comparison of constant '255' with boolean expression is always false`
 // for `f > limit::max()` below
 template <typename To, typename From>
-std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(From /*f*/) {
+std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
+    From /*f*/,
+    bool strict_unsigned [[maybe_unused]] = false) {
   return false;
 }
 
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
 std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
-overflows(From f) {
+overflows(From f, bool strict_unsigned = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
-  if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
+  if constexpr (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return greater_than_max<To>(f) ||
-        (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
-  } else {
-    return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
+    if (!strict_unsigned) {
+      return greater_than_max<To>(f) ||
+          (c10::is_negative(f) &&
+           -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
+    }
   }
+  return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
-std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(From f) {
+std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
+    From f,
+    bool strict_unsigned [[maybe_unused]] = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
@@ -468,7 +505,9 @@ C10_CLANG_DIAGNOSTIC_POP()
 #endif
 
 template <typename To, typename From>
-std::enable_if_t<is_complex<From>::value, bool> overflows(From f) {
+std::enable_if_t<is_complex<From>::value, bool> overflows(
+    From f,
+    bool strict_unsigned = false) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
   if (!is_complex<To>::value && f.imag() != 0) {
@@ -480,13 +519,16 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(From f) {
   // able to figure it out.)
   return overflows<
              typename scalar_value_type<To>::type,
-             typename From::value_type>(f.real()) ||
+             typename From::value_type>(f.real(), strict_unsigned) ||
       overflows<
              typename scalar_value_type<To>::type,
-             typename From::value_type>(f.imag());
+             typename From::value_type>(f.imag(), strict_unsigned);
 }
 
-C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
+C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <optional>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
@@ -155,5 +156,70 @@ TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 #endif
+
+C10_NOINLINE void f1() {
+  CAFFE_THROW("message");
+}
+
+C10_NOINLINE void f2() {
+  f1();
+}
+
+C10_NOINLINE void f3() {
+  f2();
+}
+
+#ifdef FBCODE_CAFFE2
+TEST(LoggingTest, ExceptionWhat) {
+  std::optional<::c10::Error> error;
+  try {
+    f3();
+  } catch (const ::c10::Error& e) {
+    error = e;
+  }
+
+  ASSERT_TRUE(error);
+  std::string what = error->what();
+
+  EXPECT_TRUE(what.find("c10_test::f1()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f2()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f3()") != std::string::npos) << what;
+
+  // what() should be recomputed.
+  error->add_context("NewContext");
+  what = error->what();
+  EXPECT_TRUE(what.find("c10_test::f1()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f2()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("c10_test::f3()") != std::string::npos) << what;
+  EXPECT_TRUE(what.find("NewContext") != std::string::npos) << what;
+}
+#endif
+
+TEST(LoggingTest, LazyBacktrace) {
+  struct CountingLazyString : ::c10::OptimisticLazyValue<std::string> {
+    mutable size_t invocations{0};
+
+    std::string compute() const override {
+      ++invocations;
+      return "A string";
+    }
+  };
+
+  auto backtrace = std::make_shared<CountingLazyString>();
+  ::c10::Error ex("", backtrace);
+  // The backtrace is not computed on construction, and then it is not computed
+  // more than once.
+  EXPECT_EQ(backtrace->invocations, 0);
+  const char* w1 = ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+  const char* w2 = ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+  // what() should not be recomputed.
+  EXPECT_EQ(w1, w2);
+
+  ex.add_context("");
+  ex.what();
+  EXPECT_EQ(backtrace->invocations, 1);
+}
 
 } // namespace c10_test

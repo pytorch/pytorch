@@ -36,6 +36,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -254,12 +255,12 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // schema
   const auto& schema = func.getSchema();
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+  auto type_printer = [&](const c10::Type& t) -> std::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   auto makeArgTuple = [&](const std::vector<Argument>& args) {
@@ -313,7 +314,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   }
   auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
-  c10::optional<IValue> debug_info_vals;
+  std::optional<IValue> debug_info_vals;
   // module debug info
   // This is just a set of debug handles.
   // We always save debug handles.
@@ -344,9 +345,10 @@ void pushMobileFunctionsToIValues(
 }
 
 struct ModuleMethod {
-  ModuleMethod(const Module& m, const GraphFunction& f, c10::QualifiedName n)
-      : module(m), function(f), exportName(std::move(n)) {}
+  ModuleMethod(Module m, const GraphFunction& f, c10::QualifiedName n)
+      : module(std::move(m)), function(f), exportName(std::move(n)) {}
   Module module;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const GraphFunction& function;
   c10::QualifiedName exportName;
 };
@@ -401,12 +403,10 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
             std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
         sr_records.emplace_back(
             std::numeric_limits<size_t>::max(), source_range);
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-        auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
+        const auto& cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
         if (cs_ptr) {
           for (const auto& e : cs_ptr->vec()) {
-            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-            const auto sr = std::get<kSourceRange>(e);
+            const auto& sr = std::get<kSourceRange>(e);
             sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
           }
         }
@@ -450,7 +450,7 @@ void ScriptModuleSerializer::serialize(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  C10_LOG_API_USAGE_ONCE("torch.script.save");
+  C10_LOG_API_USAGE_ONCE("torch.jit.save");
   writeExtraFiles(module, extra_files);
   // Serialize the model object
   writeArchive(
@@ -481,7 +481,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
   }
-  if (module.retrieve_traced_inputs().size() > 0) {
+  if (!module.retrieve_traced_inputs().empty()) {
     writeArchive(
         module.retrieve_traced_inputs(),
         /*archive_name=*/"traced_inputs",
@@ -543,7 +543,6 @@ void ScriptModuleSerializer::writeArchive(
   data_pickle.stop();
   // write out tensor data
   size_t i = 0;
-  std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
@@ -754,7 +753,7 @@ void ScriptModuleSerializer::writeByteCode(
 
 namespace {
 
-c10::optional<std::string> type_printer(
+std::optional<std::string> type_printer(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
@@ -765,7 +764,7 @@ c10::optional<std::string> type_printer(
   if (namedType && namedType->name()) {
     return type_name_uniquer.getUniqueName(namedType).qualifiedName();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 } // namespace
@@ -836,7 +835,8 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
+    out.write(
+        static_cast<const char*>(buf), static_cast<std::streamsize>(nbytes));
     return !out ? 0 : nbytes;
   };
   ExportModule(
@@ -870,8 +870,7 @@ void ExportModule(
     if (errno == ENOENT) {
       message << "Parent directory of " << filename << " does not exist.\n";
     } else {
-      message << "Error while opening file: " << errno << std::endl;
-      ;
+      message << "Error while opening file: " << errno << '\n';
     }
     TORCH_CHECK(false, message.str());
   }
@@ -891,7 +890,8 @@ void save_jit_module(
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(
-      reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
+      reinterpret_cast<char*>(buffer->data()),
+      static_cast<std::streamsize>(buffer->size()));
   ofile.close();
 }
 
@@ -939,7 +939,6 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   mobile::Module mobile_m = jitModuleToMobile(m, getOptionsFromGlobal());
   for (const auto& method : mobile_m.get_methods()) {
     for (const auto& op : method.function().get_code().op_names_) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       opnames.emplace(
           op.overload_name.empty() ? op.name
                                    : op.name + "." + op.overload_name);

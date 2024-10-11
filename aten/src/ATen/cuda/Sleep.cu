@@ -1,3 +1,4 @@
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Sleep.h>
 
 #include <c10/cuda/CUDAException.h>
@@ -30,6 +31,39 @@ void sleep(int64_t cycles) {
   dim3 block(1);
   spin_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(cycles);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+#ifdef USE_ROCM
+__global__ void flush_icache_kernel()
+{
+    asm __volatile__("s_icache_inv \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t" ::
+                         :);
+}
+#endif
+
+void flush_icache() {
+#ifdef USE_ROCM
+  dim3 grid(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 60);
+  dim3 block(64);
+  flush_icache_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
 }
 
 }  // namespace at::cuda

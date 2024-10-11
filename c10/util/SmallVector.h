@@ -38,11 +38,6 @@
 #include <type_traits>
 #include <utility>
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
-
 namespace c10 {
 
 /// This is all the stuff common to all SmallVectors.
@@ -75,7 +70,7 @@ class C10_API SmallVectorBase {
   /// This is an implementation of the grow() method which only works
   /// on POD-like data types and is out of line to reduce code duplication.
   /// This function will report a fatal error if it cannot increase capacity.
-  void grow_pod(void* FirstEl, size_t MinSize, size_t TSize);
+  void grow_pod(const void* FirstEl, size_t MinSize, size_t TSize);
 
  public:
   SmallVectorBase() = delete;
@@ -112,8 +107,10 @@ using SmallVectorSizeType =
 /// Figure out the offset of the first element.
 template <class T, typename = void>
 struct SmallVectorAlignmentAndSize {
+  // NOLINTNEXTLINE(*c-arrays*)
   alignas(SmallVectorBase<SmallVectorSizeType<T>>) char Base[sizeof(
       SmallVectorBase<SmallVectorSizeType<T>>)];
+  // NOLINTNEXTLINE(*c-arrays*)
   alignas(T) char FirstEl[sizeof(T)];
 };
 
@@ -246,7 +243,7 @@ class SmallVectorTemplateCommon
 
     bool ReferencesStorage = false;
     int64_t Index = -1;
-    if (!U::TakesParamByValue) {
+    if constexpr (!U::TakesParamByValue) {
       if (C10_UNLIKELY(This->isReferenceToStorage(&Elt))) {
         ReferencesStorage = true;
         Index = &Elt - This->begin();
@@ -306,7 +303,7 @@ class SmallVectorTemplateCommon
   size_type size_in_bytes() const {
     return size() * sizeof(T);
   }
-  size_type max_size() const {
+  constexpr size_type max_size() const {
     return std::min(this->SizeTypeMax(), size_type(-1) / sizeof(T));
   }
 
@@ -475,6 +472,7 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
     this->set_size(this->size() + 1);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   void push_back(T&& Elt) {
     T* EltPtr = reserveForParamAndGetAddress(Elt);
     ::new ((void*)this->end()) T(::std::move(*EltPtr));
@@ -788,13 +786,9 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     assign(RHS.begin(), RHS.end());
   }
 
-  iterator erase(const_iterator CI) {
-    // Just cast away constness because this is a non-const member function.
-    iterator I = const_cast<iterator>(CI);
-
+  iterator erase(iterator I) {
     assert(
-        this->isReferenceToStorage(CI) &&
-        "Iterator to erase is out of bounds.");
+        this->isReferenceToStorage(I) && "Iterator to erase is out of bounds.");
 
     iterator N = I;
     // Shift all elts down one.
@@ -804,11 +798,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     return (N);
   }
 
-  iterator erase(const_iterator CS, const_iterator CE) {
-    // Just cast away constness because this is a non-const member function.
-    iterator S = const_cast<iterator>(CS);
-    iterator E = const_cast<iterator>(CE);
-
+  iterator erase(iterator S, iterator E) {
     assert(this->isRangeInStorage(S, E) && "Range to erase is out of bounds.");
 
     iterator N = S;
@@ -1402,6 +1392,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                    .end())>::iterator_category,
                   std::input_iterator_tag>,
           int> = 0>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   SmallVector& operator=(Container&& C) {
     this->assign(C.begin(), C.end());
     return *this;
@@ -1439,6 +1430,7 @@ using ValueTypeFromRangeType = std::remove_const_t<
 /// SmallVector with elements of the vector.  This is useful, for example,
 /// when you want to iterate a range and then sort the results.
 template <unsigned Size, typename R>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R&& Range) {
   return {std::begin(Range), std::end(Range)};
 }
@@ -1447,6 +1439,7 @@ SmallVector<
     ValueTypeFromRangeType<R>,
     CalculateSmallVectorDefaultInlinedElements<
         ValueTypeFromRangeType<R>>::value>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 to_vector(R&& Range) {
   return {std::begin(Range), std::end(Range)};
 }
@@ -1472,5 +1465,3 @@ inline void swap(
 }
 
 } // end namespace std
-
-C10_CLANG_DIAGNOSTIC_POP()

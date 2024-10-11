@@ -32,7 +32,7 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           {out_size},
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
-      const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
+      const underlying_t* qdata = reinterpret_cast<const underlying_t*>(self.const_data_ptr<scalar_t>());
       for (const auto i : c10::irange(dst.numel())) {
         dst[i] = static_cast<underlying_t>(qdata[i]);
       }

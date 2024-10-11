@@ -116,7 +116,7 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
   template <bool AllowDeprecatedTypes, class... Args>
@@ -183,7 +183,7 @@ namespace impl {
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported input type: float. Please use double instead.");
+      "You tried to register a kernel with an unsupported input type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
@@ -198,7 +198,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
+      "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const c10::SymInt&, T>::value>> {
@@ -226,7 +226,7 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class T, bool AllowDeprecatedTypes>
@@ -283,7 +283,7 @@ namespace impl {
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported output type: float. Please use double instead.");
+      "You tried to register a kernel with an unsupported output type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
@@ -298,7 +298,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
+      "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
 
   // ivalue_to_arg
@@ -392,10 +392,10 @@ namespace impl {
     }
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
-    // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
-    // to optional<ArrayRef<T>>.
+  struct ivalue_to_arg<std::optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
+    // If an argument is std::optional<ArrayRef<T>>, convert the IValue to an std::optional<std::vector<T>> and pass that
+    // to the operator. OptionalArray<T> is basically a std::optional<std::vector<T>> but implicitly convertible
+    // to std::optional<ArrayRef<T>>.
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
@@ -404,8 +404,8 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is OptionalArrayRef<T>, convert the IValue to an
-    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
-    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // std::optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a std::optional<std::vector<T>> but implicitly convertible to
     // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);

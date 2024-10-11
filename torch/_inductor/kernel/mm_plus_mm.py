@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 import torch
@@ -11,6 +12,7 @@ from ..select_algorithm import (
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
+
 
 aten = torch.ops.aten
 
@@ -54,8 +56,19 @@ mm_plus_mm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+
+    if (((stride_am == 1 and stride_ak == M) or (stride_am == K1 and stride_ak == 1))
+        and ((stride_cm == 1 and stride_ck == M) or (stride_cm == K1 and stride_ck == 1))):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+
+    if (((stride_bk == 1 and stride_bn == K1) or (stride_bk == N and stride_bn == 1))
+        and ((stride_dk == 1 and stride_dn == K1) or (stride_dk == N and stride_dn == 1))):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
+
     rk = tl.arange(0, BLOCK_K)
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
@@ -207,10 +220,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
-        if m1 == m2 and n1 == n2:
-            V.graph.sizevars.guard_equals(m1, m2)
-            V.graph.sizevars.guard_equals(n1, n2)
-            return lowerings[aten.addmm](lowerings[aten.mm](mat3, mat4), mat1, mat2)
         return lowerings[aten.add](
             lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
         )
@@ -226,7 +235,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if config.kwargs["BLOCK_K"] < k1:
+            if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
                 mm_plus_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2, mat3, mat4),

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import bisect
 import itertools
 import math
@@ -14,11 +15,11 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator, randperm
+from torch import default_generator, Generator, randperm, Tensor
 
-from ... import Generator, Tensor
 
 __all__ = [
     "Dataset",
@@ -31,14 +32,15 @@ __all__ = [
     "random_split",
 ]
 
-T_co = TypeVar("T_co", covariant=True)
-T = TypeVar("T")
-T_dict = Dict[str, T_co]
-T_tuple = Tuple[T_co, ...]
-T_stack = TypeVar("T_stack", T_tuple, T_dict)
+
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
+_T_dict = Dict[str, _T_co]
+_T_tuple = Tuple[_T_co, ...]
+_T_stack = TypeVar("_T_stack", _T_tuple, _T_dict)
 
 
-class Dataset(Generic[T_co]):
+class Dataset(Generic[_T_co]):
     r"""An abstract class representing a :class:`Dataset`.
 
     All datasets that represent a map from keys to data samples should subclass
@@ -57,14 +59,14 @@ class Dataset(Generic[T_co]):
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
 
-    def __getitem__(self, index) -> T_co:
+    def __getitem__(self, index) -> _T_co:
         raise NotImplementedError("Subclasses of Dataset should implement __getitem__.")
 
-    # def __getitems__(self, indices: List) -> List[T_co]:
+    # def __getitems__(self, indices: List) -> List[_T_co]:
     # Not implemented to prevent false-positives in fetcher check in
     # torch.utils.data._utils.fetch._MapDatasetFetcher
 
-    def __add__(self, other: "Dataset[T_co]") -> "ConcatDataset[T_co]":
+    def __add__(self, other: "Dataset[_T_co]") -> "ConcatDataset[_T_co]":
         return ConcatDataset([self, other])
 
     # No `def __len__(self)` default?
@@ -72,7 +74,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co], Iterable[T_co]):
+class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -181,7 +183,7 @@ class IterableDataset(Dataset[T_co], Iterable[T_co]):
         [3, 4, 5, 6]
     """
 
-    def __add__(self, other: Dataset[T_co]):
+    def __add__(self, other: Dataset[_T_co]):
         return ChainDataset([self, other])
 
     # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
@@ -212,7 +214,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 
-class StackDataset(Dataset[T_stack]):
+class StackDataset(Dataset[_T_stack]):
     r"""Dataset as a stacking of multiple datasets.
 
     This class is useful to assemble different parts of complex input data, given as datasets.
@@ -233,7 +235,7 @@ class StackDataset(Dataset[T_stack]):
 
     datasets: Union[tuple, dict]
 
-    def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
+    def __init__(self, *args: Dataset[_T_co], **kwargs: Dataset[_T_co]) -> None:
         if args:
             if kwargs:
                 raise ValueError(
@@ -261,7 +263,7 @@ class StackDataset(Dataset[T_stack]):
     def __getitems__(self, indices: list):
         # add batched sampling support when parent datasets supports it.
         if isinstance(self.datasets, dict):
-            dict_batch: List[T_dict] = [{} for _ in indices]
+            dict_batch: List[_T_dict] = [{} for _ in indices]
             for k, dataset in self.datasets.items():
                 if callable(getattr(dataset, "__getitems__", None)):
                     items = dataset.__getitems__(indices)  # type: ignore[attr-defined]
@@ -292,14 +294,14 @@ class StackDataset(Dataset[T_stack]):
             else:
                 for idx, t_sample in zip(indices, list_batch):
                     t_sample.append(dataset[idx])
-        tuple_batch: List[T_tuple] = [tuple(sample) for sample in list_batch]
+        tuple_batch: List[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
     def __len__(self):
         return self._length
 
 
-class ConcatDataset(Dataset[T_co]):
+class ConcatDataset(Dataset[_T_co]):
     r"""Dataset as a concatenation of multiple datasets.
 
     This class is useful to assemble different existing datasets.
@@ -308,7 +310,7 @@ class ConcatDataset(Dataset[T_co]):
         datasets (sequence): List of datasets to be concatenated
     """
 
-    datasets: List[Dataset[T_co]]
+    datasets: List[Dataset[_T_co]]
     cumulative_sizes: List[int]
 
     @staticmethod
@@ -348,12 +350,11 @@ class ConcatDataset(Dataset[T_co]):
         return self.datasets[dataset_idx][sample_idx]
 
     @property
+    @deprecated(
+        "`cummulative_sizes` attribute is renamed to `cumulative_sizes`",
+        category=FutureWarning,
+    )
     def cummulative_sizes(self):
-        warnings.warn(
-            "cummulative_sizes attribute is renamed to " "cumulative_sizes",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self.cumulative_sizes
 
 
@@ -389,7 +390,7 @@ class ChainDataset(IterableDataset):
         return total
 
 
-class Subset(Dataset[T_co]):
+class Subset(Dataset[_T_co]):
     r"""
     Subset of a dataset at specified indices.
 
@@ -398,10 +399,10 @@ class Subset(Dataset[T_co]):
         indices (sequence): Indices in the whole set selected for subset
     """
 
-    dataset: Dataset[T_co]
+    dataset: Dataset[_T_co]
     indices: Sequence[int]
 
-    def __init__(self, dataset: Dataset[T_co], indices: Sequence[int]) -> None:
+    def __init__(self, dataset: Dataset[_T_co], indices: Sequence[int]) -> None:
         self.dataset = dataset
         self.indices = indices
 
@@ -410,7 +411,7 @@ class Subset(Dataset[T_co]):
             return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
-    def __getitems__(self, indices: List[int]) -> List[T_co]:
+    def __getitems__(self, indices: List[int]) -> List[_T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
@@ -423,10 +424,10 @@ class Subset(Dataset[T_co]):
 
 
 def random_split(
-    dataset: Dataset[T],
+    dataset: Dataset[_T],
     lengths: Sequence[Union[int, float]],
     generator: Optional[Generator] = default_generator,
-) -> List[Subset[T]]:
+) -> List[Subset[_T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
 

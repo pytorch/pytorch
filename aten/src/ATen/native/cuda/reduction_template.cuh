@@ -1,5 +1,4 @@
-namespace at {
-namespace cuda {
+namespace at::cuda {
 //windows doesn't like large string literals, so split in two
 const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
@@ -185,8 +184,8 @@ struct ReduceJitOp {
   using OutputCalculator = OffsetCalculator<2>;
 
 //   static constexpr bool can_accumulate_in_output =
-//     std::is_convertible<arg_t, out_scalar_t>::value
-//     && std::is_convertible<out_scalar_t, arg_t>::value;
+//     std::is_convertible_v<arg_t, out_scalar_t>
+//     && std::is_convertible_v<out_scalar_t, arg_t>;
 
   static constexpr int input_vec_size = ReduceConfig::input_vec_size;
 
@@ -595,6 +594,7 @@ struct ReduceJitOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); //complete acquire pattern
       value = ident;
       if (config.should_block_x_reduce()) {
         uint32_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
@@ -677,4 +677,4 @@ const std::string &get_reduction_template() {
   return reduction_template;
 }
 
-}}
+} // namespace at::cuda

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import importlib
 import logging
 import os
@@ -7,11 +8,20 @@ import subprocess
 import sys
 import warnings
 
-import torch
-from common import BenchmarkRunner, download_retry_decorator, main
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
+
+import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):
@@ -28,7 +38,7 @@ finally:
     from timm.data import resolve_data_config
     from timm.models import create_model
 
-TIMM_MODELS = dict()
+TIMM_MODELS = {}
 filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
 with open(filename) as fh:
@@ -43,28 +53,21 @@ with open(filename) as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 8,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "dpn107": 2,
     "gluon_xception65": 2,
     "mobilevit_s": 2,
-    "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
-    "res2net101_26w_4s": 2,
     "resnest101e": 2,
-    "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
     "swsl_resnext101_32x16d": 2,
-    "twins_pcpvt_base": 2,
     "vit_base_patch16_224": 2,
     "volo_d1_224": 2,
     "jx_nest_base": 4,
-    "xcit_large_24_p8_224": 4,
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
@@ -72,8 +75,30 @@ REQUIRE_HIGHER_TOLERANCE = {
     "gmixer_24_224",
     "hrnet_w18",
     "inception_v3",
+    "mixer_b16_224",
+    "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+}
+
+REQUIRE_EVEN_HIGHER_TOLERANCE = {
+    "levit_128",
+    "sebotnet33ts_256",
+    "beit_base_patch16_224",
+    "cspdarknet53",
+}
+
+# These models need higher tolerance in MaxAutotune mode
+REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {
+    "gluon_inception_v3",
+}
+
+REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
+    "adv_inception_v3",
+    "botnet26t_256",
+    "gluon_inception_v3",
+    "selecsls42b",
+    "swsl_resnext101_32x16d",
 }
 
 SCALED_COMPUTE_LOSS = {
@@ -91,6 +116,12 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     "xcit_large_24_p8_224",
+}
+
+REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
+    "inception_v3",
+    "mobilenetv3_large_100",
+    "cspdarknet53",
 }
 
 
@@ -147,7 +178,7 @@ def refresh_model_names():
         return name.split("_")[0]
 
     def populate_family(models):
-        family = dict()
+        family = {}
         for model_name in models:
             family_name = get_family_name(model_name)
             if family_name not in family:
@@ -165,11 +196,9 @@ def refresh_model_names():
         del all_models_family[key]
 
     chosen_models = set()
-    for value in docs_models_family.values():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for value in docs_models_family.values())
 
-    for key, value in all_models_family.items():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for key, value in all_models_family.items())
 
     filename = "timm_models_list.txt"
     if os.path.exists("benchmarks"):
@@ -193,10 +222,26 @@ class TimmRunner(BenchmarkRunner):
         return set()
 
     @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
+    @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
+
+    @property
+    def inline_inbuilt_nn_modules_models(self):
+        return {
+            "lcnet_050",
+        }
 
     @download_retry_decorator
     def _download_model(self, model_name):
@@ -292,8 +337,8 @@ class TimmRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
@@ -307,11 +352,28 @@ class TimmRunner(BenchmarkRunner):
         else:
             return torch.no_grad()
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
+
+        if self.args.freezing and name in REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING:
+            # the conv-batchnorm fusion used under freezing may cause relatively
+            # large numerical difference. We need are larger tolerance.
+            # Check https://github.com/pytorch/pytorch/issues/120545 for context
+            tolerance = 8 * 1e-2
+
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            from torch._inductor import config as inductor_config
+
+            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+                inductor_config.max_autotune
+                and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
+            ):
+                tolerance = 8 * 1e-2
+            elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2

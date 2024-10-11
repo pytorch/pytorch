@@ -1,7 +1,5 @@
 #pragma once
 
-#include <sys/types.h>
-
 #include <condition_variable>
 #include <mutex>
 #include <unordered_map>
@@ -24,7 +22,7 @@ class TORCH_API HashStore : public Store {
   std::vector<uint8_t> get(const std::string& key) override;
 
   void wait(const std::vector<std::string>& keys) override {
-    wait(keys, Store::kDefaultTimeout);
+    wait(keys, timeout_);
   }
 
   void wait(

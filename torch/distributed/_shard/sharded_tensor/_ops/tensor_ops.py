@@ -1,14 +1,15 @@
+# mypy: allow-untyped-defs
 import copy
+
 import torch
+from torch.distributed._shard.common_op_utils import _register_default_op
 from torch.distributed._shard.sharded_tensor import (
     _sharded_op_impl,
     Shard,
     ShardedTensor,
 )
-from ._common import (
-    _register_sharded_op_on_local_shards,
-)
-from torch.distributed._shard.common_op_utils import _register_default_op
+
+from ._common import _register_sharded_op_on_local_shards
 
 
 # Tensor properties access
@@ -32,6 +33,7 @@ _register_default_op(torch.Tensor.grad.__get__, _sharded_op_impl)  # type: ignor
 _register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ignore[union-attr]
 _register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 
+
 # device property is ambiguous as from a global prospective,
 # ShardedTensor.device consists of multiple devices (might even across hosts)
 # We choose to return the current device of the local tensor to represent
@@ -50,6 +52,7 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     else:
         dev = torch.device(torch.cuda.current_device())
     return dev
+
 
 @_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
 def st_is_meta(types, args=(), kwargs=None, pg=None):

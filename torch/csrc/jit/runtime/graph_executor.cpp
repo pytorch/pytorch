@@ -487,7 +487,6 @@ struct DifferentiableGraphOp {
       for (auto& tensor : lst) {
         tensor = detach(tensor);
       }
-      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }
@@ -636,7 +635,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   const ExecutionPlan& getPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth) override {
+      std::optional<size_t> remaining_bailout_depth) override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -838,7 +837,7 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
 
 const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 

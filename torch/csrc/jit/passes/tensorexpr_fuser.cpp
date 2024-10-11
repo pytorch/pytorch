@@ -26,7 +26,6 @@
 
 #include <utility>
 
-// NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
@@ -37,8 +36,7 @@ C10_DEFINE_bool(
     false,
     "enable TE fusion using dynamic shapes");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static bool texpr_reductions_enabled = false;
 
@@ -560,8 +558,7 @@ class TensorExprFuser {
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
     if (fuse_to_dynamic_shapes_) {
-      VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled"
-              << std::endl;
+      VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled" << '\n';
       generalizeFusionGroups(graph_->block());
       GRAPH_DUMP("After generalizing fusion groups: ", graph_);
     } else {
@@ -624,9 +621,7 @@ class TensorExprFuser {
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     GRAPH_DEBUG(msg, *n);
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
@@ -667,9 +662,8 @@ class TensorExprFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        auto [tmp_it, changed] = scanNode(*it);
+        it = tmp_it;
         any_changed |= changed;
       }
     }
@@ -780,9 +774,9 @@ class TensorExprFuser {
     }
   }
 
-  c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
+  std::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     std::vector<Node*> nodes_to_merge = {to_merge};
@@ -799,7 +793,7 @@ class TensorExprFuser {
       GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
       if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
         GRAPH_UPDATE("Failed to move because of AliasDB checks!");
-        return c10::nullopt;
+        return std::nullopt;
       }
       move_point = n;
     }
@@ -1288,7 +1282,7 @@ class TensorExprFuser {
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
       if (!GenerateGuard(fusion_group, add_composed_op_)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
-                << std::endl;
+                << '\n';
         SubgraphUtils::unmergeSubgraph(fusion_group);
       }
     }
@@ -1451,5 +1445,4 @@ RegisterOperators TensorExprOps({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

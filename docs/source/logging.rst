@@ -9,7 +9,7 @@ given different log level settings. For instance, one component's log messages
 can be completely disabled, while another component's log messages can be
 set to maximum verbosity.
 
-.. warning:: This feature is a prototype and may have compatibility breaking
+.. warning:: This feature is in beta and may have compatibility breaking
     changes in the future.
 
 .. warning:: This feature has not been expanded to control the log messages of

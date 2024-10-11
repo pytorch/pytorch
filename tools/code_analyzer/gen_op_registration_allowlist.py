@@ -8,12 +8,14 @@ For custom build with static dispatch, the op dependency graph will be omitted,
 and it will directly output root ops as the allowlist.
 """
 
-import argparse
+from __future__ import annotations
 
+import argparse
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 import yaml
+
 
 DepGraph = Dict[str, Set[str]]
 
@@ -34,7 +36,7 @@ def load_op_dep_graph(fname: str) -> DepGraph:
         return dict(result)
 
 
-def load_root_ops(fname: str) -> List[str]:
+def load_root_ops(fname: str) -> list[str]:
     result = []
     with open(fname) as stream:
         for op in yaml.safe_load(stream):
@@ -44,9 +46,9 @@ def load_root_ops(fname: str) -> List[str]:
 
 def gen_transitive_closure(
     dep_graph: DepGraph,
-    root_ops: List[str],
+    root_ops: list[str],
     train: bool = False,
-) -> List[str]:
+) -> list[str]:
     result = set(root_ops)
     queue = root_ops.copy()
 
@@ -73,7 +75,7 @@ def gen_transitive_closure(
     return sorted(result)
 
 
-def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: List[str]) -> str:
+def gen_transitive_closure_str(dep_graph: DepGraph, root_ops: list[str]) -> str:
     return " ".join(gen_transitive_closure(dep_graph, root_ops))
 
 

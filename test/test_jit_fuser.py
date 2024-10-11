@@ -70,7 +70,7 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu_unicode_temp_dir(self):
-        with TemporaryDirectoryName(suffix='中文') as dname:
+        with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname:
             shell_env = os.environ.copy()
             shell_env['TMP'] = dname
             cmd = [sys.executable, os.path.basename(__file__), type(self).__name__ + '.test_abs_cpu']
@@ -796,7 +796,7 @@ class TestFuser(JitTestCase):
             FileCheck.check("FusionGroup").run(str(graph))
         except RuntimeError as e:
             if 'Failed to compile' in e.args[0]:
-                warnings.warn('CPU fuser test has failed! This is not a hard failure, '
+                warnings.warn('CPU fuser test has failed! This is not a hard failure, '  # noqa: F821
                               'because the kernels sometimes trigger bugs in compilers '
                               '(most notably GCC 7.2).')
                 raise unittest.SkipTest('Failed to compile') from e
@@ -821,7 +821,7 @@ class TestFuser(JitTestCase):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.d = torch.device('cuda')
 

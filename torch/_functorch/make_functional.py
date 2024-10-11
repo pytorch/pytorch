@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -22,6 +23,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input

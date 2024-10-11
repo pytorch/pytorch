@@ -1,9 +1,9 @@
+#include <cstring>
+#include <iostream>
+#include <sstream>
+
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Runtime.h>
-#include <c10/util/Logging.h>
-#include <c10/util/irange.h>
-
-#include <sstream>
 
 namespace at {
 namespace native {
@@ -100,7 +100,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
 
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
-  TORCH_CHECK(instance, "Invalid Vulkan instance!");
+  VK_CHECK_COND(instance, "Invalid Vulkan instance!");
 
 #ifdef USE_VULKAN_VOLK
   volkLoadInstance(instance);
@@ -139,21 +139,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
     const char* const layer_prefix,
     const char* const message,
     void* const /* user_data */) {
+  (void)flags;
+
   std::stringstream stream;
   stream << layer_prefix << " " << message_code << " " << message << std::endl;
   const std::string log = stream.str();
 
-  if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-    LOG(ERROR) << log;
-  } else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
-    LOG(WARNING) << log;
-  } else if (flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
-    LOG(WARNING) << "Performance:" << log;
-  } else if (flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
-    LOG(INFO) << log;
-  } else if (flags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
-    LOG(INFO) << "Debug: " << log;
-  }
+  std::cout << log;
 
   return VK_FALSE;
 }
@@ -180,7 +172,7 @@ VkDebugReportCallbackEXT create_debug_report_callback(
       (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
           instance, "vkCreateDebugReportCallbackEXT");
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       vkCreateDebugReportCallbackEXT,
       "Could not load vkCreateDebugReportCallbackEXT");
 
@@ -191,7 +183,7 @@ VkDebugReportCallbackEXT create_debug_report_callback(
       nullptr,
       &debug_report_callback));
 
-  TORCH_CHECK(debug_report_callback, "Invalid Vulkan debug report callback!");
+  VK_CHECK_COND(debug_report_callback, "Invalid Vulkan debug report callback!");
 
   return debug_report_callback;
 }
@@ -202,19 +194,16 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 
 uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
   if (devices.empty()) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: no device devices are available for selection!");
     return devices.size() + 1; // return out of range to signal invalidity
   }
 
   // Select the first adapter that has compute capability
-  for (const uint32_t i : c10::irange(devices.size())) {
+  for (size_t i = 0; i < devices.size(); ++i) {
     if (devices[i].first.num_compute_queues > 0) {
       return i;
     }
   }
 
-  TORCH_WARN("Pytorch Vulkan Runtime: no device devices support compute!");
   return devices.size() + 1;
 }
 
@@ -226,16 +215,10 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
   // Load Vulkan drivers
 #if defined(USE_VULKAN_VOLK)
   if (VK_SUCCESS != volkInitialize()) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: Failed to load Vulkan driver using volkInitialize()! "
-        "The global vulkan runtime is invalid.");
     return std::unique_ptr<Runtime>(nullptr);
   }
 #elif defined(USE_VULKAN_WRAPPER)
   if (!InitVulkan()) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: Failed to load Vulkan driver using initVulkan()! "
-        "The global vulkan runtime is invalid.");
     return std::unique_ptr<Runtime>(nullptr);
   }
 #endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
@@ -258,21 +241,7 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
   try {
     return std::make_unique<Runtime>(Runtime(default_config));
-  } catch (const c10::Error& e) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
-        "The global vulkan runtime is invalid. Error: ",
-        e.what());
-  } catch (const std::exception& e) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
-        "The global vulkan runtime is invalid. Error: ",
-        e.what());
   } catch (...) {
-    TORCH_WARN(
-        "Pytorch Vulkan Runtime: Failed to initialize the global vulkan runtime! "
-        "The global vulkan runtime is invalid. "
-        "Error: Unknown");
   }
 
   return std::unique_ptr<Runtime>(nullptr);
@@ -296,24 +265,13 @@ Runtime::Runtime(const RuntimeConfiguration config)
         case AdapterSelector::First:
           default_adapter_i_ = create_adapter(select_first);
       }
-    } catch (const c10::Error& e) {
-      TORCH_WARN(
-          "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
-          e.what());
-    } catch (const std::exception& e) {
-      TORCH_WARN(
-          "Pytorch Vulkan Runtime: Could not initialize default device! Error: ",
-          e.what());
     } catch (...) {
-      TORCH_WARN(
-          "Pytorch Vulkan Runtime: Could not initialize default device! Error: "
-          "Unknown.");
     }
   }
 }
 
 Runtime::~Runtime() {
-  if C10_LIKELY (VK_NULL_HANDLE == instance_) {
+  if (VK_NULL_HANDLE == instance_) {
     return;
   }
 
@@ -328,12 +286,10 @@ Runtime::~Runtime() {
         (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
             instance_, "vkDestroyDebugReportCallbackEXT");
 
-    TORCH_CHECK(
-        vkDestroyDebugReportCallbackEXT,
-        "Pytorch Vulkan Runtime: Could not load vkDestroyDebugReportCallbackEXT "
-        "when destroying debug_report_callback_");
-
-    vkDestroyDebugReportCallbackEXT(instance_, debug_report_callback_, nullptr);
+    if (vkDestroyDebugReportCallbackEXT) {
+      vkDestroyDebugReportCallbackEXT(
+          instance_, debug_report_callback_, nullptr);
+    }
 
     debug_report_callback_ = {};
   }
@@ -353,13 +309,13 @@ Runtime::Runtime(Runtime&& other) noexcept
 }
 
 uint32_t Runtime::create_adapter(const Selector& selector) {
-  TORCH_CHECK(
+  VK_CHECK_COND(
       !device_mappings_.empty(),
       "Pytorch Vulkan Runtime: Could not initialize adapter because no "
       "devices were found by the Vulkan instance.");
 
   uint32_t physical_device_i = selector(device_mappings_);
-  TORCH_CHECK(
+  VK_CHECK_COND(
       physical_device_i < device_mappings_.size(),
       "Pytorch Vulkan Runtime: no suitable device adapter was selected! "
       "Device could not be initialized");
@@ -387,7 +343,7 @@ Runtime* runtime() {
   static const std::unique_ptr<Runtime> p_runtime =
       init_global_vulkan_runtime();
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       p_runtime,
       "Pytorch Vulkan Runtime: The global runtime could not be retrieved "
       "because it failed to initialize.");

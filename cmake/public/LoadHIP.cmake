@@ -1,19 +1,33 @@
 set(PYTORCH_FOUND_HIP FALSE)
 
-if(NOT DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH /opt/rocm)
-else()
+# If ROCM_PATH is set, assume intention is to compile with
+# ROCm support and error out if the ROCM_PATH does not exist.
+# Else ROCM_PATH does not exist, assume a default of /opt/rocm
+# In the latter case, if /opt/rocm does not exist emit status
+# message and return.
+if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH $ENV{ROCM_PATH})
+  if(NOT EXISTS ${ROCM_PATH})
+    message(FATAL_ERROR
+      "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
+      "Set a valid ROCM_PATH or unset ROCM_PATH environment variable to fix.")
+  endif()
+else()
+  set(ROCM_PATH /opt/rocm)
+  if(NOT EXISTS ${ROCM_PATH})
+    message(STATUS
+        "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
+        "Building without ROCm support.")
+    return()
+  endif()
 endif()
+
 if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
   set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
 else()
   set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
 endif()
 
-if(NOT EXISTS ${ROCM_PATH})
-  return()
-endif()
 
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
@@ -146,6 +160,7 @@ if(HIP_FOUND)
   set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
   set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
   set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
+  set(hiprtc_DIR ${ROCM_PATH}/lib/cmake/hiprtc)
 
 
   find_package_and_print_version(hip REQUIRED)
@@ -155,21 +170,16 @@ if(HIP_FOUND)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(hipblas REQUIRED)
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-    find_package_and_print_version(hipblaslt REQUIRED)
-  endif()
+  find_package_and_print_version(hipblaslt REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    find_package_and_print_version(hipfft REQUIRED)
-  else()
-    find_package_and_print_version(rocfft REQUIRED)
-  endif()
+  find_package_and_print_version(hipfft REQUIRED)
   find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rccl)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
+  find_package_and_print_version(hiprtc REQUIRED)
 
 
   find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${ROCM_PATH}/lib)
@@ -191,56 +201,29 @@ if(HIP_FOUND)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
-    # check whether hipblaslt is using its own datatype
-    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_data_type.cc")
-    file(WRITE ${file} ""
-      "#include <hipblaslt/hipblaslt.h>\n"
-      "int main() {\n"
-      "    hipblasltDatatype_t bar = HIPBLASLT_R_16F;\n"
-      "    return 0;\n"
-      "}\n"
-      )
+  # check whether HIP declares new types
+  set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
+  file(WRITE ${file} ""
+    "#include <hip/library_types.h>\n"
+    "int main() {\n"
+    "    hipDataType baz = HIP_R_8F_E4M3_FNUZ;\n"
+    "    return 0;\n"
+    "}\n"
+    )
 
-    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-      OUTPUT_VARIABLE hipblaslt_compile_output)
+  try_compile(hip_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+    COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+    OUTPUT_VARIABLE hip_compile_output)
 
-    if(hipblaslt_compile_result)
-      set(HIPBLASLT_CUSTOM_DATA_TYPE ON)
-      #message("hipblaslt is using custom data type: ${hipblaslt_compile_output}")
-      message("hipblaslt is using custom data type")
-    else()
-      set(HIPBLASLT_CUSTOM_DATA_TYPE OFF)
-      #message("hipblaslt is NOT using custom data type: ${hipblaslt_compile_output}")
-      message("hipblaslt is NOT using custom data type")
-    endif()
-
-    # check whether hipblaslt is using its own compute type
-    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_compute_type.cc")
-    file(WRITE ${file} ""
-      "#include <hipblaslt/hipblaslt.h>\n"
-      "int main() {\n"
-      "    hipblasLtComputeType_t baz = HIPBLASLT_COMPUTE_F32;\n"
-      "    return 0;\n"
-      "}\n"
-      )
-
-    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-      OUTPUT_VARIABLE hipblaslt_compile_output)
-
-    if(hipblaslt_compile_result)
-      set(HIPBLASLT_CUSTOM_COMPUTE_TYPE ON)
-      #message("hipblaslt is using custom compute type: ${hipblaslt_compile_output}")
-      message("hipblaslt is using custom compute type")
-    else()
-      set(HIPBLASLT_CUSTOM_COMPUTE_TYPE OFF)
-      #message("hipblaslt is NOT using custom compute type: ${hipblaslt_compile_output}")
-      message("hipblaslt is NOT using custom compute type")
-    endif()
+  if(hip_compile_result)
+    set(HIP_NEW_TYPE_ENUMS ON)
+    #message("HIP is using new type enums: ${hip_compile_output}")
+    message("HIP is using new type enums")
+  else()
+    set(HIP_NEW_TYPE_ENUMS OFF)
+    #message("HIP is NOT using new type enums: ${hip_compile_output}")
+    message("HIP is NOT using new type enums")
   endif()
 
 endif()

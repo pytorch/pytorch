@@ -1,9 +1,9 @@
-from typing import Dict, Optional, Set
-
+# mypy: allow-untyped-defs
+from typing import Dict, Optional
 import torch
-from torch._ops import OpOverload, OpOverloadPacket, HigherOrderOperator
+from torch._ops import OpOverload, HigherOrderOperator
 from torch._export.error import InternalError
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 
 
 __all__ = ["ReplaceViewOpsWithViewCopyOpsPass"]
@@ -13,12 +13,6 @@ _NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS: Dict[OpOverload, OpOverload] = {
     torch.ops.aten._unsafe_view.default: torch.ops.aten.view_copy.default,
 }
 
-# TODO (tmanlaibaatar) remove this after https://github.com/pytorch/pytorch/pull/100749
-_BLACK_LISTED_OPS: Set[OpOverloadPacket] = {
-    torch.ops.aten.sym_size,
-    torch.ops.aten.sym_stride,
-    torch.ops.aten.sym_numel,
-}
 
 def is_view_op(schema: torch._C.FunctionSchema) -> bool:
     if len(schema.arguments) == 0:
@@ -49,7 +43,7 @@ def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOver
     return None
 
 
-class ReplaceViewOpsWithViewCopyOpsPass(_ExportPassBase):
+class ReplaceViewOpsWithViewCopyOpsPass(_ExportPassBaseDeprecatedDoNotUse):
     """
     Our backend expects pure functional operators. For efficiency
     purposes, we keep view ops around while functionalizing the exported
@@ -62,7 +56,7 @@ class ReplaceViewOpsWithViewCopyOpsPass(_ExportPassBase):
                 (_NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS[op]), args, kwargs, meta
             )
 
-        if op in _BLACK_LISTED_OPS or isinstance(op, HigherOrderOperator):
+        if isinstance(op, HigherOrderOperator):
             return super().call_operator(op, args, kwargs, meta)
 
         if view_copy_op := get_view_copy_of_view_op(op._schema):

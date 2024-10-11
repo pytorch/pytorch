@@ -1,42 +1,15 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
+from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = (7, 4)
 TREESPEC_VERSION = 1
-
-# TODO (zhxchen17) Move to a separate file.
-class _Union:
-    @classmethod
-    def create(cls, **kwargs):
-        assert len(kwargs) == 1
-        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
-
-    def __post_init__(self):
-        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
-
-    @property
-    def value(self):
-        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val is not None
-        return val
-
-    @property
-    def type(self):
-        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val_type is not None
-        return val_type
-
-    def __str__(self):
-        return self.__repr__()
-
-    def __repr__(self):
-        return f"{type(self).__name__}({self.type}={self.value})"
 
 
 class ScalarType(IntEnum):
@@ -54,6 +27,7 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
+    UINT16 = 28
 
 
 class Layout(IntEnum):
@@ -78,7 +52,7 @@ class MemoryFormat(IntEnum):
 @dataclass
 class Device:
     type: str
-    index: Optional[int]
+    index: Optional[int] = None
 
 
 @dataclass(repr=False)
@@ -117,7 +91,7 @@ class TensorMeta:
     requires_grad: bool
     device: Device
     strides: List[SymInt]
-    storage_offset: int
+    storage_offset: SymInt
     layout: Layout
 
 
@@ -150,13 +124,18 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class TokenArgument:
+    name: str
+
+
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values seiralized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
-    as_tensor: str
+    as_tensor: TensorArgument
     as_none: Tuple[()]
 
 
@@ -169,6 +148,7 @@ class GraphArgument:
 @dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 # This is actually a union type
@@ -196,6 +176,7 @@ class Argument(_Union):
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
     as_custom_obj: CustomObjArgument
+    as_operator: str
 
 
 @dataclass
@@ -226,12 +207,28 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 @dataclass
 class UserInputSpec:
     # Actually, only tensors and SymInts are allowed here
     arg: Argument
+
+
+@dataclass(repr=False)
+class ConstantValue(_Union):
+    as_none: Tuple[()]
+    as_int: int
+    as_float: float
+    as_string: str
+    as_bool: bool
+
+
+@dataclass
+class ConstantInputSpec:
+    name: str
+    value: ConstantValue
 
 
 @dataclass
@@ -244,6 +241,8 @@ class InputToParameterSpec:
 class InputToBufferSpec:
     arg: TensorArgument
     buffer_name: str
+    persistent: bool
+
 
 
 @dataclass
@@ -253,11 +252,25 @@ class InputToTensorConstantSpec:
 
 
 @dataclass
+class InputToCustomObjSpec:
+    arg: CustomObjArgument
+    custom_obj_name: str
+
+
+@dataclass
+class InputTokenSpec:
+    arg: TokenArgument
+
+
+@dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
+    custom_obj: InputToCustomObjSpec
+    token: InputTokenSpec
+    constant_input: ConstantInputSpec
 
 
 @dataclass
@@ -289,12 +302,25 @@ class GradientToUserInputSpec:
 
 
 @dataclass
+class UserInputMutationSpec:
+    arg: TensorArgument
+    user_input_name: str
+
+
+@dataclass
+class OutputTokenSpec:
+    arg: TokenArgument
+
+
+@dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
     loss_output: LossOutputSpec
     buffer_mutation: BufferMutationSpec
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
+    user_input_mutation: UserInputMutationSpec
+    token: OutputTokenSpec
 
 
 @dataclass
@@ -319,6 +345,10 @@ class ModuleCallSignature:
     in_spec: str
     out_spec: str
 
+    # This field is used to prettify the graph placeholders
+    # after we ser/der and retrace
+    forward_arg_names: Optional[List[str]] = None
+
 
 @dataclass
 class ModuleCallEntry:
@@ -334,6 +364,15 @@ class GraphModule:
     # the modules in order to unflatten the modules back to the eager calling
     # conventions.
     module_call_graph: List[ModuleCallEntry]
+    metadata: Dict[str, str] = field(default_factory=dict)
+
+
+# Invariant: Every time a change is made to the schema, one of the versions
+#            should be upadted.
+@dataclass
+class SchemaVersion:
+    major: int  # Major version number is bumped every time a breaking change is made.
+    minor: int  # Minor version number is bumped when a compatible change is made.
 
 
 @dataclass
@@ -342,5 +381,6 @@ class ExportedProgram:
     # Key is the opset namespace (ex. aten), and value is the version number
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
-    schema_version: int
-    dialect: str
+    schema_version: SchemaVersion
+    verifiers: List[str] = field(default_factory=list)
+    torch_version: str = "<=2.4"

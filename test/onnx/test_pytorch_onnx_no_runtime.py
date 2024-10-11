@@ -13,6 +13,7 @@ import warnings
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
+
 import onnx
 import onnx.numpy_helper
 import pytorch_test_common
@@ -20,7 +21,7 @@ import pytorch_test_common
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import OperatorExportTypes, symbolic_helper, utils
+from torch.onnx import symbolic_helper, utils
 from torch.onnx._internal import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
@@ -96,7 +97,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return x.contiguous().transpose(0, 1).sum()
 
         class TraceMe(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo()
 
@@ -148,7 +149,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = PythonModule()
 
@@ -168,7 +169,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.jit.trace(ModuleToInline(), torch.zeros(1, 2, 3))
 
@@ -187,7 +188,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
 
@@ -250,7 +251,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.Parameter(torch.ones(3, 3))
                 self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
@@ -260,7 +261,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.mm(x, self.m)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
                 self.param = torch.nn.Parameter(torch.ones(3, 4))
@@ -374,7 +375,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Will be expanded during ONNX export
                 self.ln = torch.nn.LayerNorm([1])
@@ -394,7 +395,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         for node in graph.nodes():
             self.assertTrue(node.sourceRange())
 
-    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_due_exception(self):
         def bad_clamp(g, self, min, max):
             return symbolic_helper._onnx_unsupported("Bad boy!")
@@ -411,7 +411,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
 
-    @common_utils.skipIfCaffe2
     def test_clip_aten_fallback_explicit_request(self):
         class MyClip(torch.nn.Module):
             def forward(self, x):
@@ -486,7 +485,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 "box_coder": BoxCoder,
             }
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.box_coder = BoxCoder(1.4)
 
@@ -601,33 +600,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             + ")."
         )
 
-    def test_onnx_checker_invalid_graph(self):
-        class CustomAddModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.add(x, y)
-
-        def symbolic_custom_invalid_add(g, input, other, alpha=None):
-            return g.op("Add", input, other, invalid_attr_i=1)
-
-        torch.onnx.register_custom_op_symbolic(
-            "::add", symbolic_custom_invalid_add, opset_version=9
-        )
-
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
-
-        test_model = CustomAddModule()
-        f = io.BytesIO()
-
-        try:
-            with self.assertRaises(torch.onnx.errors.CheckerError):
-                torch.onnx.export(test_model, (x, y), f, opset_version=9)
-        finally:
-            torch.onnx.unregister_custom_op_symbolic("::add", 9)
-
-        self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
-        loaded_model = onnx.load_from_string(f.getvalue())
-
     def test_shape_value_map(self):
         class RSoftMax(torch.nn.Module):
             def __init__(self, radix, cardinality):
@@ -675,7 +647,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertRaises(RuntimeError, check_proto)
 
     def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+        def symbolic_pythonop(g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
 
         torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
@@ -889,7 +861,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         mask_start_point = 0
 
         class LSTMTraceWrapper(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.rnn = torch.nn.LSTM(
@@ -961,60 +933,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
         torch.onnx.export_to_pretty_string(Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
-    @common_utils.skipIfNoCaffe2
-    def test_caffe2_aten_fallback_must_fallback(self):
-        class ModelWithAtenNotONNXOp(torch.nn.Module):
-            def forward(self, x, y):
-                abcd = x + y
-                defg = torch.linalg.qr(abcd)
-                return defg
-
-        # TODO: Refactor common_utils._decide_skip_caffe2 to support parametrize
-        for operator_export_type in (
-            OperatorExportTypes.ONNX_ATEN,
-            OperatorExportTypes.ONNX_ATEN_FALLBACK,
-        ):
-            x = torch.rand(3, 4)
-            y = torch.rand(3, 4)
-            f = io.BytesIO()
-            torch.onnx.export(
-                ModelWithAtenNotONNXOp(),
-                (x, y),
-                f,
-                do_constant_folding=False,
-                operator_export_type=operator_export_type,
-                # support for linalg.qr was added in later op set versions.
-                opset_version=9,
-            )
-            onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-            self.assertAtenOp(onnx_model, "linalg_qr")
-
-    @common_utils.skipIfNoCaffe2
-    def test_caffe2_onnx_aten_must_not_fallback(self):
-        class ModelWithAtenFmod(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.fmod(x, y)
-
-        # TODO: Refactor common_utils._decide_skip_caffe2 to support parametrize
-        for operator_export_type in (
-            OperatorExportTypes.ONNX_ATEN_FALLBACK,
-            OperatorExportTypes.ONNX_ATEN,
-        ):
-            x = torch.randn(3, 4, dtype=torch.float32)
-            y = torch.randn(3, 4, dtype=torch.float32)
-            f = io.BytesIO()
-            torch.onnx.export(
-                ModelWithAtenFmod(),
-                (x, y),
-                f,
-                do_constant_folding=False,
-                operator_export_type=operator_export_type,
-                opset_version=10,  # or higher
-            )
-            onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-            assert onnx_model.graph.node[0].op_type == "Mod"
-
-    @common_utils.skipIfCaffe2
     def test_aten_fallback_must_fallback(self):
         class ModelWithAtenNotONNXOp(torch.nn.Module):
             def forward(self, x, y):
@@ -1037,7 +955,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         self.assertAtenOp(onnx_model, "linalg_qr")
 
-    @common_utils.skipIfCaffe2
     def test_onnx_aten(self):
         class ModelWithAtenFmod(torch.nn.Module):
             def forward(self, x, y):
@@ -1056,11 +973,10 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         self.assertAtenOp(onnx_model, "fmod", "Tensor")
 
-    @common_utils.skipIfCaffe2
     def test_onnx_aten_fallback_must_not_fallback(self):
         # For BUILD_CAFFE2=0, aten fallback only when not exportable
         class ONNXExportable(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.fc1 = torch.nn.Linear(12, 8)
@@ -1234,26 +1150,6 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
         _export_to_onnx(model, data, input_names)
 
     @common_quantization.skipIfNoFBGEMM
-    @common_utils.skipIfNoCaffe2
-    def test_lower_graph_linear(self):
-        model = torch.ao.quantization.QuantWrapper(
-            torch.nn.Linear(5, 10, bias=True)
-        ).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @common_quantization.skipIfNoFBGEMM
-    @common_utils.skipIfNoCaffe2
-    def test_lower_graph_conv2d(self):
-        model = torch.ao.quantization.QuantWrapper(
-            torch.nn.Conv2d(3, 5, 2, bias=True)
-        ).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @common_quantization.skipIfNoFBGEMM
     @unittest.skip(
         "onnx opset9 does not support quantize_per_tensor and caffe2 \
     does not support conv3d"
@@ -1313,6 +1209,18 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
                 decoder_input_ids=ids["input_ids"],
                 decoder_attention_mask=ids["attention_mask"],
             )
+
+    def test_aten_linalg_vector_norm_with_reducel2(self):
+        class Net(torch.nn.Module):
+            def forward(self, x):
+                x = F.normalize(x)
+                return x
+
+        f = io.BytesIO()
+        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
+        self.assertIn("ReduceL2", onnx_nodes)
 
 
 if __name__ == "__main__":

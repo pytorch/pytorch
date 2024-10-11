@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher
 from torchgen.api.translate import translate
@@ -11,6 +13,10 @@ from torchgen.api.types import (
     FunctionalizationLambda,
     iTensorListRefT,
     NativeSignature,
+    OptionalCType,
+    optionalSymIntArrayRefT,
+    symIntArrayRefT,
+    SymIntT,
     tensorListT,
     tensorT,
     VectorCType,
@@ -42,8 +48,11 @@ from torchgen.native_function_generation import (
     MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
     OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
 )
+from torchgen.utils import dataclass_repr
 
-from torchgen.selective_build.selector import SelectiveBuilder
+
+if TYPE_CHECKING:
+    from torchgen.selective_build.selector import SelectiveBuilder
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -84,8 +93,14 @@ class GenCompositeViewCopyKernel:
     backend_index: BackendIndex
 
     @method_with_native_function
-    def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
+    def __call__(self, g: NativeFunctionsViewGroup) -> str | None:
         if g.view_copy is None:
+            return None
+        elif g.view_copy.func.name.name.base != f"{g.view.func.name.name}_copy":
+            # If the view_copy doesn't match the standard naming scheme of <op>_copy,
+            # assume it already exists and doesn't need to be generated.
+            # Example: slice_inverse() with the copy variant named slice_scatter()
+            # instead of slice_inverse_copy()
             return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
@@ -150,7 +165,7 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 """
 
 
-def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
+def return_str(rets: tuple[Return, ...], names: list[str]) -> str:
     assert len(rets) == len(names)
     if len(rets) == 0:
         return ""
@@ -174,7 +189,7 @@ def wrapper_name(func: FunctionSchema) -> str:
         return cpp.name(func)
 
 
-def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> bool:
+def is_tensor_like(a: Argument | TensorOptionsArguments | SelfArgument) -> bool:
     return isinstance(a, SelfArgument) or (
         isinstance(a, Argument) and a.type.is_tensor_like()
     )
@@ -184,7 +199,7 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
 # We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
-def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
+def get_owning_type(t: CType) -> tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
     if t == BaseCType(iTensorListRefT):
@@ -199,9 +214,9 @@ def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
 # (2) a context, to be used by translate(), with all of the relevant bindings.
 def unwrap_tensor_args(
     sig: DispatcherSignature, *, is_view_op: bool
-) -> Tuple[str, List[Binding]]:
-    context: List[Binding] = []
-    unwrapped_tensor_args: List[str] = []
+) -> tuple[str, list[Binding]]:
+    context: list[Binding] = []
+    unwrapped_tensor_args: list[str] = []
     for arg in sig.arguments():
         if is_tensor_like(arg.argument):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
@@ -237,9 +252,9 @@ def unwrap_tensor_args(
 # converts  all tensor-like arguments to meta tensors, which are used to compute stride info. Returns:
 # (1) a string containing all of the logic that does the conversions.
 # (2) a context, to be used by translate(), with all of the relevant bindings.
-def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
-    context: List[Binding] = []
-    unwrapped_tensor_args: List[str] = []
+def convert_to_meta_tensors(sig: DispatcherSignature) -> tuple[str, list[Binding]]:
+    context: list[Binding] = []
+    unwrapped_tensor_args: list[str] = []
     for arg in sig.arguments():
         if is_tensor_like(arg.argument):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
@@ -272,6 +287,58 @@ but found an argument of type {str(args[0].type)} for operator: {str(func.name)}
         is_alias(a) for a in args[1:]
     ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
 View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
+
+
+# One-liner expression for checking if an expression expr of type type has any
+# symbolic values.
+def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
+    if type == BaseCType(SymIntT):
+        return f"{expr}.is_symbolic()"
+
+    if isinstance(type, OptionalCType):
+        innerexpr = f"(*{expr})"
+        return f"{expr}.has_value() ? {emit_expr_has_symbolic_values(innerexpr, type.elem)} : false"
+
+    if type == BaseCType(optionalSymIntArrayRefT):
+        return emit_expr_has_symbolic_values(
+            expr, OptionalCType(BaseCType(symIntArrayRefT))
+        )
+
+    if type in (BaseCType(symIntArrayRefT), VectorCType(BaseCType(SymIntT))):
+        argname = "arg"
+        lambda_check = emit_expr_has_symbolic_values(argname, BaseCType(SymIntT))
+        return (
+            "std::any_of("
+            f"{expr}.begin(), {expr}.end(), "
+            f"[=](auto& {argname}) {{ return {lambda_check}; }})"
+        )
+
+    raise ValueError(
+        "unsupported type for has_symbolic_values check. "
+        "It should be a SymInt or a collection of those. "
+        f"Got: {type.cpp_type()}"
+    )
+
+
+# Detects whether any of the SymInt arguments are, in fact, symbolic values.
+# This is used in the constructor of ViewMeta.
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
+    name = "has_symbolic_inputs"
+    statements = [
+        f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
+        for binding in sig.arguments()
+        if (
+            isinstance(binding.argument, Argument)
+            and binding.argument.type.is_symint_like()
+        )
+    ]
+    body = "\n      ".join(statements)
+    return (
+        name,
+        f"""
+      bool {name} = false;
+      {body}""",
+    )
 
 
 # Generates the Functionalization kernel for:
@@ -327,6 +394,11 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
+        (
+            symbolic_inputs_varname,
+            symbolic_inputs_check,
+        ) = emit_has_symbolic_inputs(call_sig)
+
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
             return f"""
@@ -342,6 +414,7 @@ def emit_view_functionalization_body(
           reapply_views ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
             : at::functionalization::InverseReturnMode::NeverView
       );
+      {symbolic_inputs_check}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           if (reapply_views) {{
@@ -352,7 +425,8 @@ def emit_view_functionalization_body(
         }},
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
-        }}
+        }},
+        /*has_symbolic_inputs=*/{symbolic_inputs_varname}
       );
       auto compute_reference_meta =
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
@@ -414,6 +488,7 @@ def emit_view_functionalization_body(
           tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
         }}
       }}
+      {symbolic_inputs_check}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           if (reapply_views) {{
@@ -425,7 +500,9 @@ def emit_view_functionalization_body(
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
         }},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()}
+        /*has_symbolic_inputs=*/{symbolic_inputs_varname},
+        /*is_multi_output=*/{str(is_multi_output_view).lower()},
+        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -450,7 +527,7 @@ def maybe_create_output(f: NativeFunction, var_name: str) -> str:
 # - the names of returns corresponding to the (immutable) outputs of the inner redispatched function
 def get_mutable_redispatch_return_names(
     f: NativeFunction, inner_return_var: str
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     aliased_returns = []
     non_aliased_returns = []
     for i, name in enumerate(f.func.aliased_return_names()):
@@ -513,10 +590,12 @@ def wrap_propagate_mutations_and_return(
     ):
         updates.append(
             f"""\
-  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
+  auto {outer_arg}_inner = at::functionalization::impl::from_functional_tensor({outer_arg});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
-  at::functionalization::impl::sync({outer_arg});"""
+  at::functionalization::impl::sync({outer_arg});
+  auto {outer_arg}_inner_updated = at::functionalization::impl::from_functional_tensor({outer_arg});
+  at::functionalization::impl::propagate_xla_data_direct({outer_arg}_inner, {outer_arg}_inner_updated);"""
         )
 
     # Finally, we return:
@@ -658,7 +737,7 @@ def emit_inplace_functionalization_body(
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
          {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')};
+         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
         }}
       }} else {{
         {return_type} tmp_output;
@@ -679,24 +758,24 @@ def emit_inplace_functionalization_body(
 # See Note [Functionalization Pass: View Inverses].
 def gen_functionalization_view_inverse_declaration(
     selector: SelectiveBuilder, g: NativeFunctionsViewGroup
-) -> Optional[str]:
+) -> str | None:
     # For every (non-composite) view op, we need a corresponding "inverse view" function.
     # This generates the declarations so we get a good compiler error when someone adds a new view.
     @with_native_function
-    def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
+    def emit_decl_helper(g: NativeFunctionsViewGroup) -> str | None:
         if g.view.has_composite_implicit_autograd_kernel:
             return None
-        view_copy_inverse_sig = ViewInverseSignature(g)
-        return view_copy_inverse_sig.decl()
+        view_inverse_sig = ViewInverseSignature(g)
+        return view_inverse_sig.decl()
 
     return emit_decl_helper(g)
 
 
 def gen_functionalization_registration(
     selector: SelectiveBuilder,
-    g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup],
+    g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
     composite_implicit_autograd_index: BackendIndex,
-) -> List[str]:
+) -> list[str]:
     @with_native_function
     def emit_registration_helper(f: NativeFunction) -> str:
         assert not f.has_composite_implicit_autograd_kernel
@@ -744,7 +823,8 @@ def gen_functionalization_registration(
         if str(f.func.name) == "resize_":
             # See Note [resize_ in Functionalization]
             return []
-        assert not f.is_view_op
+        if str(f.func.name.name) != "set_":
+            assert not f.is_view_op
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
@@ -759,8 +839,8 @@ def gen_functionalization_definition(
     # (and instead only need to operate on grouped NativeFunctions).
     # The only reason currently is because we need to emit direct dispatch registrations
     # For CompositeImplicitAutograd operators, which are potentially ungrouped.
-    g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup],
-) -> List[str]:
+    g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
+) -> list[str]:
     # Don't generate kernels in mobile build
     if not selector.include_all_operators:
         return []
@@ -771,7 +851,7 @@ def gen_functionalization_definition(
         if not g.composite:
             # invariant: NativeFunctionsViewGroup's always have a view_copy operator
             # if the view is not composite (implicit autograd)
-            assert g.view_copy is not None
+            assert g.view_copy is not None, dataclass_repr(g, indent=1)
             view_defs.append(emit_view_functionalization_body(g, view_inplace=False))
             if g.view_inplace is not None:
                 view_defs.append(emit_view_functionalization_body(g, view_inplace=True))
@@ -784,7 +864,10 @@ def gen_functionalization_definition(
         # I think we should either:
         # (1) fix their schemas (BC-breaking)
         # (2) hand-write their functionalization kernels
-        if str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
+        if (
+            str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+            and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+        ):
             assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
         return []
     else:

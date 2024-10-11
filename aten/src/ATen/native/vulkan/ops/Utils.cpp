@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -82,7 +83,8 @@ Tensor create_staging_tensor(const vTensor& v_in) {
   // the staging tensor matches the number of bytes in the image texture. Refer
   // to comments for api::vk_format()
   return at::empty(
-      {NC4, H, W, 4}, at::device(at::kCPU).dtype(v_in.texture_dtype()));
+      {NC4, H, W, 4},
+      at::device(at::kCPU).dtype(convert_dtype(v_in.texture_dtype())));
 }
 
 /*
@@ -328,10 +330,11 @@ api::utils::vec4 extract_texel(const Tensor& input, const ivec3& pos) {
   // x, y, z, w all using a single element tensor. We intend to pull
   // (0, 0, 0).x from each tensor. This allows us to isolate the effect
   // of most packing mechanism.
-  vTensor v_outputs_x{context, output_size, input.scalar_type()};
-  vTensor v_outputs_y{context, output_size, input.scalar_type()};
-  vTensor v_outputs_z{context, output_size, input.scalar_type()};
-  vTensor v_outputs_w{context, output_size, input.scalar_type()};
+  api::ScalarType dtype = convert_dtype(input.scalar_type());
+  vTensor v_outputs_x{context, output_size, dtype};
+  vTensor v_outputs_y{context, output_size, dtype};
+  vTensor v_outputs_z{context, output_size, dtype};
+  vTensor v_outputs_w{context, output_size, dtype};
 
   const struct Block final {
     ivec3 pos;

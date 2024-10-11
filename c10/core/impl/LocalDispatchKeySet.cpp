@@ -1,7 +1,6 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // NB: POD, must be zero initialized!
 // Note [TLS Initialization]
@@ -115,5 +114,4 @@ bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
 bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
   return raw_local_dispatch_key_set.included().isSupersetOf(ks);
 }
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

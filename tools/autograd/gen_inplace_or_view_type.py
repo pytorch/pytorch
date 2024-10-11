@@ -4,7 +4,7 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from __future__ import annotations
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -24,7 +24,6 @@ from torchgen.api.types import (
     OptionalCType,
     symIntArrayRefT,
     SymIntT,
-    # See Note [Nested Arg Types]
     tensorT,
 )
 from torchgen.code_template import CodeTemplate
@@ -46,6 +45,7 @@ from .gen_trace_type import (
     type_wrapper_name,
 )
 
+
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
 # you **MUST** also update the public list of view ops accordingly in
@@ -59,7 +59,9 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
+    "_nested_get_values",
     "_nested_view_from_buffer",
+    "_nested_view_from_jagged",
 ]
 
 VIEW_FUNCTIONS = {
@@ -71,6 +73,7 @@ VIEW_FUNCTIONS = {
     "permute": "self",
     "select": "self",
     "slice": "self",
+    "slice_inverse": "self",
     "split": "self",
     "split_with_sizes": "self",
     "squeeze": "self",
@@ -156,20 +159,43 @@ CALL_DISPATCH = CodeTemplate(
 at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 )
 
-SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
+REVERSE_VIEW_DISPATCH = CodeTemplate(
     """\
-std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided() ||
-    c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
-  ${replay_view_func}
+${reverse_name}(${unpacked_args})"""
+)
+
+MULTI_OUTPUT_VIEW_ITERATION = CodeTemplate(
+    """\
+for (auto ${view_idx} : c10::irange(${var}.size())) {
+  ${body}
 }
 """
 )
 
-REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
-func = [=](const at::Tensor& ${input_base}) {
-  return ${replay_view_call};
+std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
+if (${is_view_with_metadata_change} ||
+    !self.unsafeGetTensorImpl()->support_as_strided() ||
+    self.unsafeGetTensorImpl()->is_python_dispatch() ||
+    c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+  ${replay_view_func}
+  ${reverse_replay_view_func}
+}
+"""
+)
+
+REPLAY_VIEW_FUNC = CodeTemplate(
+    """\
+func = std::make_unique<${view_func_name}>(${view_func_args});
+"""
+)
+
+REVERSE_REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
+    """\
+rev_func = [=](const at::Tensor& ${input_view}) {
+  return ${reverse_replay_view_call};
 };
 """
 )
@@ -246,12 +272,17 @@ def unpacked_name(arg_name: str) -> str:
     return arg_name + "_"
 
 
-@with_native_function
-def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
-    body: List[str] = []
-    unpacked_bindings: List[Binding] = []
+# e.g. select.int -> select_copy_int_inverse()
+def inverse_view_name(f: NativeFunction) -> str:
+    copy_variant = f"{f.root_name}_copy"
+    overload = f"{f.func.name.overload_name}"
+    if overload != "":
+        overload = "_" + overload
+    return f"{copy_variant}{overload}_inverse"
 
-    bindings = [
+
+def extract_bindings(f: NativeFunction) -> list[Binding]:
+    return [
         r
         for a in f.func.schema_order_arguments()
         for r in cpp.argument(
@@ -264,7 +295,13 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         )
     ]
 
-    for i, binding in enumerate(bindings):
+
+@with_native_function
+def unpack_args(f: NativeFunction) -> tuple[list[str], list[Binding]]:
+    body: list[str] = []
+    unpacked_bindings: list[Binding] = []
+
+    for i, binding in enumerate(extract_bindings(f)):
         assert not isinstance(binding.argument, SelfArgument)
         if isinstance(binding.argument, TensorOptionsArguments):
             raise RuntimeError("VariableKernel shouldn't take TensorOptions")
@@ -301,7 +338,7 @@ def get_base_name(f: NativeFunction) -> str:
     return f.func.name.name.base  # TODO: should be str(f.func.name.name)?
 
 
-def get_view_info(f: NativeFunction) -> Optional[str]:
+def get_view_info(f: NativeFunction) -> str | None:
     base_name = get_base_name(f)
     view_info = VIEW_FUNCTIONS.get(base_name, None)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
@@ -309,26 +346,17 @@ def get_view_info(f: NativeFunction) -> Optional[str]:
     return view_info
 
 
-# For view replay calls, we generate an ordinary Dispatcher::call() instead, because:
-#  - We want to replay the entire call into the op, including any previously-set dispatch keys (including autograd!).
-#  - The view replay call also is not part of the hot path.
-def emit_view_call(
-    f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
+def emit_view_func(
+    f: NativeFunction, bindings: list[Binding], view_idx: str | None = None
 ) -> str:
-    # View replay functions use the standard Dispatcher::call API.
-    return CALL_DISPATCH.substitute(
-        unambiguous_name=f.func.name.unambiguous_name(), unpacked_args=unpacked_args
-    )
-
-
-def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
     See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
     """
+    # TODO: Clean this logic up if we get rid of reverse view funcs or reify them.
     input_base = "input_base"
     replay_view_func = ""
-    updated_unpacked_args: List[str] = []
-    known_view_arg_simple_types: List[CType] = [
+    updated_args: list[str] = []
+    known_view_arg_simple_types: list[CType] = [
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
         BaseCType(SymIntT),
@@ -337,11 +365,12 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
         ConstRefCType(BaseCType(tensorT)),
+        ConstRefCType(OptionalCType(BaseCType(tensorT))),
     ]
-    for unpacked_binding in unpacked_bindings:
-        arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
-        if arg == "self_":
-            updated_unpacked_args.append(input_base)
+    for binding in bindings:
+        arg, arg_type = binding.name, binding.nctype.type
+        if arg == "self":
+            updated_args.append(input_base)
             continue
         if arg_type not in known_view_arg_simple_types:
             known_types_str = ", ".join([str(t) for t in known_view_arg_simple_types])
@@ -358,27 +387,52 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             # reference type, so materialize a vector to close over by value
             arg_vec = arg + "_vec"
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
-            updated_unpacked_args.append(arg_vec)
+            updated_args.append(arg_vec)
         elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t
             arg_value = arg + "_val"
             replay_view_func += OPTIONAL_TO_VAL.substitute(
                 arg=arg, val=arg_value, default="0"
             )
-            updated_unpacked_args.append(arg_value)
-        elif (
-            arg == "nested_size_" or arg == "nested_strides_" or arg == "offsets_"
-        ) and arg_type == ConstRefCType(BaseCType(tensorT)):
-            # [NOTE] [Nested Arg Types]
-            # This is temporary. Nested tensors will be migrating to use SymInts and
-            # nested_size and nested_strides will no longer be tensors.
-            updated_unpacked_args.append(arg[:-1])
+            updated_args.append(arg_value)
+        elif arg_type == ConstRefCType(BaseCType(tensorT)) or arg_type == ConstRefCType(
+            OptionalCType(BaseCType(tensorT))
+        ):
+            # NB: Closing over a tensor. If a user modifies this tensor, this will be silently
+            # incorrect. The proper thing to do is to store the version counter and copy on write.
+            updated_args.append(arg)
         else:
-            updated_unpacked_args.append(arg)
+            updated_args.append(arg)
 
-    replay_view_call = emit_view_call(f, input_base, updated_unpacked_args)
-    replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
-        input_base=input_base, replay_view_call=replay_view_call
+    from .gen_view_funcs import view_func_name
+
+    view_func_args = [b.name for b in bindings if b.name != "self"]
+    if view_idx is not None:
+        view_func_args.append(f"{view_idx}")
+    replay_view_func += REPLAY_VIEW_FUNC.substitute(
+        view_func_name=view_func_name(f, include_namespace=True),
+        view_func_args=view_func_args,
+    )
+
+    input_view = "input_view"
+    reverse_unpacked_args = [
+        "self",
+        f"{input_view}",
+        # inverse_return_mode=
+        "at::functionalization::InverseReturnMode::AlwaysView",
+        *(() if view_idx is None else (f"{view_idx}",)),
+        # skip input_base arg
+        *updated_args[1:],
+    ]
+
+    from torchgen.api.functionalization import reverse_name
+
+    reverse_replay_view_call = REVERSE_VIEW_DISPATCH.substitute(
+        reverse_name=reverse_name(f, include_namespace=True),
+        unpacked_args=reverse_unpacked_args,
+    )
+    reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
+        input_view=input_view, reverse_replay_view_call=reverse_replay_view_call
     )
 
     is_view_with_metadata_change = (
@@ -388,12 +442,13 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
         is_view_with_metadata_change=is_view_with_metadata_change,
         replay_view_func=replay_view_func,
+        reverse_replay_view_func=reverse_replay_view_func,
     )
 
 
 def emit_view_body(
     fn: NativeFunctionWithDifferentiabilityInfo, var: str
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
     base_name = get_base_name(f)
@@ -432,20 +487,27 @@ def emit_view_body(
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
-            call += (
-                f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
-                "/* is_fw_differentiable */ true, "
+            view_idx = "view_idx"
+            view_func = emit_view_func(
+                f, extract_bindings(f), view_idx=view_idx
+            ).strip()
+            as_view_call = (
+                f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
+                "/* is_bw_differentiable */ true, /* is_fw_differentiable */ true, "
+                "/* view_func */ std::move(func), /* rev_view_func */ rev_func, "
                 f"/* creation_meta */ {creation_meta});"
+            )
+            call += MULTI_OUTPUT_VIEW_ITERATION.substitute(
+                var=var, view_idx=view_idx, body=f"{view_func}\n{as_view_call}"
             )
             rhs_value = f"std::move({var})"
         else:
-            _, unpacked_bindings = unpack_args(f)
-            call += emit_view_lambda(f, unpacked_bindings)
+            call += emit_view_func(f, extract_bindings(f), view_idx=None)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
                 "/* is_fw_differentiable */ true, "
-                f"/* view_func */ func, /* creation_meta */ {creation_meta})"
+                f"/* view_func */ std::move(func), /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
             )
     else:
         # This could be supported but we don't need it at the moment, so keeping things simple.
@@ -461,9 +523,9 @@ def modifies_arguments(f: NativeFunction) -> bool:
 
 
 @with_native_function_with_differentiability_info
-def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
+def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> list[str]:
     f = fn.func
-    inplace_view_body: List[str] = []
+    inplace_view_body: list[str] = []
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
@@ -522,7 +584,7 @@ def gen_formals(f: NativeFunction) -> str:
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(
     fn: NativeFunctionWithDifferentiabilityInfo,
-) -> Optional[str]:
+) -> str | None:
     f = fn.func
     if get_view_info(f) is None and (
         # For functions that modify their inputs but don't return them,
@@ -543,7 +605,7 @@ def inplace_or_view_method_definition(
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(
     fn: NativeFunctionWithDifferentiabilityInfo,
-) -> Optional[str]:
+) -> str | None:
     f = fn.func
     if get_view_info(f) is None and (
         not modifies_arguments(f) or len(f.func.returns) == 0
@@ -564,7 +626,7 @@ def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
 
 def gen_inplace_or_view_type_env(
     fn: NativeFunctionWithDifferentiabilityInfo,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     definition = inplace_or_view_method_definition(fn)
     registration = inplace_or_view_method_registration(fn)
 
@@ -587,7 +649,7 @@ def gen_inplace_or_view_type(
     out: str,
     native_yaml_path: str,
     tags_yaml_path: str,
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    fns_with_infos: list[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp

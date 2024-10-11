@@ -10,6 +10,11 @@
 #include <sstream>
 #include <string>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -50,6 +55,11 @@ inline std::ostream& _str(std::ostream& ss, const T& t) {
   ss << t;
   return ss;
 }
+
+// Overloads of _str for wide types; forces narrowing.
+C10_API std::ostream& _str(std::ostream& ss, const wchar_t* wCStr);
+C10_API std::ostream& _str(std::ostream& ss, const wchar_t& wChar);
+C10_API std::ostream& _str(std::ostream& ss, const std::wstring& wString);
 
 template <>
 inline std::ostream& _str<CompileTimeEmptyString>(
@@ -132,7 +142,7 @@ struct C10_API SourceLocation {
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 
 // unix isprint but insensitive to locale
-inline static bool isPrint(char s) {
+inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
@@ -195,5 +205,7 @@ inline void printQuotedString(std::ostream& stmt, const string_view str) {
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_STRINGUTIL_H_

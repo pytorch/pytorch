@@ -16,7 +16,7 @@ echo "Caffe2 path: $CAFFE2_ROOT"
 
 CMAKE_ARGS=()
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
-CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+CMAKE_ARGS+=("-DPython_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
 
@@ -68,8 +68,6 @@ CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_ITT=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
-CMAKE_ARGS+=("-DUSE_LMDB=OFF")
-CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
 CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")

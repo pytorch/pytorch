@@ -2,19 +2,16 @@
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-
 from torch.distributed._state_dict_utils import _all_gather_sharded_tensor
 from torch.distributed._tensor import DTensor, init_device_mesh, Replicate
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -43,7 +40,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         fsdp_state_dict = fsdp_model.state_dict()
 
         # save fsdp_state_dict to storage
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=fsdp_state_dict,
             storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
         )
@@ -82,7 +79,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
                 ).to_local()
                 self.assertNotEqual(fsdp_redistributed, tp_redistributed)
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=tp_state_dict,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
         )

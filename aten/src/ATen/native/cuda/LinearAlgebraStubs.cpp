@@ -98,7 +98,7 @@ void lazy_linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& i
 void lazy_svd_kernel(const Tensor& A,
                      const bool full_matrices,
                      const bool compute_uv,
-                     const c10::optional<c10::string_view>& driver,
+                     const std::optional<c10::string_view>& driver,
                      const Tensor& U,
                      const Tensor& S,
                      const Tensor& Vh,
@@ -160,12 +160,12 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 // Protect from infinite recursion by initializing dispatch to self and checking
 // that values are different after linalg library were loaded
 
-namespace cuda {
-namespace detail {
+
+namespace cuda::detail {
 void registerLinalgDispatch(const LinalgDispatch& disp_) {
   disp = disp_;
 }
-}} //namespace cuda::detail
+} //namespace cuda::detail
 
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
     getTorchLinalgLibrary();

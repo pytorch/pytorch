@@ -1,11 +1,3 @@
-if(UNIX)
-  # prevent Unknown CMake command "check_function_exists".
-  include(CheckFunctionExists)
-endif()
-include(CheckIncludeFile)
-include(CheckCSourceCompiles)
-include(CheckCSourceRuns)
-include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
@@ -15,7 +7,7 @@ set(CAFFE2_USE_EXCEPTION_PTR 1)
 # ---[ Check if we want to turn off deprecated warning due to glog.
 if(USE_GLOG)
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++17")
   CHECK_CXX_SOURCE_COMPILES(
       "#include <glog/stl_logging.h>
       int main(int argc, char** argv) {
@@ -78,8 +70,6 @@ CHECK_CXX_SOURCE_COMPILES(
      }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
 if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
-  # Also see CMakeLists.txt under caffe2/perfkernels.
-  set(CAFFE2_PERF_WITH_AVX512 1)
 endif()
 cmake_pop_check_state()
 
@@ -120,7 +110,7 @@ endif()
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
 set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
-if(USE_NATIVE_ARCH)
+if(USE_NATIVE_ARCH AND NOT MSVC)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
   if(COMPILER_SUPPORTS_MARCH_NATIVE)
     add_definitions("-march=native")

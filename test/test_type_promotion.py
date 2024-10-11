@@ -43,6 +43,7 @@ class TestTypePromotion(TestCase):
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
     # Promoting inplace would require re-allocating and copying the memory of the
     # tensor data, since element size could change.
+    # https://github.com/pytorch/pytorch/issues/127049
     @float_double_default_dtype
     def test_inplace(self, device):
         int_tensor = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
@@ -941,8 +942,10 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
-                                    set(numpy_to_torch_dtype_dict.values()))))
+    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
+    @dtypes(*list(itertools.product(
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]

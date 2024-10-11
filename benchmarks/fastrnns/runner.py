@@ -1,8 +1,9 @@
 from collections import namedtuple
 from functools import partial
 
-import torch
 import torchvision.models as cnn
+
+import torch
 
 from .factory import (
     dropoutlstm_creator,

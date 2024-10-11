@@ -12,9 +12,9 @@ namespace py = pybind11;
 
 namespace torch::jit {
 
-c10::optional<std::string> maybeConvertToString(const py::object& obj) {
+std::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   std::stringstream ss;
   ss << py::str(obj);
@@ -23,32 +23,28 @@ c10::optional<std::string> maybeConvertToString(const py::object& obj) {
 
 struct SourceRangeFactory {
   SourceRangeFactory(
-      std::string text,
+      const std::string& text,
       const py::object& filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
-            std::move(text),
+            text,
             maybeConvertToString(filename),
             file_lineno)),
         leading_whitespace_chars_(leading_whitespace_chars) {}
 
   SourceRange create(int line, int start_col, int end_col) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t start_byte_offset, end_byte_offset;
-    std::tie(start_byte_offset, end_byte_offset) = line_col_to_byte_offs(
+    auto [start_byte_offset, end_byte_offset] = line_col_to_byte_offs(
         line,
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
 
   std::tuple<size_t, size_t> line_col_to_byte_offs(
       int line,
-      int start_col,
-      int end_col) {
+      size_t start_col,
+      size_t end_col) {
     // lines are counted from 1.
     line--;
     auto line_start = source_->offset_for_line(line);
@@ -179,10 +175,10 @@ void initTreeViewBindings(PyObject* module) {
           [](const Property& property) { return property.getter().name(); })
       .def("setter_name", [](const Property& property) {
         if (property.setter().present()) {
-          return c10::optional<Ident>(property.setter().get().name());
+          return std::optional<Ident>(property.setter().get().name());
         }
 
-        return c10::optional<Ident>(c10::nullopt);
+        return std::optional<Ident>(std::nullopt);
       });
 
   py::class_<ClassDef, TreeView>(m, "ClassDef")

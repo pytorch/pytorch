@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 def hashable(x):
     try:
@@ -75,14 +76,14 @@ def reverse_dict(d):
     result = {}  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
-            result[val] = result.get(val, tuple()) + (key, )
+            result[val] = result.get(val, ()) + (key,)
     return result
 
 
 def xfail(func):
     try:
         func()
-        raise Exception("XFailed test passed")  # pragma:nocover
+        raise Exception("XFailed test passed")  # pragma:nocover  # noqa: TRY002
     except Exception:
         pass
 

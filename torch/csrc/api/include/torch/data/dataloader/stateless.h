@@ -64,7 +64,7 @@ class StatelessDataLoader : public DataLoaderBase<
 
   /// Queries the sampler for the next batch request (possibly progressing its
   /// internal state).
-  optional<BatchRequestType> get_batch_request() override {
+  std::optional<BatchRequestType> get_batch_request() override {
     auto indices = sampler_.next(this->options_.batch_size);
     if (!indices ||
         (indices->size() < this->options_.batch_size &&

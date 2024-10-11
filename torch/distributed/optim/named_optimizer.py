@@ -1,8 +1,18 @@
+# mypy: allow-untyped-defs
 import logging
 import warnings
-
 from copy import deepcopy
-from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Union, overload
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Union,
+)
 
 import torch
 import torch.nn as nn

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
@@ -8,6 +9,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+
 
 __all__ = ["NegativeBinomial"]
 

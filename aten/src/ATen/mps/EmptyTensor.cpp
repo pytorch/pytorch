@@ -20,11 +20,11 @@
 namespace at::detail {
 TensorBase empty_mps(
     IntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt) {
+    std::optional<ScalarType> dtype_opt,
+    std::optional<Layout> layout_opt,
+    std::optional<Device> device_opt,
+    std::optional<bool> pin_memory_opt,
+    std::optional<c10::MemoryFormat> memory_format_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
   if (at::hasMPS()) {
@@ -43,7 +43,8 @@ TensorBase empty_mps(
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
-    TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16, "BFloat16 is not supported on MPS");
+    TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16 || is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_14_0_PLUS), "MPS BFloat16 is only supported on MacOS 14 or newer");
+
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);
     int64_t size_bytes = nelements * dtype_meta.itemsize();
@@ -94,7 +95,7 @@ TensorBase empty_strided_mps(
     IntArrayRef size,
     IntArrayRef stride,
     ScalarType dtype,
-    c10::optional<Device> device_opt) {
+    std::optional<Device> device_opt) {
 #if defined(__APPLE__)
 #if __is_target_os(macOS)
   if (at::hasMPS()) {

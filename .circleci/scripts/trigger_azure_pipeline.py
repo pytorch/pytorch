@@ -8,6 +8,7 @@ import time
 
 import requests
 
+
 AZURE_PIPELINE_BASE_URL = "https://aiinfra.visualstudio.com/PyTorch/"
 AZURE_DEVOPS_PAT_BASE64 = os.environ.get("AZURE_DEVOPS_PAT_BASE64_SECRET", "")
 PIPELINE_ID = "911"

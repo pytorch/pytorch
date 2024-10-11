@@ -8,6 +8,8 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
+#include <ATen/Dispatch_v2.h>
+
 #include <c10/util/Exception.h>
 
 #include <structmember.h>
@@ -150,11 +152,19 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
+#define AT_DISPATCH_IINFO_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_V2(                                \
+      TYPE, NAME, AT_WRAP(__VA_ARGS__), AT_EXPAND(AT_INTEGRAL_TYPES_V2))
+
 static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
-    return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
-      return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+    return AT_DISPATCH_IINFO_TYPES(self->type, "max", [] {
+      if (std::is_unsigned_v<scalar_t>) {
+        return THPUtils_packUInt64(std::numeric_limits<scalar_t>::max());
+      } else {
+        return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+      }
     });
   }
   // Quantized Type
@@ -167,8 +177,12 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
 static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
-    return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
-      return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
+    return AT_DISPATCH_IINFO_TYPES(self->type, "min", [] {
+      if (std::is_unsigned_v<scalar_t>) {
+        return THPUtils_packUInt64(std::numeric_limits<scalar_t>::lowest());
+      } else {
+        return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
+      }
     });
   }
   // Quantized Type
@@ -180,8 +194,8 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
-  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [&primary_name] {
+  auto primary_name = c10::getDtypeNames(self->type).first;
+  return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
   END_HANDLE_TH_ERRORS
@@ -213,7 +227,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
@@ -272,7 +286,8 @@ static PyMethodDef THPFInfo_methods[] = {
 };
 
 PyTypeObject THPFInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.finfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.finfo", /* tp_name */
     sizeof(THPFInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -325,7 +340,8 @@ static PyMethodDef THPIInfo_methods[] = {
 };
 
 PyTypeObject THPIInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.iinfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.iinfo", /* tp_name */
     sizeof(THPIInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

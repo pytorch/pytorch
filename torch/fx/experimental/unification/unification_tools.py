@@ -1,11 +1,12 @@
+# mypy: allow-untyped-defs
 import collections
 import operator
 from functools import reduce
 from collections.abc import Mapping
 
-__all__ = ('merge', 'merge_with', 'valmap', 'keymap', 'itemmap',
+__all__ = ['merge', 'merge_with', 'valmap', 'keymap', 'itemmap',
            'valfilter', 'keyfilter', 'itemfilter',
-           'assoc', 'dissoc', 'assoc_in', 'update_in', 'get_in')
+           'assoc', 'dissoc', 'assoc_in', 'update_in', 'get_in']
 
 
 def _get_factory(f, kwargs):

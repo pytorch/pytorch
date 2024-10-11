@@ -20,12 +20,14 @@ namespace at {
 // which do NO argument checking by default.
 
 struct TORCH_API TensorArg {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Tensor& tensor;
   const char* name;
   int pos; // 1-indexed
   TensorArg(const Tensor& tensor, const char* name, int pos)
       : tensor(tensor), name(name), pos(pos) {}
   // Try to mitigate any possibility of dangling reference to temporaries.
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
   const Tensor* operator->() const {
     return &tensor;
@@ -66,7 +68,9 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-TORCH_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
+TORCH_API std::ostream& operator<<(
+    std::ostream& out,
+    const TensorGeometryArg& t);
 TORCH_API void checkDim(
     CheckedFrom c,
     const Tensor& tensor,
@@ -103,7 +107,7 @@ TORCH_API void checkSize_symint(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
-    c10::SymInt size);
+    const c10::SymInt& size);
 TORCH_API void checkNumel(
     CheckedFrom c,
     const TensorGeometryArg& t,
@@ -167,17 +171,17 @@ TORCH_API void check_dim_size(
 namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 
-TORCH_API c10::optional<std::vector<int64_t>> computeStride(
+TORCH_API std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
 
-TORCH_API c10::optional<SymDimVector> computeStride(
+TORCH_API std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape);
 
-TORCH_API c10::optional<DimVector> computeStride(
+TORCH_API std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape);

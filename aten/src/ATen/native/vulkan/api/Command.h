@@ -4,12 +4,13 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/ArrayRef.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -83,7 +84,7 @@ class CommandBuffer final {
   void bind_pipeline(VkPipeline, VkPipelineLayout, const utils::uvec3);
   void bind_descriptors(VkDescriptorSet);
 
-  void insert_barrier(const PipelineBarrier& pipeline_barrier);
+  void insert_barrier(PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
 
   void copy_buffer_to_buffer(

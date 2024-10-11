@@ -21,7 +21,7 @@ enum BIN_SELECTION_ALGORITHM {
   BINARY_SEARCH,
 };
 
-static const char* METAL_HISTOGRAM = R"HISTOGRAM_METAL(
+static MetalShaderLibrary lib(R"HISTOGRAM_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -142,48 +142,28 @@ kernel void histogramdd<DTYPE>(                               \
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
 
-)HISTOGRAM_METAL";
+kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
+                                device uint           * data_offsets    [[buffer(1)]],
+                                constant uint         * iter_shape      [[buffer(2)]],
+                                constant uint         & num_dimensions  [[buffer(3)]],
+                                uint thread_index [[thread_position_in_grid]]) {
+    data_offsets[thread_index] = 0;
+    uint32_t idx = thread_index;
+    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
+        uint32_t reversed_dim = num_dimensions - dim -1;
+        uint32_t remainder = idx % iter_shape[reversed_dim];
+        idx /= iter_shape[reversed_dim];
 
-static id<MTLLibrary> compileHistogramOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> histogramLibrary = nil;
-  if (histogramLibrary) {
-    return histogramLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  histogramLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_HISTOGRAM
-                                                                     encoding:NSASCIIStringEncoding]
-                                          options:options
-                                            error:&error];
-  TORCH_CHECK(histogramLibrary, "Failed to create metal histogram library, error: ", [[error description] UTF8String]);
-  return histogramLibrary;
+        data_offsets[thread_index] += remainder * strides[reversed_dim];
+    }
 }
-
-static id<MTLComputePipelineState> histogramPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> crossLib = compileHistogramOpLibrary(device);
-  id<MTLFunction> crossFunc = [crossLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(crossFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:crossFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)HISTOGRAM_METAL");
 
 template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
-                             const c10::optional<Tensor>& weight) {
+                             const std::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
@@ -242,80 +222,61 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
-      thread_hist_sizes, hist_output.scalar_type(), c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */
+      thread_hist_sizes, hist_output.scalar_type(), std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */
   );
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
-  id<MTLBuffer> weightBuffer =
-      has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength:0 options:0] autorelease];
-  size_t weightOffset = has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
+  TORCH_CHECK(input.numel() * input.element_size() <= UINT32_MAX, "histogramdd(): Tensor is larger than 4Gb");
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      MTLSize gridSize = MTLSizeMake(stridedIndicesNumThreads, 1, 1);
       const IntArrayRef& inputShape = input.sizes();
       std::vector<uint32_t> inputShapeData(inputShape.size());
       std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
 
       for (const auto i : c10::irange(inputShape.size())) {
-        TORCH_CHECK(i <= UINT32_MAX);
-        inputShapeData[i] = (uint32_t)(inputShape[i]);
+        inputShapeData[i] = static_cast<uint32_t>(inputShape[i]);
       }
 
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
-      id<MTLComputePipelineState> stridedIndicesPSO = MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offset");
+      id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
+      mtl_setBytes(computeEncoder, strides, 0);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      mtl_setBytes(computeEncoder, inputShapeData, 2);
+      mtl_setBytes(computeEncoder, nDim, 3);
 
-      NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
-      if (stridedIndicesTGSize > stridedIndicesNumThreads)
-        stridedIndicesTGSize = stridedIndicesNumThreads;
+      mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
-      MTLSize stridedIndicesThreadGroupSize = MTLSizeMake(stridedIndicesTGSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:stridedIndicesThreadGroupSize];
-
-      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
-      id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);
+      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input);
+      id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
 
       [computeEncoder setComputePipelineState:histogramPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:weightBuffer offset:weightOffset atIndex:1];
-      [computeEncoder setBuffer:outputBuffer
-                         offset:thread_histograms.storage_offset() * thread_histograms.element_size()
-                        atIndex:2];
-      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
-      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
-      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
-      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
-      [computeEncoder setBytes:thread_histograms.strides().data()
-                        length:sizeof(int64_t) * thread_hist_sizes.size()
-                       atIndex:9];
-      [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
-      [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
-
-      NSUInteger tgSize = histogramPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
+      mtl_setBuffer(computeEncoder, input, 0);
+      if (has_weight) {
+        mtl_setBuffer(computeEncoder, weight.value(), 1);
       }
-      gridSize = MTLSizeMake(numThreads, 1, 1);
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_setBuffer(computeEncoder, thread_histograms, 2);
+      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
+      mtl_setBytes(computeEncoder, D, 4);
+      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
+      mtl_setBytes(computeEncoder, num_bin_edges, 6);
+      mtl_setBytes(computeEncoder, leftmost_edge, 7);
+      mtl_setBytes(computeEncoder, rightmost_edge, 8);
+      mtl_setBytes(computeEncoder, thread_histograms.strides(), 9);
+      mtl_setBytes(computeEncoder, bin_selection_algorithm, 10);
+      mtl_setBytes(computeEncoder, has_weight, 11);
+
+      mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(histogramPSO);
     }
@@ -325,7 +286,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
 template <BIN_SELECTION_ALGORITHM bin_algorithm>
 static void histogramdd_out_mps_template(const Tensor& self,
-                                         const c10::optional<Tensor>& weight,
+                                         const std::optional<Tensor>& weight,
                                          bool density,
                                          Tensor& hist,
                                          const TensorList& bin_edges) {
@@ -338,7 +299,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const Tensor reshaped_input = self.reshape({M, N});
 
   const auto reshaped_weight =
-      weight.has_value() ? c10::optional<Tensor>(weight.value().reshape({M})) : c10::optional<Tensor>();
+      weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
   std::vector<Tensor> bin_edges_contig(bin_edges.size());
   for (const auto dim : c10::irange(bin_edges_contig.size())) {
@@ -373,7 +334,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
 } // namespace mps
 
 static void histogramdd_kernel(const Tensor& self,
-                               const c10::optional<Tensor>& weight,
+                               const std::optional<Tensor>& weight,
                                bool density,
                                Tensor& hist,
                                const TensorList& bin_edges) {
@@ -381,7 +342,7 @@ static void histogramdd_kernel(const Tensor& self,
 }
 
 static void histogramdd_linear_kernel(const Tensor& self,
-                                      const c10::optional<Tensor>& weight,
+                                      const std::optional<Tensor>& weight,
                                       bool density,
                                       Tensor& hist,
                                       const TensorList& bin_edges,
@@ -401,8 +362,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(input, 0);
+  auto [min, max] = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
     leftmost_edges[i] = min[i].item().to<double>();

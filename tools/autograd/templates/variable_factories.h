@@ -48,7 +48,7 @@ inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, cons
     // it is ignored anyways (and we actually have an assertion that it isn't set
     // which would fail otherwise). We handle requires_grad explicitly here
     // instead of passing it through to the kernel.
-    tensor_data_container.convert_to_tensor(options.requires_grad(c10::nullopt)),
+    tensor_data_container.convert_to_tensor(options.requires_grad(::std::nullopt)),
     options.requires_grad());
 }
 
@@ -72,7 +72,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoDispatchBelowAutograd guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, strides, deleter, options.requires_grad(c10::nullopt));
+    return at::from_blob(data, sizes, strides, deleter, options.requires_grad(::std::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -90,7 +90,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoDispatchBelowAutograd guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, strides, options.requires_grad(c10::nullopt));
+    return at::from_blob(data, sizes, strides, options.requires_grad(::std::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -109,7 +109,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoDispatchBelowAutograd guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, deleter, options.requires_grad(c10::nullopt));
+    return at::from_blob(data, sizes, deleter, options.requires_grad(::std::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -125,7 +125,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoDispatchBelowAutograd guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, options.requires_grad(c10::nullopt));
+    return at::from_blob(data, sizes, options.requires_grad(::std::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }

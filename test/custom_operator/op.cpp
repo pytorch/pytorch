@@ -29,7 +29,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
       torch::Tensor var1,
       int64_t mul,
       torch::Tensor var2,
-      c10::optional<torch::Tensor> var3) {
+      std::optional<torch::Tensor> var3) {
     ctx->saved_data["mul"] = mul;
     ctx->saved_data["var3_has_value"] = var3.has_value();
     ctx->save_for_backward({var1, var2});
@@ -59,7 +59,7 @@ torch::Tensor custom_op_with_autograd(
     torch::Tensor var1,
     int64_t mul,
     torch::Tensor var2,
-    c10::optional<torch::Tensor> var3) {
+    std::optional<torch::Tensor> var3) {
   return CustomOpAutogradFunction::apply(var1, mul, var2, var3);
 }
 
@@ -88,10 +88,16 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
 }
 
 TORCH_LIBRARY_FRAGMENT(custom, m) {
+    m.impl_abstract_pystub("nonexistent");
+    m.def("asin(Tensor x) -> Tensor");
+}
+
+TORCH_LIBRARY_FRAGMENT(custom, m) {
     m.def("tan(Tensor x) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(custom, CPU, m) {
   m.impl("nonzero", &custom_nonzero);
   m.impl("sin", &custom_sin);
+  m.impl("asin", &at::asin);
 }

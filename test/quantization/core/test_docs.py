@@ -55,8 +55,8 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         path_to_file = get_correct_path(path_from_pytorch)
         if path_to_file:
-            file = open(path_to_file)
-            content = file.readlines()
+            with open(path_to_file) as file:
+                content = file.readlines()
 
             # it will register as having a newline at the end in python
             if "\n" not in unique_identifier:

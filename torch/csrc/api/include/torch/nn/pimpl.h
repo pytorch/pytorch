@@ -58,9 +58,9 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   template <
       typename Head,
       typename... Tail,
-      typename = typename std::enable_if<
+      typename = std::enable_if_t<
           !(torch::detail::is_module_holder_of<Head, ContainedType>::value &&
-            (sizeof...(Tail) == 0))>::type>
+            (sizeof...(Tail) == 0))>>
   explicit ModuleHolder(Head&& head, Tail&&... tail)
       : impl_(new Contained(
             std::forward<Head>(head),
@@ -140,27 +140,13 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 
  private:
-  /// In C++17, the two methods below could be written as the following:
-  /// if constexpr (std::is_default_constructible_v<Contained>) {
-  ///   return std::make_shared<Contained>();
-  /// } else {
-  ///   return nullptr;
-  /// }
-  /// In C++11, we use SFINAE instead of `if constexpr`.
-
-  template <
-      typename T = Contained,
-      typename = torch::enable_if_t<std::is_default_constructible<T>::value>>
-  std::shared_ptr<Contained> default_construct() {
-    return std::make_shared<Contained>();
-  }
-
   template <typename T = Contained>
-  torch::disable_if_t<
-      std::is_default_constructible<T>::value,
-      std::shared_ptr<Contained>>
-  default_construct() {
-    return nullptr;
+  std::shared_ptr<Contained> default_construct() {
+    if constexpr (std::is_default_constructible_v<T>) {
+      return std::make_shared<Contained>();
+    } else {
+      return nullptr;
+    }
   }
 };
 

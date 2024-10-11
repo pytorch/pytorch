@@ -2,8 +2,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_symnode.h>
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (torch::is_symint(src)) {
@@ -19,6 +18,18 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   }
 
   auto raw_obj = src.ptr();
+
+  if (THPVariable_Check(raw_obj)) {
+    auto& var = THPVariable_Unpack(raw_obj);
+    if (var.numel() == 1 &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_INTERNAL_ASSERT(scalar.isIntegral(/*include bool*/ false));
+      value = scalar.toSymInt();
+      return true;
+    }
+  }
+
   if (THPUtils_checkIndex(raw_obj)) {
     value = c10::SymInt{THPUtils_unpackIndex(raw_obj)};
     return true;
@@ -127,7 +138,11 @@ py::handle type_caster<c10::Scalar>::cast(
     if (scalar.isSymbolic()) {
       return py::cast(scalar.toSymInt()).release();
     } else {
-      return py::cast(scalar.toLong()).release();
+      if (scalar.type() == at::ScalarType::UInt64) {
+        return py::cast(scalar.toUInt64()).release();
+      } else {
+        return py::cast(scalar.toLong()).release();
+      }
     }
   } else if (scalar.isFloatingPoint()) {
     // This isn't strictly necessary but we add it for symmetry
@@ -148,5 +163,4 @@ py::handle type_caster<c10::Scalar>::cast(
   }
 }
 
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail

@@ -31,6 +31,17 @@ a ``params`` key, containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
 
+For example, this is very useful when one wants to specify per-layer learning rates::
+
+    optim.SGD([
+                    {'params': model.base.parameters(), 'lr': 1e-2},
+                    {'params': model.classifier.parameters()}
+                ], lr=1e-3, momentum=0.9)
+
+This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
+``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``.
+Finally a momentum of ``0.9`` will be used for all parameters.
+
 .. note::
 
     You can still pass options as keyword arguments. They will be used as
@@ -38,17 +49,24 @@ as optimization options for this group.
     only want to vary a single option, while keeping all others consistent
     between parameter groups.
 
+Also consider the following example related to the distinct penalization of parameters.
+Remember that :func:`~torch.nn.Module.parameters` returns an iterable that
+contains all learnable parameters, including biases and other
+parameters that may prefer distinct penalization. To address this, one can specify
+individual penalization weights for each parameter group::
 
-For example, this is very useful when one wants to specify per-layer learning rates::
+    bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
+    others = [p for name, p in self.named_parameters() if 'bias' not in name]
 
     optim.SGD([
-                    {'params': model.base.parameters()},
-                    {'params': model.classifier.parameters(), 'lr': 1e-3}
-                ], lr=1e-2, momentum=0.9)
+                    {'params': others},
+                    {'params': bias_params, 'weight_decay': 0}
+                ], weight_decay=1e-2, lr=1e-2)
 
-This means that ``model.base``'s parameters will use the default learning rate of ``1e-2``,
-``model.classifier``'s parameters will use a learning rate of ``1e-3``, and a momentum of
-``0.9`` will be used for all parameters.
+In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
+of ``0`` is set specifically for the bias terms, as to avoid any penalization for
+this group.
+
 
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -104,8 +122,14 @@ Base class
 
     Optimizer.add_param_group
     Optimizer.load_state_dict
+    Optimizer.register_load_state_dict_pre_hook
+    Optimizer.register_load_state_dict_post_hook
     Optimizer.state_dict
+    Optimizer.register_state_dict_pre_hook
+    Optimizer.register_state_dict_post_hook
     Optimizer.step
+    Optimizer.register_step_pre_hook
+    Optimizer.register_step_post_hook
     Optimizer.zero_grad
 
 Algorithms
@@ -116,6 +140,7 @@ Algorithms
     :nosignatures:
 
     Adadelta
+    Adafactor
     Adagrad
     Adam
     AdamW
@@ -146,10 +171,10 @@ horizontally and fused implementations as fusing vertically on top of that.
 In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
 So when applicable, we default to foreach over for-loop. Applicable means the foreach
 implementation is available, the user has not specified any implementation-specific kwargs
-(e.g., fused, foreach, differentiable), and all tensors are native and on CUDA. Note that
-while fused should be even faster than foreach, the implementations are newer and we would
-like to give them more bake-in time before flipping the switch everywhere. You are welcome
-to try them out though!
+(e.g., fused, foreach, differentiable), and all tensors are native. Note that while fused
+should be even faster than foreach, the implementations are newer and we would like to give
+them more bake-in time before flipping the switch everywhere. We summarize the stability status
+for each implementation on the second table below, you are welcome to try them out though!
 
 Below is a table showing the available and default implementations of each algorithm:
 
@@ -159,7 +184,8 @@ Below is a table showing the available and default implementations of each algor
     :delim: ;
 
     :class:`Adadelta`;foreach;yes;no
-    :class:`Adagrad`;foreach;yes;no
+    :class:`Adafactor`;for-loop;no;no
+    :class:`Adagrad`;foreach;yes;yes (cpu only)
     :class:`Adam`;foreach;yes;yes
     :class:`AdamW`;foreach;yes;yes
     :class:`SparseAdam`;for-loop;no;no
@@ -170,12 +196,34 @@ Below is a table showing the available and default implementations of each algor
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
     :class:`Rprop`;foreach;yes;no
-    :class:`SGD`;foreach;yes;no
+    :class:`SGD`;foreach;yes;yes
+
+Below table is showing the stability status for fused implementations:
+
+.. csv-table::
+    :header: "Algorithm", "CPU", "CUDA", "MPS"
+    :widths: 25, 25, 25, 25
+    :delim: ;
+
+    :class:`Adadelta`;unsupported;unsupported;unsupported
+    :class:`Adafactor`;unsupported;unsupported;unsupported
+    :class:`Adagrad`;beta;unsupported;unsupported
+    :class:`Adam`;beta;stable;beta
+    :class:`AdamW`;beta;stable;beta
+    :class:`SparseAdam`;unsupported;unsupported;unsupported
+    :class:`Adamax`;unsupported;unsupported;unsupported
+    :class:`ASGD`;unsupported;unsupported;unsupported
+    :class:`LBFGS`;unsupported;unsupported;unsupported
+    :class:`NAdam`;unsupported;unsupported;unsupported
+    :class:`RAdam`;unsupported;unsupported;unsupported
+    :class:`RMSprop`;unsupported;unsupported;unsupported
+    :class:`Rprop`;unsupported;unsupported;unsupported
+    :class:`SGD`;beta;beta;beta
 
 How to adjust learning rate
 ---------------------------
 
-:mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
+:class:`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
@@ -238,6 +286,7 @@ algorithms.
     :toctree: generated
     :nosignatures:
 
+    lr_scheduler.LRScheduler
     lr_scheduler.LambdaLR
     lr_scheduler.MultiplicativeLR
     lr_scheduler.StepLR
@@ -257,8 +306,7 @@ algorithms.
 Weight Averaging (SWA and EMA)
 ------------------------------
 
-:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA). In particular,
-the :class:`torch.optim.swa_utils.AveragedModel` class implements SWA and EMA models,
+:class:`torch.optim.swa_utils.AveragedModel` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA),
 :class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
 :func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA/EMA batch
 normalization statistics at the end of training.
@@ -285,9 +333,9 @@ EMA models are constructed by specifying the ``multi_avg_fn`` argument as follow
 >>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to ``get_ema_multi_avg_fn``, the default is 0.999.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999.
 
-``get_ema_multi_avg_fn`` returns a function that applies the following EMA equation to the weights:
+:func:`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
 .. math:: W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
 
@@ -409,6 +457,17 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 >>> torch.optim.swa_utils.update_bn(loader, ema_model)
 >>> # Use ema_model to make predictions on test data
 >>> preds = ema_model(test_input)
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    swa_utils.AveragedModel
+    swa_utils.SWALR
+
+
+.. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn
+.. autofunction:: torch.optim.swa_utils.update_bn
 
 
 .. This module needs to be documented. Adding here in the meantime

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the BSD license found in the
@@ -22,6 +23,7 @@ from typing import (
 )
 
 import torch.nn as nn
+
 
 __all__ = [
     "always_wrap_policy",

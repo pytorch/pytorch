@@ -12,6 +12,7 @@ from torch.package import (
 )
 from torch.testing._internal.common_utils import run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -98,7 +99,7 @@ class TestImporter(PackageTestCase):
                 self._whichmodule_return = whichmodule_return
 
             def import_module(self, module_name):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             def whichmodule(self, obj, name):
                 return self._whichmodule_return

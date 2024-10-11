@@ -16,7 +16,7 @@
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
-namespace at { namespace native { namespace memory {
+namespace at::native::memory {
 
 namespace detail {
 
@@ -109,7 +109,7 @@ struct LoadWithCast {
   size_array_t element_sizes;
 
   LoadWithCast(const TensorIteratorBase& iter) {
-    assert(iter.ninputs() == N);
+    CUDA_KERNEL_ASSERT(iter.ninputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i + iter.noutputs());
@@ -140,7 +140,7 @@ struct StoreWithCast {
   size_array_t element_sizes;
 
   StoreWithCast(const TensorIteratorBase& iter) {
-    assert(iter.noutputs() == N);
+    CUDA_KERNEL_ASSERT(iter.noutputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i);
@@ -197,12 +197,12 @@ struct unroll {
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
@@ -219,7 +219,6 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
@@ -268,7 +267,7 @@ struct vectorized {
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     detail::static_unroll<detail::vectorized_load_helper, arity>::with_args(*this, args, idx);
   }
 
@@ -305,12 +304,12 @@ struct multi_outputs_unroll {
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
-    constexpr int arity = std::tuple_size<args_t>::value;
+    constexpr int arity = std::tuple_size_v<args_t>;
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
@@ -347,16 +346,21 @@ struct multi_outputs_unroll {
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
-  constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
+  constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
+  constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
   return 1;
+}
+
+template<typename scalar_t>
+inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
+  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer));
 }
 
 template<int i>
@@ -382,4 +386,4 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
-}}} // namespace at::native::memory
+} // namespace at::native::memory

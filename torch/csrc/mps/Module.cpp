@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mps {
+namespace torch::mps {
 
 namespace {
 // True for children forked after mps init
@@ -95,7 +94,7 @@ static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkDouble(args), "invalid argument to setMemoryFraction()");
   double fraction = THPUtils_unpackDouble(args);
   at::detail::getMPSHooks().setMemoryFraction(fraction);
@@ -118,6 +117,15 @@ static PyObject* MPSModule_driverAllocatedMemory(
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       at::detail::getMPSHooks().getDriverAllocatedMemory());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_recommendedMaxMemory(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getRecommendedMaxMemory());
   END_HANDLE_TH_ERRORS
 }
 
@@ -216,9 +224,7 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
      MPSModule_deviceSynchronize,
@@ -242,6 +248,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_driverAllocatedMemory",
      MPSModule_driverAllocatedMemory,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_recommendedMaxMemory",
+     MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
     {"_mps_profilerStartTrace",
@@ -268,5 +278,4 @@ PyMethodDef* python_functions() {
   return _MPSModule_methods;
 }
 
-} // namespace mps
-} // namespace torch
+} // namespace torch::mps

@@ -11,7 +11,6 @@
 #include <c10/util/Exception.h>
 
 #include <structmember.h>
-#include <cstring>
 #include <limits>
 #include <sstream>
 
@@ -226,7 +225,8 @@ static PyMethodDef THPDevice_methods[] = {
 };
 
 PyTypeObject THPDeviceType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.device", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.device", /* tp_name */
     sizeof(THPDevice), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

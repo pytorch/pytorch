@@ -16,7 +16,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -203,7 +202,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     qadaptive_avg_pool3d_ndhwc_stub(
         input.device().type(),
@@ -293,7 +292,7 @@ Tensor qnnpack_adaptive_avg_pool2d(
       padding,
       ceil_mode,
       count_include_pad,
-      c10::nullopt);
+      std::nullopt);
 }
 
 bool enable_qnnpack_for_ada_avgpool(

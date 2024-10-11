@@ -78,7 +78,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   return result;
 }
 
-static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
   TORCH_CHECK(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
@@ -102,8 +102,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
-    TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
-    TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X2 got: ", device2);
   }
 
   auto dim1 = x1.dim();
@@ -147,7 +147,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   return result;
 }
 
-Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
@@ -175,7 +175,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   return result;
 }
 
-Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
@@ -310,14 +310,13 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x2_is_int = c10::isIntegralType(x2_.scalar_type(), /*încludeBool=*/true);
   auto x1_t = x1_is_int ? x1_.to(commonDtype) : x1_;
   auto x2_t = x2_is_int ? x2_.to(commonDtype) : x2_;
-  c10::MaybeOwned<Tensor> x1, x2;
-  std::tie(x1, x2) = expand_outplace(x1_t, x2_t);
+  auto [x1, x2] = expand_outplace(x1_t, x2_t);
 
 
   // We want to divide each tensor by its norm first, as it's more numerically stable.
   // This keeps the result between -1.0 and 1.0
   // We clone them, as we're going to modify them in-place
-  // This allows the gradients to propagate propertly all the way to x1 and x2
+  // This allows the gradients to propagate properly all the way to x1 and x2
   auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 

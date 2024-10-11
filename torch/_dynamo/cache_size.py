@@ -1,9 +1,14 @@
+# mypy: allow-untyped-defs
 import logging
 import types
 import weakref
 from dataclasses import dataclass
+from typing import Tuple
+
+from torch._guards import CompileId
 
 from . import config
+
 
 log = logging.getLogger(__name__)
 """
@@ -84,9 +89,15 @@ class CacheSizeRelevantForFrame:
     def will_compilation_exceed(self, limit: int) -> bool:
         # Checks if a compilation will exceed the given limit (thats why >=).
         return (
-            self.num_cache_entries >= config.accumulated_cache_size_limit
-            or self.num_cache_entries_with_same_id_matched_objs >= limit
+            self.will_compilation_exceed_accumulated_limit()
+            or self.will_compilation_exceed_specific_limit(limit)
         )
+
+    def will_compilation_exceed_accumulated_limit(self) -> bool:
+        return self.num_cache_entries >= config.accumulated_cache_size_limit
+
+    def will_compilation_exceed_specific_limit(self, limit: int) -> bool:
+        return self.num_cache_entries_with_same_id_matched_objs >= limit
 
 
 def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
@@ -113,7 +124,7 @@ def _has_same_id_matched_objs(frame: types.FrameType, cache_entry) -> bool:
     ) in cache_entry.check_fn.id_matched_objs.items():
         if weakref_from_cache_entry() is not None:
             weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
-            if weakref_from_frame != weakref_from_cache_entry:
+            if weakref_from_frame is not weakref_from_cache_entry:
                 return False
 
     # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
@@ -154,8 +165,21 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> bool:
+def exceeds_cache_size_limit(
+    cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
+) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
-    return cache_size.will_compilation_exceed(config.cache_size_limit)
+    if cache_size.will_compilation_exceed_accumulated_limit():
+        return True, "accumulated_cache_size_limit"
+    if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
+        return True, "cache_size_limit"
+    # NOTE this check is needed in the case that the frame's cache doesn't grow
+    # and we keep recompiling. This can happen if the guard check_fn becomes invalidated,
+    # e.g. due to guarded objects being freed. This technically makes the
+    # will_compilation_exceed_accumulated_limit check unnecessary, but we will keep the
+    # check in case we have a better fix in the future.
+    if compile_id.frame_compile_id >= config.accumulated_cache_size_limit:
+        return True, "accumulated_cache_size_limit"
+    return False, ""

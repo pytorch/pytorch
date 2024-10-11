@@ -5,8 +5,8 @@
 
 namespace at::native {
 
-using histogramdd_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&);
-using histogramdd_linear_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&, bool);
+using histogramdd_fn = void(*)(const Tensor&, const std::optional<Tensor>&, bool, Tensor&, const TensorList&);
+using histogramdd_linear_fn = void(*)(const Tensor&, const std::optional<Tensor>&, bool, Tensor&, const TensorList&, bool);
 using histogram_select_outer_bin_edges_fn = void(*)(const Tensor& input, const int64_t N, std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges);
 
 DECLARE_DISPATCH(histogramdd_fn, histogramdd_stub);

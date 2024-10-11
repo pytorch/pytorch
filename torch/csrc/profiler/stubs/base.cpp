@@ -2,9 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 ProfilerStubs::~ProfilerStubs() = default;
 
@@ -12,7 +10,8 @@ namespace {
 struct DefaultStubs : public ProfilerStubs {
   DefaultStubs(const char* name) : name_{name} {}
 
-  void record(int*, ProfilerVoidEventStub*, int64_t*) const override {
+  void record(c10::DeviceIndex*, ProfilerVoidEventStub*, int64_t*)
+      const override {
     fail();
   }
   float elapsed(const ProfilerVoidEventStub*, const ProfilerVoidEventStub*)
@@ -77,6 +76,4 @@ REGISTER_DEFAULT(itt, ITT)
 REGISTER_DEFAULT(privateuse1, PrivateUse1)
 #undef REGISTER_DEFAULT
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

@@ -79,14 +79,14 @@ void check_mkldnn_binary_fusion_inputs(
 #if AT_MKLDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
-  [](torch::List<c10::optional<at::Scalar>> scalars, \
-     c10::optional<c10::string_view> algorithm) {    \
+  [](torch::List<std::optional<at::Scalar>> scalars, \
+     std::optional<c10::string_view> algorithm) {    \
     return ideep::attr_t::fuse_##NAME();             \
   }
 
 AttrFunction attr_func_leaky_relu =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 1 &&
               scalars[0].get().toOptional<at::Scalar>().has_value(),
@@ -97,8 +97,8 @@ AttrFunction attr_func_leaky_relu =
     };
 
 AttrFunction attr_func_hardtanh =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 2 &&
               scalars[0].get().toOptional<at::Scalar>().has_value() &&
@@ -112,8 +112,8 @@ AttrFunction attr_func_hardtanh =
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
-AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
-                                 c10::optional<c10::string_view> algorithm) {
+AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
+                                 std::optional<c10::string_view> algorithm) {
   TORCH_CHECK(
       algorithm.has_value(),
       "gelu is expected to have one str input: algorithm");
@@ -131,8 +131,8 @@ AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
 };
 
 AttrFunction attr_func_hardsigmoid =
-    [](torch::List<c10::optional<at::Scalar>> scalars,
-       c10::optional<c10::string_view> algorithm) {
+    [](torch::List<std::optional<at::Scalar>> scalars,
+       std::optional<c10::string_view> algorithm) {
       ideep::attr_t attr;
       ideep::post_ops po;
       po.append_eltwise(

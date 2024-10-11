@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.fx.experimental.migrate_gradual_types.constraint import TVar, DVar, BinConstraintD, \
     BVar
 from torch.fx.experimental.migrate_gradual_types.operation import op_leq

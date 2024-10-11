@@ -6,11 +6,14 @@ import timeit
 from collections import namedtuple
 
 import benchmark_utils
+
 import numpy as np
+
 import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+
 
 """Performance microbenchmarks.
 
@@ -49,7 +52,7 @@ def _create_test(
     """Create tests with the benchmark backend.
     Args:
         bench_op_obj: an object which instantiated from a subclass of
-            Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+            TorchBenchmarkBase which includes tensor
             creation and operator execution.
         orig_test_attrs: a dictionary includes test configs.
         tags: a attribute in test config to filter inputs
@@ -74,7 +77,7 @@ def _build_test(
     """Generate PyTorch/Caffe2 tests of operators with different inputs.
     Args:
         configs: a dictionary that has the input shapes
-        bench_op: a subclass of Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+        bench_op: a subclass of TorchBenchmarkBase which includes tensor
             creation and operator execution
         OperatorTestCase: a named tuple to save the metadata of an test
         run_backward: a bool parameter indicating backward path
@@ -232,9 +235,7 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            if test_case.framework == "PyTorch":
-                print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
-
+            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -282,8 +283,7 @@ class BenchmarkRunner:
         and the execution time is reported
         """
         test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
-        if test_case.framework == "PyTorch":
-            test_case._output_mean()
+        test_case._output_mean()
         backward_time = timeit.timeit(
             functools.partial(test_case.run_backward, iters, print_per_iter), number=1
         )
@@ -340,24 +340,17 @@ class BenchmarkRunner:
         return cmd_flag is None or test_flag == cmd_flag
 
     def _check_operator_first_char(self, test_flag, cmd_flag):
-        if cmd_flag is None or test_flag[:1].lower() in cmd_flag:
-            return True
-        return False
+        return cmd_flag is None or test_flag[:1].lower() in cmd_flag
 
     def _check_keep_list(self, test_flag, cmd_flag_list):
-        if cmd_flag_list is None or any(
+        return cmd_flag_list is None or any(
             test_flag == cmd_flag for cmd_flag in cmd_flag_list
-        ):
-            return True
-        return False
+        )
 
     def _keep_test(self, test_case):
         # TODO: consider regex matching for test filtering.
         # Currently, this is a sub-string matching.
         op_test_config = test_case.test_config
-
-        if self.args.framework:
-            frameworks = benchmark_utils.process_arg_list(self.args.framework)
 
         operators = (
             benchmark_utils.process_arg_list(self.args.operators)
@@ -366,10 +359,9 @@ class BenchmarkRunner:
         )
 
         # Filter framework, operator, test_name, tag, forward_only
-        if (
+        return (
             self._check_keep(op_test_config.test_name, self.args.test_name)
             and self._check_keep_list(test_case.op_bench.module_name(), operators)
-            and self._check_keep_list(test_case.framework, frameworks)
             and self._check_operator_first_char(
                 test_case.op_bench.module_name(), self.operator_range
             )
@@ -386,10 +378,7 @@ class BenchmarkRunner:
                 or "device" not in test_case.test_config.input_config
                 or self.args.device in op_test_config.test_name
             )
-        ):
-            return True
-
-        return False
+        )
 
     def _print_test_case_info(self, test_case):
         # Print out the test name and skip the real execution

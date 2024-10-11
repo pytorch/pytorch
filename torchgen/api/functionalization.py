@@ -1,4 +1,4 @@
-from typing import List, Optional
+from __future__ import annotations
 
 from torchgen.api import dispatcher
 from torchgen.api.types import (
@@ -17,6 +17,7 @@ from torchgen.model import (
     BaseTy,
     BaseType,
     FunctionSchema,
+    NativeFunction,
     NativeFunctionsViewGroup,
 )
 
@@ -92,23 +93,14 @@ def name(
     *,
     is_reverse: bool,
     include_namespace: bool,
-    reapply_views: Optional[bool] = None,
+    reapply_views: bool | None = None,
 ) -> str:
     if reapply_views is None:
         # reapply_views is only important for the fwd lambda,
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
         assert is_reverse
     if is_reverse:
-        # for the reverse: the name of the inverse function always involves "view_copy",
-        # and we plumb the "reapply_views" flag into that function.
-        # (We could avoid doing that, but that would require writing out twice as many view inverse functions).
-        assert g.view_copy is not None
-        api_name = g.view_copy.func.name.unambiguous_name()
-        # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
-        if include_namespace:
-            return f"at::functionalization::FunctionalInverses::{api_name}_inverse"
-        else:
-            return f"{api_name}_inverse"
+        return reverse_name(g.view, include_namespace)
     # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
     assert g.view_copy is not None
@@ -120,7 +112,19 @@ def name(
     return f"at::_ops::{api_name}::call"
 
 
-def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
+def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
+    # for the reverse: we plumb the "reapply_views" flag into that function and support
+    # both copy and non-copy variants. (We could avoid doing that, but that would require
+    # writing out twice as many view inverse functions).
+    api_name = f.func.name.unambiguous_name()
+    # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
+    if include_namespace:
+        return f"at::functionalization::FunctionalInverses::{api_name}_inverse"
+    else:
+        return f"{api_name}_inverse"
+
+
+def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> list[Binding]:
     # capture arguments include all arguments except `self`.
     # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
     # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
@@ -148,14 +152,14 @@ def returns_type(func: FunctionSchema) -> CType:
     return BaseCType(tensorT)
 
 
-def outer_arguments(*, is_reverse: bool) -> List[Binding]:
+def outer_arguments(*, is_reverse: bool) -> list[Binding]:
     if is_reverse:
         return [base_binding, mutated_view_binding, mutated_view_idx_binding]
     else:
         return [base_binding, mutated_view_idx_binding]
 
 
-def inner_call_index(func: FunctionSchema) -> Optional[Binding]:
+def inner_call_index(func: FunctionSchema) -> Binding | None:
     # For view ops that return multiple tensors (like `split`), we generate a separate lambda for each output.
     # When we replay a view op that returns multiple tensors, we need to index into the output appropriately
     if len(func.returns) > 1 or (
@@ -165,7 +169,7 @@ def inner_call_index(func: FunctionSchema) -> Optional[Binding]:
     return None
 
 
-def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
+def inner_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
     args = func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]

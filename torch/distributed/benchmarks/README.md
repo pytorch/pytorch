@@ -7,22 +7,22 @@ This Benchmark is used to measure distributed training iteration time. It combin
 There are different training paradigms where combining these two techniques might be useful. For example:
 1) If we have a model with a sparse part (large embedding table) and a dense
    part (FC layers), we might want to set the embedding table on a parameter
-   server and replicate the FC layer across multiple trainers using [DistributedDataParallel](https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel). The [Distributed RPC framework](https://pytorch.org/docs/master/rpc.html) comes handy to perform embedding lookups on the parameter servers.
-2) Enable hybrid parallelism as described in the [PipeDream](https://arxiv.org/abs/1806.03377) paper. We can use the [Distributed RPC framework](https://pytorch.org/docs/master/rpc.html) to pipeline stages of the model across multiple workers and replicate each stage (if needed) using [DistributedDataParallel](https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel).
+   server and replicate the FC layer across multiple trainers using [DistributedDataParallel](https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel). The [Distributed RPC framework](https://pytorch.org/docs/main/rpc.html) comes handy to perform embedding lookups on the parameter servers.
+2) Enable hybrid parallelism as described in the [PipeDream](https://arxiv.org/abs/1806.03377) paper. We can use the [Distributed RPC framework](https://pytorch.org/docs/main/rpc.html) to pipeline stages of the model across multiple workers and replicate each stage (if needed) using [DistributedDataParallel](https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel).
 
 ## Training Process
 This benchmark focuses on the first paradigm above. The training process is executed as follows:
 
-1) The master creates embedding tables on each of the 8 Parameter Servers and holds an [RRef](https://pytorch.org/docs/master/rpc.html#rref) to it.
+1) The master creates embedding tables on each of the 8 Parameter Servers and holds an [RRef](https://pytorch.org/docs/main/rpc.html#rref) to it.
 2) The master, then kicks off the training loop on the 8 trainers and passes the embedding table RRef to the trainers.
 3) The trainers create a `HybridModel` which performs embedding lookups in all 8 Parameter Servers using the embedding table RRef provided by the master and then executes the FC layer which is wrapped and replicated via DDP (DistributedDataParallel).
 4) The trainer executes the forward pass of the model and uses the loss to
-   execute the backward pass using [Distributed Autograd](https://pytorch.org/docs/master/rpc.html#distributed-autograd-framework).
+   execute the backward pass using [Distributed Autograd](https://pytorch.org/docs/main/rpc.html#distributed-autograd-framework).
 5) As part of the backward pass, the gradients for the FC layer are computed
    first and synced to all trainers via allreduce in DDP.
 6) Next, Distributed Autograd propagates the gradients to the parameter servers,
    where the gradients for the embedding table are updated.
-7) Finally, the [Distributed Optimizer](https://pytorch.org/docs/master/rpc.html#module-torch.distributed.optim) is used to update all parameters.
+7) Finally, the [Distributed Optimizer](https://pytorch.org/docs/main/rpc.html#module-torch.distributed.optim) is used to update all parameters.
 
 
 ## Example Benchmark output:

@@ -10,8 +10,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 void IdentityImpl::reset() {}
 
@@ -46,9 +45,7 @@ void LinearImpl::reset_parameters() {
   torch::nn::init::kaiming_uniform_(
       weight, std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   if (bias.defined()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t fan_in, fan_out;
-    std::tie(fan_in, fan_out) =
+    auto [fan_in, fan_out] =
         torch::nn::init::_calculate_fan_in_and_fan_out(weight);
     const auto bound = 1 / std::sqrt(fan_in);
     torch::nn::init::uniform_(bias, -bound, bound);
@@ -173,5 +170,4 @@ Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
   return F::bilinear(input1, input2, weight, bias);
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

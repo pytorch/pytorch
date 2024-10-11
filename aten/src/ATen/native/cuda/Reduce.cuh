@@ -19,7 +19,7 @@
 
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using at::detail::Array;
 
@@ -313,7 +313,7 @@ struct ReduceJitOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -346,8 +346,8 @@ struct ReduceOp {
   using OutputCalculator = OffsetCalculator<2, index_t>;
 
   static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value
-    && std::is_convertible<out_scalar_t, arg_t>::value;
+    std::is_convertible_v<arg_t, out_scalar_t>
+    && std::is_convertible_v<out_scalar_t, arg_t>;
 
   static constexpr int input_vec_size = ReduceConfig::input_vec_size;
 
@@ -376,7 +376,7 @@ struct ReduceOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -704,7 +704,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
     at::detail::Array<out_scalar_t*, output_vec_size> out,
     at::detail::Array<arg_t, output_vec_size> value,
-    typename std::enable_if<can_acc>::type* = nullptr
+    typename std::enable_if_t<can_acc>* = nullptr
   ) const {
     at::detail::Array<arg_t, output_vec_size> ret;
     #pragma unroll
@@ -717,7 +717,7 @@ struct ReduceOp {
   template <bool can_acc>
   C10_DEVICE out_scalar_t get_accumulated_output(
     out_scalar_t* out, arg_t value,
-    typename std::enable_if<can_acc>::type* = nullptr
+    typename std::enable_if_t<can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(!final_output);
     return (out_scalar_t)value;
@@ -730,7 +730,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
     at::detail::Array<out_scalar_t*, output_vec_size>,
     at::detail::Array<arg_t, output_vec_size>,
-    typename std::enable_if<!can_acc>::type* = nullptr
+    typename std::enable_if_t<!can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(false);
     return arg_t {};
@@ -742,7 +742,7 @@ struct ReduceOp {
   template <bool can_acc>
   C10_DEVICE out_scalar_t get_accumulated_output(
     out_scalar_t* out, arg_t value,
-    typename std::enable_if<!can_acc>::type* = nullptr
+    typename std::enable_if_t<!can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(false);
     return *out;
@@ -807,6 +807,7 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); // complete the acquire pattern after atomic
       value = ident;
       if (config.should_block_x_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
@@ -1054,7 +1055,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Case 1: "vectorize along input"
   // This case happens when we are reducing along fastest moving dimesion. In such case, threads
   // with the same threadIdx.y works on the same reduction cooperatively and will produce results
-  // for the same ouput. In such case, values in each loaded vector always correspond to the same ouput.
+  // for the same output. In such case, values in each loaded vector always correspond to the same output.
   //
   // Case 2: "vectorize along output"
   // This case happens when the fastest moving dimesion is not the dimension of reduction. In such case,
@@ -1091,7 +1092,11 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   }
 
   constexpr int min_values_per_thread = 16;
+#ifndef USE_ROCM
   constexpr int max_values_per_thread = 256;
+#else
+  constexpr int max_values_per_thread = 1024;
+#endif
 
   if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
@@ -1139,18 +1144,18 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_half_or_chalf =
-      (std::is_same<at::Half, scalar_t>::value &&
-       std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<c10::complex<Half>, scalar_t>::value &&
-       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+      (std::is_same_v<at::Half, scalar_t> &&
+       std::is_same_v<at::Half, out_scalar_t>) ||
+      (std::is_same_v<c10::complex<Half>, scalar_t> &&
+       std::is_same_v<c10::complex<Half>, out_scalar_t>);
   // at::BFloat16 has lower precision and can lead to rounding errors.
   // So when scalar_t and out_scalar_t are at::BFloat16, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
-      (std::is_same<at::BFloat16, scalar_t>::value &&
-       std::is_same<at::BFloat16, out_scalar_t>::value);
+      (std::is_same_v<at::BFloat16, scalar_t> &&
+       std::is_same_v<at::BFloat16, out_scalar_t>);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value &&
+      std::is_convertible_v<arg_t, out_scalar_t> &&
       !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
@@ -1189,11 +1194,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1246,18 +1251,18 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_half_or_chalf =
-      (std::is_same<at::Half, scalar_t>::value &&
-       std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<c10::complex<Half>, scalar_t>::value &&
-       std::is_same<c10::complex<Half>, out_scalar_t>::value);
+      (std::is_same_v<at::Half, scalar_t> &&
+       std::is_same_v<at::Half, out_scalar_t> ) ||
+      (std::is_same_v<c10::complex<Half>, scalar_t> &&
+       std::is_same_v<c10::complex<Half>, out_scalar_t>);
   // at::BFloat16 has lower precision and can lead to rounding errors.
   // So when scalar_t and out_scalar_t are at::BFloat16, we
   // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
-      (std::is_same<at::BFloat16, scalar_t>::value &&
-       std::is_same<at::BFloat16, out_scalar_t>::value);
+      (std::is_same_v<at::BFloat16, scalar_t> &&
+       std::is_same_v<at::BFloat16, out_scalar_t>);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value &&
+      std::is_convertible_v<arg_t, out_scalar_t> &&
       !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
@@ -1298,11 +1303,11 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1351,4 +1356,4 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
       jiterator_mutex, cache, desc, vt0, config, &reduce);
 }
 
-}} // namespace at::native
+} // namespace at::native

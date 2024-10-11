@@ -33,15 +33,15 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   uint64_t value_;
 };
 
-Tensor& random_(Tensor& self, c10::optional<Generator> generator) {
+Tensor& random_(Tensor& self, std::optional<Generator> generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, std::optional<Generator> generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, c10::optional<Generator> generator) {
+Tensor& random_to(Tensor& self, int64_t to, std::optional<Generator> generator) {
   return random_from_to(self, 0, to, generator);
 }
 

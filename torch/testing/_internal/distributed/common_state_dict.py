@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 # Owner(s): ["oncall: distributed"]
 
 import copy
@@ -6,22 +8,25 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
-    PG,
+    _PG,
+    _STATE,
     set_state_dict,
-    STATE,
     StateDictOptions,
 )
 
 
 class VerifyStateDictMixin:
-    def _compare_tensor(self, orig_tensor, dist_tensor):
+    def _compare_tensor(self, orig_tensor, dist_tensor, offload_to_cpu=False):
         if isinstance(dist_tensor, (DTensor, ShardedTensor)):
             dist_tensor = _gather_state_dict({"mykey": dist_tensor}).pop("mykey")
+
+        if offload_to_cpu:
+            orig_tensor = orig_tensor.cpu()
+            dist_tensor = dist_tensor.cpu()
         self.assertTrue(isinstance(dist_tensor, torch.Tensor))
         self.assertTrue(torch.allclose(orig_tensor, dist_tensor))
 
@@ -30,16 +35,22 @@ class VerifyStateDictMixin:
         msd: Dict[str, Any],
         dist_msd: Dict[str, Any],
         options: StateDictOptions = StateDictOptions(),
+        offload_to_cpu=False,
     ) -> None:
         if not options.ignore_frozen_params:
             self.assertEqual(len(msd), len(dist_msd))
         for fqn, param in msd.items():
             dist_param = dist_msd.get(fqn, None)
             if not options.ignore_frozen_params:
-                self.assertIsNotNone(dist_param)
-                self._compare_tensor(param, dist_param)
+                self.assertIsNotNone(dist_param, f"{fqn=}")
+                try:
+                    self._compare_tensor(param, dist_param, offload_to_cpu)
+                except AssertionError as e:
+                    raise AssertionError(
+                        f"{fqn} has mismatched value {param} {dist_param}"
+                    ) from e
             elif dist_param is None:
-                self.assertFalse(param.requires_grad)
+                self.assertFalse(param.requires_grad, f"{fqn=}")
 
     def _verify_osd(
         self,
@@ -57,10 +68,10 @@ class VerifyStateDictMixin:
             fqn_pid_mapping[pid] = fqn
         # Check optimizer_state_dict state
 
-        self.assertEqual(len(osd[STATE]), len(dist_osd[STATE]))
-        for pid, states in osd[STATE].items():
+        self.assertEqual(len(osd[_STATE]), len(dist_osd[_STATE]))
+        for pid, states in osd[_STATE].items():
             fqn = fqn_pid_mapping[pid]
-            dist_states = dist_osd[STATE].get(fqn, None)
+            dist_states = dist_osd[_STATE].get(fqn, None)
             self.assertIsNotNone(dist_states, fqn)
             self.assertEqual(len(states), len(dist_states))
             for key, state in states.items():
@@ -69,17 +80,17 @@ class VerifyStateDictMixin:
                 self._compare_tensor(state, dist_state)
 
         # Check optimizer_state_dict param_group
-        old_dist_osd_pg = dist_osd[PG]
-        if len(osd[PG]) != len(dist_osd[PG]):
-            self.assertTrue(len(dist_osd[PG]) > len(osd[PG]))
-            new_pg = copy.deepcopy(dist_osd[PG][0])
+        old_dist_osd_pg = dist_osd[_PG]
+        if len(osd[_PG]) != len(dist_osd[_PG]):
+            self.assertTrue(len(dist_osd[_PG]) > len(osd[_PG]))
+            new_pg = copy.deepcopy(dist_osd[_PG][0])
             new_pg["params"] = []
-            for dist_group in dist_osd[PG]:
+            for dist_group in dist_osd[_PG]:
                 new_pg["params"].extend(dist_group["params"])
-            dist_osd[PG] = [new_pg]
+            dist_osd[_PG] = [new_pg]
 
-        self.assertEqual(len(osd[PG]), len(dist_osd[PG]))
-        for group, dist_group in zip(osd[PG], dist_osd[PG]):
+        self.assertEqual(len(osd[_PG]), len(dist_osd[_PG]))
+        for group, dist_group in zip(osd[_PG], dist_osd[_PG]):
             self.assertEqual(len(group), len(dist_group))
             for key, value in group.items():
                 # Below doesn't work because param_groups can have None
@@ -92,7 +103,7 @@ class VerifyStateDictMixin:
                     self.assertEqual(sorted(fqns), sorted(dist_value))
                 else:
                     self.assertEqual(value, dist_value)
-        dist_osd[PG] = old_dist_osd_pg
+        dist_osd[_PG] = old_dist_osd_pg
 
     def _verify_osd_by_load(
         self,

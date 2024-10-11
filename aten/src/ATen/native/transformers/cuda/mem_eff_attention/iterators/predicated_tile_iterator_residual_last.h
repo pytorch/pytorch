@@ -87,7 +87,7 @@ namespace threadblock {
 /// To be efficient, this assumes the iterator will be dereferenced and advanced
 /// at least once outside any looping structure to minimize integer arithmetic.
 ///
-/// Acceses out of bounds are safe so long as `clear_mask()` is called prior to
+/// Access out of bounds are safe so long as `clear_mask()` is called prior to
 /// dereferencing the iterator.
 ///
 ///

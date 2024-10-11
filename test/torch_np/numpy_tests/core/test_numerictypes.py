@@ -3,10 +3,10 @@
 import functools
 import itertools
 import sys
-
 from unittest import skipIf as skipif
 
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -162,7 +163,7 @@ class TestScalarTypeNames(TestCase):
         """Test that names correspond to where the type is under ``np.``"""
         assert getattr(np, t.__name__) is t
 
-    @skipIfTorchDynamo  # XXX: weird, some names are not OK
+    @skipIfTorchDynamo()  # XXX: weird, some names are not OK
     @parametrize("t", numeric_types)
     def test_names_are_undersood_by_dtype(self, t):
         """Test the dtype constructor maps names back to the type"""

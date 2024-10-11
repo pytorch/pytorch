@@ -5,7 +5,7 @@
 
 namespace at::native {
 
-void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
+void uniform_kernel(TensorIteratorBase& iter, double from, double to, std::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   templates::cuda::uniform_kernel(iter, from, to, generator);
 }

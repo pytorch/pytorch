@@ -25,8 +25,8 @@ inline void get_data_ptrs(
     ArrayRef<char*> base,
     IntArrayRef strides,
     IntArrayRef counter) {
-  const int64_t ntensors = base.size();
-  const int64_t ndim = counter.size();
+  const auto ntensors = base.size();
+  const auto ndim = counter.size();
   std::copy(base.begin(), base.end(), ptrs);
   for (const auto dim : c10::irange(ndim)) {
     int64_t value = counter[dim];

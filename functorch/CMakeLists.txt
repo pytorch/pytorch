@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 set(FT_DIR csrc)
-file(GLOB_RECURSE FT_SOURCES ${FT_DIR}/*.cpp)
+file(GLOB_RECURSE FT_SOURCES ${FT_DIR}/*.cpp ${FT_DIR}/*.c)
 
 add_library(${PROJECT_NAME} MODULE ${FT_SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -16,7 +16,12 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE TORCH_API_INCLUDE_EXTENSION_H
 target_compile_options(${PROJECT_NAME} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 target_compile_options_if_supported(${PROJECT_NAME} "-Wmissing-prototypes")
 target_compile_options_if_supported(${PROJECT_NAME} "-Werror=missing-prototypes")
-target_link_libraries(${PROJECT_NAME} PRIVATE torch torch_python)
+if(BUILD_LIBTORCHLESS)
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${TORCH_LIB} torch_python)
+else()
+  # functorch cannot use the alias to build on windows
+  target_link_libraries(${PROJECT_NAME} PRIVATE torch torch_python)
+endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY

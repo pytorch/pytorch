@@ -7,8 +7,8 @@ from typing import List
 
 import torch
 import torch.cuda._sanitizer as csan
-from torch.cuda._sanitizer import StreamId, DataPtr, EventId
-from torch.testing._internal.common_utils import TestCase, run_tests, NoTest, TEST_CUDA
+from torch.cuda._sanitizer import DataPtr, EventId, StreamId
+from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
 
 
 if not TEST_CUDA:
@@ -57,10 +57,7 @@ class TestArgumentHandler(TestCase):
 
         outputs = {out[0].data_ptr(), out[1].data_ptr(), out[2].data_ptr()}
         self.assertEqual({a.data_ptr()}, argument_handler.dataptrs_read)
-        self.assertEqual(
-            outputs,
-            argument_handler.dataptrs_written,
-        )
+        self.assertEqual(outputs, argument_handler.dataptrs_written)
 
     def test_inplace(self):
         add_inplace_func = torch.ops.aten.add_.Tensor

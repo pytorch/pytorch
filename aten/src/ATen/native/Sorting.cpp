@@ -71,10 +71,7 @@ TORCH_META_FUNC(topk)
 }
 
 TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
-  TORCH_INTERNAL_ASSERT(
-      stable.has_value(),
-      "sort(): c10::optional<bool> for stable has to have value.");
+(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -222,7 +219,7 @@ void quantile_checks(const Tensor& self, const Tensor& q) {
 }
 
 std::vector<int64_t> quantile_output_shape(
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const Tensor& self,
     const Tensor& q,
     const bool keepdim,
@@ -249,7 +246,7 @@ std::vector<int64_t> quantile_output_shape(
 Tensor quantile_compute(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> orginal_dim,
+    const std::optional<int64_t> orginal_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan,
@@ -375,7 +372,7 @@ void quantile_out_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -400,7 +397,7 @@ void quantile_out_impl(
 Tensor quantile_impl(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -549,7 +546,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(vals)
     .add_output(inds)
-    .add_input(in)
+    .add_const_input(in)
     .build();
 
   AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_out", [&] {
@@ -656,7 +653,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -674,7 +671,7 @@ Tensor& quantile_out(
 Tensor& quantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -692,7 +689,7 @@ Tensor& quantile_out(
 Tensor quantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   return quantile_impl(
@@ -707,7 +704,7 @@ Tensor quantile(
 Tensor quantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   TORCH_CHECK(
@@ -719,7 +716,7 @@ Tensor quantile(
 Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -737,7 +734,7 @@ Tensor& nanquantile_out(
 Tensor& nanquantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
@@ -755,7 +752,7 @@ Tensor& nanquantile_out(
 Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   return quantile_impl(
@@ -770,7 +767,7 @@ Tensor nanquantile(
 Tensor nanquantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
   TORCH_CHECK(
@@ -942,7 +939,7 @@ Tensor nanmedian_cpu(const Tensor& self) {
 
 TORCH_IMPL_FUNC(sort_stable_out)
 (const Tensor& self,
- c10::optional<bool> stable,
+ std::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,
@@ -953,7 +950,7 @@ TORCH_IMPL_FUNC(sort_stable_out)
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
+    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
   }
 }
 
@@ -987,8 +984,14 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+Tensor argsort(const Tensor & self, bool stable, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, stable, dim, descending));
+}
+
+Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descending, Tensor& out) {
+  auto values = at::empty({0}, self.options());
+  at::sort_outf(self, stable, dim, descending, values, out);
+  return out;
 }
 
 

@@ -15,6 +15,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -59,7 +60,7 @@ class TestFlattenParams(FSDPTest):
             dim_feedforward=128,
             dropout=0.1,
         )
-        module.register_buffer("dummy_buffer", torch.tensor(1.0))
+        module.dummy_buffer = nn.Buffer(torch.tensor(1.0))
 
         def get_input(device, dtype):
             torch.manual_seed(1)  # keep everything deterministic

@@ -1,11 +1,14 @@
-from typing import Any, List
+# mypy: allow-untyped-defs
+import io
+from typing import Any, Callable, cast, Dict, List
 
 import torch
+import torch.distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 from .metadata import (
     BytesStorageMetadata,
@@ -13,6 +16,7 @@ from .metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from .planner import (
@@ -27,6 +31,7 @@ from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
 )
+
 
 __all__: List[str] = ["create_read_items_for_chunk_list"]
 
@@ -47,9 +52,19 @@ def _chunk_for_shard(shard_md: ShardMetadata) -> ChunkStorageMetadata:
 def _sharded_tensor_metadata(
     sharded_tensor: ShardedTensor, shard_md: ShardMetadata
 ) -> TensorWriteData:
+    shard_properties = sharded_tensor.metadata().tensor_properties
+
+    properties = TensorProperties(
+        dtype=shard_properties.dtype,
+        layout=shard_properties.layout,
+        requires_grad=shard_properties.requires_grad,
+        memory_format=shard_properties.memory_format,
+        pin_memory=shard_properties.pin_memory,
+    )
+
     return TensorWriteData(
         chunk=_chunk_for_shard(shard_md),
-        properties=sharded_tensor.metadata().tensor_properties,
+        properties=properties,
         size=sharded_tensor.metadata().size,
     )
 
@@ -68,7 +83,6 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
                 offsets=offsets,
                 sizes=sizes,
             ),
-            # TODO:update this to not use TensorProperties from ST.
             properties=TensorProperties.create_from_tensor(tensor.to_local()),
             size=tensor.size(),
         ),
@@ -203,8 +217,9 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, DTensor):
-        return [_create_write_items_for_dtensor(fqn, object)]
+    if hasattr(object, "__create_write_items__"):
+        # DTensor implements _Checkpointable
+        return object.__create_write_items__(fqn, object)
     elif isinstance(object, ShardedTensor):
         return [
             _create_write_item_for_shard(fqn, object, shard.metadata)
@@ -227,21 +242,35 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
+def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+    if hasattr(tensor, "__create_chunk_list__"):
+        # DTensor implements _Checkpointable
+        local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+    elif isinstance(tensor, ShardedTensor):
+        local_chunks = [
+            _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
+        ]
+    elif isinstance(tensor, torch.Tensor):
+        local_chunks = [_create_chunk_from_tensor(tensor)]
+    else:
+        raise ValueError(
+            "Unsupported Type, expecting one of [Tensor, DTensor, ShardedTensor] "
+            f",but got {type(tensor)}"
+        )
+
+    return local_chunks
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
-        if isinstance(obj, DTensor):
-            local_chunks = [_create_chunk_from_dtensor(obj)]
-        elif isinstance(obj, ShardedTensor):
-            local_chunks = [
-                _chunk_for_shard(shard.metadata) for shard in obj.local_shards()
-            ]
-        elif isinstance(obj, torch.Tensor):
-            local_chunks = [_create_chunk_from_tensor(obj)]
-        else:
+        try:
+            local_chunks = _create_chunk_list(obj)
+        except ValueError as ex:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, "
-                + f"expected BytesStorageMetadata but found {type(md)}"
-            )
+                + f"expected BytesStorageMetadata but found {type(md)}",
+            ) from ex
+
         return create_read_items_for_chunk_list(fqn, md, local_chunks)
     else:
         return [
@@ -253,3 +282,105 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
+
+
+def _init_state_dict(state_dict: Dict[str, Any]) -> Any:
+    """
+    Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
+    """
+
+    def dtensor_func(value: DTensor):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
+            device_type = dist.distributed_c10d._get_pg_default_device().type
+            device = cast(
+                torch.device, _get_device_module(device_type).current_device()
+            )
+            new_local_tensor = torch.empty_like(value.to_local(), device=device)
+            # We need to pass shape and stride explicitly, since DTensor might be
+            # sharded unevenly.
+            dtensor = DTensor.from_local(
+                new_local_tensor,
+                device_mesh=value.device_mesh,
+                placements=value.placements,
+                shape=value.size(),
+                stride=value.stride(),
+            )
+            return dtensor
+        else:
+            return value
+
+    def sharded_tensor_func(value: Any):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
+            raise RuntimeError(
+                f"Found unsupported type {type(value)} for meta device loading."
+            )
+        else:
+            return value
+
+    def tensor_func(value: torch.Tensor):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
+            device_type = dist.distributed_c10d._get_pg_default_device().type
+            device = cast(
+                torch.device, _get_device_module(device_type).current_device()
+            )
+            tensor = torch.empty_like(value, device=device)
+            return tensor
+        else:
+            return value
+
+    _iterate_state_dict(
+        state_dict,
+        dtensor_func,
+        sharded_tensor_func,
+        tensor_func,
+    )
+
+
+def _iterate_state_dict(
+    iter_object: Any,
+    dtensor_func: Callable,
+    sharded_tensor_func: Callable,
+    tensor_func: Callable,
+):
+    """
+    Iterate through the state dict, applying the given functions to each tensor type
+    and update the state dict in place.
+
+    Args:
+        iter_object (Any): the target state_dict.
+        sharded_tensor_func (Callable): the function to apply to ShardedTensor
+        dtensor_func (Callable): the function to apply to DTensor
+        tensor_func (Callable): the function to apply to Tensor
+
+    # TODO: let state_dict_util._iterate_state_dict() to support in place option
+    so we don't need to have two versions of _iterate_state_dict.
+    """
+
+    if isinstance(iter_object, DTensor):
+        return dtensor_func(iter_object)
+    elif isinstance(iter_object, ShardedTensor):
+        return sharded_tensor_func(iter_object)
+    elif isinstance(iter_object, torch.Tensor):
+        return tensor_func(iter_object)
+    elif (
+        isinstance(iter_object, (int, float, str, bytes, io.BytesIO))
+        or iter_object is None
+    ):
+        return iter_object
+    elif isinstance(iter_object, dict):
+        for key, value in iter_object.items():
+            iter_object[key] = _iterate_state_dict(
+                value, dtensor_func, sharded_tensor_func, tensor_func
+            )
+        return iter_object
+    elif isinstance(iter_object, (list, tuple)):
+        ret = [
+            _iterate_state_dict(v, dtensor_func, sharded_tensor_func, tensor_func)
+            for v in iter_object
+        ]
+        if isinstance(iter_object, tuple):
+            ret = tuple(ret)  # type: ignore[assignment]
+        return ret

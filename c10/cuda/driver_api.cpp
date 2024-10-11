@@ -3,9 +3,8 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
-#include <iostream>
-namespace c10 {
-namespace cuda {
+
+namespace c10::cuda {
 
 namespace {
 
@@ -19,6 +18,12 @@ DriverAPI create_driver_api() {
   r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
   TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
+#undef LOOKUP_LIBCUDA_ENTRY
+
+#define LOOKUP_LIBCUDA_ENTRY(name)                       \
+  r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
+  dlerror();
+  C10_LIBCUDA_DRIVER_API_12030(LOOKUP_LIBCUDA_ENTRY)
 #undef LOOKUP_LIBCUDA_ENTRY
 
   if (handle_1) {
@@ -42,7 +47,6 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 #endif

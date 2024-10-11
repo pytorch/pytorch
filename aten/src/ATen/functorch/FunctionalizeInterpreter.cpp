@@ -2,7 +2,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static void sanityCheckNotFunctional(const c10::OperatorHandle& op, torch::jit::Stack* stack, size_t num_args) {
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
@@ -64,4 +64,4 @@ void FunctionalizeInterpreterPtr::sendToNextInterpreterImpl(
   sanityCheckNotFunctional(op, stack, ret_size);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch

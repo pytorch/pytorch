@@ -221,9 +221,9 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t 
 
 void nan_to_num_kernel_cuda(
     TensorIteratorBase& iter,
-    c10::optional<double> nan,
-    c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf) {
+    std::optional<double> nan,
+    std::optional<double> pos_inf,
+    std::optional<double> neg_inf) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
       using value_t = scalar_t::value_type;
@@ -262,7 +262,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),

@@ -22,7 +22,7 @@ Tensor unary_op(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {

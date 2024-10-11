@@ -3,11 +3,13 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace c10 {
 
@@ -30,58 +32,79 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   // these could be pure virtual when we implement LTC versions
   virtual bool is_int() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_bool() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
+  virtual bool is_nested_int() const {
+    return false;
+  }
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sub(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode mul(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
+  // NB: legacy, prefer float_truediv or int_truediv
   virtual SymNode truediv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
+  virtual SymNode float_truediv(const SymNode& other) {
+    return truediv(other);
+  }
+  virtual SymNode int_truediv(const SymNode& other) {
+    return truediv(other);
+  }
+  // NB: legacy, prefer float_pow or pow_by_natural
   virtual SymNode pow(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
+  virtual SymNode float_pow(const SymNode& other) {
+    return pow(other);
+  }
+  virtual SymNode pow_by_natural(const SymNode& other) {
+    return pow(other);
+  }
+  // NB: legacy, prefer int_floordiv
   virtual SymNode floordiv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
+  virtual SymNode int_floordiv(const SymNode& other) {
+    return floordiv(other);
+  }
   virtual SymNode mod(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode eq(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ne(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode gt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode lt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode le(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ge(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode ceil() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode floor() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode neg() {
     TORCH_CHECK(false, "NYI");
   };
@@ -158,6 +181,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool guard_size_oblivious(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  }
   virtual bool expect_true(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation!
@@ -180,20 +208,23 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> singleton_int() {
-    return c10::nullopt;
+  virtual std::string _graph_repr() {
+    return str();
+  };
+  virtual std::optional<int64_t> nested_int() {
+    return std::nullopt;
   }
-  virtual c10::optional<int64_t> singleton_coeff() {
-    return c10::nullopt;
+  virtual std::optional<int64_t> nested_int_coeff() {
+    return std::nullopt;
   }
-  virtual c10::optional<int64_t> constant_int() {
-    return c10::nullopt;
+  virtual std::optional<int64_t> constant_int() {
+    return std::nullopt;
   }
-  virtual c10::optional<bool> constant_bool() {
-    return c10::nullopt;
+  virtual std::optional<bool> constant_bool() {
+    return std::nullopt;
   }
-  virtual c10::optional<int64_t> maybe_as_int() {
-    return c10::nullopt;
+  virtual std::optional<int64_t> maybe_as_int() {
+    return std::nullopt;
   }
   virtual bool is_constant() {
     return false;
@@ -208,3 +239,4 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
 };
 
 } // namespace c10
+C10_DIAGNOSTIC_POP()

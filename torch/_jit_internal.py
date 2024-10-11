@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The weak_script annotation needs to be here instead of inside torch/jit/ so it
 can be used in other places in torch/ (namely torch.nn) without running into
@@ -13,26 +14,24 @@ import inspect
 import io
 import pickle
 import sys
+import textwrap
 import threading
 import types
 import typing
 import warnings
 import weakref
-from textwrap import dedent
-from typing import (  # noqa: F401
+from typing import (
     Any,
     Callable,
     Dict,
     Final,
     ForwardRef,
-    Generic,
-    get_args,  # new in 3.8
-    get_origin,  # new in 3.8
+    get_args,
+    get_origin,
     List,
     Optional,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -47,6 +46,7 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
@@ -65,7 +65,7 @@ try:
 
     LockType = _thread.LockType
 except ImportError:
-    import _dummy_thread
+    import _dummy_thread  # type: ignore[import-not-found]
 
     LockType = _dummy_thread.LockType
 
@@ -77,6 +77,120 @@ boolean_dispatched: "weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]" =
 
 
 FAKE_FILENAME_PREFIX = "__torch_jit_dataclass"
+
+
+def is_final(ann) -> bool:
+    return (
+        hasattr(ann, "__module__")
+        and ann.__module__ in {"typing", "typing_extensions"}
+        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
+    )
+
+
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls:
+    def __getitem__(self, types):
+        return
+
+
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()[f"BroadcastingList{i}"] = BroadcastingList1
+
+
+def is_scripting() -> bool:
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+    .. testcode::
+
+        import torch
+
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+            if torch.jit.is_scripting():
+                return torch.linear(x)
+            else:
+                return unsupported_linear_op(x)
+    """
+    return False
+
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj, mangle_name=True) -> str:
+    # This special case allows us to override the qualified name on a type.
+    # It's currently used in conjunction with tracing, where we create a
+    # fake module to filter only supported attributes. However, since this
+    # new type is defined as a local class, we need a mechanism to override
+    # its qualname so it appears correctly in the TorchScript system. This,
+    # we set '_jit_override_qualname' with the original traced module's
+    # qualified name, which is picked up here
+    if hasattr(obj, "_jit_override_qualname"):
+        return obj._jit_override_qualname
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.ScriptFunction):
+        return obj.qualified_name
+
+    if getattr(obj, "__name__", None):
+        name = obj.__name__
+    # Enum classes do not have `__name__` attr, instead they have `name`.
+    elif isinstance(obj, enum.Enum):
+        name = obj.name
+    else:
+        raise RuntimeError("Could not get name of python class object")
+
+    if name == "<lambda>":
+        name = "_lambda"  # make name a valid identifier
+
+    module_name = obj.__module__
+
+    # If the module is actually a torchbind module, then we should short circuit
+    if module_name == "torch._classes":
+        return obj.qualified_name
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError(
+            f"Could not get qualified name for class '{name}': "
+            "__module__ can't be None."
+        )
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
+    #                        f"the attr {name} on module {module_name} is not the class")
+
+    # torch.package and TorchScript have separate mangling schemes to avoid
+    # name collisions from multiple packages. To avoid them interfering with
+    # each other, normalize the package manging here.
+    if package_mangling.is_mangled(module_name):
+        module_name = module_name.replace("<", "_")
+        module_name = module_name.replace(">", "_")
+
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError(
+            f"Could not get qualified name for class '{name}': "
+            f"'{name}' is not a valid identifier"
+        )
+
+    return module_name + "." + name
 
 
 class SourceLoader:
@@ -105,9 +219,7 @@ def createResolutionCallbackFromEnv(lookup_base):
 
     def lookupInModule(qualified_name, module):
         if "." in qualified_name:
-            parts = qualified_name.split(".")
-            base = parts[0]
-            remaining_pieces = ".".join(parts[1:])
+            base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
             return lookupInModule(remaining_pieces, module_value)
         else:
@@ -181,9 +293,11 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
             cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
+
         def baz():
             foo = 2
             bar()
+
 
         baz()
     """
@@ -357,7 +471,7 @@ def get_annotation_str(annotation):
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
-    elif isinstance(annotation, (ast.Constant, ast.NameConstant)):
+    elif isinstance(annotation, ast.Constant):
         return f"{annotation.value}"
 
     # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
@@ -382,7 +496,12 @@ def get_type_hint_captures(fn):
     # This may happen in cases where the function is synthesized dynamically at runtime.
     src = loader.get_source(fn)
     if src is None:
-        src = inspect.getsource(fn)
+        try:
+            src = inspect.getsource(fn)
+        except OSError as e:
+            raise OSError(
+                f"Failed to get source for {fn} using inspect.getsource"
+            ) from e
 
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
@@ -401,7 +520,7 @@ def get_type_hint_captures(fn):
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
-    a = ast.parse(dedent(src))
+    a = ast.parse(textwrap.dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected {fn} to be a function")
     f = a.body[0]
@@ -478,7 +597,13 @@ def createResolutionCallbackForClassMethods(cls):
 
 
 def boolean_dispatch(
-    arg_name, arg_index, default, if_true, if_false, module_name, func_name
+    arg_name,
+    arg_index,
+    default,
+    if_true,
+    if_false,
+    module_name,
+    func_name,
 ):
     """
     Dispatches to either of 2 script functions based on a boolean argument.
@@ -600,6 +725,7 @@ def unused(fn):
             import torch
             import torch.nn as nn
 
+
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
                     super().__init__()
@@ -608,6 +734,7 @@ def unused(fn):
                 @torch.jit.unused
                 def memory_efficient(self, x):
                     import pdb
+
                     pdb.set_trace()
                     return x + 10
 
@@ -617,6 +744,7 @@ def unused(fn):
                         return self.memory_efficient(x)
                     else:
                         return x + 10
+
 
             m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
@@ -664,10 +792,12 @@ def ignore(drop=False, **kwargs):
         import torch
         import torch.nn as nn
 
+
         class MyModule(nn.Module):
             @torch.jit.ignore
             def debugger(self, x):
                 import pdb
+
                 pdb.set_trace()
 
             def forward(self, x):
@@ -677,6 +807,7 @@ def ignore(drop=False, **kwargs):
                 # to Python
                 self.debugger(x)
                 return x
+
 
         m = torch.jit.script(MyModule())
 
@@ -876,7 +1007,11 @@ def _check_overload_body(func):
         return isinstance(x, ast.Pass)
 
     def is_ellipsis(x):
-        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+        return (
+            isinstance(x, ast.Expr)
+            and isinstance(x.value, ast.Constant)
+            and x.value.value is Ellipsis
+        )
 
     if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
         msg = (
@@ -937,7 +1072,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno = {}
+_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -983,7 +1118,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_class_fileno = get_source_lines_and_file(mod_class)[1]
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception(
+        raise AssertionError(
             "Overloads are not useable when a module is redeclared within the same file: "
             + str(method)
         )
@@ -1098,118 +1233,6 @@ else:
         return False
 
 
-def is_final(ann) -> bool:
-    return ann.__module__ in {"typing", "typing_extensions"} and (
-        get_origin(ann) is Final or isinstance(ann, type(Final))
-    )
-
-
-# allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls:
-    def __getitem__(self, types):
-        return
-
-
-# mypy doesn't support parameters on types, so we have to explicitly type each
-# list size
-BroadcastingList1 = BroadcastingListCls()
-for i in range(2, 7):
-    globals()[f"BroadcastingList{i}"] = BroadcastingList1
-
-
-def is_scripting() -> bool:
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
-    .. testcode::
-
-        import torch
-
-        @torch.jit.unused
-        def unsupported_linear_op(x):
-            return x
-
-        def linear(x):
-           if torch.jit.is_scripting():
-              return torch.linear(x)
-           else:
-              return unsupported_linear_op(x)
-    """
-    return False
-
-
-# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj, mangle_name=True) -> str:
-    # This special case allows us to override the qualified name on a type.
-    # It's currently used in conjunction with tracing, where we create a
-    # fake module to filter only supported attributes. However, since this
-    # new type is defined as a local class, we need a mechanism to override
-    # its qualname so it appears correctly in the TorchScript system. This,
-    # we set '_jit_override_qualname' with the original traced module's
-    # qualified name, which is picked up here
-    if hasattr(obj, "_jit_override_qualname"):
-        return obj._jit_override_qualname
-    # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.ScriptFunction):
-        return obj.qualified_name
-
-    if getattr(obj, "__name__", None):
-        name = obj.__name__
-    # Enum classes do not have `__name__` attr, instead they have `name`.
-    elif isinstance(obj, enum.Enum):
-        name = obj.name
-    else:
-        raise RuntimeError("Could not get name of python class object")
-
-    if name == "<lambda>":
-        name = "_lambda"  # make name a valid identifier
-
-    module_name = obj.__module__
-
-    # If the module is actually a torchbind module, then we should short circuit
-    if module_name == "torch._classes":
-        return obj.qualified_name
-
-    # The Python docs are very clear that `__module__` can be None, but I can't
-    # figure out when it actually would be.
-    if module_name is None:
-        raise RuntimeError(
-            f"Could not get qualified name for class '{name}': "
-            "__module__ can't be None."
-        )
-
-    # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
-    #                        f"the attr {name} on module {module_name} is not the class")
-
-    # torch.package and TorchScript have separate mangling schemes to avoid
-    # name collisions from multiple packages. To avoid them interfering with
-    # each other, normalize the package manging here.
-    if package_mangling.is_mangled(module_name):
-        module_name = module_name.replace("<", "_")
-        module_name = module_name.replace(">", "_")
-
-    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
-    # does not need mangle the python class name.
-    if mangle_name:
-        # __main__ is a builtin module, so rewrite it to "__torch__".
-        if module_name == "__main__":
-            module_name = "__torch__"
-        else:
-            # Everything else gets a "__torch__" prefix to avoid name collisions
-            # with the names of user values.
-            module_name = "__torch__." + module_name
-
-    if "." in name:
-        raise RuntimeError(
-            f"Could not get qualified name for class '{name}': "
-            f"'{name}' is not a valid identifier"
-        )
-
-    return module_name + "." + name
-
-
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
         return None
@@ -1217,7 +1240,9 @@ def _try_get_dispatched_fn(fn):
 
 
 def _get_named_tuple_properties(
-    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None, rcb=None
+    obj,
+    loc: Optional[torch._C._jit_tree_views.SourceRange] = None,
+    rcb=None,
 ):
     if loc is None:
         loc = fake_range()
@@ -1297,7 +1322,10 @@ def _get_named_tuple_properties(
 
 
 def _create_named_tuple(
-    t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
+    t,
+    unqual_name: str,
+    field_names: List[str],
+    defaults: Tuple[Any, ...],
 ):
     TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
@@ -1498,6 +1526,15 @@ def _extract_tensors(obj):
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors
+
+
+def _get_model_id(obj) -> Optional[str]:
+    if isinstance(obj, torch.jit.ScriptModule):
+        return str(obj._c._type())
+    elif isinstance(obj, torch.jit.ScriptFunction):
+        return obj.qualified_name
+    else:
+        return None
 
 
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass

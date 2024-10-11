@@ -6,6 +6,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
+// For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -22,7 +24,7 @@
 namespace at::native {
 namespace mps {
 
-static const char* METAL_BINARY = R"BINARY_METAL(
+static MetalShaderLibrary lib(R"BINARY_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -37,7 +39,7 @@ kernel void fmax(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = fmax(*input, *other);
+  *out = static_cast<T>(fmax(*input, *other));
 }
 
 template<typename T>
@@ -50,7 +52,7 @@ kernel void fmin(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = fmin(*input, *other);
+  *out = static_cast<T>(fmin(*input, *other));
 }
 
 template<typename T>
@@ -63,7 +65,7 @@ kernel void copysign(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = copysign(*input, *other);
+  *out = static_cast<T>(copysign(*input, *other));
 }
 
 template<typename T>
@@ -125,6 +127,11 @@ REGISTER_FMIN_OP(float);
 REGISTER_FMIN_OP(half);
 REGISTER_COPYSIGN_OP(float);
 REGISTER_COPYSIGN_OP(half);
+#if __METAL_VERSION__ >= 310
+REGISTER_FMAX_OP(bfloat);
+REGISTER_FMIN_OP(bfloat);
+REGISTER_COPYSIGN_OP(bfloat);
+#endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
 REGISTER_COPYSIGN_INTEGRAL_OP(long);
 REGISTER_COPYSIGN_INTEGRAL_OP(short);
@@ -190,24 +197,25 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
                              device   void  * out_         [[buffer(2)]],
                              constant uint3 * offsets      [[buffer(3)]],
                              uint tid [[thread_position_in_grid]]) {
-  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  if (*input == *other)
-  {
-    *out = *other;
-  }
-  else if (isnan(*input) || isnan(*other))
-  {
+  auto out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = *(constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = *(constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+#if __METAL_VERSION__ >= 310
+  *out = static_cast<T>(nextafter(input, other));
+#else
+  if (input == other) {
+    *out = input;
+  } else if (isnan(input) || isnan(other)) {
     *out = NAN;
-  }
-  else
-  {
-    U bits = as_type<U>(*input);
-    bits = bits + ((*other > *input) ? 1 : -1);
+  } else if (input == 0) {
+    constexpr auto one = as_type<T>(static_cast<U>(1));
+    *out = other > 0 ? one : -one;
+  } else {
+    U bits = as_type<U>(input);
+    (input > 0) ^ (input > other) ? bits++ : bits--;
     *out = as_type<T>(bits);
   }
+#endif
 }
 
 #define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
@@ -222,6 +230,9 @@ kernel void nextafter_kernel<DTYPE, UTYPE>(  \
 
 REGISTER_NEXTAFTER_OP(float, uint);
 REGISTER_NEXTAFTER_OP(half, ushort);
+#if __METAL_VERSION__ >= 310
+REGISTER_NEXTAFTER_OP(bfloat, ushort);
+#endif
 
 template<typename T>
 kernel void complex_kernel(constant void  * real_       [[buffer(0)]],
@@ -249,43 +260,7 @@ kernel void complex_kernel<DTYPE>(       \
 REGISTER_COMPLEX_OUT_OP(float);
 REGISTER_COMPLEX_OUT_OP(half);
 
-)BINARY_METAL";
-
-using namespace mps;
-
-static id<MTLLibrary> compileBinaryOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> binaryLibrary = nil;
-  if (binaryLibrary) {
-    return binaryLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BINARY encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(binaryLibrary, "Failed to create metal binary library, error: ", [[error description] UTF8String]);
-  return binaryLibrary;
-}
-
-static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> binaryLib = compileBinaryOpsLibrary(device);
-  id<MTLFunction> binaryFunc = [binaryLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(binaryFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:binaryFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)BINARY_METAL");
 
 static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
@@ -294,70 +269,28 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   Tensor other = iter.input(1);
   Tensor out = iter.output();
 
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> otherBuffer = getMTLBufferStorage(other);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      const IntArrayRef& iterShape = iter.shape();
-      std::vector<uint32_t> iterShapeData(iterShape.size());
-      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
+      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
-      for (const auto i : c10::irange(iterShape.size())) {
-        TORCH_CHECK(i <= UINT32_MAX);
-        iterShapeData[i] = (uint32_t)(iterShape[i]);
-      }
-
-      for (const auto i : c10::irange(nDim)) {
-        for (const auto offset : c10::irange(nOffsets)) {
-          strides[i][offset] = iter.strides(offset)[i];
-        }
-      }
-
-      id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
-                                                             options:0] autorelease];
-      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
-
-      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > numThreads)
-        kernelOffsetsTGSize = numThreads;
-
-      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
-
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
-      id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
+      id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
 
       [computeEncoder setComputePipelineState:binaryPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-
-      NSUInteger tgSize = binaryPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
-      }
-
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
@@ -365,7 +298,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
 }
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -374,9 +307,10 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   if (length == 0) {
     return;
   }
+  auto common_dtype = output.scalar_type();
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other).select(other.dim(), 0);
+  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
+  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
   auto iter =
       TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
 
