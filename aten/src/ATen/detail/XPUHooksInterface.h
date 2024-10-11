@@ -57,11 +57,6 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::XPU);
   }
 
-  c10::Stream getDefaultStream(DeviceIndex device) const override {
-    TORCH_CHECK(false, "Cannot get default stream on XPU without ATen_xpu library.");
-    return c10::Stream::unpack3(-1, 0, c10::DeviceType::XPU);
-  }
-
   void setCurrentStream(const c10::Stream& stream) const override {
     TORCH_CHECK(false, "Cannot set current stream on XPU without ATen_xpu library.");
   }
