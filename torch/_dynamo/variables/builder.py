@@ -2566,7 +2566,7 @@ def _automatic_dynamic(
                 )
 
     strides = e.stride()
-    outermost_dim = max(range(len(strides)), key=lambda i: strides[i])
+    outermost_dim = max(range(len(strides)), key=lambda i: strides[i]) if strides else -1
     assume_outer_dim_dynamic_by_default_knob = JustKnobsConfig(
         name="pytorch/compiler:assume_outer_dim_dynamic_by_default_knob",
         env_name="ASSUME_OUTER_DIM_DYNAMIC_BY_DEFAULT",
