@@ -23,8 +23,7 @@
 typedef SSIZE_T ssize_t;
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -818,8 +817,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
       auto prev = it->input(0)->node();
       Node* origNllLossNode = *it;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Node* origLogSoftmaxNode;
+      Node* origLogSoftmaxNode = nullptr;
 
       // Check for patterns especially in cases with autocasting enabled
       // in which a cast node is inserted before the NegativeLogLikelihoodLoss
@@ -1069,5 +1067,4 @@ void PeepholeOptimizeONNX(
   GRAPH_DUMP("After PeepholeOptimizeONNX", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
