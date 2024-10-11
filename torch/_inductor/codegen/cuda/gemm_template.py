@@ -1288,7 +1288,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                     new_stride,
                     old_layout.offset,
                 )
-                return Buffer(name=node.get_name(), layout=new_layout)
+                return Buffer(node.get_name(), new_layout)
 
             new_X = clone_with_transposed_stride(X)
             new_W = clone_with_transposed_stride(W)
