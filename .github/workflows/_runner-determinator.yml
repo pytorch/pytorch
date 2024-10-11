@@ -480,6 +480,10 @@ jobs:
 
 
           def main() -> None:
+              print("*" * 120)
+              print("This is a test, to understand GH behaviour with CI")
+              print("*" * 120)
+
               args = parse_args()
 
               runner_label_prefix = DEFAULT_LABEL_PREFIX

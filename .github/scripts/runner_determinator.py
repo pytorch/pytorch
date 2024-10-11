@@ -421,6 +421,10 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
 
 
 def main() -> None:
+    print("*" * 120)
+    print("This is a test, to understand GH behaviour with CI")
+    print("*" * 120)
+
     args = parse_args()
 
     runner_label_prefix = DEFAULT_LABEL_PREFIX
