@@ -273,6 +273,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 fullgraph=True,
             )
             inputs = torch.ones(12800, 12800, device="cuda") + self.rank
+            # We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
+            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done.
             for _ in range(10):
                 out_ref = all_reduce_wait(all_reduce_eager(inputs))
 
