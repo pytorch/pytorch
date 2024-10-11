@@ -370,10 +370,10 @@ class TestCKBackend(TestCase):
     def test_max_autotune_conv2d(self, max_autotune_gemm_backends):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
-        x = torch.randn(1, 3, 224, 224, **tensor_options)
-        w = torch.randn(64, 3, 7, 7, **tensor_options)
+        x = torch.randn(1, 3, 224, 224, **tensor_options).to(memory_format=torch.channels_last)
+        w = torch.randn(64, 3, 7, 7, **tensor_options).to(memory_format=torch.channels_last)
 
         assert "rocm" in dir(config)
 
