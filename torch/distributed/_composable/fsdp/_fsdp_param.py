@@ -6,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -25,6 +24,13 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 """
