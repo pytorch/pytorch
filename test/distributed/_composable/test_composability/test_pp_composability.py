@@ -14,7 +14,6 @@ from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
-    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
@@ -86,7 +85,6 @@ class ComposabilityTest(MultiProcessTestCase):
             Schedule1F1B,
             ScheduleInterleaved1F1B,
             ScheduleLoopedBFS,
-            ScheduleFlexibleInterleaved1F1B,
             ScheduleInterleavedZeroBubble,
         ],
     )

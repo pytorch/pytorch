@@ -4,11 +4,7 @@ import logging
 from typing import List
 
 import torch
-from torch.distributed.pipelining import (
-    ScheduleFlexibleInterleaved1F1B,
-    ScheduleInterleaved1F1B,
-    ScheduleLoopedBFS,
-)
+from torch.distributed.pipelining import ScheduleInterleaved1F1B, ScheduleLoopedBFS
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
@@ -164,7 +160,7 @@ class TestSchedulePlan(TestCase):
 
     @parametrize(
         "ScheduleClass",
-        [ScheduleFlexibleInterleaved1F1B],
+        [ScheduleInterleaved1F1B],
     )
     def test_pipeline_order_flex_and_zero_bubble(self, ScheduleClass):
         for num_local_stages, num_microbatches, group_size in self.test_cases:
