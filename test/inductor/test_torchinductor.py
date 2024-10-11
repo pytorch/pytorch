@@ -1487,7 +1487,6 @@ class CommonTemplate:
         actual = nested_opt(*example_inputs)
         self.assertEqual(expect, actual)
 
-    @xfail_if_triton_cpu
     def test_index_propagation_flip(self):
         def flip(x):
             i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -11541,7 +11540,6 @@ class CommonTemplate:
 
         self.common(forward, ())
 
-    @xfail_if_triton_cpu
     def test_flip_cat(self):
         def forward(unsqueeze, unsqueeze_1):
             cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
