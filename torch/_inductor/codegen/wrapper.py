@@ -1504,13 +1504,17 @@ class PythonWrapperCodegen(CodeGen):
         line = self.make_allocation(
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
+        zline = self.make_zero_buffer("workspace")
         self.writeline(line)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(line)
         if zero_fill:
-            self.writeline(f"workspace.zero_(){self.ending}")
+            self.writeline(zline)
             if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
+                self.kernel_autotune_calls.writeline(zline)
+
+    def make_zero_buffer(self, name):
+        return f"{name}.zero_(){self.ending}"
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
