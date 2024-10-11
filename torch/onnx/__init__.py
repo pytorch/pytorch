@@ -30,7 +30,6 @@ __all__ = [
     "JitScalarType",
     # Public functions
     "export",
-    "export_to_pretty_string",
     "is_in_onnx_export",
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
@@ -68,7 +67,6 @@ from .errors import OnnxExporterError
 from .utils import (
     _run_symbolic_function,
     _run_symbolic_method,
-    export_to_pretty_string,
     is_in_onnx_export,
     register_custom_op_symbolic,
     select_model_mode_for_export,
