@@ -6548,6 +6548,11 @@ try:
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 
+    @register_lowering(_c10d_functional.wait_tensors)
+    def _wait_tensor(inps):
+        ir._WaitKernel.create_wait(_c10d_functional.wait_tensors.default, inps)
+        return inps
+
     @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
     def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
         return ir.TensorBox.create(

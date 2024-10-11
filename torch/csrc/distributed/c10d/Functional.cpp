@@ -36,6 +36,22 @@ class WorkRegistry {
     return work;
   }
 
+  std::vector<at::Tensor> get_tensors(const c10::intrusive_ptr<c10d::Work>& work) {
+    std::unique_lock lock(lock_);
+    std::vector<at::Tensor> result;
+    
+    for (auto it = registry_.begin(); it != registry_.end(); it++) {
+      if (it->second == work) {
+        auto storage = it->first.lock();
+        if (storage) {
+          result.emplace_back(at::tensor(std::move(storage)));
+        }
+      }
+    }
+  
+    return result;
+  }
+
   ~WorkRegistry() {
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
@@ -304,6 +320,16 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
   return tensor;
 }
 
+std::vector<at::Tensor> wait_tensors(std::vector<at::Tensor> tensors) {
+  for (const auto& tensor : tensors) {
+    auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
+    if (work != nullptr) {
+      work->wait();
+    }
+  }
+  return tensors;
+}
+
 } // namespace
 
 TORCH_LIBRARY(_c10d_functional, m) {
@@ -390,6 +416,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "wait_tensors(Tensor[] tensor) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensors),
       {at::Tag::pt2_compliant_tag});
 }
 

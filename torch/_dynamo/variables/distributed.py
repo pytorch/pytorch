@@ -318,12 +318,12 @@ class WorkVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from ..utils import proxy_args_kwargs
-
         if name in {"wait"}:
-            TODO: re-route this to look up the corresponding tensor and call .wait_tensor on them.
+            tensors_proxy = tx.output.create_proxy(
+                "call_function", torch._C._distributed_c10d._get_tensors, (self.proxy,),
+            )
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function", torch._C._c10d_functional.wait_tensors, (tensors_proxy,),
             )
             return variables.ConstantVariable(None)
         else:

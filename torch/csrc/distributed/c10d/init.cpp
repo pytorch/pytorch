@@ -933,6 +933,15 @@ This class does not support ``__members__`` property.)");
       py::arg("tensor"),
       py::arg("work"));
 
+  module.def(
+      "_get_tensors",
+      [](const c10::intrusive_ptr<::c10d::Work>& work) {
+        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
+            ->ref_py_object();
+        return ::c10d::get_tensors(work);
+      },
+      py::arg("work"));
+
   // Remove a group from the native registry
   module.def(
       "_unregister_process_group",
