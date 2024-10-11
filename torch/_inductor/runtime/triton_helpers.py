@@ -617,43 +617,53 @@ def select_one(x, mask, dim, keep_dims=False):
 
 
 @triton.jit
-def gpu_barrier(state, total):
+def gpu_barrier(
+    sem, total: tl.constexpr, first_barrier: tl.constexpr = tl.constexpr(False)
+):
     """
     Wait for all other thread blocks to reach this barrier before returning.
 
+    if *sem<=total: we are in count_up mode waiting for all threads to enter
+    if *sem>=total*2: we are in count_down mode waiting for all threads to leave
+
     Args:
-        state: scratch space for two int32 semaphores, zero initialized
+        sem: an int32 semaphores, zero initialized
         total: how many other blocks are running
+        first_barrier: True if we can skip waiting for exit for last barrier
 
     Returns:
         True on the first thread leaving the barrier
 
     """
-    # TODO(jansel): try to do this with a single value and shifting
-    count_up = state
-    count_down = state + 1
-
     # ensure stores before this are visible
     tl.debug_barrier()
 
-    # all threads must exit prior barrier before we start
-    # expect this to already be true in common case
-    while tl.load(count_down, volatile=True) != 0:
-        pass
+    # scaling factor so we know which mode we are in
+    count_down = 2 * total
+
+    if not first_barrier:
+        # all threads must exit prior barrier before we start
+        # expect this to already be true in common case
+        # TODO(jansel): we could avoid the need for this with two semaphores we ping-ping between
+        while tl.load(sem, volatile=True) >= count_down:
+            pass
 
     # count threads entering barrier
-    num_here = tl.atomic_add(count_up, 1) + 1  # acts as a memory fence
+    num_here = tl.atomic_add(sem, 1) + 1  # acts as a memory fence
     if num_here == total:
-        # all other threads are spinning on count_down
+        # all other threads are spinning on count_down mode starting
         # the last thread flips from count_up mode to count_down mode
-        tl.store(count_up, 0)
-        tl.atomic_xchg(count_down, total - 1, sem="release")
+        tl.atomic_xchg(sem, count_down * (total - 1), sem="relaxed")
         return True
     else:
         prior = 0
-        while prior == 0:  # wait for last thread to flip the mode to count_down
-            prior = tl.atomic_cas(count_down, total - 1, total - 2, sem="relaxed")
-        if prior != total - 1:  # did the cas decrement already?
-            tl.atomic_add(count_down, -1, sem="relaxed")
-            # when last thread reaches here count_down is back to 0
+        while prior < count_down:  # wait for last thread to flip the mode to count_down
+            # TODO(jansel): is it faster to spin with a normal read rather than CAS?
+            prior = tl.atomic_cas(
+                sem, count_down * (total - 1), count_down * (total - 2), sem="relaxed"
+            )
+
+        if prior != count_down * (total - 1):  # did the cas decrement already?
+            tl.atomic_add(sem, -count_down, sem="relaxed")
+            # when last thread reaches here sem is back to 0
         return False
