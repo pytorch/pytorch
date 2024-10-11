@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar
+from typing import Any, Dict, Iterable, List, Tuple, Dict, TypeVar, NoReturn, Type
+from typing_extensions import Self
 
 from torch.utils._pytree import (
     _dict_flatten,
@@ -18,9 +19,6 @@ from ._compatibility import compatibility
 __all__ = ["immutable_list", "immutable_dict"]
 
 
-_T = TypeVar("_T")
-
-
 _help_mutation = """\
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:
@@ -29,26 +27,29 @@ instead create a new copy of it and assign the copy to the node:
 """
 
 
-def _no_mutation(self, *args, **kwargs):
+_T = TypeVar("_T")
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
+def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:
     raise NotImplementedError(
         f"'{type(self).__name__}' object does not support mutation. {_help_mutation}",
     )
 
 
-def _create_immutable_container_class(
-    base: Type[_T],
-    mutable_methods: Iterable[str],
-    namespace: Optional[Dict[str, Any]] = None,
-) -> Type[_T]:
-    ns = dict.fromkeys(mutable_methods, _no_mutation)
-    if namespace is not None:
-        ns.update(namespace)
-    return type("immutable_" + base.__name__, (base,), ns)
+class _ImmutableMixin:
+    def __init_subclass__(cls, mutable_methods_to_disable: Iterable[str]) -> None:
+        super().__init_subclass__()
+        for method in mutable_methods_to_disable:
+            setattr(cls, method, _no_mutation)
 
 
-immutable_list = _create_immutable_container_class(
-    list,
-    mutable_methods=(
+@compatibility(is_backward_compatible=True)
+class immutable_list(
+    _ImmutableMixin,
+    List[_T],
+    mutable_methods_to_disable=(
         "__delitem__",
         "__iadd__",
         "__imul__",
@@ -62,17 +63,19 @@ immutable_list = _create_immutable_container_class(
         "reverse",
         "sort",
     ),
-    namespace={
-        "__hash__": lambda self: hash(tuple(self)),
-        "__reduce__": lambda self: (type(self), (tuple(self),)),
-    },
-)
-immutable_list = compatibility(is_backward_compatible=True)(immutable_list)
+):
+    def __hash__(self) -> int:  # type: ignore[override]
+        return hash(tuple(self))
+
+    def __reduce__(self)-> Tuple[Type[Self], Tuple[Tuple[_T, ...]]]:
+        return (type(self), (tuple(self),))
 
 
-immutable_dict = _create_immutable_container_class(
-    dict,
-    mutable_methods=(
+@compatibility(is_backward_compatible=True)
+class immutable_dict(
+    _ImmutableMixin,
+    Dict[_KT, _VT],
+    mutable_methods_to_disable=(
         "__delitem__",
         "__ior__",
         "__setitem__",
@@ -82,12 +85,12 @@ immutable_dict = _create_immutable_container_class(
         "setdefault",
         "update",
     ),
-    namespace={
-        "__hash__": lambda self: hash(tuple(self.items())),
-        "__reduce__": lambda self: (type(self), (tuple(self.items()),)),
-    },
-)
-immutable_dict = compatibility(is_backward_compatible=True)(immutable_dict)
+):
+    def __hash__(self) -> int: # type: ignore[override]
+        return hash(tuple(self.items()))
+
+    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[Tuple[_KT, _VT], ...]]]:
+        return (type(self), (tuple(self.items()),))
 
 
 # Register immutable collections for PyTree operations
