@@ -326,7 +326,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
-    // Get a Future object that would be marked as either success or failure
+    // Get a Future result of each work (e.g. success, different error types).
     // instead of the tensor output.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
