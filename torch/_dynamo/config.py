@@ -81,6 +81,9 @@ dynamic_shapes = True
 # Precedence (mark_static): mark_static takes precedence over assume_outer_dim_dynamic_by_default. Specifically,
 # if assume_outer_dim_dynamic_by_default is True, a torch._dynamo.mark_static call on the outer most dimension will
 # result in the dimension being marked as static.assume_static_by_default
+#
+# This is also turned off for export since it's unlikely to be of any benefit since we don't have caches
+# available on the export path.
 assume_outer_dim_dynamic_by_default = True
 
 use_lazy_graph_module = (
