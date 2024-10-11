@@ -26,9 +26,10 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 @register_backend
 def eager(gm, fake_tensor_inputs, **kwargs):
-    if kwargs:
-        log.warning("eager backend ignoring extra kwargs %s", kwargs)
-    return gm.forward
+    with torch._C.DisableTorchFunctionSubclass():
+        if kwargs:
+            log.warning("eager backend ignoring extra kwargs %s", kwargs)
+        return gm.forward
 
 
 def make_eager_backend_with_torch_function_mode(mode):
