@@ -36,7 +36,7 @@ struct DynamicGraphOtherNodeUpdate {
 };
 
 struct TrackedAllocation {
-  void* ptr;
+  char* ptr;
   size_t size;
 };
 

@@ -151,7 +151,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     }, [this](void* ptr, size_t size) {
       std::cout << "tracked alloc " << allocations.size() << " of size " << size << " returning " << ptr << " since mode=" << sentinelAllocationsMode << std::endl;
       allocations.push_back(TrackedAllocation{
-        .ptr = ptr,
+        .ptr = (char*) ptr,
         .size = size,
       });
     }, sentinelCaptureUniqueToken);
@@ -177,6 +177,31 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
 }
 
+std::vector<TrackedAllocation> combineRanges(const std::vector<TrackedAllocation>& input) {
+    std::vector<TrackedAllocation> ranges = input;
+
+    // Sort ranges by start address
+    std::sort(ranges.begin(), ranges.end(), [](const TrackedAllocation& a, const TrackedAllocation& b) {
+        return a.ptr < b.ptr;
+    });
+
+    std::vector<TrackedAllocation> result;
+    for (const auto& range : ranges) {
+        if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
+            // No overlap, add new range
+            result.push_back(range);
+        } else {
+            // Overlap found, extend the previous range
+            auto& last = result.back();
+            char* last_end = last.ptr + last.size;
+            char* range_end = range.ptr + range.size;
+            last.size = std::max(last_end, range_end) - last.ptr;
+        }
+    }
+
+    return result;
+}
+
 void CUDAGraph::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -189,7 +214,12 @@ void CUDAGraph::capture_end() {
 
   if (sentinelAllocationsMode) {
     c10::cuda::CUDACachingAllocator::endAllocateSentinelPointers(sentinelCaptureUniqueToken);
-    //std::cout << "capture_end, recorded allocation sizes were: " << allocations << std::endl;
+    std::cout << "capture_end, recorded allocation sizes were: ";
+    for (auto& capture : allocations) std::cout << capture.size << " ";
+    allocations = combineRanges(allocations);
+    std::cout << "and after combining ranges the sizes were: ";
+    for (auto& capture : allocations) std::cout << capture.size << " ";
+    std::cout << std::endl;
   }
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");

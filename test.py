@@ -38,7 +38,8 @@ def myFunc(a, b, c):
 
     # check that simple kernels work:
     a += b.sum() * c
-    temp = torch.ones_like(c) # we can even allocate :)
+    for i in range(100): # mess with the allocator a bit (make it reuse some stuff)
+        temp = torch.ones_like(c) # we can even allocate :)
     temp += 1
     a += temp
     a[3:] += 2
