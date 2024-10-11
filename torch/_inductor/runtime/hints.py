@@ -34,10 +34,10 @@ try:
 except ImportError:
     attrs_descriptor_available = False
 
-# Define `instance_descriptor` function with clear conditional handling
+# Define `AttrsDescriptorWrapper` function with clear conditional handling
 if attrs_descriptor_available:
 
-    def instance_descriptor(
+    def AttrsDescriptorWrapper(
         divisible_by_16=None,
         equal_to_1=None,
     ):
@@ -52,8 +52,8 @@ if attrs_descriptor_available:
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
-        "instance_descriptor",
+    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef]
+        "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
     )

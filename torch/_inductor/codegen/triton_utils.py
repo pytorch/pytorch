@@ -6,7 +6,7 @@ import sympy
 import torch
 
 from .. import config
-from ..runtime.hints import instance_descriptor
+from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
@@ -169,4 +169,4 @@ def config_of(
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
 
-    return instance_descriptor(divisible_by_16, equal_to_1)
+    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)
