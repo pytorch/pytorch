@@ -136,6 +136,7 @@ from .distributed import (
     PlacementVariable,
     ProcessGroupVariable,
     WorldMetaClassVariable,
+    WorkVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,

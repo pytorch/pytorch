@@ -11,10 +11,31 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import NoTest
 
+import functools
+
+import logging
+import multiprocessing
+import os
+import unittest
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Union
+
+import torch.distributed as dist
+from torch import nn
+from torch.distributed.distributed_c10d import GroupMember
+
+from torch.testing._internal.common_distributed import (
+    _dynamo_dist_per_rank_init,
+    at_least_x_gpu,
+    DynamoDistributedMultiProcTestCase,
+    requires_nccl,
+)
+
 
 try:
     from torchrec.datasets.random import RandomRecDataset
     from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
+    from torchrec.distributed import comm_ops
 
     HAS_TORCHREC = True
 except ImportError:
@@ -199,6 +220,71 @@ class TorchRecTests(TestCase):
 
         self.assertEqual(counter.frame_count, 1)
 
+
+# TODO(yf225): double-check that our CI has torchrec
+@unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
+@requires_nccl()
+class TorchRecMultiProcTests(DynamoDistributedMultiProcTestCase):
+    def test_awaitable(self):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
+            device = torch.device(f"cuda:{self.rank}")
+
+            torch.cuda.set_device(device)
+
+            B_global = 2
+            D0 = 8
+            D1 = 9
+
+            input_embedding0 = torch.rand(
+                (B_global, D0),
+                device=device,
+                requires_grad=True,
+            )
+            input_embedding0 = torch.tensor(
+                [[1, 2, 3, 4, 5, 6, 7, 8], [9, 10, 11, 12, 13, 14, 15, 16]],
+                device=device,
+                requires_grad=True,
+                dtype=torch.float32,
+            )
+            input_embedding1 = torch.rand(
+                (B_global, D1),
+                device=device,
+                requires_grad=True,
+            )
+            input_embedding1 = torch.tensor(
+                [[11, 12, 13, 14, 15, 16, 17, 18, 19], [20, 21, 22, 23, 24, 25, 26, 27, 28]],
+                device=device,
+                requires_grad=True,
+                dtype=torch.float32,
+            )
+
+            input_embeddings = [input_embedding0, input_embedding1]
+            out_split = [17, 17]
+
+            def wait_fn(awaitable: comm_ops.Request):
+                res = awaitable.wait()
+                res1 = res[0] + res[1]
+                return res1
+
+            def func(compile_wait_fn=False):
+                v_embs_out_awaitable = comm_ops.alltoallv(
+                    input_embeddings, out_split=out_split
+                )
+                assert isinstance(v_embs_out_awaitable, comm_ops.Request)
+                if compile_wait_fn:
+                    with torch._dynamo.config.patch(
+                        skip_torchrec=False,
+                    ):
+                        v_embs_out = torch.compile(wait_fn, backend="inductor", fullgraph=True)(v_embs_out_awaitable)
+                else:
+                    v_embs_out = wait_fn(v_embs_out_awaitable)
+                return torch.sum(v_embs_out)
+
+            out_ref = func(compile_wait_fn=False)
+            out_compiled = func(compile_wait_fn=True)
+            self.assertEqual(out_ref, out_compiled)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

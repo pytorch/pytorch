@@ -28,7 +28,7 @@ from .dicts import (
     FrozensetVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
+from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable, WorkVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,

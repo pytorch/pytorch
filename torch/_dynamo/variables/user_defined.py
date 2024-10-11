@@ -13,6 +13,7 @@ import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
+import logging
 
 import torch._dynamo.config
 import torch.nn
@@ -66,6 +67,8 @@ try:
     from torch.utils._cxx_pytree import PyTreeSpec
 except ImportError:
     PyTreeSpec = type(None)
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -627,6 +630,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
     def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
+        import traceback
+        log.warn("\n".join(traceback.format_stack()) + "\n" + f"value: {value}")
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
@@ -772,6 +777,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
+
+            # print(f"method: {method}")
+            # print(f"self.value: {self.value}")
+            # if torch.distributed.is_available() and self.value is torch.distributed.Work.wait:
+            #     return variables.WorkVariable(proxy=None, value=self.value.__self__).call_method(tx, "wait", args, kwargs)
 
             if (
                 method in (object.__ne__, object.__eq__)
