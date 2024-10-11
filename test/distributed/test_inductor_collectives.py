@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
+import time
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -270,10 +271,28 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 backend="inductor",
                 fullgraph=True,
             )
-
             inputs = torch.ones(12800, 12800, device="cuda") + self.rank
-            out_ref = all_reduce_wait(all_reduce_eager(inputs))
-            out_compiled = all_reduce_wait_compiled(all_reduce_eager(inputs))
+            for _ in range(100):
+                out_ref = all_reduce_wait(all_reduce_eager(inputs))
+
+            from torch.profiler import profile, ProfilerActivity
+
+            my_schedule = torch.profiler.schedule(
+                wait=5,
+                warmup=5,
+                active=5
+            )
+            prof = profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=my_schedule,
+            )
+
+            for _ in range(100):
+                out_compiled = all_reduce_wait_compiled(all_reduce_eager(inputs))
+                prof.step()
+            trace_file_path = f"trace_{str(prof.step_num)}_rank{self.rank}.json"
+            print(trace_file_path)
+            prof.export_chrome_trace(trace_file_path)
             self.assertEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
