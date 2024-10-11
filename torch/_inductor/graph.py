@@ -97,6 +97,7 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -862,16 +863,7 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> str:
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
-                if (
-                    not data.is_onednn
-                    and data.size() == value.size()
-                    and data.stride() == value.stride()
-                    and data.dtype == value.dtype
-                    and data.device == value.device
-                    and data.untyped_storage().data_ptr()
-                    == value.untyped_storage().data_ptr()
-                    and data.storage_offset() == value.storage_offset()
-                ):
+                if is_same_tensor(data, value):
                     return constant_name
 
         if name is None:
