@@ -261,7 +261,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 torch.ops.c10d_functional.wait_tensor(y)
             else:
                 req.wait()
-            return y * y
+            return torch.matmul(y, y)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             all_reduce_wait_compiled = torch.compile(
@@ -270,7 +270,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 fullgraph=True,
             )
 
-            inputs = torch.ones(4, 4, device="cuda") + self.rank
+            inputs = torch.ones(1280, 1280, device="cuda") + self.rank
             out_ref = all_reduce_wait(all_reduce_eager(inputs))
             out_compiled = all_reduce_wait_compiled(all_reduce_eager(inputs))
             self.assertEqual(out_ref, out_compiled)
