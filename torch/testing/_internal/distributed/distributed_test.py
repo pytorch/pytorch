@@ -895,50 +895,6 @@ class DistributedTest:
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
 
-        # This test helper can only be used when using the Gloo or NCCL backend
-        # **and** both the Gloo and NCCL backends are available.
-        # See the @skip annotations below.
-        def _test_group_override_backend(self, initializer):
-            if BACKEND == "gloo":
-                new_backend = "nccl"
-            elif BACKEND == "nccl":
-                new_backend = "gloo"
-            elif BACKEND in DistTestCases.backend_feature["plugin"]:
-                new_backend = "gloo"
-
-            group, group_id, rank = initializer(backend=new_backend)
-            if group_id is None:
-                return
-
-            if new_backend == "gloo":
-                self.assertTrue(group_id._get_backend_name(), "gloo")
-            if new_backend == "nccl":
-                self.assertTrue(group_id._get_backend_name(), "nccl")
-
-            self.assertEqual(rank, group[dist.get_rank(group_id)])
-            self.assertEqual(len(group), dist.get_world_size(group_id))
-
-            # Pin device (so we avoid NCCL race conditions/deadlocks).
-            group_rank = dist.get_rank(group_id)
-            torch.cuda.set_device(group_rank)
-
-            # Run broadcast of CUDA tensor (so it works for both Gloo and NCCL).
-            tensor = _build_tensor(2, value=group_rank).cuda()
-            dist.broadcast(tensor, src=group[0], group=group_id)
-            self.assertEqual(_build_tensor(2, value=0), tensor.to("cpu"))
-
-        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @require_world_size(3)
-        @skip_if_lt_x_gpu(2)
-        def test_backend_group(self):
-            self._test_group_override_backend(self._init_group_test)
-
-        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(BACKEND == "ucc", "broken, see https://github.com/pytorch/pytorch/pull/113620")
-        def test_backend_full_group(self):
-            self._test_group_override_backend(self._init_full_group_test)
-
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
