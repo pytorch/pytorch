@@ -454,7 +454,7 @@ c10::Stream CUDAHooks::getDefaultStream(DeviceIndex device) const {
 
 void CUDAHooks::setCurrentStream(const c10::Stream& stream) const {
   auto cudaStream = at::cuda::CUDAStream(stream);
-  return at::cuda::setCurrentCUDAStream(cudaStream);
+  at::cuda::setCurrentCUDAStream(cudaStream);
 }
 
 #ifdef USE_ROCM
