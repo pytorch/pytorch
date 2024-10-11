@@ -9883,6 +9883,132 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
+    def test_pytree_tree_leaves(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x):
+                    tree = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            collections.deque([0.0, -x]),
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    leaves = module.tree_leaves(tree)
+                    return leaves
+
+                x = torch.randn(3, 2)
+                expected = fn(x)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x)
+
+                self.assertEqual(actual, expected)
+
+    def test_pytree_tree_flatten_unflatten(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x, y):
+                    tree = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            [0.0, -x],
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    leaves, treespec = module.tree_flatten(tree)
+                    new_leaves = [
+                        x - 1,
+                        y,
+                        x * y,
+                        3.0,
+                        y - 2,
+                        torch.zeros(2, 2),
+                        2 * y,
+                        -y,
+                        x + y,
+                        x - y,
+                        torch.ones(3, 2),
+                        1,
+                    ]
+                    new_tree = module.tree_unflatten(leaves, treespec)
+                    return leaves, new_tree
+
+            x = torch.randn(3, 2)
+            y = torch.randn(3, 2)
+            expected = fn(x, y)
+            fn_opt = torch.compile(fullgraph=True)(fn)
+            actual = fn_opt(x, y)
+
+            self.assertEqual(actual, expected)
+
+    def test_pytree_tree_map(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x, y):
+                    tree1 = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            [0.0, -x],
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    tree2 = collections.OrderedDict(
+                        [
+                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("a", [y, y + 1]),
+                            ("b", y + 2),
+                            (
+                                "d",
+                                {
+                                    "f": MyTuple(torch.ones(4, 3), -y, y + 1),
+                                    "e": torch.return_types.qr((2 * y, None)),
+                                },
+                            ),
+                        ],
+                    )
+                    return module.tree_map(lambda u, v: (u, v), tree1, tree2)
+
+                x = torch.randn(3, 2)
+                y = torch.randn(3, 2)
+                expected = fn(x, y)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x, y)
+
+                self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
