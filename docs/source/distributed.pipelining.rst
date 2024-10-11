@@ -483,8 +483,6 @@ Pipeline Schedules
 
 .. autoclass:: Schedule1F1B
 
-.. autoclass:: ScheduleFlexibleInterleaved1F1B
-
 .. autoclass:: ScheduleInterleaved1F1B
 
 .. autoclass:: ScheduleLoopedBFS
