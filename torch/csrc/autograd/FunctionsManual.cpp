@@ -1943,10 +1943,10 @@ Tensor cholesky_backward(const Tensor& gL, bool upper, const Tensor& L) {
   // dL = L\pi(L^{-1}dA(L^-H))
   //
   // Let gL be the projection into the lower-triangular gradient wrt L. Taking
-  // adjoints we have gA_asym = L^{-H}\pi(L^H gL)L^{-1} where \pi as seen in cholesky_jvp
-  // but since A is symmetric, we have to use gA = gA_asym + gA_asym^H - diag(gA_asym)
+  // adjoints we have gA_asym = L^{-H}\pi(L^H gL)L^{-1} where \pi as seen in 
+  // cholesky_jvp but since A is symmetric, we have to use:
+  // gA = gA_asym + gA_asym^H - diag(gA_asym)
   // See Murray, Iain. "Differentiation of the Cholesky decomposition."
-  //                        arXiv preprint arXiv:1602.07527 (2016).
   // Note that the gradient is symmetric and not triangular.
   auto L_ = upper ? L.mH() : L;
   auto gL_ = upper ? gL.mH() : gL;
