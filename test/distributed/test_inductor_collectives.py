@@ -245,6 +245,38 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_eager_non_functional_allreduce_inductor_wait(self):
+        import torch.distributed as dist
+
+        def all_reduce(x):
+            y = x * x
+            req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
+            assert isinstance(req, torch.distributed.Work)
+            return req, y
+
+        def all_reduce_wait(inputs):
+            req = inputs[0]
+            y = inputs[1]
+            if torch.compiler.is_dynamo_compiling():
+                torch.ops.c10d_functional.wait_tensor(y)
+            else:
+                req.wait()
+            return y * y
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            all_reduce_wait_compiled = torch.compile(
+                all_reduce_wait,
+                backend="inductor",
+                fullgraph=True,
+            )
+
+            inputs = torch.ones(4, 4, device="cuda") + self.rank
+            out_ref = all_reduce_wait(all_reduce(inputs))
+            out_compiled = all_reduce_wait_compiled(all_reduce(inputs))
+            self.assertEqual(out_ref, out_compiled)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_allreduce_input_buffer_reuse(self):
         def func(a, *, tag, ranks, group_size):
