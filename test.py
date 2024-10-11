@@ -16,7 +16,9 @@ def make_dynamic(func):
             g1 = torch.cuda.CUDAGraph()
             g1.enable_debug_mode() # because we need the graph_t to stick around, not just the graphexec_t
             with torch.cuda.graph(g1, dynamic_graph=True):
-                func(*[torch.empty_like(arg) for arg in args])
+                empty_args = [torch.empty_like(arg) for arg in args]
+                func(*empty_args)
+                # empty_args must stay in scope at least until here, so that its allocations can't be reused
             graph = g1
             initialized = True
 

@@ -1350,8 +1350,19 @@ class DeviceCachingAllocator {
     }
 
     bool split_remainder = should_split(params.block, params.size());
-    return alloc_found_block(
+    Block* block = alloc_found_block(
         params, orig_size, std::move(context), split_remainder);
+
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      for (auto& it : captures_underway) {
+        auto logger = it.allocation_logger;
+        if (logger && it.stream_filter(stream)) {
+          (*logger)(block->ptr, orig_size);
+        }
+      }
+    }
+
+    return block;
   }
 
   Block* alloc_found_block(
