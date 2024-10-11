@@ -245,7 +245,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    def test_eager_non_functional_allreduce_inductor_wait(self):
+    def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
 
         def all_reduce_eager(x):
