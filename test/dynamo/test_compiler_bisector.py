@@ -78,6 +78,28 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
 
+    def test_emulate_precision_casts(self):
+        def test_fn():
+            torch._dynamo.reset()
+
+            def calculate_scale(inp):
+                amax = torch.abs(torch.max(inp))
+                scale = 448.0 / torch.clamp(amax, min=1e-12)
+                scale = scale.to(torch.float32)
+                return scale
+
+            dtype = torch.bfloat16
+            torch.manual_seed(0)
+            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
+            eager_scale = calculate_scale(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)
+
+            return torch.equal(eager_scale, compile_scale)
+
+        out = BisectionManager.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
+
     def test_bad_lowering(self):
         def test_fn():
             torch._dynamo.reset()

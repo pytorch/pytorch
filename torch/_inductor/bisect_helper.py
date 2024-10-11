@@ -48,7 +48,10 @@ BACKENDS: Dict[str, List[Subsystem]] = {
     "aot_eager": [],
     # run dynamo with aot autograd, decompositions and partitioner
     "aot_eager_decomp_partition": [
-        BisectSubsystem("decomposition")  # number of decompositions we apply in tracing
+        ConfigChange("aot_eager_decomp_partition", "cse", False),
+        BisectSubsystem(
+            "decomposition"
+        ),  # number of decompositions we apply in tracing
     ],  # TODO - add cse ?
     "inductor": [
         BisectSubsystem(
@@ -179,8 +182,13 @@ class BisectionManager:
         lines = cls.read_lines_from_file(file_path)
         for line in lines:
             if line.startswith("subsystem="):
-                return line.strip().split("=")[1]
+                out = line.strip().split("=")[1]
+                return out if out else None
         return None
+
+    @classmethod
+    def get_subsystem_object(cls, backend_name: str, subsystem_name: str) -> Subsystem:
+        return next(obj for obj in BACKENDS[backend_name] if obj.name == subsystem_name)
 
     @classmethod
     def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
@@ -389,7 +397,13 @@ class BisectionManager:
                         return False
                     curr_subsystem = next_subsystem
                 else:
-                    print(f"Disabling {curr_subsystem.name} fixed the issue.")
+                    if isinstance(curr_subsystem, ConfigChange):
+                        print(
+                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field}"
+                            f"to {curr_subsystem.config_value} fixed the issue"
+                        )
+                    else:
+                        print(f"Disabling {curr_subsystem.name} fixed the issue.")
                     if isinstance(curr_subsystem, BinarySubsystem):
                         return True
                     print("Starting bisect by getting upper bound.")
@@ -457,13 +471,19 @@ class BisectionManager:
             cleanup = DisableBisect()
 
         curr_backend = cls.get_backend()
-        curr_subsystem = cls.get_subsystem()
+        curr_subsystem_name = cls.get_subsystem()
 
         if not curr_backend:
             cls.initialize_system()
             curr_backend = cls.get_backend()
-            curr_subsystem = cls.get_subsystem()
+            assert curr_backend is not None
+            curr_subsystem_name = cls.get_subsystem()
 
+        curr_subsystem = (
+            cls.get_subsystem_object(curr_backend, curr_subsystem_name)
+            if curr_subsystem_name is not None
+            else None
+        )
         while True:
             assert curr_backend is not None
             reset_counters()
@@ -472,26 +492,22 @@ class BisectionManager:
                     curr_backend, curr_subsystem, fn, cli_interface=cli_interface
                 )
                 if result:
-                    curr_subsystem = cls.get_subsystem()
-                    assert curr_subsystem is not None
-                    subsystem_object = next(
-                        obj
-                        for obj in BACKENDS[curr_backend]
-                        if obj.name == curr_subsystem
+                    curr_subsystem = cls.get_subsystem_object(
+                        curr_backend, cls.get_subsystem()  # type: ignore[arg-type]
                     )
 
-                    if isinstance(subsystem_object, BinarySubsystem):
+                    if isinstance(curr_subsystem, BinarySubsystem):
                         return BisectionResult(
                             curr_backend,
-                            curr_subsystem,
+                            curr_subsystem.name,
                             0,
-                            subsystem_object.name,
+                            curr_subsystem.name,
                         )
 
-                    low, _ = cls.get_bisect_range(curr_backend, curr_subsystem)
+                    low, _ = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                     return BisectionResult(
                         curr_backend,
-                        curr_subsystem,
+                        curr_subsystem.name,
                         low,
                         call_counter_debug_info.get(low, None),
                     )
