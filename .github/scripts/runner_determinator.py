@@ -423,6 +423,7 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
 def main() -> None:
     print("*" * 120)
     print("This is a test, to understand GH behaviour with CI")
+    print("Now, will THIS line be printed in the PR to this branch? Let's see!")
     print("*" * 120)
 
     args = parse_args()
