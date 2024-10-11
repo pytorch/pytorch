@@ -943,7 +943,7 @@ class triton:
 
     # used to debug persistent reduction codegen
     # always enable persistent reductions when size is below the provided
-    force_persistent_reductions_threshold = 1024
+    force_persistent_reductions_threshold: Optional[int] = None
 
     # 0/False: disable
     # 1/True: enable, use tuning to pick between different subkernels
