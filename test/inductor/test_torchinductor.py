@@ -1668,7 +1668,6 @@ class CommonTemplate:
             vectorize=False,  # There's no loop to vectorize!
         )
 
-    @xfail_if_triton_cpu
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -10785,7 +10784,6 @@ class CommonTemplate:
             self.common(fn, (inp,), check_lowp=False)
 
     @requires_gpu()
-    @xfail_if_triton_cpu
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
