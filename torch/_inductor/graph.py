@@ -737,8 +737,8 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.constants:
             data = V.graph.constants[buffer_name]
             return ir.ConstantBuffer(
-                buffer_name,
-                ir.FixedLayout(
+                name=buffer_name,
+                layout=ir.FixedLayout(
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
@@ -900,7 +900,9 @@ class GraphLowering(torch.fx.Interpreter):
         return TensorBox.create(
             ir.ConstantBuffer(
                 name=new_name,
-                layout=FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
+                layout=FixedLayout(
+                    data.device, data.dtype, *self.static_sizes_strides(data)
+                ),
             )
         )
 
@@ -1057,7 +1059,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         with no_dispatch():
             if value.shape == ():
-                return Constant(value=value.item(), dtype=value.dtype, device=value.device)
+                return Constant(
+                    value=value.item(), dtype=value.dtype, device=value.device
+                )
             if self.can_inline_constant(value):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
@@ -1221,7 +1225,9 @@ class GraphLowering(torch.fx.Interpreter):
             new_stride,
             old_layout.offset,
         )
-        return ir.TensorBox(torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout))
+        return ir.TensorBox(
+            torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)
+        )
 
     def propagate_mutation(
         self,

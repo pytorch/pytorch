@@ -469,7 +469,9 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         def const_func(x):
             if isinstance(x, sympy.Basic):
-                return ir.IndexingConstant(index=x, dtype=dtype, device=decode_device(None))
+                return ir.IndexingConstant(
+                    index=x, dtype=dtype, device=decode_device(None)
+                )
             else:
                 return ir.Constant(value=x, dtype=dtype, device=decode_device(None))
 
@@ -480,13 +482,16 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()), list(ex.get_size())
+                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    list(ex.get_size()),
                 )
             )
         elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
-                    IndexingConstant(index=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    IndexingConstant(
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
+                    ),
                     list(ex.get_size()),
                 )
             )

@@ -910,7 +910,9 @@ class CppPackedGemmTemplate(CppTemplate):
         #   Y
         if epilogue_creators:
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
-            gemm_output_buffer = ir.Buffer(name=gemm_output_name, layout=template_buffer.layout)
+            gemm_output_buffer = ir.Buffer(
+                name=gemm_output_name, layout=template_buffer.layout
+            )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
@@ -993,7 +995,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 else:
                     assert isinstance(Y, ir.Buffer)
                     storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(data=storage, layout=template_buffer.get_layout())
+                Y_2d = ir.ReinterpretView(
+                    data=storage, layout=template_buffer.get_layout()
+                )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
