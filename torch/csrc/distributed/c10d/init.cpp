@@ -2759,7 +2759,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+              &::c10d::ProcessGroupNCCL::performNocolorSplit)
+          .def(
+              "abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_get_intra_node_comm_usage_counter",
