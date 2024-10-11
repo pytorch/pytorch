@@ -34,15 +34,19 @@
 #include <utility>
 #include <vector>
 
+// for validators
+#ifdef USE_ROCM
+#include <rocm-core/rocm_version.h>
+#define ROCBLAS_BETA_FEATURES_API
+#include <rocblas/rocblas.h>
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
+
 namespace at::cuda::tunable {
 
-namespace {
-
-TuningContext tuning_context;
-
-} // anonymous namespace
-
 TuningContext* getTuningContext() {
+  static TuningContext tuning_context;
   return &tuning_context;
 }
 
@@ -106,6 +110,32 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   }
 
   AddImpl(op_signature, params_signature, best, it->second);
+}
+
+void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
+  std::scoped_lock l{lock_};
+  if (!untuned_file.good()) {
+    TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
+    return;
+  } else {
+    bool isNew = false;
+    auto it = untuned_results_.find(op_signature);
+    if (it == untuned_results_.end()) {
+      it = untuned_results_.insert({op_signature, {}}).first;
+      isNew = true;
+    }
+
+    auto it_kernel_map = it->second.find(params_signature);
+    if (it_kernel_map == it->second.end()) {
+      it->second.insert(params_signature);
+      isNew = true;
+    }
+
+    if (isNew) {
+      untuned_file << op_signature << "," << params_signature << std::endl;
+      TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
+    }
+  }
 }
 
 void TuningResultsManager::Delete(const std::string& op_signature, const std::string& params_signature) {
@@ -177,6 +207,66 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       [this]() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
+#ifdef USE_ROCM
+  // rocm
+  {
+    std::string rocm_version = ROCM_BUILD_INFO;
+    RegisterValidator(
+       "ROCM_VERSION",
+       [rocm_version]() { return rocm_version; },
+       [rocm_version](auto&& k) {
+        TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
+        return rocm_version == k ? OK : FAIL;
+      });
+  }
+  // gfx arch
+  {
+    std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+    RegisterValidator(
+        "GCN_ARCH_NAME",
+        [gcn_arch_name]() { return gcn_arch_name; },
+        [gcn_arch_name](auto&& k) {
+          TUNABLE_LOG1("GCN_ARCH_NAME validation: expect ", k, " to match ", gcn_arch_name);
+          return gcn_arch_name == k ? OK : FAIL;
+        });
+  }
+  // rocblas
+  {
+#define STRINGIFY(s) #s
+#define XSTRINGIFY(s) STRINGIFY(s)
+    std::string rocblas_version = c10::str(
+        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
+        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
+#undef XSTRINGIFY
+#undef STRINGIFY
+    RegisterValidator(
+        "ROCBLAS_VERSION",
+        [rocblas_version]() { return rocblas_version; },
+        [rocblas_version](auto&& k) {
+          TUNABLE_LOG1("ROCBLAS_VERSION validation: expect ", k, " to match ", rocblas_version);
+          return rocblas_version == k ? OK : FAIL;
+        });
+  }
+  // hipblaslt
+  {
+    int version;
+    std::string revision(128, '\0');
+    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, revision.data());
+    std::string hipblaslt_version =
+        c10::str(version, "-", revision.c_str());
+    RegisterValidator(
+        "HIPBLASLT_VERSION",
+        [hipblaslt_version]() { return hipblaslt_version; },
+        [hipblaslt_version](auto&& k) {
+          TUNABLE_LOG1("HIPBLASLT_VERSION validation: expect ", k, " to match ", hipblaslt_version);
+          return hipblaslt_version == k ? OK : FAIL;
+        });
+  }
+#endif
 }
 
 std::unordered_map<std::string, std::string> TuningResultsValidator::GetAllValidators() const {
@@ -295,6 +385,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
+    record_untuned_enable_{false},
     manager_initialized_{false},
     write_file_on_exit_{true},
     numerics_check_enable_{false},
@@ -305,6 +396,7 @@ TuningContext::TuningContext() :
     icache_flush_{true},
     rotating_buffer_size_{-1},
     filename_{},
+    untuned_file_{},
     results_count_from_input_file_{0}
 {
 }
@@ -329,6 +421,10 @@ TuningContext::~TuningContext() {
         TUNABLE_LOG1("failed to write file ", filename);
       }
     }
+  }
+
+  if (untuned_file_.good()) {
+    untuned_file_.close();
   }
 }
 
@@ -360,12 +456,48 @@ void TuningContext::EnableTuning(bool value) {
   }
 }
 
+void TuningContext::EnableRecordUntuned(bool value) {
+  record_untuned_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Record Untuned for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+  }
+}
+
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
     return false;
   }
   return tuning_enable_;
+}
+
+bool TuningContext::IsRecordUntunedEnabled() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
+  if (env != nullptr && strcmp(env, "1") == 0) {
+    return true;
+  }
+  return record_untuned_enable_;
+}
+
+std::ofstream& TuningContext::GetUntunedFile(){
+  if (!untuned_file_.is_open()) {
+    const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
+    std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
+
+    std::string device = c10::str(int(c10::cuda::current_device()));
+    std::size_t found = filename.rfind(".");
+    if (found != std::string::npos) {
+      filename.insert(found, device);
+    } else {
+      // all else fails, just append
+      filename.append(device);
+    }
+
+    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::trunc);
+  }
+  return untuned_file_;
 }
 
 void TuningContext::WriteFileOnExit(bool value) {
@@ -481,7 +613,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
       SetFilename(filename, true);
     }
     auto filename = GetFilename();
-    if (!filename.empty()) {
+    if (!filename.empty() && !IsRecordUntunedEnabled()) {
       ReadFile(filename);
       // attempt immediately to open file for writing to catch errors early
       std::ofstream file(filename, std::ios::out | std::ios::app);

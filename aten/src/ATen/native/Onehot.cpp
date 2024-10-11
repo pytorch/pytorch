@@ -15,7 +15,7 @@
 namespace at::native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
-    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
 
     // using meta bit test to catch Fake Tensor as well until __torch_function__
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
