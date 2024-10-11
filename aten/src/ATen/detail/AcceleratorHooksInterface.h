@@ -50,7 +50,7 @@ struct TORCH_API AcceleratorHooksInterface {
     return -1;
   }
 
-  virtual c10::Stream getCurrentStream(DeviceIndex device) const {
+  virtual c10::Stream getCurrentStream(C10_UNUSED DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support getCurrentStream()");
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CPU);
   }
