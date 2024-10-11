@@ -209,7 +209,13 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   bool all_contiguous = is_contiguous(input);
   constexpr bool mixed_type = !std::is_same_v<scalar_t, param_t>;
-  const auto dtype = mixed_type ? kFloat : input.scalar_type();
+  // Using float data type for Half _var_sum in batchnorm stats updating on CPU
+  // to avoid _var_sum overflow since the representation range of Half is small.
+  using opmath_t = std::conditional_t<std::is_same_v<param_t, at::Half>, at::opmath_type<param_t>, param_t>;
+  auto dtype = mixed_type ? kFloat : input.scalar_type();
+  if (dtype == kHalf) {
+    dtype = kFloat;
+  }
 
   auto save_mean_a = save_mean.accessor<param_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<param_t, 1>();
@@ -220,9 +226,9 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   if (all_contiguous) {
     auto _mean = at::empty({n_input}, input.options().dtype(dtype));
     auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
-    auto _mean_a = _mean.accessor<param_t, 1>();
-    auto _var_sum_a = _var_sum.accessor<param_t, 1>();
-    auto momentum_ = static_cast<param_t>(momentum);
+    auto _mean_a = _mean.accessor<opmath_t, 1>();
+    auto _var_sum_a = _var_sum.accessor<opmath_t, 1>();
+    auto momentum_ = static_cast<opmath_t>(momentum);
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
 
@@ -552,7 +558,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (input.sym_numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
-        at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
+        at::toAccumulateType(input.scalar_type(), input.device().type()));
     auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
     auto save_invstd = at::empty_symint(c10::SymIntArrayRef({std::move(num_features)}), options);
 

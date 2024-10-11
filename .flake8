@@ -57,7 +57,7 @@ per-file-ignores =
     torch/distributed/_tensor/_collective_utils.py: TOR901
     # This is a full package that happen to live within the test
     # folder, so ok to skip
-    test/cpp_extensions/open_registration_extension/pytorch_openreg/__init__.py: TOR901
+    test/cpp_extensions/open_registration_extension/pytorch_openreg/_aten_impl.py: TOR901
 optional-ascii-coding = True
 exclude =
     ./.git,

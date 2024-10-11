@@ -127,6 +127,7 @@ if(NOT BUILD_LIBTORCHLESS)
 
   if(LINUX)
     target_link_libraries(c10 PRIVATE Threads::Threads)
+    target_link_libraries(c10 PRIVATE dl)
   endif()
 
   if(ANDROID)
