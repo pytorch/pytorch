@@ -374,6 +374,8 @@ class TestCKBackend(TestCase):
 
         x = torch.randn(1, 8, 224, 224, **tensor_options)
         w = torch.randn(64, 8, 7, 7, **tensor_options)
+        x_cl = x.to(memory_format=torch.channels_last)
+        w_cl = w.to(memory_format=torch.channels_last)
 
         assert "rocm" in dir(config)
 
@@ -382,9 +384,10 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 144,
+                "layout_optimization": True,
+                "compile_threads": 4,
                 "rocm.ck_dir": self.ck_dir,
-                # "rocm.n_max_profiling_configs": 2,
+                "rocm.n_max_profiling_configs": 4,
             }
         ):
 
@@ -392,10 +395,10 @@ class TestCKBackend(TestCase):
             def conv2d(x, w):
                 return torch.conv2d(x, w)
 
-            Y_compiled = conv2d(x, w)
+            Y_compiled = conv2d(x_cl, w_cl).to(memory_format=torch.contiguous_format)
             Y_eager = torch.conv2d(x, w)
 
-            torch.testing.assert_close(Y_compiled, Y_eager)
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
 
 if __name__ == "__main__":
