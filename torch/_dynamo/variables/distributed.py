@@ -2,7 +2,6 @@
 import functools
 import inspect
 from typing import Dict, List, TYPE_CHECKING
-import sys
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState

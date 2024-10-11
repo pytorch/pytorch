@@ -9,33 +9,19 @@ import torch._dynamo.test_case
 from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import NoTest
-
-import functools
-
-import logging
-import multiprocessing
-import os
-import unittest
-from dataclasses import dataclass
-from typing import Callable, List, Optional, Union
-
-import torch.distributed as dist
-from torch import nn
-from torch.distributed.distributed_c10d import GroupMember
-
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_nccl,
 )
+from torch.testing._internal.common_utils import NoTest
 
 
 try:
     from torchrec.datasets.random import RandomRecDataset
-    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
     from torchrec.distributed import comm_ops
+    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
 
     HAS_TORCHREC = True
 except ImportError:
@@ -254,7 +240,10 @@ class TorchRecMultiProcTests(DynamoDistributedMultiProcTestCase):
                 requires_grad=True,
             )
             input_embedding1 = torch.tensor(
-                [[11, 12, 13, 14, 15, 16, 17, 18, 19], [20, 21, 22, 23, 24, 25, 26, 27, 28]],
+                [
+                    [11, 12, 13, 14, 15, 16, 17, 18, 19],
+                    [20, 21, 22, 23, 24, 25, 26, 27, 28],
+                ],
                 device=device,
                 requires_grad=True,
                 dtype=torch.float32,
@@ -277,7 +266,9 @@ class TorchRecMultiProcTests(DynamoDistributedMultiProcTestCase):
                     with torch._dynamo.config.patch(
                         skip_torchrec=False,
                     ):
-                        v_embs_out = torch.compile(wait_fn, backend="inductor", fullgraph=True)(v_embs_out_awaitable)
+                        v_embs_out = torch.compile(
+                            wait_fn, backend="inductor", fullgraph=True
+                        )(v_embs_out_awaitable)
                 else:
                     v_embs_out = wait_fn(v_embs_out_awaitable)
                 return torch.sum(v_embs_out)
@@ -285,6 +276,7 @@ class TorchRecMultiProcTests(DynamoDistributedMultiProcTestCase):
             out_ref = func(compile_wait_fn=False)
             out_compiled = func(compile_wait_fn=True)
             self.assertEqual(out_ref, out_compiled)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
