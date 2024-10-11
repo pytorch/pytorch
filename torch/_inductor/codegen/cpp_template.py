@@ -82,6 +82,7 @@ class CppTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
+            flag_template_buffer_has_other_users: bool,
             epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
@@ -91,6 +92,7 @@ class CppTemplate(KernelTemplate):
                 kernel.render,
                 self,
                 template_buffer_node=template_node,
+                flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,
             )
@@ -109,11 +111,10 @@ class CppTemplate(KernelTemplate):
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
         res.writeline(codecache.cpp_prefix())
-        res.splice(
-            """
-                #include "c10/util/Unroll.h"
-            """
-        )
+        # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
+        res.splice("""#include <c10/util/Unroll.h>""")
+        if config.abi_compatible:
+            res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",

@@ -1,8 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 AutogradMetadata::AutogradMetadata(
     int64_t autogradContextId_,
@@ -10,6 +8,4 @@ AutogradMetadata::AutogradMetadata(
     : autogradContextId(autogradContextId_),
       autogradMessageId(autogradMessageId_) {}
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd
