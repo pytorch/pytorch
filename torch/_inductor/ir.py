@@ -116,7 +116,7 @@ from typing_extensions import dataclass_transform
 
 
 @dataclass_transform()
-def ir_dataclass(cls):
+def ir_dataclass(_cls):
     def wrap(cls: T) -> T:
         if sys.version_info >= (3, 10):
             # Use native kw_only for Python 3.10+
