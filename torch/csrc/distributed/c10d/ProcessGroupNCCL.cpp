@@ -551,6 +551,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
         enableTiming ? cudaEventDefault : cudaEventDisableTiming);
   }
+  futureWorkResult_ =
+      c10::make_intrusive<at::ivalue::Future>(c10::AnyEnumType::get());
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -572,6 +574,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
       store_(w.store_),
+      futureWorkResult_(w.futureWorkResult_),
       timingEnabled_(w.timingEnabled_),
       trace_id_(w.trace_id_),
       distDebugLevel_(w.distDebugLevel_) {
@@ -1838,6 +1841,10 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        if (work.futureWorkResult_) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::FAILURE)));
+        }
         // log as soon as exception is detected
         LOG(ERROR) << c10::str(
             logPrefix(),
@@ -1942,6 +1949,10 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        if (work.futureWorkResult_ && work.finishedGPUExecutionInternal()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
+        }
         {
           // Reset the timeout and first work if the work is completed.
           std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
@@ -2568,6 +2579,11 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
   return future_;
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
+    getFutureResult() {
+  return futureWorkResult_;
 }
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {

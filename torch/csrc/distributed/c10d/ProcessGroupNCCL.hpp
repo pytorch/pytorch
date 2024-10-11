@@ -326,6 +326,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+    // Get a Future object that would be marked as either success or failure
+    // instead of the tensor output.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -440,6 +444,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
+
+    // the future result (e.g., success or failure) of the work
+    c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
 
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
