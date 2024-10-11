@@ -248,13 +248,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     def test_eager_non_functional_allreduce_inductor_wait(self):
         import torch.distributed as dist
 
-        def all_reduce(x):
+        def all_reduce_eager(x):
             y = x * x
             req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
             assert isinstance(req, torch.distributed.Work)
             return req, y
 
-        def all_reduce_wait(inputs):
+        def all_reduce_wait(inputs):  # potentially compiled
             req = inputs[0]
             y = inputs[1]
             if torch.compiler.is_dynamo_compiling():
@@ -271,8 +271,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             inputs = torch.ones(4, 4, device="cuda") + self.rank
-            out_ref = all_reduce_wait(all_reduce(inputs))
-            out_compiled = all_reduce_wait_compiled(all_reduce(inputs))
+            out_ref = all_reduce_wait(all_reduce_eager(inputs))
+            out_compiled = all_reduce_wait_compiled(all_reduce_eager(inputs))
             self.assertEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
