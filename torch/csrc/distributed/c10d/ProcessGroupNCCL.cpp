@@ -2779,6 +2779,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  // Associate output tensors with the work, so that `.wait_tensor(output)` will
+  // invoke the correct `work.wait()`.
   for (const auto& output : outputs) {
     c10d::register_work(output, work);
   }
@@ -2972,6 +2974,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  // Associate output tensors with the work, so that `.wait_tensor(output)` will
+  // invoke the correct `work.wait()`.
+  for (const auto& output : outputs) {
+    c10d::register_work(output, work);
+  }
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
