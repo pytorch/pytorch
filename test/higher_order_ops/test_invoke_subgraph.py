@@ -8,6 +8,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
+from torch._dynamo.testing import EagerAndRecordGraphs
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -196,7 +197,8 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, backend="aot_eager")(x_clone, y_clone)
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend)(x_clone, y_clone)
 
         # Run backward
         ref.sum().backward()
@@ -205,6 +207,14 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+        # Check that the Dynamo graph has just one subgraph module
+        self.assertEqual(len(backend.graphs), 1)
+        subgraph_attr_names = set()
+        for node in backend.graphs[0].graph.nodes:
+            if node.op == "get_attr":
+                subgraph_attr_names.add(node.target)
+        self.assertEqual(len(subgraph_attr_names), 1)
 
     def test_nonlocal_update(self):
         counter = 2

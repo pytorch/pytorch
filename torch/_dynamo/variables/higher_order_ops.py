@@ -1504,17 +1504,14 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def add_subgraph_to_root_module(
+    def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
-        body_name = add_subgraph(
+        return add_subgraph(
             tx,
             f"{attr_name}",
             body_gmod,
         )
-
-        body_node = make_attr(tx, body_name)
-        return body_name, body_node
 
     def create_wrapped_node(
         self,
@@ -1543,9 +1540,10 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name, body_node = self.add_subgraph_to_root_module(
+        body_name = self.install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod
         )
+        body_node = make_attr(tx, body_name)
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
@@ -2477,14 +2475,91 @@ def maybe_positional_arg_names(func):
     return result
 
 
+def canonicalize(gmod, root_gmod):
+    # autograd_cache_key is sensitive to the name of the placeholder nodes.
+    # So, we first canonicalize it.
+    new_graph = torch.fx.Graph()
+    env = {}
+
+    index = 0
+
+    def next_placeholder_name():
+        nonlocal index
+        index += 1
+        return f"placeholder_{index}"
+
+    for node in gmod.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = new_graph.placeholder(next_placeholder_name())
+        else:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+        env[node].meta = node.meta
+
+    new_graph.lint()
+    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
+    return new_gmod
+
+
+@functools.lru_cache(None)
+def get_dummy_aot_autograd_config():
+    from torch._functorch._aot_autograd.schemas import AOTConfig
+
+    return AOTConfig(
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+        dynamic_shapes=True,
+        aot_autograd_arg_pos_to_source=None,
+        is_export=False,
+        no_tangents=False,
+        enable_log=False,
+    )
+
+
+def hash_graph_and_inputs(tx, gmod, fake_inputs):
+    # Here, we use the existing autograd_cache_key infrastructure to hash the
+    # graph and fake inputs.
+
+    # TODO(anijain2305) - Consider reorganizing autograd_cache_key such that the
+    # namespaces seem more intuitive. It seems somewhat confusing that we are
+    # calling an API from aot_autograd here.
+    from torch._functorch._aot_autograd.autograd_cache import autograd_cache_key
+
+    # autograd_cache_key is sensitive to the name of the placeholder nodes.
+    # So, we first canonicalize it.
+    canonicalized_gmod = canonicalize(gmod, tx.output.nn_modules)
+    config = get_dummy_aot_autograd_config()
+
+    key, _ = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
+    return key
+
+
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    def add_subgraph_to_root_module(
+    def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
     ):
-        # TODO(anijain305) - De-dupe if the subgraph has been seen before.
-        return super().add_subgraph_to_root_module(
+        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
+        # inputs have already been seen before. If yes, the subgraph is already
+        # installed in the output graph and we can just access the subgraph
+        # using the saved attr name.
+
+        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
+
+        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
+
+        if key in tx.output.seen_invoke_subgraphs:
+            return tx.output.seen_invoke_subgraphs[key]
+
+        body_name = super().install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
         )
+        tx.output.seen_invoke_subgraphs[key] = body_name
+        return body_name
 
     def call_function(
         self,
