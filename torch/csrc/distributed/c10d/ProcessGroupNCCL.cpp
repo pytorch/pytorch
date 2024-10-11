@@ -489,7 +489,7 @@ std::future<bool> launchAsyncGilCheck() {
 }
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
-constexpr int64_t kSynchronizeBusyWaitMillis = 10;
+constexpr int64_t kSynchronizeBusyWaitMillis = 1;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
 std::ostream& operator<<(
@@ -519,6 +519,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     int rank,
     OpType opType,
     uint64_t seq,
+    bool isP2P,
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
@@ -531,6 +532,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
       device_(device),
       workStartTime_(std::chrono::steady_clock::now()),
       seq_(seq),
+      isP2P_(isP2P),
       timingEnabled_(enableTiming),
       distDebugLevel_(distDebugLevel) {
   // Creates the CUDA event wrappers
@@ -565,6 +567,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       ownedEphermeralTimeout_(w.ownedEphermeralTimeout_),
       workStartTime_(w.workStartTime_),
       seq_(w.seq_),
+      isP2P_(w.isP2P_),
       startTraceUpdated_(w.startTraceUpdated_),
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
@@ -709,27 +712,6 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
-
-  // Device synchronize only after we've completed timeout checks.
-  // TODO: Is this necessary for barrier if we block the cpu thread till
-  // the completion of the work?
-  if (barrierTensor_.defined()) {
-    // If we use the work to do barrier, we should block here
-    // `dist.barrier()` only requires all CPU processes to enter this
-    // function, hence we only need to make sure the dummy all-reduce has
-    // completed. So we would only need to sync the **current stream** back to
-    // host, and do not need to synchronize the entire device (which may have
-    // kernels running on other streams).
-    // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
-    // - lower chance of hang;
-    // - CurrentCUDAStream is usually the context of the next operation in
-    // Python, thus blocking current stream would already block the next
-    // compute kernel;
-    // - achieve better barrier performance.
-    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-    // CUDAStream wrapper will correctly use a DeviceGuard here
-    currentStream.synchronize();
-  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -745,7 +727,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
 // Same as calling synchronize() when blockingWait_ is false
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   RECORD_PARAM_COMMS(
-      static_cast<int>(this->seq_), // seq
+      std::make_tuple(static_cast<int64_t>(this->seq_), this->isP2P_), // seq
       std::make_tuple(pgUID_, pgDesc_), // PG name tuple
       rank_, // rank
       "wait", // collective name
@@ -757,6 +739,9 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       -1,
       -1,
       static_cast<int>(1)); // number of device?
+
+  // synchronize() will block the current stream on the NCCL stream
+  synchronize();
 
   // In case of blockingWait or a timeout value is specified by the user, we
   // block the CPU thread until the work is completed or timed out.
@@ -779,17 +764,22 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
-
-    if (exception()) {
-      // Abort NCCL communicators
-      abort();
-      // Throw exception (from main thread here)
-      handleException(TearDown);
-    }
+  } else if (isBarrierOp_ && !isCompleted()) {
+    // For barrier wait when timeout is unspecified, we block the CPU thread on
+    // current stream. This is to minimize the CPU barrier wait time in healthy
+    // path
+    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
+    // CUDAStream wrapper will correctly use a DeviceGuard here
+    currentStream.synchronize();
   }
 
-  // syncrhoize() will block the current stream on the NCCL stream
-  synchronize();
+  // If exception is detected, throw it from the main CPU thread
+  if (exception()) {
+    // Abort NCCL communicators
+    abort();
+    // Throw exception (from main thread here)
+    handleException(TearDown);
+  }
 
   // TODO(kwen2501): this should be moved to c10d tests, to qualify a NCCL
   // upgrade. Once a NCCL version is qualified, this code should not be needed
@@ -1247,7 +1237,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
       gpuGuard.set_index(deviceIndex);
     }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->ncclComm_ << " on CUDA device: " << devName;
+              << ncclComm->repr() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -2354,7 +2344,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
 
   RECORD_PARAM_COMMS(
-      0, // seq
+      std::make_tuple(0, false), // seq
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       rank, // rank
       "init", // collective name
@@ -2368,7 +2358,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
+            << ncclComm->repr()
             << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
@@ -2517,6 +2507,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     at::Device& device,
     int rank,
     OpType opType,
+    bool isP2P,
     const char* profilingTitle,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs, // TODO(kwen2501): necessary?
@@ -2527,7 +2518,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seqCollective_,
+      isP2P ? seqP2P_ : seqCollective_,
+      isP2P,
       profilingTitle,
       profilingTitle != nullptr ? std::optional<std::vector<at::Tensor>>(inputs)
                                 : std::nullopt,
@@ -2674,8 +2666,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   bool enqueue =
       (coalescing_state_) && capture_status == c10::cuda::CaptureStatus::None;
-  auto work =
-      initWork(device, rank_, optype, "nccl:coalesced", {}, {}, enqueue);
+  auto work = initWork(
+      device,
+      rank_,
+      optype,
+      coalescing_state_ & CoalP2P,
+      "nccl:coalesced",
+      {},
+      {},
+      enqueue);
   work->ncclComm_ = comm;
   work->blockingWait_ = blockingWait_;
   work->avoidRecordStreams_ = avoidRecordStreams_;
@@ -2778,8 +2777,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   bool enqueue =
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
-  auto work =
-      initWork(device, rank_, opType, profilingTitle, inputs, outputs, enqueue);
+  auto work = initWork(
+      device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2962,7 +2961,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
+      device,
+      rank_,
+      opType,
+      false,
+      profilingTitle,
+      inputs,
+      outputs,
+      /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -3218,7 +3224,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // cases such as profiling.
 
     work = initWork(
-        device, rank_, opType, profilingTitle, {tensor}, {}, /*record=*/false);
+        device,
+        rank_,
+        opType,
+        true,
+        profilingTitle,
+        {tensor},
+        {},
+        /*record=*/false);
     // This bypasses something in Work() that crashes if {tensor} is given as
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
@@ -3532,8 +3545,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       "Float8 dtypes are not currenlty supported for NCCL reductions");
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -3562,8 +3576,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective and assume only one collective
+                  // in coalesed range
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -3615,8 +3631,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -3714,8 +3731,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   }
   check_gpu_single_tensor(tensor);
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -3809,8 +3827,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   auto outputTensors_ = outputTensors.back();
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -3906,6 +3925,26 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
+  // @lint-ignore CLANGTIDY
+  RECORD_PARAM_COMMS_DATA(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective and assume only one collective
+                  // in coalesed range
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputs, // inputTensors
+      outputs, // outputTensors
+      rank_, // rank
+      "allgather_into_tensor_coalesced", // collective name
+      getTensorsNumel(inputs), // inNelems
+      getTensorsNumel(outputs), // outNelems
+      inputs[0].scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      this->getSize()); // worldSize
+
   return collectiveCoalesced(
       inputs,
       outputs,
@@ -3940,8 +3979,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       "Float8 dtypes are not currenlty supported for NCCL reductions");
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -4053,8 +4093,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       !isFloat8Type(tensor.scalar_type()),
       "Float8 dtypes are not currenlty supported for NCCL reductions");
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensor, // inputTensor
       outputTensor, // outputTensor
@@ -4115,6 +4156,27 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
   TORCH_CHECK(
       !isFloat8Type(inputs.back().scalar_type()),
       "Float8 dtypes are not currenlty supported for NCCL reductions");
+
+  // @lint-ignore CLANGTIDY
+  RECORD_PARAM_COMMS_DATA(
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective and assume only one collective
+                  // in coalesed range
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      inputs, // inputTensors
+      outputs, // outputTensors
+      rank_, // rank
+      "reduce_scatter_tensor_coalesced", // collective name
+      getTensorsNumel(inputs), // inNelems
+      getTensorsNumel(outputs), // outNelems
+      inputs[0].scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      this->getSize()); // worldSize
+
   return collectiveCoalesced(
       inputs,
       outputs,
@@ -4144,8 +4206,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       rank_, // rank
       "barrier", // collective name
@@ -4212,7 +4275,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
   TORCH_CHECK(ncclWork);
-  ncclWork->barrierTensor_ = std::move(barrierTensor);
+  ncclWork->isBarrierOp_ = true;
   return work;
 }
 
@@ -4226,9 +4289,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
   check_gpu_single_tensor(inputTensor, true);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
     RECORD_PARAM_COMMS_DATA(
-        static_cast<int>(
-            this->getSequenceNumberForGroup() +
-            1), // seq + 1 to match collective
+        std::make_tuple(
+            static_cast<int64_t>(seqCollective_) + 1,
+            false), // seq + 1 to match collective
         std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
@@ -4268,9 +4331,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
 
     RECORD_PARAM_COMMS_DATA(
-        static_cast<int>(
-            this->getSequenceNumberForGroup() +
-            1), // seq + 1 to match collective
+        std::make_tuple(
+            static_cast<int64_t>(seqCollective_) + 1,
+            false), // seq + 1 to match collective
         std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
@@ -4347,8 +4410,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
   }
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -4399,8 +4463,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
   check_gpu_single_tensor(tensor, true);
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
+          true), // the 1st p2p in coalesced range sets coalescing_state_ and
+                 // bumps seqP2P_
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -4440,8 +4506,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
   check_gpu_single_tensor(tensor, true);
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
+          true), // the 1st p2p in coalesced range sets coalescing_state_ and
+                 // bumps seqP2P_
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -4540,8 +4608,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   }
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -4633,8 +4702,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   }
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -4711,8 +4781,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   }
 
   RECORD_PARAM_COMMS_DATA(
-      static_cast<int>(
-          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      std::make_tuple(
+          static_cast<int64_t>(seqCollective_) + 1,
+          false), // seq + 1 to match collective
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       input_tensor, // inputTensors
       output_tensor, // outputTensors
