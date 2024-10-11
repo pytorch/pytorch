@@ -1180,8 +1180,7 @@ def include_paths(device_type: str = "cpu") -> List[str]:
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
-
+        device_type: Defaults to "cpu".
     Returns:
         A list of include path strings.
     """
@@ -1221,7 +1220,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific library paths.
+        device_type: Defaults to "cpu".
 
     Returns:
         A list of library path strings.
@@ -2076,7 +2075,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
                   f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
-        python_version = f'py{sys.version_info.major}{sys.version_info.minor}'
+        python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
         root_extensions_directory = os.path.join(

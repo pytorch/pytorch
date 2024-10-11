@@ -139,6 +139,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
             for arg in node._input_nodes:
                 if arg.op == "get_attr":
                     for entry in torch.fx.proxy._COPY_META_FIELDS:
+                        #  the custom field should not be copied
+                        if entry == "custom":
+                            continue
                         if entry in meta:
                             params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
@@ -219,7 +222,7 @@ def _rename_without_collisions(
 
 def _check_input_constraints_for_graph(
     input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
-):
+) -> None:
     def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
         describing how to access it, e.g. "*args["foo"][0].bar"

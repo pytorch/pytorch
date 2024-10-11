@@ -66,6 +66,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
@@ -711,7 +712,9 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -729,7 +732,9 @@ class TestPatternMatcher(TestCase):
             torch.randn(16, 16, device="cuda"),
             torch.randn(16, 16, device="cuda"),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -1455,6 +1460,18 @@ class TestPatternMatcher(TestCase):
             "call_function",
             torch.ops._c10d_functional.all_gather_into_tensor,
             (t, 2, "0"),
+            {},
+            expect=False,
+        )
+
+        @torch.library.custom_op("vllm::fused_rms_norm_quant_static", mutates_args=[])
+        def fused_rms_norm_quant_static(out: torch.Tensor, input: torch.Tensor) -> None:
+            pass
+
+        check(
+            "call_function",
+            torch.ops.vllm.fused_rms_norm_quant_static,
+            (t, t),
             {},
             expect=False,
         )

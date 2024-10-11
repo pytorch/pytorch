@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -43,7 +43,19 @@ static_weight_shapes = True
 cse = True
 
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
 
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
@@ -98,21 +110,6 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
-# Must save the output from the activation checkpoint region
-# (to avoid recomputing it during backward).
-# This is to work around circular dependencies in FSDP2+AC.
-#
-# Example:
-# ```
-# out = fully_shard(utils.checkpoint(module))(x)
-# norm_out = layer_norm(out)
-# ```
-# 1. `out_grad` is dependent on `out`.
-# 2. `out` depends on FSDP2 backward hook in order to be recomputed.
-# 3. FSDP2 backward hook depends on `out_grad`.
-#
-# By saving `out` in forward graph, we will be able to break the circular dependency.
-must_save_ac_output = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)

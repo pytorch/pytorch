@@ -20,7 +20,11 @@ sys.path.append(pytorch_test_dir)
 import contextlib
 import unittest
 
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model,
+    check_model_cuda,
+    copy_tests,
+)
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
 

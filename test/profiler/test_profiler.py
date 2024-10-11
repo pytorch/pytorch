@@ -990,19 +990,41 @@ class TestProfiler(TestCase):
         # print(output)
 
         test_schedule = torch.profiler.schedule(
-            skip_first=2, wait=1, warmup=1, active=2, repeat=2
+            skip_first=3, wait=2, warmup=1, active=4, repeat=2
         )
         test_schedule_expected_outputs = [
+            # skip first 3
             ProfilerAction.NONE,
             ProfilerAction.NONE,
             ProfilerAction.NONE,
+            # ----
+            # repeat No. 1 begin
+            # wait 2
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
             ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
             ProfilerAction.RECORD,
             ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 1 end
+            # ---
+            # repeat No. 2 begin
+            # wait 2
             ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
             ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
             ProfilerAction.RECORD,
             ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 2 end
             ProfilerAction.NONE,
             ProfilerAction.NONE,
             ProfilerAction.NONE,

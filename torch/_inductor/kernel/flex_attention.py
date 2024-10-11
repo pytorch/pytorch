@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -17,9 +17,11 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
+    get_stride_order,
     InputBuffer,
     IRNode,
     StorageBox,
+    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -29,6 +31,29 @@ from ..select_algorithm import autotune_select_algorithm, realize_inputs, Triton
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+Expr = sympy.Expr
+
+
+def construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
 
 
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
@@ -56,7 +81,7 @@ def maybe_realize(args: List[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest":
+    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
         return "'ieee'"
     else:
         return "'tf32'"
@@ -83,46 +108,47 @@ def build_subgraph_buffer(
         # TensorBox for each of these inputs. For the rest of the inputs we
         # expect that these are lifted inputs that fill up the '*other_buffers'
         # tuple and already have corresponding TensorBoxes passed in as args.
-        if node.op == "placeholder":
-            env[node] = args[cnt]
-            cnt += 1
-        elif node.op == "call_function":
-            # For call_function we use the default lowerings and pass in the
-            # already created TensorBoxes as args
+        with V.graph.set_current_node(node):
+            if node.op == "placeholder":
+                env[node] = args[cnt]
+                cnt += 1
+            elif node.op == "call_function":
+                # For call_function we use the default lowerings and pass in the
+                # already created TensorBoxes as args
 
-            args, kwargs = tree_map(
-                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
-            )
-            env[node] = lowerings[node.target](*args, **kwargs)
-        elif node.op == "output":
+                args, kwargs = tree_map(
+                    lambda x: env[x] if x in env else x, (node.args, node.kwargs)
+                )
+                env[node] = lowerings[node.target](*args, **kwargs)
+            elif node.op == "output":
 
-            def convert_output_node_to_buffer(output):
-                if output is None:
-                    return None
-                output_node = output
-                output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
-                subgraph_buffer = ComputedBuffer(
-                    name=None,
-                    layout=FlexibleLayout(
-                        device=output_buffer.data.get_device(),
-                        dtype=output_buffer.data.get_dtype(),
-                        size=output_buffer.data.get_size(),
-                    ),
-                    data=output_buffer.data.data,  # type: ignore[arg-type]
-                )
-                return subgraph_buffer
+                def convert_output_node_to_buffer(output):
+                    if output is None:
+                        return None
+                    output_node = output
+                    output_buffer = env[output_node]
+                    assert isinstance(output_buffer, TensorBox), (
+                        "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+                        type(output_buffer),
+                    )
+                    assert isinstance(output_buffer.data, StorageBox), (
+                        "The output node for the flex attention subgraph must be a StorageBox, but got: ",
+                        type(output_buffer),
+                    )
+                    subgraph_buffer = ComputedBuffer(
+                        name=None,
+                        layout=FlexibleLayout(
+                            device=output_buffer.data.get_device(),
+                            dtype=output_buffer.data.get_dtype(),
+                            size=output_buffer.data.get_size(),
+                        ),
+                        data=output_buffer.data.data,  # type: ignore[arg-type]
+                    )
+                    return subgraph_buffer
 
-            # node.args[0] is either a single element or a list of elements
-            # representing all outputs of the function.
-            return tree_map(convert_output_node_to_buffer, node.args[0])
+                # node.args[0] is either a single element or a list of elements
+                # representing all outputs of the function.
+                return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
@@ -672,8 +698,8 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
     placeholder_inps = [
@@ -745,6 +771,9 @@ def flex_attention(
         ]
     )
 
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     assert V.graph.sizevars.evaluate_expr(
@@ -761,11 +790,18 @@ def flex_attention(
     # This works because only the last dim differs and we check it is contiguous.
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
+
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    stride_order = get_stride_order(query.get_stride())
+    fill_order = stride_order2fill_order(stride_order)
+    out_strides = construct_strides(out_size, fill_order)
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        query.get_stride(),
+        stride=out_strides,
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
@@ -1604,8 +1640,8 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
 
@@ -1836,13 +1872,13 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
-    if Bq == Bkv:
+    if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+        assert V.graph.sizevars.evaluate_expr(
+            sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
+        ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 

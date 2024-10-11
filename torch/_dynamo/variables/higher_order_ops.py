@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 import torch._C
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
@@ -72,13 +71,13 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
 
 
 @contextlib.contextmanager
-def dynamo_under_checkpoint(tx: "InstructionTranslator"):
-    orig_val = tx.output.current_tracer.under_checkpoint
+def dynamo_under_activation_checkpoint(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.under_activation_checkpoint
     try:
-        tx.output.current_tracer.under_checkpoint = True
+        tx.output.current_tracer.under_activation_checkpoint = True
         yield
     finally:
-        tx.output.current_tracer.under_checkpoint = orig_val
+        tx.output.current_tracer.under_activation_checkpoint = orig_val
 
 
 def only_consist_of(var, types, allow_none=False):
@@ -398,7 +397,7 @@ def speculate_subgraph(
     set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
-    under_checkpoint=False,
+    under_activation_checkpoint=False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -451,8 +450,8 @@ def speculate_subgraph(
                 else contextlib.nullcontext()
             )
             checkpoint_ctx = (
-                dynamo_under_checkpoint(tx)
-                if under_checkpoint
+                dynamo_under_activation_checkpoint(tx)
+                if under_activation_checkpoint
                 else contextlib.nullcontext()
             )
 
@@ -624,7 +623,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "auto_functionalized":
+        elif (
+            value.__name__ == "auto_functionalized"
+            or value.__name__ == "auto_functionalized_v2"
+        ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
@@ -1483,25 +1485,6 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if not torch._dynamo.config.capture_func_transforms:
-            name = self.get_name()
-            fn = {
-                "grad_impl": "grad",
-                "vmap_impl": "vmap",
-                "vjp": "vjp",
-                "jvp": "jvp",
-                "jacrev": "jacrev",
-                "jacfwd": "jacfwd",
-                "hessian": "hessian",
-                "linearize": "linearize",
-                "functional_call": "functional_call",
-            }.get(name)
-            assert name is not None
-            unimplemented(
-                f"torch.func.{fn} capture is disabled, "
-                "it can be turned on by setting "
-                "`torch._dynamo.config.capture_func_transforms=True`"
-            )
         return super().call_function(tx, args, kwargs)
 
 
@@ -1525,7 +1508,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args,
         kwargs,
         description,
-        under_checkpoint=False,
+        under_activation_checkpoint=False,
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
 
@@ -1541,7 +1524,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             should_flatten_outputs=True,
-            under_checkpoint=under_checkpoint,
+            under_activation_checkpoint=under_activation_checkpoint,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -1882,7 +1865,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             args,
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
-            under_checkpoint=True,
+            under_activation_checkpoint=True,
         )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
@@ -2015,8 +1998,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn: "VariableTracker",
         fn_name: str,
     ):
-        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
-
+        from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx

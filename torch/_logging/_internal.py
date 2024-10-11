@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+import importlib.util
 import itertools
 import json
 import logging
@@ -10,8 +11,9 @@ import pathlib
 import re
 import sys
 import tempfile
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
-from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
@@ -722,11 +724,8 @@ def _parse_log_settings(settings):
 
 
 def _is_valid_module(qname):
-    try:
-        __import__(qname)
-        return True
-    except ImportError:
-        return False
+    spec = importlib.util.find_spec(qname)
+    return spec is not None
 
 
 def _update_log_state_from_env():
@@ -1091,6 +1090,42 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
+# Logs the time it takes to do structured logging by frame/compile id
+# key is always {frame_id}_{frame_compile_id}
+structured_logging_overhead: Dict[str, float] = defaultdict(float)
+
+
+# Same principle as add_remote_cache_time_saved, but do it for structured logging
+def add_structured_logging_overhead(time_spent: float) -> None:
+    global structured_logging_overhead
+    key = None
+    if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        frame_id = trace_id.compile_id.frame_id
+        frame_compile_id = trace_id.compile_id.frame_compile_id
+        # Why not trace_id.attempt, like structured logging?
+        # We aggregate across all attempts because
+        # a compilation metric is logged per successful attempt
+        key = f"{frame_id}_{frame_compile_id}"
+    # TODO: deal with structured logging that occurs outside of specific compile ids
+    # It's hard to figure out where we would log that if we want it in compilation metrics
+    # itself.
+    if key is not None:
+        key = str(key)
+        structured_logging_overhead[key] += time_spent
+
+
+def get_structured_logging_overhead() -> Optional[float]:
+    key = None
+    if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        frame_id = trace_id.compile_id.frame_id
+        frame_compile_id = trace_id.compile_id.frame_compile_id
+        key = f"{frame_id}_{frame_compile_id}"
+    if key is not None:
+        return structured_logging_overhead.get(key)
+    else:
+        return None
+
+
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
@@ -1100,6 +1135,7 @@ def trace_structured(
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
 ):
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1118,6 +1154,7 @@ def trace_structured(
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:
+        start_time = time.time_ns()
         record: Dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:
@@ -1155,6 +1192,11 @@ def trace_structured(
             "", extra={"metadata": record, "payload": payload}, stacklevel=2
         )
         log_trace_structured_event(name, record)
+
+        if record_logging_overhead:
+            # Convert to seconds from nanoseconds, add it to the frame compile total
+            structured_logging_overhead_s = (time.time_ns() - start_time) / 1e9
+            add_structured_logging_overhead(structured_logging_overhead_s)
 
 
 import torch._guards
