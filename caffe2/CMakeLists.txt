@@ -1441,6 +1441,7 @@ elseif(USE_ROCM)
 endif()
 
 if(USE_XPU)
+  target_compile_definitions(torch_xpu PRIVATE CAFFE2_BUILD_MAIN_LIB)
   target_compile_definitions(torch_xpu PRIVATE TORCH_XPU_BUILD_MAIN_LIB)
 endif()
 
