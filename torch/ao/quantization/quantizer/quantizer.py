@@ -27,8 +27,6 @@ class QuantizationSpecBase(ABC):  # noqa: B024
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
 
-    pass
-
 
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec(QuantizationSpecBase):

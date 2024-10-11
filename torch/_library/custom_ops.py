@@ -332,12 +332,16 @@ class CustomOpDef:
                                 fn = self._backend_fns[device_type]
                                 module = inspect.getmodule(fn)
                                 raise RuntimeError(
-                                    f"Tensors returned from custom ops (1) must not "
-                                    f"be inputs to the custom op and (2) may not alias "
-                                    f"any inputs or other returns. Please clone the "
-                                    f"the offending output tensors (e.g. output.clone()) "
-                                    f"or refactor your code. "
-                                    f"Offending op: {self._name} (with implementation in {module})"
+                                    f"{self._name} (with implementation in {module}): "
+                                    f"The output of this custom operator (1) must not "
+                                    f"also be an input to this custom operator and "
+                                    f"(2) may not alias any inputs to this custom operator "
+                                    f"or other returns. "
+                                    f"The most common way to trigger this error is if "
+                                    f"we have y = custom_op(x) and y and x are the same Tensor. "
+                                    f"Please instead return a clone of the offending output "
+                                    f"tensor(s) (e.g. return x.clone()) or refactor the custom "
+                                    f"operator to not return y."
                                 )
                             storages.add(key)
                         return result
@@ -355,6 +359,7 @@ class CustomOpDef:
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
+                @torch._disable_dynamo
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)

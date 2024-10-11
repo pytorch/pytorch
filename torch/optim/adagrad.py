@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional, Union
+from typing import cast, List, Optional, Union
 
 import torch
 from torch import Tensor
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 from .optimizer import (
     _default_to_fused_or_foreach,
+    _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
     _get_scalar_dtype,
@@ -68,21 +68,9 @@ class Adagrad(Optimizer):
         if fused:
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
-            self._step_supports_amp_scaling = True
-            fused_supported_devices = _get_fused_kernels_supported_devices()
-            # Not support CUDA yet
-            fused_supported_devices.remove("cuda")
-            if not all(
-                p.device.type in fused_supported_devices and torch.is_floating_point(p)
-                for pg in self.param_groups
-                for p in pg["params"]
-            ):
-                raise RuntimeError(
-                    "`fused=True` requires all the params to be floating point Tensors of "
-                    f"supported devices: {fused_supported_devices}."
-                )
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+            self._need_device_dtype_check_for_fused = True
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -136,6 +124,13 @@ class Adagrad(Optimizer):
         has_sparse_grad, has_complex = False, False
         for p in group["params"]:
             if p.grad is not None:
+                if group["fused"] and getattr(
+                    self,
+                    "_need_device_dtype_check_for_fused",
+                    True,
+                ):
+                    _device_dtype_check_for_fused(p, cuda_unsupported=True)
+                    self._need_device_dtype_check_for_fused = False
                 has_sparse_grad |= p.grad.is_sparse
                 has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
@@ -409,14 +404,19 @@ def _multi_tensor_adagrad(
         return
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, state_sums, state_steps]
+        [params, grads, state_sums, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_state_sums,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_state_sums_,
+        device_state_steps_,
     ), _ in grouped_tensorlists.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_state_sums = cast(List[Tensor], device_state_sums_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         device_has_sparse_grad = has_sparse_grad and any(
             grad.is_sparse for grad in device_grads
         )
@@ -519,17 +519,22 @@ def _fused_adagrad(
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, state_sums, state_steps]
+        [params, grads, state_sums, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
-            device_params,
-            device_grads,
-            device_state_sums,
-            device_state_steps,
+            device_params_,
+            device_grads_,
+            device_state_sums_,
+            device_state_steps_,
         ),
         _,
     ) in grouped_tensors.items():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_state_sums = cast(List[Tensor], device_state_sums_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None and grad_scale_dict is not None:
             if device not in grad_scale_dict:

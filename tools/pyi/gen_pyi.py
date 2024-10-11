@@ -781,6 +781,9 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
+            ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
