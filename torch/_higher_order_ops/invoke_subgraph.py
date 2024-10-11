@@ -28,6 +28,9 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.graph_module import GraphModule
 
 
+invoke_subgraph_counter = 0
+
+
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("invoke_subgraph")
@@ -44,6 +47,16 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+def create_invoke_subgraph_op(subgraph, operands):
+    # Helper to set the identifier for the invoke_subgraph op. We ensure that
+    # each identifier is different here. Its torch.compile responsibility to
+    # replace identifiers for subgraphs that are identical.
+    global invoke_subgraph_counter
+    identifier = f"invoke_subgraph_{invoke_subgraph_counter}"
+    invoke_subgraph_counter += 1
+    return invoke_subgraph(subgraph, identifier, operands)
 
 
 def trace_joint_graph(fn, fw_inputs, fw_outputs):
