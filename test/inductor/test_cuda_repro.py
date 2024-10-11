@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import gc
 import math
 import sys
@@ -25,6 +26,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
+    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -32,6 +34,11 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
     TEST_WITH_ASAN,
+)
+
+
+requires_multigpu = functools.partial(
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
@@ -1382,6 +1389,24 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
+
+    @requires_multigpu()
+    def test_not_initializing_wrong_device(self):
+        device_stats = torch.cuda.memory_stats("cuda:0")
+
+        @torch.compile()
+        def foo(x, y):
+            return x @ y
+
+        x = torch.rand([256, 256], device="cuda:1", requires_grad=True)
+        y = torch.rand([256, 256], device="cuda:1", requires_grad=True)
+
+        foo(x, y).sum().backward()
+
+        device_stats2 = torch.cuda.memory_stats("cuda:0")
+        self.assertTrue(
+            device_stats2["active.all.peak"] <= device_stats["active.all.peak"]
+        )
 
 
 if __name__ == "__main__":
