@@ -1535,7 +1535,7 @@ Example::
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
                 if (worldSize.value() == 0) {
-                    throw py::value_error("world_size cannot be 0");
+                    throw py::value_error("TCPStore world size cannot be 0");
                 }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
