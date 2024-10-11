@@ -129,14 +129,22 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
         model = MLP(8)
-        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\('cuda', \[\[\[0\]\], \[\[1\]\]\]\)"
+        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh"
         with self.assertRaisesRegex(ValueError, regex):
+            fully_shard(model, mesh=mesh)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_2d_mesh_without_mesh_dim_names(self):
+        mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        model = MLP(8)
+        regex = "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+        with self.assertRaisesRegex(AssertionError, regex):
             fully_shard(model, mesh=mesh)
 
 
