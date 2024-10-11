@@ -136,6 +136,7 @@ from .distributed import (
     PlacementVariable,
     ProcessGroupVariable,
     WorldMetaClassVariable,
+    WorkVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
@@ -878,6 +879,21 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif WorkVariable.is_matching_object(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            torch._dynamo.utils.store_user_object_weakref(value)
+            work_proxy = self.tx.output.create_proxy(
+                "call_function",
+                torch._dynamo.utils.get_user_object_from_id,
+                (id(value),),
+                {},
+            )
+            set_example_value(work_proxy.node, value)
+            return WorkVariable(
+                work_proxy,
+                value,
+                source=self.source,
+            )
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)

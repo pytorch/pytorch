@@ -2,6 +2,7 @@
 import functools
 import inspect
 from typing import Dict, List, TYPE_CHECKING
+import sys
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -298,6 +299,85 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
+
+
+class WorkVariable(VariableTracker):
+    """represents torch.distributed.Work"""
+
+    def __init__(self, proxy, value, **kwargs) -> None:
+        if proxy is not None and "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from ..utils import proxy_args_kwargs
+
+        if name in {"wait"}:
+            TODO: re-route this to look up the corresponding tensor and call .wait_tensor on them.
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        else:
+            unimplemented(f"torch.distributed.Work method {name} unsupported")
+
+    def as_proxy(self):
+        return self.proxy
+
+    @classmethod
+    def is_matching_object(cls, obj):
+        mod = sys.modules.get("torch.distributed")
+        return mod is not None and type(obj) is mod.Work
+
+
+# class TorchRecRequestVariable(VariableTracker):
+#     """
+#     Represents torchrec.distributed.comm_ops.Request
+#     """
+
+#     def __init__(self, proxy, value, **kwargs) -> None:
+#         if proxy is not None and "example_value" in proxy.node.meta:
+#             assert proxy.node.meta["example_value"] == value
+#         super().__init__(**kwargs)
+#         self.proxy = proxy
+#         self.value = value
+
+#     def call_method(
+#         self,
+#         tx,
+#         name,
+#         args,
+#         kwargs: "Dict[str, VariableTracker]",
+#     ) -> "VariableTracker":
+#         from ..utils import proxy_args_kwargs
+#         from .builder import wrap_fx_proxy_cls
+
+#         if name in {"wait"}:
+#             return wrap_fx_proxy_cls(
+#                 target_cls=variables.LazyVariableTracker,
+#                 tx=tx,
+#                 proxy=tx.output.create_proxy(
+#                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+#                 ),
+#             )
+#         else:
+#             unimplemented(f"torchrec.distributed.comm_ops.Request method {name} unsupported")
+
+#     def as_proxy(self):
+#         return self.proxy
+
+#     @classmethod
+#     def is_matching_object(cls, obj):
+#         mod = sys.modules.get("torchrec.distributed.comm_ops")
+#         return mod is not None and type(obj) is mod.Request
 
 
 class BackwardHookVariable(VariableTracker):
