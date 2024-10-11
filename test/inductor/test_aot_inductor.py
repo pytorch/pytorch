@@ -430,6 +430,7 @@ class AOTInductorTestsTemplate:
     def test_linear_freezing(self):
         dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
         for dtype in dtypes:
+
             class LinearModel(torch.nn.Module):
                 def __init__(self, device):
                     super().__init__()
@@ -2953,22 +2954,27 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             if SM80OrLater:
+
                 def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
                     return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
             else:
+
                 def forward(self, x0, x1, x2, x4, x5, x6, x7, x8, x9):
                     return (x0, x1, x2, x4, x5, x6, x7, x8, x9)
 
         inputs = []
-        dtypes = [torch.float16,
-                  torch.float32,
-                  torch.float64,
-                  torch.bool,
-                  torch.int8,
-                  torch.int16,
-                  torch.int32,
-                  torch.int64,
-                  torch.uint8]
+        dtypes = [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ]
         if SM80OrLater:
             dtypes.append(torch.bfloat16)
         for dtype in dtypes:
@@ -2989,7 +2995,7 @@ class AOTInductorTestsTemplate:
             "x9": {2: dim2},
         }
         if SM80OrLater:
-          dynamic_shapes["x3"] = {1: dim1}
+            dynamic_shapes["x3"] = {1: dim1}
 
         m = Model()
         inputs = tuple(inputs)
@@ -3009,17 +3015,23 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21 if SM80OrLater else 19,  # we have 9 dynamic dims for which we generate different checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18 if SM80OrLater else 16,  # we have 9 dynamic dims for which we generate two checks
+                18
+                if SM80OrLater
+                else 16,  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21 if SM80OrLater else 19,  # we have 9 symbolic strides for which we don't generate checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
