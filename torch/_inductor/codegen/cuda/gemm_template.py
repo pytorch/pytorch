@@ -47,7 +47,7 @@ PT_EXPORT {{kernel_call_signature}} {
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
   {{instance_type}}::Arguments arguments;
-  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
+  {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw, swizzle,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
@@ -123,6 +123,9 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
+  arguments.scheduler.max_swizzle_size = {{swizzle}};
+  
+
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -505,21 +508,24 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         ops = self.gen_ops()
-        for op in ops:
-            self.maybe_append_choice(
-                choices,
-                op=op,
-            )
+        for name, op in ops:
+            old_len = len(choices)
+            for swizzle in [1, 2, 4, 8]:
+                # breakpoint()
+                self.maybe_append_choice(choices, op=op, swizzle=swizzle)
+                if len(choices) > old_len:
+                    choices[-1].debug_extra = name + f" swizzle={swizzle}"
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
             output_layout = layout
             warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
             log.warning(warning_msg)
-        log.debug(
+        log.info(
             "Added %d Cutlass gemm configs.",
             len(ops),
         )
+        print("cutlass gemm configs: ", len(ops))
 
     def header(self) -> IndentedBuffer:
         """
@@ -827,17 +833,19 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
         for op_dict in ops.values():
-            for op_list in op_dict.values():
+            for key, op_list in op_dict.items():
                 for op in op_list:
                     assert isinstance(op, cutlass_gemm_op.GemmOperation)
                     filter_res = self.filter_op(op)
+                    # if "ping" not in key:
+                    #     continue
                     if (
                         filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
-        return list(res.values())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        # breakpoint()
+        return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         """
@@ -952,6 +960,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
+            swizzle=kwargs["swizzle"],
             should_swap_xw=should_swap_xw,
             template=self,
             kernel=kernel,
@@ -1216,6 +1225,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         argument_template: str,
         epilogue_template: str,
         should_swap_xw: bool,
+        swizzle: int,
         X: IRNode,
         W: IRNode,
         Bias: IRNode,
@@ -1261,6 +1271,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             M="M",
             N="N",
             epilogue_args=epilogue_args,
+            swizzle=swizzle,
         )
         assert epilogue_template is not None
 

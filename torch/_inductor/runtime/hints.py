@@ -33,7 +33,7 @@ try:
 
     attrs_descriptor_available = True
     # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
+    attr_desc_fields = set(dir(AttrsDescriptor))
     ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
     divisible_by_8_available = "divisible_by_8" in attr_desc_fields
 except ImportError:
