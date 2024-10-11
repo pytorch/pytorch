@@ -749,8 +749,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    # Allow 1% variance for CPU perf to accommodate perf fluctuation
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
 
   # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
