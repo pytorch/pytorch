@@ -13,10 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch._higher_order_ops.flex_attention import (
-    flex_attention as flex_attention_hop,
-    TransformGetItemToIndex,
-)
+from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
@@ -187,6 +185,21 @@ def _dense_to_ordered(dense_mask) -> Tuple:
 def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
+
+
+def _adjust_num_blocks_and_indices(
+    num_blocks: Tensor,
+    indices: Tensor,
+    new_num_rows: int,
+    new_num_cols: int,
+):
+    num_rows = indices.shape[-2]
+    num_columns = indices.shape[-1]
+    indices = indices[:, :, :new_num_rows, :new_num_cols]
+    num_blocks = num_blocks[:, :, :new_num_rows]
+    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
+    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    return num_blocks, indices
 
 
 class BlockMask:
@@ -465,6 +478,35 @@ class BlockMask:
             f"    sparsity={self.sparsity():.2f}%,\n"
             f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
             f")"
+        )
+
+    def _adjust(self, new_q_len: int, new_kv_len: int):
+        new_num_rows = new_q_len // self.BLOCK_SIZE[0]
+        new_num_cols = new_kv_len // self.BLOCK_SIZE[1]
+        new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
+            self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
+        )
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            (
+                new_full_kv_num_blocks,
+                new_full_kv_indices,
+            ) = _adjust_num_blocks_and_indices(
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                new_num_rows,
+                new_num_cols,
+            )
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return self.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            self.BLOCK_SIZE,
+            self.mask_mod,
         )
 
     @property
@@ -845,7 +887,7 @@ def create_block_mask(
         Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
+        inner_func = torch.compile(inner_func, fullgraph=True)
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
             mask_mod, B, H, Q_LEN, KV_LEN, device, Q_BLOCK_SIZE, KV_BLOCK_SIZE
@@ -1007,13 +1049,20 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+    elif (
+        query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
+        or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
+    ):
+        new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
+        new_kv_len = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
+        block_mask = block_mask._adjust(new_q_len, new_kv_len)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
-    if query.device != block_mask.kv_num_blocks.device:
+    if query.device != block_mask.kv_num_blocks.device:  # type: ignore[union-attr]
         raise RuntimeError(
             f"Expect q/k/v and block_mask to be on the same device "
-            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
         )
 
     kernel_options = _apply_kernel_options(
@@ -1030,7 +1079,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)
@@ -1066,7 +1115,7 @@ def flex_attention(
                         key,
                         value,
                         score_mod,
-                        block_mask.as_tuple(),
+                        block_mask.as_tuple(),  # type: ignore[union-attr]
                         scale,
                         kernel_options,
                     )

@@ -3704,9 +3704,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             torch.jit.trace(f, torch.randn(3))
 
-        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
