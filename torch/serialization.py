@@ -172,7 +172,7 @@ def set_default_load_endianness(endianness):
 _compute_crc32: bool = True
 
 
-def get_default_crc32_options() -> bool:
+def get_crc32_options() -> bool:
     """
     Get whether :func:`torch.save` computes and writes crc32 for each record.
 
@@ -181,7 +181,7 @@ def get_default_crc32_options() -> bool:
     return _compute_crc32
 
 
-def set_default_crc32_options(compute_crc32: bool):
+def set_crc32_options(compute_crc32: bool):
     """
     Set whether :func:`torch.save` computes and writes crc32 for each record.
 
@@ -191,7 +191,7 @@ def set_default_crc32_options(compute_crc32: bool):
         able to load the file.
 
     Args:
-        compute_crc32: ``True`` or ``False``
+        compute_crc32 (bool): set crc32 compuation flag
     """
     global _compute_crc32
     _compute_crc32 = compute_crc32

@@ -4317,20 +4317,22 @@ class TestSerialization(TestCase, SerializationMixin):
         sd = torch.nn.Linear(3, 5).state_dict()
         with file_creation_func() as f:
             try:
-                torch.serialization.set_default_crc32_options(compute_crc32)
+                torch.serialization.set_crc32_options(compute_crc32)
                 torch.save(sd, f)
                 if not filename:
                     f.seek(0)
                 sd_loaded = torch.load(f, weights_only=True)
                 self.assertEqual(sd_loaded, sd)
             finally:
-                torch.serialization.set_default_crc32_options(True)
+                torch.serialization.set_crc32_options(True)
 
             args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
             ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
 
             if not filename:
                 f.seek(0)
+            # zip_file.extractall() will raise BadZipFile if CRC32 is not populated
+            # we use the context manager to check whether CRC32 was populated
             with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
