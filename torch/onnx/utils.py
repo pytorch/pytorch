@@ -20,13 +20,7 @@ import torch._C._onnx as _C_onnx
 import torch.jit._trace
 import torch.serialization
 from torch import _C
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _exporter_states,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
 
@@ -1423,9 +1417,6 @@ def _export(
 ):
     assert GLOBALS.in_onnx_export is False
 
-    if export_type is None:
-        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
-
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1516,10 +1507,6 @@ def _export(
                 dynamic_axes=dynamic_axes,
             )
 
-            # TODO: Don't allocate a in-memory string for the protobuf
-            defer_weight_export = (
-                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
-            )
             if custom_opsets is None:
                 custom_opsets = {}
 
@@ -1540,6 +1527,7 @@ def _export(
                     getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
+            defer_weight_export = False
             if export_params:
                 (
                     proto,
@@ -1569,7 +1557,7 @@ def _export(
                     {},
                     opset_version,
                     dynamic_axes,
-                    False,
+                    defer_weight_export,
                     operator_export_type,
                     not verbose,
                     val_keep_init_as_ip,
@@ -1585,7 +1573,7 @@ def _export(
             )
             if verbose:
                 _C._jit_onnx_log("Exported graph: ", graph)
-            onnx_proto_utils._export_file(proto, f, export_type, export_map)
+            onnx_proto_utils._export_file(proto, f, export_map)
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
