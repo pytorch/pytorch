@@ -97,7 +97,6 @@ static void _process_forward_mode_AD(
     forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const auto num_forward_grads = forward_grads.size();
   // contrary to backward mode, we don't allow returning too many gradients
   TORCH_CHECK(

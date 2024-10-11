@@ -12,7 +12,8 @@
 #include <torch/csrc/utils/pybind.h>
 
 struct THPCapturedTraceback {
-  PyObject_HEAD std::shared_ptr<torch::CapturedTraceback> data;
+  PyObject_HEAD
+  std::shared_ptr<torch::CapturedTraceback> data;
 };
 
 static int THPCapturedTraceback_traverse(
@@ -37,9 +38,8 @@ static void THPCapturedTraceback_dealloc(PyObject* self_) {
 }
 
 PyTypeObject THPCapturedTracebackType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._profiler.CapturedTraceback", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._profiler.CapturedTraceback", /* tp_name */
     sizeof(THPCapturedTraceback), /* tp_basicsize */
     0, /* tp_itemsize */
     THPCapturedTraceback_dealloc, /* tp_dealloc */
@@ -136,7 +136,8 @@ namespace torch::profiler {
 
 namespace {
 struct RecordFunctionFast {
-  PyObject_HEAD PyObject* name;
+  PyObject_HEAD
+  PyObject* name;
   PyObject* input_values;
   PyObject* keyword_values;
   std::unique_ptr<at::RecordFunction> guard;
@@ -441,7 +442,7 @@ void initPythonBindings(PyObject* module) {
             return py::reinterpret_borrow<py::object>(
                 torch::autograd::utils::wrap(metadata.dtype_));
           })
-      .def_readonly("dim", &TensorMetadata::dim_)
+      .def_readonly("dim", &TensorMetadata::size_dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
       .def_readonly("strides", &TensorMetadata::strides_);
 
@@ -641,8 +642,9 @@ void initPythonBindings(PyObject* module) {
       {nullptr},
   };
 
-  static PyTypeObject RecordFunctionFast_Type = {
-      PyVarObject_HEAD_INIT(nullptr, 0)};
+  static PyTypeObject RecordFunctionFast_Type = { PyVarObject_HEAD_INIT(nullptr,
+                                                                        0)
+  };
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
