@@ -462,9 +462,9 @@ class CPUReproTests(TestCase):
         from torch._dynamo.utils import counters
 
         dtypes = [torch.float]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.mkldnn._is_onednn_fp16_supported():
             dtypes.append(torch.float16)
         for dtype in dtypes:
             counters.clear()
