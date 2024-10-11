@@ -92,7 +92,7 @@ HAS_OPTREE = importlib.util.find_spec("optree")
 if HAS_OPTREE:
     import optree
 
-mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
 
@@ -1656,8 +1656,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_namedtuple1(self):
         def fn(a, b):
-            tmp = mytuple(a, b, a + b)
-            return mytuple(tmp.a, tmp[1], tmp.ab + b)
+            tmp = MyTuple(a, b, a + b)
+            return MyTuple(tmp.a, tmp[1], tmp.ab + b)
 
         v1 = torch.Tensor([10])
         v2 = torch.Tensor([20])
@@ -1680,19 +1680,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertEqual(opt_fn(mytuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
     def test_namedtuple3(self):
         def fn(x, packed):
-            if isinstance(packed, mytuple):
+            if isinstance(packed, MyTuple):
                 return x + 1
             else:
                 return x - 1
 
         x = torch.rand([2, 3])
-        packed = mytuple(1, 2, 3)
+        packed = MyTuple(1, 2, 3)
         ref = fn(x, packed)
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, packed)
