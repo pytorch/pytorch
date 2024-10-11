@@ -444,6 +444,14 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
   }
 
   // General case for large tensors.
+
+  // Large M, N, k
+  if (M >= 4096 && N >= 4096 && N >= 4096) {
+    return handle_transposition<
+        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+        /*Transposed=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, 8);
+  }
   if ((M <= N) ^ (M >= 2048 && N >= 2048)) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
@@ -453,7 +461,7 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
         /*Transposed=*/std::true_type,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, 4);
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
