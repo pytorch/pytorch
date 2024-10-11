@@ -52,7 +52,7 @@ if attrs_descriptor_available:
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef]
+    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
         "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
