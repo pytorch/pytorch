@@ -9,6 +9,7 @@ import logging
 import textwrap
 import traceback
 from contextlib import nullcontext
+from dataclasses import field
 from functools import partial
 from typing import (
     Any,
@@ -106,6 +107,42 @@ _IntLike: TypeAlias = Union[int, Expr]
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+from typing_extensions import dataclass_transform
+
+
+# ir_dataclass = dataclass_transform()(
+#     functools.partial(dataclasses.dataclass, kw_only=True)
+# )
+
+
+@dataclass_transform()
+def ir_dataclass(cls):
+    def wrap(cls: T) -> T:
+        if sys.version_info >= (3, 10):
+            # Use native kw_only for Python 3.10+
+            return dataclasses.dataclass(cls, kw_only=True, **kwargs)
+        else:
+            # Polyfill for Python 3.9
+            def __init__(_self, **init_kwargs):
+                fields = dataclasses.fields(cls)
+                for field in fields:
+                    if (
+                        field.default == dataclasses.MISSING
+                        and field.default_factory == dataclasses.MISSING
+                    ):
+                        if field.name not in init_kwargs:
+                            raise TypeError(
+                                f"__init__() missing required keyword-only argument: '{field.name}'"
+                            )
+                dataclasses.dataclass(cls, **kwargs).__init__(_self, **init_kwargs)
+
+            cls.__init__ = __init__
+            return dataclasses.dataclass(cls, **kwargs)
+
+    if _cls is None:
+        return wrap
+    return wrap(_cls)
+
 
 """ [Note: Inductor IR]
 
@@ -322,7 +359,7 @@ def is_cpu(x: object) -> bool:
 
 
 class IRNode:
-    _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
+    _current_origins: ClassVar[OrderedSet[Any]] = field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -425,13 +462,10 @@ class IRNode:
     get_unbacked_symbol_uses: Callable[[], OrderedSet[sympy.Symbol]]
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Operation:
-    operation_name: Optional[str] = None
-
     def __post_init__(self):
-        pass
-        # self.operation_name: Optional[str] = None
+        self.operation_name: Optional[str] = None
 
     def get_device(self):
         raise NotImplementedError
@@ -445,8 +479,8 @@ class Operation:
         return self.origins
 
     def get_operation_name(self) -> str:
-        assert self.operation_name is not None
-        return self.operation_name
+        # assert self.operation_name is not None
+        return ""
 
     def is_extern(self):
         return False
@@ -655,7 +689,7 @@ class Pointwise(Loops):
         )
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[List[Expr]], Expr]
     scatter_mode: Optional[str] = None
@@ -772,7 +806,7 @@ def significant_strides_equal(
     return strides1 == strides2
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
     reduction_type: str
@@ -1755,7 +1789,7 @@ class WelfordReduction(Reduction):
         )
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
@@ -1942,12 +1976,12 @@ class Scan(Loops):
 
 
 # This signifies a scan op that should go through TritonSplitScanKernel codegen on CUDA.
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class SplitScan(Scan):
     pass
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Sort(Loops):
     # Sorts a tuple of key, value pairs
     sort_ranges: List[Expr]
@@ -2173,7 +2207,7 @@ def is_stride_order_storage_and_layout(
         return False
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class BaseView(IRNode):
     data: IRNode
 
@@ -2269,7 +2303,7 @@ class BaseView(IRNode):
         )
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ExpandView(BaseView):
     size: List[Expr]
 
@@ -2340,7 +2374,7 @@ class ExpandView(BaseView):
         return reindex
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class PermuteView(BaseView):
     dims: List[Expr]
 
@@ -2442,7 +2476,7 @@ class SqueezeView(BaseView):
         raise AssertionError("use SqueezeView.create()")
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class GenericView(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
@@ -2472,7 +2506,7 @@ class GenericView(BaseView):
         return self.size
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class View(GenericView):
     @staticmethod
     def handle_negative_index(idx, size):
@@ -2620,7 +2654,7 @@ class View(GenericView):
         return reindex
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
@@ -2704,7 +2738,7 @@ class ReinterpretView(BaseView):
         return 1
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class DtypeView(BaseView):
     """Pretend our storage has a different type"""
 
@@ -2846,7 +2880,7 @@ class BaseConstant(IRNode):
         return False
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Constant(BaseConstant):
     value: Any
     dtype: torch.dtype
@@ -2865,7 +2899,7 @@ class Constant(BaseConstant):
         return Constant(value=self.value, dtype=self.dtype, device=device)
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class IndexingConstant(BaseConstant):
     index: Any
     dtype: torch.dtype
@@ -2896,7 +2930,7 @@ def get_align_for_dtype(dtype: torch.dtype) -> int:
     return config.padding_alignment_bytes // dtype.itemsize
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Layout(IRNode):
     def __init__(
         self,
@@ -3394,7 +3428,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.target.make_indexer()
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Buffer(IRNode):
     # Name is sometimes None; e.g., ForceInPlace, where there isn't
     # a meaningful name
@@ -3516,7 +3550,7 @@ class Buffer(IRNode):
         return False
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class OperationBuffer(Buffer, Operation):
     # An operation that produces a single output buffer
     def get_outputs(self) -> List[Buffer]:
@@ -3578,7 +3612,7 @@ class ShapeAsConstantBuffer(IRNode):
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ComputedBuffer(OperationBuffer):
     data: Loops
 
@@ -4123,9 +4157,9 @@ class CppTemplateBuffer(TemplateBuffer):
         self.choice = choice
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class InputsKernel(OperationBuffer):
-    inputs: List[Buffer]
+    inputs: List[Buffer] = []
 
     def get_read_writes(self):
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
@@ -4331,7 +4365,7 @@ class ConcatKernel(NopKernel):
         return True
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -5085,7 +5119,7 @@ class ExternKernel(InputsKernel):
     __repr__ = __str__
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -5725,7 +5759,7 @@ class AssertScalar(ExternKernel):
             wrapper.writeline(f"{self.get_name()} = None")
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ExternKernelNode:
     name: str
     node: export_schema.Node
@@ -6214,7 +6248,7 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class ComplexView(FallbackKernel):
     """View a complex number as two dtyped numbers or vice versa"""
 
@@ -6245,8 +6279,8 @@ class ComplexView(FallbackKernel):
         )
 
 
-@dataclasses.dataclass(kw_only=True)
-# @dataclasses.dataclass(kw_only=True)
+@ir_dataclass
+# @ir_dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
@@ -6456,7 +6490,7 @@ class StorageBox(MutableBox):
         return self.data.num_reads()
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Subgraph(IRNode):
     name: str
     graph_module: torch.fx.GraphModule
@@ -6472,7 +6506,7 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
     operands: Optional[List[TensorBox]] = None
@@ -6593,7 +6627,7 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class WhileLoop(ExternKernel):
     carried_inputs: Optional[List[TensorBox]] = None
     additional_inputs: Optional[List[TensorBox]] = None
@@ -6764,7 +6798,7 @@ class EffectfulKernel(FallbackKernel):
         return True
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class TorchBindObject(IRNode):
     name: str
     value: torch._C.ScriptObject
