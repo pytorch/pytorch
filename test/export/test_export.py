@@ -5127,12 +5127,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return {"prediction": (x + y, self.bff)}
 
         mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
+        ep = export(mod, ())
         self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
+        ep = export(mod, args)
         self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -5364,9 +5364,7 @@ graph():
                 return x + y
 
         m = LazyModule()
-        ep = torch.export.export(
-            m, (), {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
-        )
+        ep = export(m, (), {"x": torch.randn(3, 3), "y": torch.randn(3, 3)})
         inputs = {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
         self.assertEqual(ep.module()(**inputs), m(**inputs))
 
@@ -8285,6 +8283,89 @@ class GraphModule(torch.nn.Module):
                 add: "f32[2, 4]" = torch.ops.aten.add.Tensor(relu, arg1_1);  relu = arg1_1 = None
                 return (add,)
 """,
+        )
+
+    def test_export_for_training_with_state_dict_hooks(self):
+        def _state_dict_pre_hook(mod, prefix, keep_vars):
+            mod._buffers["test"] = torch.Tensor([1])
+
+        def _state_dict_hook(mod, state_dict, prefix, *args, **kwargs):
+            keys = list(state_dict.keys())
+            for key in keys:
+                local_key = key[len(prefix) :]
+                if local_key.startswith("layer"):
+                    new_key = prefix + local_key.replace("layer.", "")
+                    state_dict[new_key] = state_dict[key]
+                    if new_key != key:
+                        del state_dict[key]
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(2, 2)
+                self.linear2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = torch.relu(x)
+                x = self.linear2(x)
+                return x
+
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._register_state_dict_hook(_state_dict_hook)
+                self.register_state_dict_pre_hook(_state_dict_pre_hook)
+                # non-persistent buffer in named_buffers()
+                self.foo = torch.nn.Buffer(torch.rand(2, 3), persistent=False)
+                # non-persistent buffer not in named_buffers()
+                self.register_buffer("buf", None, persistent=False)
+                self.layer = Layer()
+
+            def forward(self, x):
+                x = self.layer(x)
+                return x
+
+        M = CustomModule()
+        inp = (torch.randn(2, 2),)
+        ep = export(M, inp)
+        export_res = ep.module()(*inp)
+        ref_res = M(*inp)
+        self.assertEqual(export_res, ref_res)
+        # we want to store the unprocessed keys
+        self.assertTrue(
+            {
+                "layer.linear1.weight",
+                "layer.linear1.bias",
+                "layer.linear2.weight",
+                "layer.linear2.bias",
+            }.issubset({spec.target for spec in ep.graph_signature.input_specs})
+        )
+        unflattened = torch.export.unflatten(ep)
+        export_res = unflattened(*inp)
+        self.assertEqual(export_res, ref_res)
+
+        with torch._export.utils._disable_load_state_dict_hooks(M):
+            state_dict = M.state_dict()
+        self.assertEqual(
+            {
+                "layer.linear1.weight",
+                "layer.linear1.bias",
+                "layer.linear2.weight",
+                "layer.linear2.bias",
+            },
+            state_dict.keys(),
+        )
+        state_dict = M.state_dict()
+        self.assertEqual(
+            {
+                "linear1.weight",
+                "linear1.bias",
+                "linear2.weight",
+                "linear2.bias",
+                "test",
+            },
+            state_dict.keys(),
         )
 
 
