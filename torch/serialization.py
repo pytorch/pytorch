@@ -96,14 +96,12 @@ else:
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
 # (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 # (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
-# (4) compute_crc32 (needed for torch.save)
 class _SerializationLocal(threading.local):
     def __init__(self):
         super().__init__()
         self.map_location: Optional[MAP_LOCATION] = None
         self.skip_data: bool = False
         self.materialize_fake_tensors: bool = False
-        self.compute_crc32: bool = True
 
 
 _serialization_tls = _SerializationLocal()
