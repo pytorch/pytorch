@@ -445,6 +445,8 @@ class CKConvTemplate(CKTemplate):
         stride,
         padding,
         dilation,
+        groups,
+        n_spatial_dimensions,
     ):
         super().__init__(
             "ck_conv_template",
@@ -454,6 +456,8 @@ class CKConvTemplate(CKTemplate):
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
+        self.groups = groups
+        self.n_spatial_dimensions = n_spatial_dimensions
 
     def filter_op(self, op: CKConvOp) -> bool:
         metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
@@ -545,9 +549,22 @@ class CKConvTemplate(CKTemplate):
                 names_str="input, weight, bias, output",
                 size_args=[
                     f"int32_t {arg}"
-                    for arg in ["N", "H", "W", "G", "C", "K", "X", "Y"]
+                    for arg in []
                 ],
             ),
             n_d_tensors=1 if Bias is not None else 0,
-            n_dim_spatial=2,
+            n_dim_spatial=self.n_spatial_dimensions,
+            group_count=self.groups,
+            batch_size=X.shape[0],
+            n_output_channels=Y.shape[-1],
+            n_input_channels=X.shape[-1],
+            filter_size=", ".join(W.shape[1:-1]),
+            input_size=", ".join(X.shape[1:-1]),
+            convolution_strides=", ".join(self.stride),
+            dilations=", ".join(self.dilation),
+            left_pads=", ".join(self.padding),
+            right_pads=", ".join(self.padding),
+            input_layout=op.a_layout,
+            weight_layout=op.b_layout,
+            output_layout=op.e_layout,
         )
