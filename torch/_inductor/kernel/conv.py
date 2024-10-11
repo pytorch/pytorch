@@ -666,7 +666,7 @@ def convolution(
         CKConvTemplate.add_ck_conv_choices(
             choices,
             layout,
-            [x, weight, bias],
+            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
             stride=stride,
             padding=padding,
             dilation=dilation,

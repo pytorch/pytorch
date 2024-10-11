@@ -190,10 +190,10 @@ def gen_conv_ops_library() -> List[CKConvOp]:
         "BlockGemmPipelineScheduler::Interwave",
     ]
     conv_specs = [
-        "ConvolutionForwardSpecialization::ConvFwdDefault",
-        "ConvolutionForwardSpecialization::ConvFwd1x1P0",
-        "ConvolutionForwardSpecialization::ConvFwd1x1S1P0",
-        "ConvolutionForwardSpecialization::ConvFwdOddC",
+        "ConvolutionForwardSpecialization::Default",
+        "ConvolutionForwardSpecialization::Filter1x1Pad0",
+        "ConvolutionForwardSpecialization::Filter1x1S1Pad0",
+        "ConvolutionForwardSpecialization::OddC",
     ]
 
     # substitute templated args by looping through their domains
@@ -288,9 +288,9 @@ class CKConvTemplate(CKTemplate):
         std::array<index_t, NDimSpatial> conv_filter_dilations;
         std::array<index_t, NDimSpatial> input_left_pads;
         std::array<index_t, NDimSpatial> input_right_pads;
-        const AElementwiseOperation a_element_op = PassThrough {};
-        const BElementwiseOperation b_element_op = PassThrough {};
-        const CDEElementwiseOperation cde_element_op = PassThrough {};
+        const auto a_element_op = PassThrough {};
+        const auto b_element_op = PassThrough {};
+        const auto cde_element_op = PassThrough {};
 
         auto copy = [](auto& x, auto& y) { ck::ranges::copy(x, y.begin()); };
 
@@ -410,12 +410,12 @@ class CKConvTemplate(CKTemplate):
             """
                 // CK conv headers
 
-                #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+                #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp"
                 #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
                 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 
                 #include "ck/library/utility/convolution_parameter.hpp"
-                #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp
+                #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
             """
         )
         return res
@@ -471,7 +471,7 @@ class CKConvTemplate(CKTemplate):
         self.n_spatial_dimensions = n_spatial_dimensions
 
     def filter_op(self, op: CKConvOp) -> bool:
-        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
+        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node] if T is not None]
         X_meta = metas[0]
         W_meta = metas[1]
         Y_meta = metas[-1]
@@ -555,9 +555,9 @@ class CKConvTemplate(CKTemplate):
             instance_definition=instance_definition,
             instance_type=instance_type,
             kernel_definition=kernel.def_kernel(
-                inputs=[X, W, Bias],
+                inputs=[X, W, Bias] if Bias is not None else [X, W],
                 outputs=[Y],
-                names_str="input, weight, bias, output",
+                names_str="input, weight, bias, output" if Bias is not None else "input, weight, output",
                 size_args=[
                     f"int32_t {arg}"
                     for arg in []
@@ -567,14 +567,14 @@ class CKConvTemplate(CKTemplate):
             n_dim_spatial=self.n_spatial_dimensions,
             group_count=self.groups,
             batch_size=X.shape[0],
-            n_output_channels=Y.shape[-1],
-            n_input_channels=X.shape[-1],
-            filter_size=", ".join(W.shape[1:-1]),
-            input_size=", ".join(X.shape[1:-1]),
-            convolution_strides=", ".join(self.stride),
-            dilations=", ".join(self.dilation),
-            left_pads=", ".join(self.padding),
-            right_pads=", ".join(self.padding),
+            n_output_channels=Y.shape[1],
+            n_input_channels=X.shape[1],
+            filter_size=", ".join(map(str, W.shape[2:])),
+            input_size=", ".join(map(str, X.shape[2:])),
+            convolution_strides=", ".join(map(str, self.stride)),
+            dilations=", ".join(map(str, self.dilation)),
+            left_pads=", ".join(map(str, self.padding)),
+            right_pads=", ".join(map(str, self.padding)),
             input_layout=op.a_layout,
             weight_layout=op.b_layout,
             output_layout=op.e_layout,
