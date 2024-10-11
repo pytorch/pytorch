@@ -630,7 +630,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         def gn(x):
             torch._dynamo.graph_break()
-            return torch.sin(x)
+            return torch.sin(hn(x))
 
         def fn(x):
             return gn(x)
@@ -647,7 +647,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(x)
 
         def gn(x):
-            return torch.sin(x)
+            return torch.sin(hn(x))
 
         def fn(x):
             return gn(x)
