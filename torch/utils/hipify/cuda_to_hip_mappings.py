@@ -1,4 +1,5 @@
 import collections
+import os
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
@@ -23,6 +24,12 @@ Each of the entries in these maps translates a CUDA string to a tuple containing
 ROCm/HIP string, a type and API annotation and - optionally - an annotation if it is not
 supported in ROCm/HIP yet.
 """
+
+_IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
+
+# FBCODE compiles against rccl sources instead of an installed rccl package.
+# The header location is src/rccl.h versus rccl/rccl.h, respectively.
+_RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict(
@@ -603,7 +610,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cufft.h", ("hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
         ("cufftXt.h", ("hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
-        ("<nccl.h>", ("<rccl/rccl.h>", CONV_INCLUDE, API_RUNTIME)),
+        ("<nccl.h>", (_RCCL_HEADER, CONV_INCLUDE, API_RUNTIME)),
         ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
         ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
         ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
