@@ -275,17 +275,6 @@ inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   return true;
 }
 
-// TODO(eqy): remove this once support is added
-inline bool check_for_attn_mask_cudnn(sdp_params const& params, bool debug) {
-  if (params.attn_mask.has_value()) {
-    if (debug) {
-      TORCH_WARN("cuDNN Attention does not support non-null attn_mask.");
-    }
-    return false;
-  }
-  return true;
-}
-
 inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   auto attn_mask = params.attn_mask;
   if (!attn_mask.has_value()) {
