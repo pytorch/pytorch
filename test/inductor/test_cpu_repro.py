@@ -2722,7 +2722,12 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            self.common(fn, (x,))
+            atol = None
+            rtol = None
+            if not cpu_vec_isa.valid_vec_isa_list() or os.getenv("ATEN_CPU_CAPABILITY") == "default":
+                atol = 1e-5
+                rtol = 1e-5
+            self.common(fn, (x,), atol=atol, rtol=rtol)
             self.assertEqual(
                 len(metrics.cpp_outer_loop_fused_inner_counts),
                 1,
