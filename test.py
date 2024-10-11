@@ -5,31 +5,25 @@ import functools
 def make_dynamic(func):
     graph = None
     initialized = False
-
-    @functools.wraps(func)
+    @functools.wraps(func) # keep debug info
     def wrapper(*args):
+        # TODO: Change to using pytrees
         assert all(isinstance(arg, torch.Tensor) for arg in args), "All arguments must be tensors"
-
         nonlocal graph, initialized
-
         if not initialized:
-            g1 = torch.cuda.CUDAGraph()
-            g1.enable_debug_mode() # because we need the graph_t to stick around, not just the graphexec_t
-            with torch.cuda.graph(g1, dynamic_graph=True):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, num_dynamic_args=len(args)):
                 empty_args = [torch.empty_like(arg) for arg in args]
                 func(*empty_args)
                 # empty_args must stay in scope at least until here, so that its allocations can't be reused
-            graph = g1
             initialized = True
-
         # Replay the graph with the actual arguments
         graph.replay_dynamic(list(args))
-
     return wrapper
 
 
 def myFunc(a, b, c):
-    print("myFunc is running") # Can't actually print a,b,c here, because when it's run in capture mode, their data_ptrs are nullptr
+    print("myFunc is running")
 
     # check that simple kernels work:
     a += b.sum() * c
