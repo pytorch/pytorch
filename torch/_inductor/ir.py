@@ -6491,6 +6491,69 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
 
 
 @dataclasses.dataclass
+class InvokeSubgraph(ExternKernel):
+    subgraph: Optional[Subgraph] = None
+    operands: Optional[List[TensorBox]] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self, subgraph: Subgraph, operands: List[TensorBox], layout: MultiOutputLayout
+    ):
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=operands,
+        )
+        self.subgraph = subgraph
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @classmethod
+    def create(cls, subgraph: Subgraph, operands):
+        operands = [cls.realize_input(x) for x in operands]
+
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        if subgraph.graph is None:
+            # create and lower subgraphs
+            subgraph.graph = V.graph.make_subgraph(
+                gm=subgraph.graph_module,
+                example_inputs=fake_operands,
+                subgraph_name=subgraph.name,
+            )
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.run(*fake_operands)
+
+        outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
+        device = operands[0].get_device()
+        invoke_subgraph = InvokeSubgraph(
+            subgraph=subgraph, operands=operands, layout=MultiOutputLayout(device)
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                invoke_subgraph,
+                [(list, i)],
+            )
+            for i, output in enumerate(outputs)
+        ]
+
+        invoke_subgraph.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_invoke_subgraph(self)
+
+
+@dataclasses.dataclass
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
     operands: Optional[List[TensorBox]] = None
