@@ -332,8 +332,8 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
-    TORCH_CHECK(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
@@ -350,7 +350,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                 );
             } else {
                 switch (block_m) {
-                {%- for b in range(block_m - 1, 0, -1) %}
+{%- for b in range(block_m - 1, 0, -1) %}
                 case {{b}}:
                     {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
                         A + m * lda,
@@ -362,9 +362,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                         ldc
                     );
                     break;
-                {%- endfor %}
+{%- endfor %}
                 default:
-                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                    {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
                 }
             }
         }
@@ -409,38 +409,30 @@ inline void {{kernel_name}}_kernel(
         constexpr int col = i % COLS;
 
         if constexpr (col == 0) {
-            {%- if alpha != 1 %}
+{%- if alpha != 1 %}
             va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]) * {{alpha}});
-            {%- else %}
+{%- else %}
             va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]));
-            {%- endif %}
+{%- endif %}
         }
 
         if constexpr (row == 0) {
-            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+{%- if input2_dtype in [torch.bfloat16, torch.float16] %}
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
-            {%- elif input2_dtype == torch.int8 %}
-            // Load 64 int8 elements & convert them into 16 FP32 elements each in 4 vector registers
-            if constexpr (col % 4 == 0) {
-                constexpr auto remaining = std::min<int>(4, COLS - col);
-                {{kernel.unroll_pragma(4)}}
-                for (int idx = 0; idx < remaining; idx++) {
-                    // Convert 16 int8 elements to int32, and then fp32
-                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * 16);
-                    vb[col + idx] = at::vec::convert<float>(b32);
-                }
-            }
-            {%- else %}
+{%- elif input2_dtype == torch.int8 %}
+            // Convert VLEN int8 elements to int32, and then fp32
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
+{%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
-            {%- endif %}
+{%- endif %}
         }
 
         constexpr int idx = row * COLS + col;
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < K; ++k) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
@@ -517,17 +509,17 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
-    TORCH_CHECK(K % 2 == 0, "K dimension must be multiple of 2");
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         int64_t m_tail = m;
         for (int64_t n = 0; n < N; n += {{block_n}}) {
-            {%- for num_rows in range(block_m, 0, -16) %}
-            {%- if num_rows != block_m %}
+{%- for num_rows in range(block_m, 0, -16) %}
+    {%- if num_rows != block_m %}
             else
-            {%- endif %}
+    {%- endif %}
             if (block_m >= {{num_rows}}) {
                 {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
                     amx_state,
@@ -543,7 +535,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                 block_m -= {{num_rows}};
                 m_tail += {{num_rows}};
             }
-            {%- endfor %}
+{%- endfor %}
             if (block_m > 0) {
                 {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
                     amx_state,
@@ -587,20 +579,20 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         amx_state.configure(tilecfg_rows, tail_k_size * sizeof({{input_t}}), {{num_rows}} / 16, {{num_columns}}, loadconfig);
     }
     auto load_c = [&]() {
-    {%- for tile_row in range(num_rows // 16) %}
-        {%- for tile_col in range(num_columns) %}
+{%- for tile_row in range(num_rows // 16) %}
+    {%- for tile_col in range(num_columns) %}
         {%- set tile_idx = tile_row * num_columns + tile_col %}
         _tile_loadd({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc * sizeof({{output_t}}));
-        {%- endfor %}
     {%- endfor %}
+{%- endfor %}
     };
     auto zero_c = [&]() {
-    {%- for tile_row in range(num_rows // 16) %}
-        {%- for tile_col in range(num_columns) %}
+{%- for tile_row in range(num_rows // 16) %}
+    {%- for tile_col in range(num_columns) %}
         {%- set tile_idx = tile_row * num_columns + tile_col %}
         _tile_zero({{tile_idx}});
-        {%- endfor %}
     {%- endfor %}
+{%- endfor %}
     };
 
     if constexpr (accum) {
@@ -609,25 +601,17 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         zero_c();
     }
 
-    {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // create a buffer for tiles of B.
-    // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
-    // as this buffer would be used, so maybe 4 of these should be used?
-    // Since UT output is correct, looks like loop unrolling isn't actually happening.
     alignas(64) {{input_t}} bf16_weights_buf[512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
 
-    // TODO: verify whether or not these lambdas inline
     auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
-        {{kernel.unroll_pragma(2)}}
-        for (int i = 0; i < 2; i++) {
-            // int8 -> int32 -> fp32 -> bf16
-            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
-            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
-            b_bf16.store(dst + i * 16);
-         }
+        auto b_int8 = at::vec::Vectorized<int8_t>::loadu(src, static_cast<int64_t>(32));
+        auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+        b_bf16.store(dst);
     };
 
     auto load_B_in_buf = [&]({{input2_t}}* B_ptr) {
@@ -639,13 +623,13 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             );
         }
     };
-    {%- endif %}
+{%- endif %}
 
     auto compute = [&](int k) {
-    {%- set tile_offset_a = num_rows // 16 * num_columns %}
-    {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
-    {%- for tile_row in range(num_rows // 16) %}
-        {%- for tile_col in range(num_columns) %}
+{%- set tile_offset_a = num_rows // 16 * num_columns %}
+{%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
+{%- for tile_row in range(num_rows // 16) %}
+    {%- for tile_col in range(num_columns) %}
         {%- set tile_idx_a = tile_offset_a + tile_row %}
         {%- set tile_idx_b = tile_offset_b + tile_col %}
         {%- set tile_idx_c = tile_row * num_columns + tile_col %}
@@ -653,20 +637,20 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
-        {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+            {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
         load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
         _tile_loadd({{tile_idx_b}}, bf16_weights_buf, 64);
-        {%- else %}
+            {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
-        {%- endif %}
+            {%- endif %}
         {%- endif %}
         {%- if int8_gemm %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- endif %}
-        {%- endfor %}
     {%- endfor %}
+{%- endfor %}
     };
 
     {{kernel.unroll_pragma(4)}}
@@ -676,12 +660,12 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
     auto store_c = [&]() {
     // store to C
-    {%- for tile_row in range(num_rows // 16) %}
-        {%- for tile_col in range(num_columns) %}
+{%- for tile_row in range(num_rows // 16) %}
+    {%- for tile_col in range(num_columns) %}
         {%- set tile_idx = tile_row * num_columns + tile_col %}
         _tile_stored({{tile_idx}}, C + {{tile_row * 16}} * ldc + {{tile_col * 16}}, ldc * sizeof({{output_t}}));
-        {%- endfor %}
     {%- endfor %}
+{%- endfor %}
     };
 
     // TODO(jgong5): move tail k computation to separate loopnest to save tile configuration overhead
@@ -809,6 +793,14 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
+                if (
+                    config.vec_isa_cls == VecAMX
+                    and m < block_m
+                    and input_dtype == torch.bfloat16
+                    and input2_dtype == torch.int8
+                ):
+                    # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
                 # 2. Dividable by block sizes (block_m, block_n, block_k)

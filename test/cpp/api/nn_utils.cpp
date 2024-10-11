@@ -465,8 +465,7 @@ TEST_F(PackedSequenceTest, WrongOrder) {
 }
 
 TEST_F(PackedSequenceTest, TotalLength) {
-  torch::Tensor padded, lengths;
-  std::tie(padded, lengths) = PackedSequenceTest_padded_sequence(torch::kFloat);
+  auto [padded, lengths] = PackedSequenceTest_padded_sequence(torch::kFloat);
   int64_t max_length = torch::max(lengths).item<int64_t>();
   rnn_utils::PackedSequence packed =
       rnn_utils::pack_padded_sequence(padded, lengths);
@@ -489,13 +488,11 @@ TEST_F(PackedSequenceTest, TotalLength) {
 
   // test that pad_packed_sequence returns results of correct length
   for (bool batch_first : std::vector<bool>{true, false}) {
-    torch::Tensor no_extra_pad, ignored;
-    std::tie(no_extra_pad, ignored) =
-        rnn_utils::pad_packed_sequence(packed, /*batch_first=*/batch_first);
+    auto no_extra_pad = std::get<0>(
+        rnn_utils::pad_packed_sequence(packed, /*batch_first=*/batch_first));
     for (int64_t total_length_delta : std::vector<int64_t>{0, 1, 8}) {
       int64_t total_length = max_length + total_length_delta;
-      torch::Tensor unpacked, lengths_out;
-      std::tie(unpacked, lengths_out) = rnn_utils::pad_packed_sequence(
+      auto [unpacked, lengths_out] = rnn_utils::pad_packed_sequence(
           packed,
           /*batch_first=*/batch_first,
           /*padding_value=*/0.0,
@@ -523,8 +520,7 @@ TEST_F(PackedSequenceTest, TotalLength) {
 
 TEST_F(PackedSequenceTest, To) {
   for (bool enforce_sorted : std::vector<bool>{true, false}) {
-    torch::Tensor padded, lengths;
-    std::tie(padded, lengths) = PackedSequenceTest_padded_sequence(torch::kInt);
+    auto [padded, lengths] = PackedSequenceTest_padded_sequence(torch::kInt);
     rnn_utils::PackedSequence a = rnn_utils::pack_padded_sequence(
                                       padded,
                                       lengths,
@@ -731,9 +727,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       std::vector<int64_t> sorted_lengths = std::get<0>(test_case);
       bool should_shuffle = std::get<1>(test_case);
 
-      torch::Tensor padded, lengths, expected_data, batch_sizes,
-          unsorted_indices;
-      std::tie(padded, lengths, expected_data, batch_sizes, unsorted_indices) =
+      auto [padded, lengths, expected_data, batch_sizes, unsorted_indices] =
           generate_test_case(sorted_lengths, should_shuffle);
 
       auto src = padded;
@@ -755,8 +749,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
           torch::allclose(packed.unsorted_indices(), unsorted_indices));
 
       // test inverse
-      torch::Tensor unpacked, unpacked_len;
-      std::tie(unpacked, unpacked_len) =
+      auto [unpacked, unpacked_len] =
           rnn_utils::pad_packed_sequence(packed, /*batch_first=*/batch_first);
       ASSERT_TRUE(torch::allclose(unpacked, src));
       ASSERT_TRUE(torch::allclose(unpacked_len, lengths));

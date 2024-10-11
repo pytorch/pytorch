@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -87,8 +87,11 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
+        origins: List[List[Tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
+        self.aot_graph_cls_name: Optional[str] = None
+        self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
@@ -97,12 +100,14 @@ class AutogradCompilerInstance:
             for name in self.graph_placeholders
         )
 
+        self.stack.enter_context(preserve_node_meta())
+        inputs_origins, sizes_origins, scalars_origins = origins
         # tensor inputs to fake tensors
         inputs = [
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        self.bind_tensors_to_proxies(inputs, args_proxy)
+        self.bind_tensors_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints
         sizes = [
@@ -113,7 +118,7 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy)
+        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -135,14 +140,13 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy)
+        self.bind_tensors_to_proxies(scalars, scalars_proxy, scalars_origins)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
-        self.stack.enter_context(preserve_node_meta())
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -180,7 +184,7 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def proxy_call_hook(self, hook, *args):
+    def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
@@ -188,7 +192,7 @@ class AutogradCompilerInstance:
                 hook,
                 *[self.to_proxy(x) for x in args],
             ),
-            {},
+            kwargs,
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
@@ -197,6 +201,7 @@ class AutogradCompilerInstance:
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
+            hook_type="tensor_pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs[i] = maybe_clone(inputs[i])
@@ -209,6 +214,7 @@ class AutogradCompilerInstance:
         proxies = self.proxy_call_hook(
             hook,
             inputs,
+            hook_type="pre_hook",
         )
         with disable_proxy_modes_tracing():
             inputs = [maybe_clone(x) for x in inputs]
@@ -222,6 +228,7 @@ class AutogradCompilerInstance:
             hook,
             outputs,
             inputs,
+            hook_type="post_hook",
         )
         with disable_proxy_modes_tracing():
             outputs = [maybe_clone(x) for x in outputs]
@@ -232,13 +239,14 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxies = self.proxy_call_hook(
+        proxy = self.proxy_call_hook(
             hook,
             input,
+            hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, proxies)
+            self.bind_tensors_to_proxies(input, [proxy])
         return input
 
     # Note: [Compiled autograd and cudagraphs]
@@ -300,6 +308,7 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
@@ -309,15 +318,15 @@ class AutogradCompilerInstance:
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
-        compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
+        lazy_graph_code = lazy_format_graph_code(
+            "Compiled autograd graph",
+            graph,
+            include_device=True,
+            include_stride=True,
+            colored=True,
         )
-        verbose_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True, colored=True
-            ),
-        )
+        compiled_autograd_log.info("%s", lazy_graph_code)
+        verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -330,11 +339,102 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                return compiled_fn(inputs, sizes, scalars, hooks)
+                with disable():
+                    return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
 
         return runtime_wrapper, self.compiler_fn(graph)
+
+    def rename_aot_dispatcher_nodes(self):
+        """
+        Renames nodes as they appear in the AOTDispatcher backward graphs, prefixed by AOT id
+        e.g. AOTDispatcher backward graph X's `sin_Y` -> `aotX_sin_Y`
+        """
+        if self.aot_graph_cls_name is None:
+            return
+
+        def is_similar(ca: torch.fx.node.Node, aot: torch.fx.node.Node):
+            # 1. comparing using target (for aten ops)
+            target_match = ca.target == aot.target
+            if not target_match:
+                # 2. comparing using name (for HOPs)
+                target_match = (
+                    hasattr(ca.target, "__name__")
+                    and hasattr(aot.target, "__name__")
+                    and ca.target.__name__ == aot.target.__name__
+                )
+            if (
+                not target_match
+                and hasattr(ca.target, "name")
+                and hasattr(aot.target, "name")
+                and aot.target.name() == "aten::reshape"
+                and hasattr(aot.meta.get("original_aten"), "name")
+            ):
+                # 3. undo view_to_reshape post grad pass
+                target_match = ca.target.name() == aot.meta["original_aten"].name()
+
+            return (
+                target_match
+                and ca.op == aot.op
+                and ca.type == aot.type
+                and len(ca.all_input_nodes) == len(aot.all_input_nodes)
+            )
+
+        for nodecall_index, info in self.aot_graph_infos.items():
+            ca_node_start_idx = info["ca_node_start_idx"]
+            aot_id = info["aot_id"]
+            aot_graph = info["aot_gm"].graph
+
+            # 1. Find the first op from user code in the AOT graph
+            aot_it = iter(aot_graph.nodes)
+            aot_node = next(aot_it)
+            assert aot_node is not None
+            try:
+                while aot_node.op != "call_function":
+                    aot_node = next(aot_it)
+            except StopIteration:
+                continue
+
+            try:
+                # 2. Find the first op in the compiled autograd graph segment
+                ca_it = iter(self.fx_tracer.graph.nodes)
+                for _ in range(ca_node_start_idx):
+                    next(ca_it)
+                ca_node = next(ca_it)
+
+                # Graphs should all end with output node
+                while ca_node.op != "output" and not is_similar(ca_node, aot_node):
+                    # The compiled autograd graph may contain lazily inserted ops
+                    # We skip those when aligning nodes
+                    ca_node = next(ca_it)
+
+                # 3. Keep alligned and rename nodes
+                while aot_node.op != "output" and ca_node.op != "output":
+                    if not ca_node.users:
+                        # TODO: DCE for compiled autograd graph
+                        ca_node = next(ca_it)
+                        continue
+
+                    if not is_similar(ca_node, aot_node):
+                        # There should be no lazily inserted ops in the middle of a match
+                        # So any deviation is an error
+                        raise StopIteration
+
+                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    for i, inp in enumerate(aot_node.all_input_nodes):
+                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+
+                    aot_node = next(aot_it)
+                    ca_node = next(ca_it)
+            except StopIteration:
+                verbose_log.debug(
+                    "Failed to match %s%s (NodeCall %s) nodes with AOT backward graph %s nodes",
+                    self.aot_graph_cls_name,
+                    aot_id,
+                    nodecall_index,
+                    aot_id,
+                )
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -362,9 +462,21 @@ class AutogradCompilerInstance:
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
 
-    def bind_tensors_to_proxies(self, tensors, proxies):
+    def bind_tensors_to_proxies(
+        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+    ):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]
+            if origins:
+                assert len(origins) == len(tensors)
+                bound_proxies = []
+                for i in range(len(tensors)):
+                    nodecall_index, node_name = origins[i]
+                    self.set_node_origin(node_name, nodecall_index, None)
+                    bound_proxies.append(proxies[i])  # type: ignore[index]
+                proxies = bound_proxies
+            else:
+                proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
@@ -375,9 +487,27 @@ class AutogradCompilerInstance:
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 
-    def set_node_origin(self, node_name, node_index):
+    def set_node_origin(
+        self,
+        node_name: str,
+        nodecall_index: int,
+        pyobj: Optional[torch.autograd.Function],
+    ):
+        maybe_aot_id = ""
+        if pyobj is not None:
+            forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
+            if hasattr(forward_cls, "_aot_id"):
+                # backward was created by AOT Dispatcher
+                self.aot_graph_cls_name = node_name
+                maybe_aot_id = forward_cls._aot_id
+                self.aot_graph_infos[nodecall_index] = {
+                    "ca_node_start_idx": len(self.fx_tracer.graph.nodes),
+                    "aot_id": maybe_aot_id,
+                    "aot_gm": forward_cls._lazy_backward_info.bw_module,
+                }
+
+        new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
-        new_code = f"{node_name} (NodeCall {node_index})"
         new_stack_trace = raw_stack_trace.replace(
             "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
         )
@@ -393,6 +523,10 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def enable(compiler_fn):
+    # we need to import this, because user might not have imported it if they directly use this context manager
+    # we need to lazily import it, because of circular dependencies
+    import torch._inductor.cudagraph_trees
+
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
