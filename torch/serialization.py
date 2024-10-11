@@ -53,6 +53,8 @@ __all__ = [
     "load",
     "StorageType",
     "LoadEndianness",
+    "get_default_crc32_options",
+    "set_default_crc32_options",
     "get_default_load_endianness",
     "set_default_load_endianness",
     "get_default_mmap_options",
@@ -186,9 +188,9 @@ def set_default_crc32_options(compute_crc32: bool):
     Set whether :func:`torch.save` computes and writes crc32 for each record.
 
     .. note::
-        Setting this to ``False`` may make unzip of the ``torch.save`` output
+        Setting this to ``False`` may make unzipping of the ``torch.save`` output
         fail or warn due to corrupted CRC32. However ``torch.load`` will be
-        able to load the file correctly.
+        able to load the file.
 
     Args:
         compute_crc32: ``True`` or ``False``
