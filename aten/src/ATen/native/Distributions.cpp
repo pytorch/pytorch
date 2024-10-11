@@ -23,6 +23,7 @@
 #include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
+#include <ATen/ops/_assert_async.h>
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/binomial_native.h>
@@ -585,19 +586,15 @@ Tensor& multinomial_out(const Tensor& self,
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
-    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
-    TORCH_CHECK(
-        is_valid.to<bool>(),
-        "probability tensor contains either `inf`, `nan` or element < 0");
-    bool zero_prob_condition = false;
+    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0));
+    at::_assert_async(is_valid, "probability tensor contains either `inf`, `nan` or element < 0");
+    at::Tensor zero_prob_condition;
     if (self.dim() == 1){
-      zero_prob_condition = (self.sum() == 0).item().to<bool>();
+      zero_prob_condition = (self.sum() == 0);
     } else {
-      zero_prob_condition = (self.sum(1) == 0).sum().item().to<bool>();
+      zero_prob_condition = (self.sum(1) == 0).any();
     }
-    TORCH_CHECK(
-        !zero_prob_condition,
-        "invalid multinomial distribution (sum of probabilities <= 0)");
+    at::_assert_async(~zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
     // The algorithm is from gumbel softmax.
     // s = argmax( logp - log(-log(eps)) ) where eps ~ U(0, 1)

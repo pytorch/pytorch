@@ -49,10 +49,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
-      # For sccache access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      DESIRED_PYTHON: "3.9"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -104,7 +101,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
@@ -124,7 +121,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
