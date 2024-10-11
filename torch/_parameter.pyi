@@ -13,8 +13,8 @@ class _ParameterMeta(_TensorMeta):
 class Parameter(Tensor, metaclass=_ParameterMeta):
     def __init__(
         self,
-        *,
         data: Tensor | None = None,
+        *,
         requires_grad: bool = True,
     ) -> None: ...
 
