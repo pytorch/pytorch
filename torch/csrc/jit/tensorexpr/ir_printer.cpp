@@ -44,6 +44,15 @@ std::string IRPrinter::to_string(CompareSelectOperation op) {
   }
 }
 
+void IRPrinter::PrinterStream::initialize_imbue() {
+  // Similar to https://github.com/pytorch/pytorch/issues/79583:
+  // global locale can be set to something other than "C", which can add
+  // extra commas in the printed numbers.
+  static std::locale c_locale("C");
+  // note: IRPrinter is a subclass of ostream, so imbue is a member function.
+  imbue(c_locale);
+}
+
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
 template <
