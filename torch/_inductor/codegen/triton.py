@@ -25,6 +25,7 @@ from typing import (
 import sympy
 
 import torch
+import torch._inductor.metrics as metrics
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -38,10 +39,10 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
+from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -1357,20 +1358,16 @@ class TritonKernel(SIMDKernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
+        threshold = {
+            ReductionHint.INNER: 1024,
+        }.get(self.reduction_hint, 64)
 
-        if config.triton.force_persistent_reductions_threshold:
-            threshold = config.triton.force_persistent_reductions_threshold
-        else:
-            threshold = {
-                ReductionHint.INNER: 1024,
-            }.get(self.reduction_hint, 64)
-            # If multi_kernel is enabled, we do more aggressive persistent reduction.
-            # This may result in some persistent reductions slower than the
-            # corresponding non-persistent reductions. MultiKernel will do benchmarking
-            # to pick the faster one.
-            if config.triton.multi_kernel:
-                threshold *= 16
-
+        # If multi_kernel is enabled, we do more aggressive persistent reduction.
+        # This may result in some persistent reductions slower than the
+        # corresponding non-persistent reductions. MultiKernel will do benchmarking
+        # to pick the faster one.
+        if config.triton.multi_kernel:
+            threshold *= 16
         last_numel = self.numels[-1]
         return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
@@ -3102,6 +3099,14 @@ class TritonScheduling(SIMDScheduling):
             )
         )
 
+    def __init__(self, scheduler: Scheduler) -> None:
+        super().__init__(scheduler)
+        if scheduler is None or not hasattr(scheduler, "nodes"):
+            return
+        for node in scheduler.nodes:
+            if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
+                node.debug_device_str = debug_triton_code
+
     @classmethod
     def get_backend_features(cls, device: torch.device):
         return cls.backend_features
@@ -3178,8 +3183,8 @@ class TritonScheduling(SIMDScheduling):
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if
             # padding helps with the perf kernel by kernel.
-            if is_metric_table_enabled("kernel_metadata"):
-                log_kernel_metadata(kernel_name, kernel_path, src_code)
+            if metrics.is_metric_table_enabled("kernel_metadata"):
+                metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
 
         return kernel_name
 
@@ -3350,3 +3355,33 @@ class TritonScheduling(SIMDScheduling):
         V.graph.removed_buffers = removed_buffers_orig
         V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
+
+
+def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
+    lines = []
+    multi_template = node.get_template_node()
+    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
+    if multi_template and multi_template.make_kernel_render is None:
+        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
+    else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        device = node.get_device()
+        backend = node.scheduler.get_backend(device)
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        V.graph.scheduler.current_device = device
+
+        # Don't increment kernel count when generating debug string.
+        # This will confuse some unit tests that check the number of
+        # generated kernels.
+        old_generated_kernel_count = metrics.generated_kernel_count
+        triton_code = backend.generate_kernel_code_from_nodes(node.get_nodes()).strip()
+        metrics.generated_kernel_count = old_generated_kernel_count
+
+        lines.append(f"{node.get_name()} Triton code:")
+        lines.append(textwrap.indent(triton_code, "    "))
+    return lines
