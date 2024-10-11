@@ -93,7 +93,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor(self):
-        
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
         """
