@@ -731,32 +731,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             ng.broadcast(tensor, 0)
             self.assertEqual(backend.comm_split_count(), 1)
 
-    @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @skip_but_pass_in_sandcastle_if(
-        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
-    )
-    def test_3d_mesh_with_cudaevent_cache(self):
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "25364"
-        os.environ["WORLD_SIZE"] = "8"
-        os.environ["RANK"] = f"{self.rank}"
-        from torch.distributed.device_mesh import init_device_mesh
-        mesh_shape = (2, 2, 2)
-        mesh_3d = init_device_mesh(
-            "cuda", mesh_shape, mesh_dim_names=("dp", "tp", "pp")
-        )
-
-        mesh_3d.get_group("dp")
-        mesh_3d.get_group("tp")
-        mesh_3d.get_group("pp")
-        device = torch.device("cuda:%d" % self.rank)
-        tensors = [
-            torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
-            for i in range(5)
-        ]
-        torch.distributed.all_reduce_coalesced(tensors, group=mesh_3d.get_group("dp"))
-
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @skip_but_pass_in_sandcastle_if(
@@ -4559,6 +4533,63 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.barrier(pg)
         torch.cuda.synchronize()
         dist.destroy_process_group()
+
+
+class ProcessGroupNCCLMultiDimsTest(MultiProcessTestCase):
+    def _init_process_group_nccl(self, store, device_id=None):
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device_id,
+        )
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "3"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 8
+
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
+    )
+    def test_3d_mesh_with_cudaevent_cache(self):
+        torch.cuda.set_device(self.rank)
+        print(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._init_process_group_nccl(store)
+        from torch.distributed.device_mesh import init_device_mesh
+        mesh_shape = (2, 2, 2)
+        mesh_3d = init_device_mesh(
+            "cuda", mesh_shape, mesh_dim_names=("dp", "tp", "pp")
+        )
+
+        mesh_3d.get_group("dp")
+        mesh_3d.get_group("tp")
+        mesh_3d.get_group("pp")
+        device = torch.device("cuda:%d" % self.rank)
+        tensors = [
+            torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
+            for i in range(5)
+        ]
+        torch.distributed.all_reduce_coalesced(tensors, group=mesh_3d.get_group("dp"))
 
 
 if __name__ == "__main__":
