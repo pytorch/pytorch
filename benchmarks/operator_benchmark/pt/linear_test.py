@@ -1,5 +1,6 @@
-import operator_benchmark as op_bench
 from pt import configs
+
+import operator_benchmark as op_bench
 
 import torch
 import torch.nn as nn

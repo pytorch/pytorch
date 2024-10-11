@@ -1166,6 +1166,10 @@ struct AttentionKernel {
       auto lse_dim = ceil_div((int32_t)p.num_queries, kAlignLSE) * kAlignLSE;
       constexpr float kLog2e = 1.4426950408889634074; // log_2(e) = M_LOG2E
       if (thread_id() < p.num_queries) {
+        // We set fully masked out rows to 0, the sumexp for masked out rows will be 0
+        // We update it to be 1 prior to calling log so that log(1) = 0
+        s_prime[thread_id()] = (s_prime[thread_id()] == 0) ? 1: s_prime[thread_id()];
+        mi[thread_id()] = (mi[thread_id()] == -cutlass::platform::numeric_limits<accum_t>::infinity()) ? 0: mi[thread_id()];
         p.logsumexp_ptr[thread_id()] = accum_t(mi[thread_id()] / kLog2e) +
             cutlass::fast_log(accum_t(s_prime[thread_id()]));
       } else if (thread_id() < lse_dim) {

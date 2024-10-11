@@ -63,11 +63,9 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
-  auto size =
-      PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(
-        index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    PyObject* obj = PyTuple_GET_ITEM(index, i);
     if (check_has_torch_function(obj))
       return -1;
     if (THPVariable_Check(obj)) {
@@ -80,7 +78,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
       }
     } else if (
         obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
-        obj != Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+        obj != Py_False) {
       count++;
     }
   }
@@ -180,8 +178,7 @@ static inline Variable applySlicing(
     const at::Device& self_device,
     const std::optional<int64_t>& self_ndim,
     int64_t specified_dims) {
-  int64_t size =
-      PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
 
   // See NOTE [nested tensor size for indexing]
@@ -194,8 +191,7 @@ static inline Variable applySlicing(
 
   Variable result = self;
   for (const auto i : c10::irange(size)) {
-    PyObject* obj = PyTuple_GET_ITEM(
-        index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    PyObject* obj = PyTuple_GET_ITEM(index, i);
     // NOTE [nested tensor size for indexing]
     // nested tensor does not have a size (yet) so for now we represent its size
     // as null may need to be changed after we reach a better solution for
@@ -322,8 +318,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
   if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
   } else {
-    res = PyTuple_Pack(
-        1, index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    res = PyTuple_Pack(1, index);
   }
   if (!res)
     throw python_error();
@@ -464,7 +459,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   // handle simple types: ellipsis, none, bool
-  if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  if (index == Py_False) {
     // do nothing for false (technically we should check the size, but we don't
     // have real 0-sized shapes.
     return 0;
@@ -493,7 +488,6 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
     return 0;
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
