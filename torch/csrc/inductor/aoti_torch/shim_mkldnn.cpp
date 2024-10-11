@@ -235,7 +235,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> scalars_list;
+    std::vector<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));

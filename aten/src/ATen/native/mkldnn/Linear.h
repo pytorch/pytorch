@@ -12,7 +12,7 @@ C10_API Tensor mkldnn_linear_pointwise(
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
     std::string attr,
-    c10::List<std::optional<at::Scalar>> scalars,
+    std::vector<std::optional<at::Scalar>> scalars,
     std::optional<std::string> algorithm);
 
 C10_API Tensor mkldnn_linear_pointwise_binary(
@@ -20,7 +20,7 @@ C10_API Tensor mkldnn_linear_pointwise_binary(
     const Tensor& other_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    c10::string_view attr);
+    std::string attr);
 
 } // namespace native
 } // namespace at

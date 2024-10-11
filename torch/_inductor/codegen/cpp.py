@@ -126,7 +126,7 @@ PYTHON_TO_CPP = {
 }
 
 CONTAINER_PYTHON_TO_CPP = {
-    "List": "torch::List",  # TODO: std::vector or torch::List ?
+    "List": "std::vector",
     "Optional": "std::optional",
 }
 
