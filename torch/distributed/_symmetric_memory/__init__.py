@@ -3,6 +3,7 @@ import socket
 import uuid
 from contextlib import contextmanager
 from datetime import timedelta
+from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -133,25 +134,32 @@ def _get_backend_stream() -> torch.cuda.Stream:
     return _backend_stream
 
 
-def _pipelined_all_gather_and_consume(
-    shard: torch.Tensor,
-    shard_consumer: Callable[[torch.Tensor, int], None],
-    ag_out: torch.Tensor,
+def _pipelined_multi_all_gather_and_consume(
+    shard: List[torch.Tensor],
+    shard_consumer: Callable[[List[torch.Tensor], int], None],
+    gathered_out: List[torch.Tensor],
     group_name: str,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        tensor = all_gather_tensor(shard, gather_dim=1, group=group)
-        chunks = tensor.chunk(group.size())
-        for src_rank, chunk in enumerate(chunks):
-            shard_consumer(chunk, src_rank)
+        gathered = [
+            all_gather_tensor(x, gather_dim=0, group=group)
+            for x in shard
+        ]
 
-    NOTE:
-    - The shard passed to shard consumer will always be contiguous.
+        shards = [[] for _ in range(group_size)]
+        for x in gathered_out:
+            for i, y in enumerate(x.chunk(group_size)):
+                shards[i].append(y)
+
+        for src_rank, shard in enumerate(shards):
+            shard_consumer(shard, src_rank)
     """
-    p2p_workspace_size_req = shard.numel() * shard.element_size()
+    p2p_workspace_size_req = 0
+    for x in shard:
+        p2p_workspace_size_req += x.numel() * x.element_size()
     symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
     group_size = symm_mem.world_size
     rank = symm_mem.rank
@@ -159,17 +167,52 @@ def _pipelined_all_gather_and_consume(
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
     backend_stream.wait_stream(torch.cuda.current_stream())
-    local_p2p_buf = symm_mem.get_buffer(rank, shard.shape, shard.dtype)
 
-    chunks = ag_out.chunk(group_size)
+    for x, y in zip(shard, gathered_out):
+        assert x.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `shard` must be contiguous"
+        )
+        assert y.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `gathered_out` must be contiguous"
+        )
+        assert x.shape[0] * group_size == y.shape[0]
+        assert x.shape[1:] == y.shape[1:]
 
-    # While consuming local shard, copy it to the local p2p buffer
-    # in another stream.
+    def copy_shard(dst: List[torch.Tensor], src: List[torch.Tensor]) -> None:
+        for d, s in zip(dst, src):
+            d.copy_(s)
+
+    def get_p2p_bufs(remote_rank: int) -> List[torch.Tensor]:
+        offset_bytes = 0
+        bufs = []
+        for x in shard:
+            buf = symm_mem.get_buffer(
+                remote_rank,
+                x.shape,
+                x.dtype,
+                storage_offset=offset_bytes // x.element_size(),
+            )
+            bufs.append(buf)
+            offset_bytes += buf.numel() * buf.element_size()
+        return bufs
+
+    local_p2p_bufs = get_p2p_bufs(rank)
+
+    # shards[i] => shard from rank i
+    shards: List[List[torch.Tensor]] = [[] for _ in range(group_size)]
+    for x in gathered_out:
+        for i, y in enumerate(x.chunk(group_size)):
+            shards[i].append(y)
+
+    # While consuming the local shard, copy it to the local p2p buffer in
+    # another stream.
     shard_consumer(shard, rank)
-    chunks[rank].copy_(shard)
+    copy_shard(dst=shards[rank], src=shard)
 
     with torch.cuda.stream(backend_stream):
-        local_p2p_buf.copy_(shard)
+        copy_shard(dst=local_p2p_bufs, src=shard)
         symm_mem.barrier(channel=1)
     torch.cuda.current_stream().wait_stream(backend_stream)
 
@@ -182,13 +225,40 @@ def _pipelined_all_gather_and_consume(
         else:
             stream = backend_stream
         remote_rank = (step + rank) % group_size
-        remote_p2p_buf = symm_mem.get_buffer(remote_rank, shard.shape, shard.dtype)
+        remote_p2p_bufs = get_p2p_bufs(remote_rank)
         with torch.cuda.stream(stream):
-            chunks[remote_rank].copy_(remote_p2p_buf)
-            shard_consumer(chunks[remote_rank], remote_rank)
+            copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
+            shard_consumer(shards[remote_rank], remote_rank)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
+
+
+def _pipelined_all_gather_and_consume(
+    shard: torch.Tensor,
+    shard_consumer: Callable[[torch.Tensor, int], None],
+    ag_out: torch.Tensor,
+    group_name: str,
+) -> None:
+    """
+    Perform the following logic with micro-pipelined computation and
+    communication:
+
+        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
+        shards = ag_out.chunk(group.size())
+        for src_rank, shard in enumerate(shards):
+            shard_consumer(shard, src_rank)
+    """
+
+    def adapter(shard: List[torch.Tensor], rank: int) -> None:
+        shard_consumer(shard[0], rank)
+
+    _pipelined_multi_all_gather_and_consume(
+        [shard],
+        adapter,
+        [ag_out],
+        group_name,
+    )
 
 
 def _pipelined_produce_and_all2all(
@@ -286,10 +356,44 @@ lib.define(
 )
 
 
+class _ScaleMode(Enum):
+    UNSCALED = "unscaled"
+    TENSOR_WISE = "tensor-wise"
+    ROW_WISE_SHARDED = "row-wise-sharded"
+    ROW_WISE_REPLICATED = "row-wise-replicated"
+
+
+def _check_and_verify_fp8_all_gather_scale_mode(
+    shard: torch.Tensor, scale: Optional[torch.Tensor], gather_dim: int, group_size: int
+) -> _ScaleMode:
+    full_shape = list(shard.shape)
+    full_shape[gather_dim] *= group_size
+
+    if scale is None:
+        return _ScaleMode.UNSCALED
+    elif scale.shape[:-1] == shard.shape[:-1] and scale.shape[-1] == 1:
+        # Row-wise scaling
+        #
+        # NOTE: when the last dim of both A_shard and A_scale is one, we can't
+        # tell if A_scale is replicated tensor-wise scale or sharded row-wise
+        # scale. Treating it as row-wise scaling for safety.
+        return _ScaleMode.ROW_WISE_SHARDED
+    elif scale.numel() == 1:
+        return _ScaleMode.TENSOR_WISE
+    elif list(scale.shape[:-1]) == full_shape[:-1]:
+        return _ScaleMode.ROW_WISE_REPLICATED
+    else:
+        raise ValueError(
+            "Invalid scale shape for fp8 all-gather "
+            f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
+        )
+
+
 def _fused_all_gather_matmul_impl(
     mm_out_op: torch._ops.OpOverload,
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
+    A_scale: Optional[torch.Tensor],
     kwargs_list: List[Dict[str, Any]],
     out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
@@ -313,36 +417,96 @@ def _fused_all_gather_matmul_impl(
     # The flattened tensor doesn't need to be contiguous (for computation
     # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
     # passed to shard_consumer are contiguous.
-    x = A_shard.movedim(gather_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    x = x.flatten(0, -2)
+    A_shard_flat = A_shard.movedim(gather_dim, 0)
+    leading_dims = [group.size()] + list(A_shard_flat.shape[:-1])
+    A_shard_flat = A_shard_flat.flatten(0, -2)
 
     # Helper function for reverting the above transformation
     def unflatten(t: torch.Tensor) -> torch.Tensor:
         return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
 
-    ag_out = x.new_empty(
-        x.shape[0] * group.size(),
-        x.shape[1],
+    A_flat = A_shard_flat.new_empty(
+        A_shard_flat.shape[0] * group.size(),
+        A_shard_flat.shape[1],
     )
+
     outputs = [
-        x.new_empty(x.shape[0] * group.size(), B.shape[1], dtype=out_dtype or B.dtype)
+        A_flat.new_empty(A_flat.shape[0], B.shape[1], dtype=out_dtype or B.dtype)
         for B, out_dtype in zip(Bs, out_dtypes)
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
-    # Computing block-wise matmul along the first dim of A
-    def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-        for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
-            mm_out_op(shard, B, **kwargs, out=output_shards[idx][rank])
-
-    _pipelined_all_gather_and_consume(
-        x,
-        shard_consumer,
-        ag_out,
-        group_name,
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group.size()
     )
-    return unflatten(ag_out), [unflatten(output) for output in outputs]
+
+    # Computing block-wise matmul along the first dim of A
+    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+        assert A_scale is not None
+        A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        A_scale_flat = A_scale_shard.new_empty(
+            A_scale_shard.shape[0] * group.size(),
+            A_scale_shard.shape[1],
+        )
+
+        def row_wise_sharded_consumer(shard: List[torch.Tensor], rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(
+                    shard[0],
+                    B,
+                    scale_a=shard[1],
+                    **kwargs,
+                    out=output_shards[idx][rank],
+                )
+
+        _pipelined_multi_all_gather_and_consume(
+            [A_shard_flat, A_scale_shard],
+            row_wise_sharded_consumer,
+            [A_flat, A_scale_flat],
+            group_name,
+        )
+    elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
+        assert A_scale is not None
+        A_scale_shards = (
+            A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
+        )
+
+        def row_wise_replicated_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(
+                    shard,
+                    B,
+                    scale_a=A_scale_shards[rank],
+                    **kwargs,
+                    out=output_shards[idx][rank],
+                )
+
+        _pipelined_all_gather_and_consume(
+            A_shard_flat,
+            row_wise_replicated_consumer,
+            A_flat,
+            group_name,
+        )
+    else:
+        if scale_mode == _ScaleMode.TENSOR_WISE:
+            assert A_scale is not None
+            for kwargs in kwargs_list:
+                kwargs["scale_a"] = A_scale
+        else:
+            assert scale_mode == _ScaleMode.UNSCALED
+
+        def default_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(shard, B, **kwargs, out=output_shards[idx][rank])
+
+        _pipelined_all_gather_and_consume(
+            A_shard_flat,
+            default_consumer,
+            A_flat,
+            group_name,
+        )
+
+    return unflatten(A_flat), [unflatten(output) for output in outputs]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
@@ -388,6 +552,7 @@ def _fused_all_gather_matmul(
             torch.ops.aten.mm.out,
             A_shard,
             Bs,
+            None,
             [{} for B in Bs],
             [B.dtype for B in Bs],
             gather_dim,
@@ -417,6 +582,25 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = torch.ops._c10d_functional.wait_tensor(A)
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group_size
+    )
+    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+        A_scale_shard = A_scale
+        A_scale = torch.ops._c10d_functional.all_gather_into_tensor(
+            A_scale.contiguous(), group_size, group_name
+        )
+        A_scale = torch.ops._c10d_functional.wait_tensor(A_scale)
+        A_scale = (
+            A_scale.view(group_size, *A_scale_shard.shape)
+            .movedim(gather_dim + 1, 1)
+            .flatten(0, -2)
+        )
+    elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
+        A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+    else:
+        assert scale_mode == _ScaleMode.TENSOR_WISE
+
     def scaled_matmul(
         A: torch.Tensor,
         B: torch.Tensor,
@@ -429,7 +613,14 @@ def _fused_all_gather_scaled_matmul_fallback(
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(
-            A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+            A.flatten(0, -2),
+            B,
+            A_scale,
+            B_scale,
+            bias,
+            result_scale,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
         )
         return res.unflatten(0, leading_dims)
 
@@ -465,7 +656,10 @@ def _fused_all_gather_scaled_matmul(
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
 
-    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
+    The input `A_scale` can be tensor-wise, row-wise-sharded or
+    row-wise-replicated.
+
+    Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
@@ -499,9 +693,9 @@ def _fused_all_gather_scaled_matmul(
             torch.ops.aten._scaled_mm.out,
             A_shard,
             Bs,
+            A_scale,
             [
                 {
-                    "scale_a": A_scale,
                     "scale_b": B_scale,
                     "bias": bias,
                     "scale_result": result_scale,
