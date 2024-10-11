@@ -73,7 +73,7 @@ class immutable_dict(Dict[_KT, _VT]):
     pop = _no_mutation
     popitem = _no_mutation
     setdefault = _no_mutation
-    update = _no_mutation
+    update = _no_mutation  # type: ignore[assignment]
 
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self.items()))
