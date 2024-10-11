@@ -30,8 +30,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-import time
-from torch.utils import cpp_extension
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -250,28 +248,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
 
-        cpp_source = """
-torch::Tensor create_alias_of_tensor(torch::Tensor x) {
-  return at::from_blob(x.data_ptr(), x.sizes(), x.options());
-}
-
-TORCH_LIBRARY(test_eager_async_allreduce_inductor_wait, m) {
-  m.def("create_alias_of_tensor", create_alias_of_tensor);
-}
-        """
-
-        module = torch.utils.cpp_extension.load_inline(
-            name="test_eager_async_allreduce_inductor_wait",
-            cpp_sources=cpp_source,
-            functions="create_alias_of_tensor",
-            verbose=True,
-        )
-
         def all_reduce_eager(x):
             y = x * x
-            for _ in range(15):
-                req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
-                # assert isinstance(req, torch.distributed.Work)
+            req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
+            assert isinstance(req, torch.distributed.Work)
             return req, y
 
         def all_reduce_wait(inputs):  # potentially compiled
@@ -281,7 +261,9 @@ TORCH_LIBRARY(test_eager_async_allreduce_inductor_wait, m) {
                 torch.ops.c10d_functional.wait_tensor(y)
             else:
                 req.wait()
-            return y
+            # Under compile, if `wait_tensor(y)` above is correctly executed,
+            # `y`'s data is in its final form and the computation output here will match eager.
+            return y * y
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             all_reduce_wait_compiled = torch.compile(
@@ -290,37 +272,14 @@ TORCH_LIBRARY(test_eager_async_allreduce_inductor_wait, m) {
                 fullgraph=True,
             )
             inputs = torch.ones(12800, 12800, device="cuda") + self.rank
-            for _ in range(15):
+            for _ in range(10):
                 out_ref = all_reduce_wait(all_reduce_eager(inputs))
 
-            from torch.profiler import profile, ProfilerActivity
-
-            def trace_handler(p):
-                trace_file_path = f"trace_{str(p.step_num)}_rank{self.rank}.json"
-                print(trace_file_path)
-                p.export_chrome_trace(trace_file_path)
-
-            my_schedule = torch.profiler.schedule(
-                wait=5,
-                warmup=5,
-                active=6
-            )
-            prof = profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler,
-                with_stack=True,
-            )
-
-            for _ in range(15):
+            for _ in range(10):
                 out_compiled = all_reduce_wait_compiled(all_reduce_eager(inputs))
-                prof.step()
-            out_compiled_aliased = torch.ops.test_eager_async_allreduce_inductor_wait.create_alias_of_tensor(
-                out_compiled,
-            )
-            self.assertEqual(out_ref, out_compiled_aliased)
-            prof.step()
-            
+
+            self.assertEqual(out_ref, out_compiled)
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
