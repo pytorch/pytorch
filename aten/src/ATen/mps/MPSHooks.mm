@@ -10,7 +10,7 @@
 
 namespace at::mps {
 
-void MPSHooks::init() const {
+void MPSHooks::initMPS() const {
   C10_LOG_API_USAGE_ONCE("aten.init.mps");
   // TODO: initialize MPS devices and streams here
 }

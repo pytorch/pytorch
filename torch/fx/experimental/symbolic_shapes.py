@@ -3400,12 +3400,10 @@ class ShapeEnv:
         return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
 
     @record_shapeenv_event()
-    def _ignore_fresh_unbacked_symbols_enter(self) -> None:
-        TLS.ignore_fresh_unbacked_symbols = True
-
-    @record_shapeenv_event()
-    def _ignore_fresh_unbacked_symbols_exit(self) -> None:
-        TLS.ignore_fresh_unbacked_symbols = False
+    def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
+        prev = self._ignore_fresh_unbacked_symbols_tls()
+        TLS.ignore_fresh_unbacked_symbols = b
+        return prev
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Iterator[None]:
@@ -3413,11 +3411,11 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        self._ignore_fresh_unbacked_symbols_enter()
+        prev = self._ignore_fresh_unbacked_symbols_set(True)
         try:
             yield
         finally:
-            self._ignore_fresh_unbacked_symbols_exit()
+            self._ignore_fresh_unbacked_symbols_set(prev)
 
     @record_shapeenv_event()
     def freeze(self) -> None:

@@ -1065,6 +1065,25 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @config.patch({"triton.autotune_at_compile_time": None})
+    def test_stride_with_unbacked_expr(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = x.item()
+                torch._check(u0 >= 1)
+                s0 = y.size(0)
+                expr = u0 * s0
+                sevens = torch.empty_strided(
+                    size=(10, expr, 32), stride=(expr * 32, 32, 1), device=x.device
+                ).fill_(7)
+                return sevens * 3
+
+        example_inputs = (
+            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
+            torch.ones(8, device=self.device),
+        )
+        self.check_model(Repro(), example_inputs)
+
     def test_large_grid(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -3676,6 +3695,7 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
