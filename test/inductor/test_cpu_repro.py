@@ -2724,7 +2724,10 @@ class CPUReproTests(TestCase):
             metrics.reset()
             atol = None
             rtol = None
-            if not cpu_vec_isa.valid_vec_isa_list() or os.getenv("ATEN_CPU_CAPABILITY") == "default":
+            if (
+                not cpu_vec_isa.valid_vec_isa_list()
+                or os.getenv("ATEN_CPU_CAPABILITY") == "default"
+            ):
                 atol = 1e-5
                 rtol = 1e-5
             self.common(fn, (x,), atol=atol, rtol=rtol)
