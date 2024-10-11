@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Iterable, List, Tuple, Dict, TypeVar, NoReturn, Type
+from typing import Any, Dict, Iterable, List, NoReturn, Tuple, Type, TypeVar
 from typing_extensions import Self
 
 from torch.utils._pytree import (
@@ -67,7 +67,7 @@ class immutable_list(
     def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self))
 
-    def __reduce__(self)-> Tuple[Type[Self], Tuple[Tuple[_T, ...]]]:
+    def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[_T, ...]]]:
         return (type(self), (tuple(self),))
 
 
@@ -86,7 +86,7 @@ class immutable_dict(
         "update",
     ),
 ):
-    def __hash__(self) -> int: # type: ignore[override]
+    def __hash__(self) -> int:  # type: ignore[override]
         return hash(tuple(self.items()))
 
     def __reduce__(self) -> Tuple[Type[Self], Tuple[Tuple[Tuple[_KT, _VT], ...]]]:
