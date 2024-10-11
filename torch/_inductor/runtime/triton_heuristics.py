@@ -15,7 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -187,6 +187,7 @@ class CachingAutotuner(KernelInterface):
         configs,
         save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
+        optimize_mem,
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -210,6 +211,7 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
+        self.optimize_mem = optimize_mem
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -683,14 +685,19 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
+        cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
+
         def kernel_call():
-            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
+            cloned_args, cloned_kwargs = self.maybe_clone_args(
+                cpu_copies, *args, **kwargs
+            )
             launcher(
                 *cloned_args,
                 **cloned_kwargs,
                 grid=grid,
                 stream=stream,
             )
+            self.restore_args_from_cpu(cpu_copies)
 
         if with_profiler:
             from torch._inductor.utils import do_bench_using_profiling
@@ -702,30 +709,78 @@ class CachingAutotuner(KernelInterface):
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+    def copy_args_to_cpu_if_needed(self, *args, **kwargs):
+        """
+        To support benchmarking in the presence of mutated args, we need to avoid
+        autotuning contanminating them. We try to pass cloned args to the kernel.
+        If those clones would increase the peak memory usage, however, we instead
+        copy to cpu and restore them after each iteratrion. Figure out the args
+        to be copied and do the copying.
+        """
+        if not self.optimize_mem:
+            return {}
+
+        copies = {}
+        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+
+        def maybe_copy(name, arg):
+            if name in self.mutated_arg_names and arg.is_cuda:
+                nonlocal budget
+                assert isinstance(arg, torch.Tensor)
+                size = arg.numel() * arg.element_size()
+                if size > budget:
+                    cpu_arg = torch.empty_strided(
+                        arg.size(),
+                        arg.stride(),
+                        dtype=arg.dtype,
+                        device="cpu",
+                        pin_memory=True,
+                    )
+                    cpu_arg.copy_(arg, non_blocking=True)
+                    copies[name] = (arg, cpu_arg)
+                else:
+                    budget -= size
+
+        for i, arg in enumerate(args):
+            maybe_copy(self.fn.arg_names[i], arg)
+
+        for name, arg in kwargs.items():
+            maybe_copy(name, arg)
+
+        return copies
+
+    def restore_args_from_cpu(self, cpu_copies):
+        for pair in cpu_copies.values():
+            arg, cpu_arg = pair
+            arg.copy_(cpu_arg, non_blocking=True)
+
+    def maybe_clone_args(
+        self, exclude: Container[str], *args, **kwargs
+    ) -> Tuple[List[Any], Dict[str, Any]]:
+        """
+        Prepare new args and kwargs by cloning any in-place buffers
+        (that are not in the provided exclusion list), to avoid autotune
+        contaminating them. Avoid cloning the other buffers because it
+        leads to increased memory usage.
+        """
         from ..compile_fx import clone_preserve_strides
 
-        # [Note: clone mutated buffers]
-        # clone inplace buffers to avoid autotune contaminating them if
-        # the kernel does in-place stores. avoid cloning other buffers because
-        # it leads to increase memory use
-        cloned_args = []
-        for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.mutated_arg_names:
+        def prepare_arg(name, arg):
+            if name in self.mutated_arg_names and name not in exclude:
                 assert isinstance(arg, torch.Tensor)
-                cloned_args.append(clone_preserve_strides(arg))
+                return clone_preserve_strides(arg)
             else:
-                cloned_args.append(arg)
+                return arg
 
-        cloned_kwargs: Dict[str, Any] = {}
-        for name, arg in kwargs.items():
-            if name in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_kwargs[name] = clone_preserve_strides(arg)
-            else:
-                cloned_kwargs[name] = arg
+        cloned_args = [
+            prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
+        ]
+        cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
 
         return cloned_args, cloned_kwargs
+
+    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+        return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
@@ -1070,6 +1125,7 @@ def cached_autotune(
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
+    optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
@@ -1096,6 +1152,7 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
+                optimize_mem=optimize_mem,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
@@ -1108,6 +1165,7 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
+            optimize_mem=optimize_mem,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
             custom_kernel=custom_kernel,

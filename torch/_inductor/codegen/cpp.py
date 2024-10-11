@@ -2147,10 +2147,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
+        return "AOTI_TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None

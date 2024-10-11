@@ -13,10 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch._higher_order_ops.flex_attention import (
-    flex_attention as flex_attention_hop,
-    TransformGetItemToIndex,
-)
+from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,

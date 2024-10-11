@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    skipIfCrossRef,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -229,8 +230,14 @@ class TestDynamismExpression(TestCase):
 
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
-            torch.export.export(
+
+        if is_non_strict_test(self._testMethodName):
+            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
+        else:
+            error_type = torch._dynamo.exc.UserError
+
+        with self.assertRaisesRegex(error_type, "not in range"):
+            export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
@@ -894,6 +901,22 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
+    def test_state_shape_attribute_assignment(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.last_z_shape = self.linear.weight.shape
+
+            def forward(self, x):
+                self.last_z_shape = x.shape
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
@@ -1046,6 +1069,8 @@ graph():
             warnings.simplefilter("error")
             torch.export.export(Foo(), (x,))
 
+        ops_registered_before = set(torch.ops.mylib)
+
         # Assert warning for CompositeImplictAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
@@ -1061,6 +1086,9 @@ graph():
                 with warnings.catch_warnings():
                     warnings.simplefilter("always")
                     torch.export.export(Bar(), (x,))
+
+        ops_registered_after = set(torch.ops.mylib)
+        self.assertEqual(ops_registered_after, ops_registered_before)
 
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
@@ -5104,12 +5132,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return {"prediction": (x + y, self.bff)}
 
         mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
+        ep = export(mod, ())
         self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
+        ep = export(mod, args)
         self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -5341,9 +5369,7 @@ graph():
                 return x + y
 
         m = LazyModule()
-        ep = torch.export.export(
-            m, (), {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
-        )
+        ep = export(m, (), {"x": torch.randn(3, 3), "y": torch.randn(3, 3)})
         inputs = {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
         self.assertEqual(ep.module()(**inputs), m(**inputs))
 
@@ -5358,11 +5384,10 @@ graph():
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = _export(
+        gm = export(
             Foo(),
             (inp,),
             dynamic_shapes=({0: torch.export.Dim("dim", min=3)},),
-            pre_dispatch=True,
         ).module()
 
         with self.assertRaisesRegex(
@@ -5373,9 +5398,9 @@ graph():
         with self.assertRaisesRegex(
             RuntimeError, escape("Expected input at *args[0].shape[0]")
         ):
-            torch.export.export(gm, (torch.randn(2, 2),))
+            export(gm, (torch.randn(2, 2),))
 
-        ep = torch.export.export(
+        ep = export(
             gm,
             (torch.randn(5, 4),),
             dynamic_shapes=({0: torch.export.Dim("dim", min=3)},),
@@ -6973,6 +6998,7 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
+    @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -8346,6 +8372,89 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_export_for_training_with_state_dict_hooks(self):
+        def _state_dict_pre_hook(mod, prefix, keep_vars):
+            mod._buffers["test"] = torch.Tensor([1])
+
+        def _state_dict_hook(mod, state_dict, prefix, *args, **kwargs):
+            keys = list(state_dict.keys())
+            for key in keys:
+                local_key = key[len(prefix) :]
+                if local_key.startswith("layer"):
+                    new_key = prefix + local_key.replace("layer.", "")
+                    state_dict[new_key] = state_dict[key]
+                    if new_key != key:
+                        del state_dict[key]
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(2, 2)
+                self.linear2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = torch.relu(x)
+                x = self.linear2(x)
+                return x
+
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._register_state_dict_hook(_state_dict_hook)
+                self.register_state_dict_pre_hook(_state_dict_pre_hook)
+                # non-persistent buffer in named_buffers()
+                self.foo = torch.nn.Buffer(torch.rand(2, 3), persistent=False)
+                # non-persistent buffer not in named_buffers()
+                self.register_buffer("buf", None, persistent=False)
+                self.layer = Layer()
+
+            def forward(self, x):
+                x = self.layer(x)
+                return x
+
+        M = CustomModule()
+        inp = (torch.randn(2, 2),)
+        ep = export(M, inp)
+        export_res = ep.module()(*inp)
+        ref_res = M(*inp)
+        self.assertEqual(export_res, ref_res)
+        # we want to store the unprocessed keys
+        self.assertTrue(
+            {
+                "layer.linear1.weight",
+                "layer.linear1.bias",
+                "layer.linear2.weight",
+                "layer.linear2.bias",
+            }.issubset({spec.target for spec in ep.graph_signature.input_specs})
+        )
+        unflattened = torch.export.unflatten(ep)
+        export_res = unflattened(*inp)
+        self.assertEqual(export_res, ref_res)
+
+        with torch._export.utils._disable_load_state_dict_hooks(M):
+            state_dict = M.state_dict()
+        self.assertEqual(
+            {
+                "layer.linear1.weight",
+                "layer.linear1.bias",
+                "layer.linear2.weight",
+                "layer.linear2.bias",
+            },
+            state_dict.keys(),
+        )
+        state_dict = M.state_dict()
+        self.assertEqual(
+            {
+                "linear1.weight",
+                "linear1.bias",
+                "linear2.weight",
+                "linear2.bias",
+                "test",
+            },
+            state_dict.keys(),
+        )
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -8392,6 +8501,7 @@ class TestOneOffModelExportResult(TestCase):
     #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     #     return (getitem,)""")
 
+    @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
