@@ -425,10 +425,21 @@ class CKConvTemplate(CKTemplate):
         choices,
         layout,
         input_nodes,
+        *,
+        stride,
+        padding,
+        dilation,
+        groups,
+        n_spatial_dimensions,
     ):
         template = CKConvTemplate(
             input_nodes,
             layout,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            n_spatial_dimensions=n_spatial_dimensions,
         )
         ops = template.gen_ops()
         for op in ops:
