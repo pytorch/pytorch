@@ -137,7 +137,7 @@ def _get_backend_stream() -> torch.cuda.Stream:
 def _pipelined_multi_all_gather_and_consume(
     shard: List[torch.Tensor],
     shard_consumer: Callable[[List[torch.Tensor], int], None],
-    gathered_out: List[torch.Tensor],
+    ag_out: List[torch.Tensor],
     group_name: str,
 ) -> None:
     """
@@ -150,7 +150,7 @@ def _pipelined_multi_all_gather_and_consume(
         ]
 
         shards = [[] for _ in range(group_size)]
-        for x in gathered_out:
+        for x in ag_out:
             for i, y in enumerate(x.chunk(group_size)):
                 shards[i].append(y)
 
@@ -168,14 +168,14 @@ def _pipelined_multi_all_gather_and_consume(
     backend_stream = _get_backend_stream()
     backend_stream.wait_stream(torch.cuda.current_stream())
 
-    for x, y in zip(shard, gathered_out):
+    for x, y in zip(shard, ag_out):
         assert x.is_contiguous(), (
             "_pipelined_all_gather_and_consume: all tensors "
             "in `shard` must be contiguous"
         )
         assert y.is_contiguous(), (
             "_pipelined_all_gather_and_consume: all tensors "
-            "in `gathered_out` must be contiguous"
+            "in `ag_out` must be contiguous"
         )
         assert x.shape[0] * group_size == y.shape[0]
         assert x.shape[1:] == y.shape[1:]
@@ -202,7 +202,7 @@ def _pipelined_multi_all_gather_and_consume(
 
     # shards[i] => shard from rank i
     shards: List[List[torch.Tensor]] = [[] for _ in range(group_size)]
-    for x in gathered_out:
+    for x in ag_out:
         for i, y in enumerate(x.chunk(group_size)):
             shards[i].append(y)
 
