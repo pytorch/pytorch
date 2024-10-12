@@ -1345,7 +1345,7 @@ class TestOptimRenewed(TestCase):
     @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
     def test_state_dict_deterministic(
-            self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+        self, device, dtype, optim_info, is_named_optim0, is_named_optim1
     ):
         optim_cls = optim_info.optim_cls
 
@@ -1424,7 +1424,7 @@ class TestOptimRenewed(TestCase):
             # Param names are optional and not needed to be the consistent.
             self.assertEqual(
                 without_param_names(optimizer.state_dict()),
-                without_param_names(optimizer_c.state_dict())
+                without_param_names(optimizer_c.state_dict()),
             )
 
             # Make sure repeated parameters have identical representation (see #36831)
@@ -1484,9 +1484,12 @@ class TestOptimRenewed(TestCase):
 
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
-    @optims([o for o in optim_db if not o.only_supports_sparse_grads], dtypes=[torch.float32])
+    @optims(
+        [o for o in optim_db if not o.only_supports_sparse_grads],
+        dtypes=[torch.float32],
+    )
     def test_can_load_from_to_named_state_dict(
-            self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+        self, device, dtype, optim_info, is_named_optim0, is_named_optim1
     ):
         optim_cls = optim_info.optim_cls
 
@@ -1542,13 +1545,13 @@ class TestOptimRenewed(TestCase):
             if is_named_optim0 or is_named_optim1:
                 self.assertEqual(
                     optimizer2.state_dict()["param_groups"][0]["param_names"],
-                    ["0.weight", "0.bias", "1.weight", "1.bias"]
+                    ["0.weight", "0.bias", "1.weight", "1.bias"],
                 )
 
     @parametrize("is_named_optim", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
     def test_save_load_equality_with_weights_only(
-            self, device, dtype, optim_info, is_named_optim
+        self, device, dtype, optim_info, is_named_optim
     ):
         optim_cls = optim_info.optim_cls
 

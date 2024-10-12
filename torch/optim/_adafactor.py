@@ -8,8 +8,8 @@ from torch import Tensor
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
-    _params_doc,
     _maximize_doc,
+    _params_doc,
     Optimizer,
     ParamsT,
     TensorListList,

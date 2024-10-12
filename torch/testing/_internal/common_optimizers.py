@@ -295,14 +295,16 @@ def get_error_inputs_for_all_optims(device, dtype):
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
-                    params=[{"params": [sample_param], "lr": 1e-2},
-                            {"params": [("weight", sample_param2)]}],
+                    params=[
+                        {"params": [sample_param], "lr": 1e-2},
+                        {"params": [("weight", sample_param2)]},
+                    ],
                     kwargs={},
                     desc="all optimizer param groups should be with/without names.",
                 ),
                 error_type=ValueError,
                 error_regex="all optimizer param groups should be with/without names. "
-                            "cannot add param group with names to the optimizer",
+                "cannot add param group with names to the optimizer",
             ),
         ]
     else:
