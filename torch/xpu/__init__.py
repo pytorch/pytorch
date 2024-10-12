@@ -410,7 +410,7 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    return "-device " + ",".join(arch for arch in arch_list)
+    return f'-device {",".join(arch for arch in arch_list)}'
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:
