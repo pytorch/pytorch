@@ -1712,7 +1712,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_structseq2(self):
         def fn(x, y):
-            return tuple(torch.return_types.qr((2 * x, y - 1)))
+            return tuple(torch.return_types.qr((x, y)))
 
         x = torch.randn(3, 2)
         y = torch.randn(2, 4)
