@@ -1111,10 +1111,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         for v in non_constant_args.values():
             v = v.realize()
-            if not isinstance(v, variables.TensorVariable):
+            if not isinstance(v, (variables.TensorVariable, variables.SymNodeVariable)):
                 self.raise_unsupported(
-                    "All non-constant arguments of a traced Triton kernel "
-                    f"must be TensorVariables, but got {repr(v)}."
+                    f"Unexpected argument type for a Triton kernel: {repr(v)}."
                 )
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
