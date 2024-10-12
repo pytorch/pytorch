@@ -751,8 +751,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 
 // KERNEL_MPS
 // registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastMPS
-#define KERNEL_MPS(...) \
-  KERNEL(c10::DeviceType::MPS, __VA_ARGS__)
+#define KERNEL_MPS(...) KERNEL(c10::DeviceType::MPS, __VA_ARGS__)
 
 // Op lists for different policies.
 // To make sure other backends can reuse the policy op list.
