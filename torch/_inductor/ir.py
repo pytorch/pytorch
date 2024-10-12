@@ -6066,23 +6066,15 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
-            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
-            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
-            # fix would require changing all the uses of self.mutation_outputs.
             return_type = returns[0].real_type
-            output_arguments = [
-                handle_single_output(
-                    return_type, [*self.outputs, *self.mutation_outputs]
-                )
-            ]
+            output_arguments = [handle_single_output(return_type, self.outputs)]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
-            # Not generating output args for self.mutation_outputs
+            assert isinstance(self.outputs, tuple)
+            assert len(returns) == len(self.outputs)
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(
-                    returns, [*self.outputs, *self.mutation_outputs]
-                )
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -6146,7 +6138,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
-                [*self.outputs, *self.mutation_outputs],
+                self.outputs,
             )
         else:
             self.codegen_comment(wrapper)
@@ -6986,6 +6978,7 @@ class _WaitKernel(_CollectiveKernel):
         packed.mutation_outputs.append(
             MutationOutput(NoneLayout(inp.get_device()), inp, packed)
         )
+        packed.outputs = [packed]
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
