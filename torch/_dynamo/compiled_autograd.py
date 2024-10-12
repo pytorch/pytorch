@@ -39,14 +39,28 @@ if TYPE_CHECKING:
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
-local = threading.local()
-local.next_ctx_manager_id = 0
-local.in_compiled_autograd_region = False
-local.compiled_autograd_state = defaultdict(None)
+class TLSWrapper:
+    def __init__(self) -> None:
+        _local = threading.local()
+        _local.next_ctx_id = 0
+        _local.in_compiled_autograd_region = False
+        _local.compiled_autograd_state = defaultdict(None)
+        # for threads created by autograd
+        torch._C._stash_obj_in_tls("compiled_autograd_state", _local.compiled_autograd_state)
+        self._local = _local
 
-# for threads created by autograd
-torch._C._stash_obj_in_tls("compiled_autograd_state", local.compiled_autograd_state)
+    def __getattr__(self, attr_name: str) -> Any:
+        if hasattr(self._local, attr_name):
+            return getattr(self._local, attr_name)
+        else:
+            assert torch._C._is_key_in_tls(attr_name), f"TLS missing key: {attr_name}"
+            return torch._C._get_obj_in_tls(attr_name)
 
+    @property
+    def enabled(self):
+        return getattr(self, "compiled_autograd_state").get("compiler") is not None
+
+local = TLSWrapper()
 
 def set_tls(**kwargs):
     priors: Dict[str, Any] = {}
@@ -525,8 +539,8 @@ def enable(compiler_fn):
     # it needs to be lazily imported because of circular dependencies
     import torch._inductor.cudagraph_trees
 
-    id = local.next_ctx_manager_id
-    local.next_ctx_manager_id += 1
+    id = local.next_ctx_id
+    local.next_ctx_id += 1
 
     revert_tls = set_tls(
         compiler=functools.partial(AutogradCompilerInstance, compiler_fn),
@@ -544,8 +558,8 @@ def enable(compiler_fn):
     finally:
         revert_tls()
 
-        local.next_ctx_manager_id -= 1
-        assert local.next_ctx_manager_id == id, (
+        local.next_ctx_id -= 1
+        assert local.next_ctx_id == id, (
             "Error nesting compiled autograd context managers: "
             "inner context managers must have shorter lifetime than the outer context manager"
         )
@@ -553,6 +567,9 @@ def enable(compiler_fn):
 
 @contextlib.contextmanager
 def disable():
+    id = local.next_ctx_id
+    local.next_ctx_id += 1
+
     revert_tls = set_tls(
         compiler=None,
     )
@@ -561,10 +578,16 @@ def disable():
     finally:
         revert_tls()
 
+        local.next_ctx_id -= 1
+        assert local.next_ctx_id == id, (
+            "Error nesting compiled autograd context managers: "
+            "inner context managers must have shorter lifetime than the outer context manager"
+        )
+
 
 # return to starting state of a new process
 def reset() -> None:
-    assert local.next_ctx_manager_id == 0
+    assert local.next_ctx_id == 0
     assert not local.in_compiled_autograd_region
     local.in_compiled_autograd_region = False
     set_tls(
