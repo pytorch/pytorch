@@ -18,7 +18,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import SymbolicCallArg
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -170,6 +170,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperGpu()
 
     def write_header(self):
         if V.graph.is_const_graph:
@@ -480,9 +488,8 @@ class CppWrapperGpu(CppWrapperCpu):
             if config.abi_compatible:
                 # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
                 # default behavior is f"workspace.zero_(){self.ending}"
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
-                )
+                # or add f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
+                pass
             else:
                 self.writeline(f"workspace.zero_(){self.ending}")
             if config.triton.autotune_at_compile_time:
