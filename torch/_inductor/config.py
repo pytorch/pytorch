@@ -816,6 +816,12 @@ class cpp:
         == "1"
     )
 
+    # disable changing floating point state
+    disable_changing_floating_point_state = (
+        os.environ.get("TORCHINDUCTOR_CPP_DISABLE_CHANGING_FLOATING_POINT_STATE", "0")
+        == "1"
+    )
+
     # Disable the tiling select heuristic
     enable_tiling_heuristics = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
