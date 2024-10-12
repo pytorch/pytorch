@@ -206,14 +206,52 @@ def _pipelined_multi_all_gather_and_consume(
         for i, y in enumerate(x.chunk(group_size)):
             shards[i].append(y)
 
-    # While consuming the local shard, copy it to the local p2p buffer in
-    # another stream.
-    shard_consumer(shard, rank)
-    copy_shard(dst=shards[rank], src=shard)
-
+    # Parallelization strategy: after each rank copies its shard into its local
+    # p2p buffer, every rank issues independent p2p copy -> shard_consumer
+    # sequences to two streams. In addition to computation/communication
+    # overlapping, the strategy allows for computation/computation overlapping,
+    # greatly reducing quantization inefficiency.
+    #
+    # Notation:
+    # - "mv" for the copy to local buffer
+    # - "cp" for p2p copies
+    # - "b" for barriers
+    #
+    # Constraints:
+    # - The GPU scheduler may or may not overlap "mv" with the first shard_consumer.
+    # - "cp" from different streams cannot overlap.
+    #
+    # Ideal scenario 0 - "mv" overlaps with the first shard_consumer:
+    #
+    # stream 0: [ shard_consumer ][ cp ][ shard_consumer ]
+    # stream 1: [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # Ideal scenario 1 - "mv" is scheduled before the first shard_consumer:
+    #
+    # stream 0:       [ shard_consumer ][ cp ][ shard_consumer ]
+    # stream 1: [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # Suboptimal scenario - "mv" is scheduled after the first shard_consumer:
+    #
+    # stream 0: [ shard_consumer ]               [ cp ][ shard_consumer ]
+    # stream 1:                   [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # To prevent the suboptimal scenario, we do the following to maximize the
+    # likelihood that "mv" is either overlapped with or scheduled before the
+    # first shard_consumer:
+    # - Issue "mv" on stream 1 before issuing the first shard_consumer on
+    # stream 0.
+    # - Add a small sleep before the first shard_consumer on stream 0. The
+    # sleep duration is insignificant, but having an extra task in stream 0
+    # will almost guarantee that "mv" on stream 1 gets scheduled first, if it
+    # cannot overlap with the first shard_consumer.
     with torch.cuda.stream(backend_stream):
         copy_shard(dst=local_p2p_bufs, src=shard)
         symm_mem.barrier(channel=1)
+
+    torch.cuda._sleep(100)
+    shard_consumer(shard, rank)
+
     torch.cuda.current_stream().wait_stream(backend_stream)
 
     # At this point, all ranks have copied their local shard to
@@ -229,6 +267,15 @@ def _pipelined_multi_all_gather_and_consume(
         with torch.cuda.stream(stream):
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
+
+    # Copy from input to the all-gather output. Opportunistically overlap it
+    # with the last shard_consumer.
+    if group_size % 2 == 0:
+        stream = torch.cuda.current_stream()
+    else:
+        stream = backend_stream
+    with torch.cuda.stream(stream):
+        copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
