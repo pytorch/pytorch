@@ -78,6 +78,9 @@ def _compare_forward_backward(data, mask, fn):
     _compare_mt_t(masked_res, tensor_res)
     _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
+    # Free up the masked tensors manually to avoid memory leak
+    del mt._masked_mask
+    del mt._masked_data
 
 def _create_random_mask(shape, device):
     return make_tensor(shape, device=device, dtype=torch.bool)
