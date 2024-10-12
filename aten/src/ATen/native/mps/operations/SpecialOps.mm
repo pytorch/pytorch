@@ -1,4 +1,5 @@
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
@@ -84,23 +85,29 @@ T i0(T _x) {
   return static_cast<T>((exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / sqrt(x));
 }
 
-template <typename T>
+template <typename T, typename Tout=T>
 void kernel
 i0(constant T* input,
-   device T* output,
+   device Tout* output,
    uint index [[thread_position_in_grid]]) {
-  output[index] = i0(input[index]);
+  output[index] = i0(static_cast<Tout>(input[index]));
 }
 
-template [[host_name("i0_float")]] void kernel
-i0<float>(constant float*, device float*, uint);
+#define REGISTER_I0(DTI,DTO)                              \
+template [[host_name("i0_" #DTI "_" #DTO )]]              \
+void kernel i0<DTI, DTO>(constant DTI*, device DTO*, uint)
 
-template [[host_name("i0_half")]] void kernel
-i0<half>(constant half*, device half*, uint);
+REGISTER_I0(float, float);
+REGISTER_I0(bool, float);
+REGISTER_I0(uchar, float);
+REGISTER_I0(char, float);
+REGISTER_I0(short, float);
+REGISTER_I0(int, float);
+REGISTER_I0(long, float);
 
+REGISTER_I0(half, half);
 #if __METAL_VERSION__ >= 310
-template [[host_name("i0_bfloat")]] void kernel
-i0<bfloat>(constant bfloat*, device bfloat*, uint);
+REGISTER_I0(bfloat, bfloat);
 #endif
 )SPECIAL_METAL");
 
@@ -108,7 +115,8 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
   using namespace mps;
   auto input = iter.input(0);
   auto output = iter.output(0);
-  auto i0PSO = lib.getPipelineStateForFunc("i0_" + scalarToMetalTypeString(input));
+  auto i0PSO = lib.getPipelineStateForFunc(
+      fmt::format("i0_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
