@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 # Torch
 from torch.autograd import Variable

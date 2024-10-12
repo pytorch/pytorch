@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 import copy
 import itertools
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT, MAX_TENSOR_RANK

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 """
 Utility function to facilitate testing.

@@ -65,7 +65,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 
 
 # Coercing and collecting traced tangents memory format in one recursive traversal
-# mypy: ignore-errors
+
 def coerce_tangent_and_suggest_memory_format(x: Tensor):
     updated = False
     if not isinstance(x, Tensor):

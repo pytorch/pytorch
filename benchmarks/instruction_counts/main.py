@@ -6,7 +6,7 @@ components) in future iterations. However this allows us to excercise the
 underlying benchmark generation infrastructure in the mean time.
 """
 
-# mypy: ignore-errors
+
 
 import argparse
 import sys

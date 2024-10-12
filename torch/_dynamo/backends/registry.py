@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 import functools
 import logging

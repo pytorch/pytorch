@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from copy import copy
 from functools import partial

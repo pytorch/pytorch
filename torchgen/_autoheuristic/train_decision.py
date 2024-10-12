@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 import itertools
 import json

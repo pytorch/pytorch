@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 import unittest
 from collections.abc import Sequence

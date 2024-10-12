@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 """ "Normalize" arguments: convert array_likes to tensors, dtypes to torch dtypes and so on.
 """

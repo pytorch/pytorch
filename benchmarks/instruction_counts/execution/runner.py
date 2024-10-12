@@ -1,6 +1,6 @@
 """Run benchmarks while handling parallelism, isolation, and fault tolerance."""
 
-# mypy: ignore-errors
+
 
 import math
 import multiprocessing

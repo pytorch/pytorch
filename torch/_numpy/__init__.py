@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from . import fft, linalg, random
 from ._dtypes import *  # noqa: F403

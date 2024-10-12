@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 # This backend is maintained by ONNX team. To direct issues
 # to the right people, please tag related GitHub issues with `module: onnx`.

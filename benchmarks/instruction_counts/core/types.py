@@ -1,6 +1,6 @@
 """Type annotations for various benchmark objects."""
 
-# mypy: ignore-errors
+
 
 from typing import Any, Dict, Optional, Tuple, Union
 
