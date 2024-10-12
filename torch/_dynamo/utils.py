@@ -2276,7 +2276,7 @@ def fqn(obj: Any):
 
 
 def ifdynstaticdefault(count1, count2):
-    if torch._dynamo.config.assume_static_by_default:
+    if torch._dynamo.config.assume_static_by_default and not torch._dynamo.config.assume_outer_dim_dynamic_by_default:
         return count1
     else:
         return count2

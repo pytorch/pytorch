@@ -2668,6 +2668,7 @@ def _automatic_dynamic(
             and torch._dynamo.config.assume_outer_dim_dynamic_by_default
             and assume_outer_dim_dynamic_by_default_knob
         ):
+            # import fbvscode; fbvscode.set_trace()
             dynamic_size = DimDynamic.DYNAMIC
             # dynamic_size = DimDynamic.STATIC
         elif config.assume_static_by_default:
