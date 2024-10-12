@@ -300,16 +300,17 @@ Tensor mkldnn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::string attr,
+    std::vector<std::optional<at::Scalar>> scalars,
+    std::optional<std::string> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  c10::List<std::optional<at::Scalar>> scalars_list(scalars);
   return _mkldnn_convolution(
       input_t,
       weight_t,
@@ -320,7 +321,7 @@ Tensor mkldnn_convolution_pointwise(
       groups,
       use_channels_last,
       attr,
-      scalars,
+      scalars_list,
       algorithm);
 }
 
@@ -338,15 +339,15 @@ Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& other_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view binary_attr,
+    std::string binary_attr,
     std::optional<at::Scalar> alpha,
-    std::optional<c10::string_view> unary_attr,
-    torch::List<std::optional<at::Scalar>> unary_scalars,
-    std::optional<c10::string_view> unary_algorithm) {
+    std::optional<std::string> unary_attr,
+    std::vector<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string> unary_algorithm) {
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
       "mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
@@ -502,15 +503,15 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view binary_attr,
+    std::string binary_attr,
     std::optional<at::Scalar> alpha,
-    std::optional<c10::string_view> unary_attr,
-    torch::List<std::optional<at::Scalar>> unary_scalars,
-    std::optional<c10::string_view> unary_algorithm) {
+    std::optional<std::string> unary_attr,
+    std::vector<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string> unary_algorithm) {
   // other_t += convolution(...), other_t = unary(other_t)
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
@@ -717,14 +718,14 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> output_padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::string attr,
+    std::vector<std::optional<at::Scalar>> scalars,
+    std::optional<std::string> algorithm) {
 
   std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
   int64_t dim = input_t.ndimension() - 2;
@@ -864,17 +865,18 @@ Tensor mkldnn_convolution_transpose_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> output_padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::string attr,
+    std::vector<std::optional<at::Scalar>> scalars,
+    std::optional<std::string> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  c10::List<std::optional<at::Scalar>> scalars_list(scalars);
   return _mkldnn_convolution_transpose(
       input_t,
       weight_t,
@@ -886,7 +888,7 @@ Tensor mkldnn_convolution_transpose_pointwise(
       groups,
       use_channels_last,
       attr,
-      scalars,
+      scalars_list,
       algorithm
   );
 }
