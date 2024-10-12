@@ -34,7 +34,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+    std::vector<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
@@ -50,9 +50,9 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
         groups,
         binary_attr,
         pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<c10::string_view>(unary_attr),
+        pointer_to_optional<std::string>(unary_attr),
         unary_scalars_list,
-        pointer_to_optional<c10::string_view>(unary_algorithm));
+        pointer_to_optional<std::string>(unary_algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -77,7 +77,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+    std::vector<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
@@ -93,9 +93,9 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
         groups,
         binary_attr,
         pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<c10::string_view>(unary_attr),
+        pointer_to_optional<std::string>(unary_attr),
         unary_scalars_list,
-        pointer_to_optional<c10::string_view>(unary_algorithm));
+        pointer_to_optional<std::string>(unary_algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
@@ -157,7 +157,7 @@ aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> scalars_list;
+    std::vector<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
@@ -173,7 +173,7 @@ aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
         groups,
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
