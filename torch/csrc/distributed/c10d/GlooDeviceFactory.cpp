@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 #if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
@@ -66,10 +67,6 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice)
 #endif
 
 #if GLOO_HAVE_TRANSPORT_TCP_TLS
-static std::string cstr_to_std_string(const char* chars) {
-  return std::string(chars != nullptr ? chars : "");
-}
-
 static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
     const std::string& interface,
     const std::string& hostname) {
@@ -84,12 +81,20 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey = c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
-  const auto cert = c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
-  const auto caFile =
+  const auto pkey_env =
+      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
+  const auto pkey = pkey_env.has_value() ? pkey_env.value() : std::string();
+  const auto cert_env =
+      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
+  const auto cert = cert_env.has_value() ? cert_env.value() : std::string();
+  const auto caFile_env =
       c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE");
-  const auto caPath =
+  const auto caFile =
+      caFile_env.has_value() ? caFile_env.value() : std::string();
+  const auto caPath_env =
       c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH");
+  const auto caPath =
+      caPath_env.has_value() ? caPath_env.value() : std::string();
   return ::gloo::transport::tcp::tls::CreateDevice(
       attr, pkey, cert, caFile, caPath);
 }
