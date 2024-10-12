@@ -24,7 +24,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   DeviceIndex deviceCount() const override;
   DeviceIndex getCurrentDevice() const override;
   c10::Stream getCurrentStream(DeviceIndex device) const override;
-  void setCurrentStream(const c10::Stream& stream) const override;
+  void setCurrentStream(const c10::Stream& stream) override;
 };
 
 } // namespace at::xpu::detail

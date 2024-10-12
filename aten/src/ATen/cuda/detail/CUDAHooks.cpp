@@ -452,7 +452,7 @@ c10::Stream CUDAHooks::getDefaultStream(DeviceIndex device) const {
   return at::cuda::getDefaultCUDAStream(device);
 }
 
-void CUDAHooks::setCurrentStream(const c10::Stream& stream) const {
+void CUDAHooks::setCurrentStream(const c10::Stream& stream) {
   auto cudaStream = at::cuda::CUDAStream(stream);
   at::cuda::setCurrentCUDAStream(cudaStream);
 }

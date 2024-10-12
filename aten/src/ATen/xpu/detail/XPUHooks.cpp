@@ -103,9 +103,9 @@ c10::Stream XPUHooks::getCurrentStream(DeviceIndex device) const {
   return at::xpu::getCurrentXPUStream(device);
 }
 
-void XPUHooks::setCurrentStream(const c10::Stream& stream) const {
+void XPUHooks::setCurrentStream(const c10::Stream& stream) {
   auto xpuStream = at::xpu::XPUStream(stream);
-  return at::xpu::setCurrentXPUStream(xpuStream);
+  at::xpu::setCurrentXPUStream(xpuStream);
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);

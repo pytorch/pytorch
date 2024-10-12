@@ -87,7 +87,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  void setCurrentStream(const c10::Stream& stream) const override {
+  void setCurrentStream(const c10::Stream& stream) override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 

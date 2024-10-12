@@ -137,7 +137,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CUDA);
   }
 
-  void setCurrentStream(const c10::Stream& stream) const override {
+  void setCurrentStream(const c10::Stream& stream) override {
     TORCH_CHECK(false, "Cannot call setCurrentStream(stream) without ATen_cuda library. ", CUDA_HELP);
   }
 
