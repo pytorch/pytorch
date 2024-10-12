@@ -498,7 +498,7 @@ Stats stats() {
 
 } // namespace torch::unwind
 
-extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
+extern "C" __attribute__((used, visibility("default"))) void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
