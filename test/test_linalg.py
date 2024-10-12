@@ -4617,7 +4617,7 @@ class TestLinalg(TestCase):
         for filename in [untuned_filename, result_filename]:
             try:
                 os.remove(filename)
-            finally:
+            except PermissionError:
                 pass
 
         # disables TunableOp, no file will be written, restore to default values
