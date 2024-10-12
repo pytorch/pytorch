@@ -13,6 +13,8 @@
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
+#elif defined(USE_CUDA)
+#include <ATen/cuda/tunable/GemmCublasLt.h>
 #endif
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/tunable/TunableOp.h>
@@ -22,6 +24,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -135,64 +138,64 @@ inline bool IsZero(c10::complex<float> v) {
 }
 
 template <typename T>
-inline std::string TypeName(T v) {
+inline const char* TypeName(T v) {
   return "unknown";
 }
 
 template <>
-inline std::string TypeName(float v) {
+inline const char* TypeName(float v) {
   return "float";
 }
 
 template <>
-inline std::string TypeName(double v) {
+inline const char* TypeName(double v) {
   return "double";
 }
 
 template <>
-inline std::string TypeName(BFloat16 v) {
+inline const char* TypeName(BFloat16 v) {
   return "BFloat16";
 }
 
 template <>
-inline std::string TypeName(Half v) {
+inline const char* TypeName(Half v) {
   return "Half";
 }
 
 template <>
-inline std::string TypeName(Float8_e4m3fn v) {
+inline const char* TypeName(Float8_e4m3fn v) {
   return "Float8_e4m3fn";
 }
 
 template <>
-inline std::string TypeName(Float8_e5m2 v) {
+inline const char* TypeName(Float8_e5m2 v) {
   return "Float8_e5m2";
 }
 
 template <>
-inline std::string TypeName(Float8_e4m3fnuz v) {
+inline const char* TypeName(Float8_e4m3fnuz v) {
   return "Float8_e4m3fnuz";
 }
 
 template <>
-inline std::string TypeName(Float8_e5m2fnuz v) {
+inline const char* TypeName(Float8_e5m2fnuz v) {
   return "Float8_e5m2fnuz";
 }
 
 template <>
-inline std::string TypeName(c10::complex<double> v) {
+inline const char* TypeName(c10::complex<double> v) {
   return "c10::complex<double>";
 }
 
 template <>
-inline std::string TypeName(c10::complex<float> v) {
+inline const char* TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
-  GemmTunableOp() {
+  GemmTunableOp(const GemmParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
@@ -214,18 +217,25 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
         }
       }
     }
+#elif defined(USE_CUDA)
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      for (auto&& [name, op] : GetCublasLtGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
 #endif
   }
 
   std::string Signature() override {
-    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer> {
  public:
-  GemmAndBiasTunableOp() {
+  GemmAndBiasTunableOp(const GemmAndBiasParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
@@ -240,18 +250,29 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
         }
       }
     }
+#elif defined(USE_CUDA)
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      if constexpr (
+          !std::is_same_v<T, c10::complex<float>> &&
+          !std::is_same_v<T, c10::complex<double>>) {
+        for (auto&& [name, op] : GetCublasLtGemmAndBiasTypeStringAndOps<T, ALayout, BLayout>(params)) {
+          this->RegisterOp(std::move(name), std::move(op));
+        }
+      }
+   }
 #endif
   }
 
   std::string Signature() override {
-    return c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>, StreamTimer> {
  public:
-  GemmStridedBatchedTunableOp() {
+  GemmStridedBatchedTunableOp(const GemmStridedBatchedParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
 
 #ifdef USE_ROCM
@@ -273,33 +294,49 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
         }
       }
     }
+#elif defined(USE_CUDA)
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      for (auto&& [name, op] : GetCublasLtStridedBatchedGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
 #endif
   }
 
   std::string Signature() override {
-    return c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
 class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> {
  public:
-  ScaledGemmTunableOp() {
+  ScaledGemmTunableOp(const ScaledGemmParams<CT>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
 
-#ifdef USE_ROCM
+    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+
+#if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
+    }
+#elif defined(USE_CUDA)
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      for (auto&& [name, op] : GetCublasLtScaledGemmTypeStringAndOps<CT, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
     }
 #endif
   }
 
   std::string Signature() override {
-    return c10::str("ScaledGemmTunableOp",
-            "_", TypeName<AT>(AT{}),
-            "_", TypeName<BT>(BT{}),
-            "_", TypeName<CT>(CT{}),
-            "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return fmt::sprintf("ScaledGemmTunableOp_%s_%s_%s_%c%c",
+      TypeName<AT>(AT{}),
+      TypeName<BT>(BT{}),
+      TypeName<CT>(CT{}),
+      BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
