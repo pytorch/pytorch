@@ -645,6 +645,40 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(b(inp), inp + 2)
         self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
 
+    def test_set_stance_eager_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            out2 = a(inp, 1)
+            out3 = a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+        self.assertEqual(out3, inp + 4)
+
+    def test_set_stance_fail_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            out2 = a(inp, 1)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
         def a(x):

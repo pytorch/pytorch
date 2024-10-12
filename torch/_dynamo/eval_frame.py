@@ -114,13 +114,13 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return set_eval_frame(callback)
 
 
-_stance = threading.local()
-_stance.value = "default"
+_stance = "default"
 
 
 def _set_stance(stance: str):
-    prior = _stance.value
-    _stance.value = stance
+    global _stance
+    prior = _stance
+    _stance = stance
     return prior
 
 
@@ -128,25 +128,27 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def _callback_from_stance(callback):
-    if _stance.value == "default":
+    if _stance == "default":
         # TODO force_backend here
         return callback
-    elif _stance.value == "force_eager":
+    elif _stance == "force_eager":
         # disable
         return None
-    elif _stance.value == "eager_on_recompile":
+    elif _stance == "eager_on_recompile":
         # run mode
         return False
-    elif _stance.value == "fail_on_recompile":
+    elif _stance == "fail_on_recompile":
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(
-                "Dected recompile when torch.compile stance is 'fail_on_recompile'"
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
             )
+
+        fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
 
         return fail_callback
     else:
-        raise RuntimeError(f"invalid torch.compile stance '{_stance.value}'")
+        raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
 def _reset_guarded_backend_cache():
@@ -411,7 +413,7 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(self.callback)
+        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
