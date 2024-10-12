@@ -335,7 +335,8 @@ void initPythonBindings(PyObject* module) {
               bool /* profiler_measure_per_kernel */,
               bool /* verbose */,
               std::vector<std::string> /* performance_events  */,
-              bool /* enable_cuda_sync_events */
+              bool /* enable_cuda_sync_events */,
+              bool /* adjust_profiler_step */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -348,12 +349,15 @@ void initPythonBindings(PyObject* module) {
           "    performance_events : a list of profiler events to be used for measurement.\n"
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
-          "       and currently disabled by default.\n",
+          "       and currently disabled by default.\n"
+          "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
+          "       match the parent python event duration. This feature is new and currently disabled by default.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
           py::arg("performance_events") = std::vector<std::string>(),
-          py::arg("enable_cuda_sync_events") = false)
+          py::arg("enable_cuda_sync_events") = false,
+          py::arg("adjust_profiler_step") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -372,11 +376,12 @@ void initPythonBindings(PyObject* module) {
                 p.profiler_measure_per_kernel,
                 p.verbose,
                 p.enable_cuda_sync_events,
+                p.adjust_profiler_step,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__
-            if (t.size() >= 4) {
-              throw std::runtime_error("Expected atleast 4 values in state");
+            if (t.size() >= 5) {
+              throw std::runtime_error("Expected atleast 5 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -400,7 +405,8 @@ void initPythonBindings(PyObject* module) {
                 t[1].cast<bool>(),
                 t[2].cast<bool>(),
                 std::move(performance_events),
-                t[3].cast<bool>());
+                t[3].cast<bool>(),
+                t[4].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")

@@ -1648,12 +1648,12 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not cpu_vec_isa.valid_vec_isa_list()
         or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
-        "Does not support vectorization or not s390x/aarch64/ppc64le machine",
+        "Does not support vectorization or not s390x/ppc64le machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
-    def test_auto_zvec_neon_vsx_simd(self):
-        vec_zvec_neon_vsx = cpu_vec_isa.valid_vec_isa_list()[0]
-        self.assertTrue(vec_zvec_neon_vsx.bit_width() == 256)
+    def test_auto_zvec_vsx_simd(self):
+        vec_zvec_vsx = cpu_vec_isa.valid_vec_isa_list()[0]
+        self.assertTrue(vec_zvec_vsx.bit_width() == 256)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = cpu_vec_isa.pick_vec_isa()
@@ -1669,7 +1669,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": 256}):
             isa = cpu_vec_isa.pick_vec_isa()
-            self.assertTrue(isa == vec_zvec_neon_vsx)
+            self.assertTrue(isa == vec_zvec_vsx)
 
         pre_var = os.getenv("ATEN_CPU_CAPABILITY")
         if pre_var:
@@ -1678,17 +1678,17 @@ class CPUReproTests(TestCase):
         try:
             with config.patch({"cpp.simdlen": None}):
                 isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
+                self.assertTrue(isa == vec_zvec_vsx)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
+                self.assertTrue(isa == vec_zvec_vsx)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
                 isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
+                self.assertTrue(isa == vec_zvec_vsx)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "default"
@@ -1696,19 +1696,14 @@ class CPUReproTests(TestCase):
                 self.assertFalse(isa)
 
             with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "neon"
-                isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
-
-            with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
                 isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
+                self.assertTrue(isa == vec_zvec_vsx)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "vsx"
                 isa = cpu_vec_isa.pick_vec_isa()
-                self.assertTrue(isa == vec_zvec_neon_vsx)
+                self.assertTrue(isa == vec_zvec_vsx)
 
         finally:
             if pre_var:
@@ -1805,16 +1800,6 @@ class CPUReproTests(TestCase):
                 os.environ["ATEN_CPU_CAPABILITY"] = "default"
                 isa = cpu_vec_isa.pick_vec_isa()
                 self.assertFalse(isa)
-
-            with config.patch({"cpp.simdlen": None}):
-                os.environ["ATEN_CPU_CAPABILITY"] = "neon"
-                isa = cpu_vec_isa.pick_vec_isa()
-                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
-                    self.assertTrue(isa == vec_amx)
-                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
-                    self.assertTrue(isa == vec_avx512)
-                else:
-                    self.assertTrue(isa == vec_avx2)
 
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "zvector"

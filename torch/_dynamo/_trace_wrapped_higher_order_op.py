@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -71,16 +70,16 @@ class TransformGetItemToIndex(TorchFunctionMode):
         return func(*args, **(kwargs or {}))
 
 
-def trace_wrapped(*args, **kwargs):
+def trace_wrapped(*args: Any, **kwargs: Any) -> Any:
     with torch.no_grad():
         return _trace_wrapped_op(*args, **kwargs)
 
 
 class TraceWrapped(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("trace_wrapped")
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return super().__call__(*args, **kwargs)
 
 
@@ -88,7 +87,12 @@ class TraceWrapped(HigherOrderOperator):
 _trace_wrapped_op = TraceWrapped()
 
 
-def _assert_meta(grad, size, stride, dtype):
+def _assert_meta(
+    grad: torch.Tensor,
+    size: Tuple[int, ...],
+    stride: Tuple[int, ...],
+    dtype: torch.dtype,
+) -> torch.Tensor:
     assert grad.size() == size, "size mismatch"
     assert grad.stride() == stride, "stride mismatch"
     assert grad.dtype == dtype, "dtype mismatch"
@@ -96,14 +100,19 @@ def _assert_meta(grad, size, stride, dtype):
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(mode, *args, bw_state=None, **kwargs):
-    def self_invoke(*args, **dyn_kwargs):
+def inner_trace(
+    mode: ProxyTorchDispatchMode,
+    *args: Any,
+    bw_state: Optional[BackwardState] = None,
+    **kwargs: Any,
+) -> Any:
+    def self_invoke(*args: Any, **dyn_kwargs: Any) -> Any:
         with torch.no_grad():
             return _trace_wrapped_op(*args, **dyn_kwargs, **kwargs)
 
-    def unwrap_proxies(x):
+    def unwrap_proxies(x: Any) -> Any:
         if isinstance(x, torch.Tensor):
-            return mode.tracer.unwrap_proxy(x)
+            return mode.tracer.unwrap_proxy(x)  # type: ignore[union-attr]
         if isinstance(x, (list, tuple)):
             return type(x)(map(unwrap_proxies, x))
         if x is None:
@@ -132,12 +141,12 @@ def inner_trace(mode, *args, bw_state=None, **kwargs):
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
-def inner_fake(*args, **kwargs):
+def inner_fake(*args: Any, **kwargs: Any) -> None:
     raise RuntimeError("This op should never be invoked here")
 
 
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _trace_wrapped_op_dense(*args, fn, **kwargs):
+def _trace_wrapped_op_dense(*args: Any, fn: Any, **kwargs: Any) -> Any:
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(*args, **kwargs)
@@ -149,7 +158,7 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 
 
 @_trace_wrapped_op.py_functionalize_impl
-def _trace_wrapped_functionalized(ctx, *args, **kwargs):
+def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
         return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, **kwargs))
