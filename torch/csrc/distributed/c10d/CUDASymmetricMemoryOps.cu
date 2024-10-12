@@ -217,13 +217,20 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   sync_remote_blocks<MemOpSem::Relaxed>(signal_pads, rank, world_size);
 }
 
-at::Tensor multimem_one_shot_all_reduce(
+at::Tensor multimem_one_shot_all_reduce_out(
     const at::Tensor& input,
     std::string reduce_op,
-    std::string group_name) {
+    std::string group_name,
+    at::Tensor out) {
   TORCH_CHECK(
       input.is_contiguous(),
       "multimem_one_shot_all_reduce: input must be contiguous.");
+  TORCH_CHECK(
+      out.is_contiguous(),
+      "multimem_one_shot_all_reduce: output must be contiguous.");
+  TORCH_CHECK(
+      out.sizes() == input.sizes(),
+      "multimem_one_shot_all_reduce: input/output size mismatch.");
   TORCH_CHECK(
       reduce_op == "sum",
       "multimem_one_shot_all_reduce: only sum is supported for now.");
@@ -235,8 +242,6 @@ at::Tensor multimem_one_shot_all_reduce(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_one_shot_all_reduce: requires multicast support.");
-
-  auto output = at::empty_like(input);
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_one_shot_all_reduce");
@@ -262,7 +267,7 @@ at::Tensor multimem_one_shot_all_reduce(
                  at::cuda::getCurrentCUDAStream()>>>(
                   reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
                       input.storage_offset(),
-                  output.data_ptr<scalar_t>(),
+                  out.data_ptr<scalar_t>(),
                   input.numel(),
                   reinterpret_cast<uint32_t**>(
                       symm_mem->get_signal_pad_ptrs_dev()),
@@ -271,7 +276,15 @@ at::Tensor multimem_one_shot_all_reduce(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
-  return output;
+  return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  auto out = at::empty_like(input);
+  return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
 }
 
 // One-shot all-reduce is register-intensive because it stages values loaded
@@ -477,9 +490,22 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
+  // NOTE: [multimem_one_shot_all_reduce]
+  // multimem.ld_reduce does not guarantee a fixed accumulation order. This
+  // means that while multimem_one_shot_all_reduce is faster and has higher
+  // numerical accuracy than one_shot_all_reduce, it doesn't guarantee
+  // identical results across ranks. There may be use cases that can take
+  // advantage of this property, but it should not be used without
+  // understanding the caveats.
   m.def(
       "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce_out),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
