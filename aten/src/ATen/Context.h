@@ -340,6 +340,23 @@ class TORCH_API Context {
   bool allowFP16ReductionCPU() const;
   void setAllowFP16ReductionCPU(bool);
 
+  // Preserved for BC
+  void lazyInitCUDA() {
+    lazyInitDevice(at::kCUDA);
+  }
+  void lazyInitHIP() {
+    lazyInitDevice(at::kHIP);
+  }
+  void lazyInitXPU() {
+    lazyInitDevice(at::kXPU);
+  }
+  void lazyInitMTIA() {
+    lazyInitDevice(at::kMTIA);
+  }
+  void lazyInitPrivateUse1() {
+    lazyInitDevice(at::kPrivateUse1);
+  }
+
  private:
   static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
