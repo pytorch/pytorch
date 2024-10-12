@@ -1701,6 +1701,57 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
+    @common_utils.parametrize("after_data_ptr", [False, True])
+    @common_utils.parametrize("after_create_desc", [False, True])
+    def test_tma_graph_breaks(self, after_data_ptr, after_create_desc):
+        def f(a, b):
+            BLOCK_SIZE = 256
+            out = torch.zeros_like(a)
+            n_elements = out.numel()
+
+            ptrs = [t.data_ptr() for t in (a, b, out)]
+
+            if after_data_ptr:
+                torch._dynamo.graph_break()
+
+            descs = [
+                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
+                    ptr,
+                    n_elements,
+                    BLOCK_SIZE,
+                    t.element_size(),
+                )
+                for ptr in ptrs
+            ]
+
+            if after_create_desc:
+                torch._dynamo.graph_break()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_tma_1d[grid](
+                *descs,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn(301, device=GPU_TYPE)
+        b = torch.randn(301, device=GPU_TYPE)
+
+        expected_out = a + b
+        eager_out = f(a, b)
+        compiled_out = torch.compile(
+            f,
+            fullgraph=False,
+            backend="eager",
+            dynamic=False,
+        )(a, b)
+
+        self.assertEqual(eager_out, expected_out)
+        self.assertEqual(compiled_out, expected_out)
+
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager"])
     def test_tma_descriptor_1d(self, dynamic, backend):

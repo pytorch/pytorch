@@ -1121,7 +1121,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.data_ptr.tensor
+                combined_args_raw[k] = v.data_ptr.from_tensor
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -1146,6 +1146,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
             for k, v in combined_args.items()
             if not isinstance(v, ConstantVariable)
         }
+
+        for v in non_constant_args.values():
+            v = v.realize()
+            if not isinstance(v, variables.TensorVariable):
+                self.raise_unsupported(
+                    "All non-constant arguments of a traced Triton kernel "
+                    f"must be TensorVariables, but got {repr(v)}."
+                )
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args, dict)
@@ -1219,6 +1227,8 @@ class TMADescriptorVariable(VariableTracker):
         element_size: "ConstantVariable",
         **kwargs,
     ):
+        assert isinstance(data_ptr, variables.DataPtrVariable)
+
         super().__init__(**kwargs),
         self.data_ptr = data_ptr
         self.dims = dims
@@ -1231,6 +1241,18 @@ class TMADescriptorVariable(VariableTracker):
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
         )
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.experimental_descriptor",
+                f"create_{len(self.dims)}d_tma_descriptor",
+            )
+        )
+        self.data_ptr.reconstruct(codegen)
+        args = [*self.dims, *self.block_dims, self.element_size]
+        codegen.foreach(args)
+        codegen.call_function(len(args) + 1, False)
 
 
 class CreateTMADescriptorVariable(VariableTracker):
@@ -1250,7 +1272,15 @@ class CreateTMADescriptorVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
+
+        if not isinstance(ptr, variables.DataPtrVariable):
+            raise Unsupported(
+                "create_{1d,2d}_tma_descriptor can only be traced "
+                "when the upstream .data_ptr() call has been traced."
+            )
+
         if self.rank == 1:
+            assert len(args) + len(kwargs) == 4
             dims = [
                 kwargs["dim"] if "dim" in kwargs else args[1],
             ]
@@ -1258,6 +1288,7 @@ class CreateTMADescriptorVariable(VariableTracker):
                 kwargs["block_dim"] if "block_dim" in kwargs else args[2],
             ]
         else:
+            assert len(args) + len(kwargs) == 6
             dims = [
                 kwargs["dim1"] if "dim1" in kwargs else args[1],
                 kwargs["dim0"] if "dim0" in kwargs else args[2],
