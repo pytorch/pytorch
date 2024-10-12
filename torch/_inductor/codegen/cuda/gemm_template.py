@@ -124,7 +124,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     hw_info
   };
   arguments.scheduler.max_swizzle_size = {{swizzle}};
-  
+
 
 """
 

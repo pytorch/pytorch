@@ -6,12 +6,11 @@ import dataclasses
 import functools
 import itertools
 import logging
+import sys
 import textwrap
 import traceback
 from contextlib import nullcontext
-from dataclasses import field
 from functools import partial
-import sys
 from typing import (
     Any,
     Callable,
@@ -118,14 +117,13 @@ from typing_extensions import dataclass_transform
 
 @dataclass_transform()
 def ir_dataclass(_cls):
-    def wrap(cls: T) -> T:
-        return dataclasses.dataclass(cls, kw_only=True)
+    def wrap(cls: _T) -> _T:
         if sys.version_info >= (3, 10):
             # Use native kw_only for Python 3.10+
             return dataclasses.dataclass(cls, kw_only=True)
         else:
             # Polyfill for Python 3.9
-            def __init__(_self, **init_kwargs):
+            def __init__(_self):
                 fields = dataclasses.fields(cls)
                 for field in fields:
                     if (
@@ -136,10 +134,10 @@ def ir_dataclass(_cls):
                             raise TypeError(
                                 f"__init__() missing required keyword-only argument: '{field.name}'"
                             )
-                dataclasses.dataclass(cls, **kwargs).__init__(_self, **init_kwargs)
+                dataclasses.dataclass(cls).__init__(_self)
 
             cls.__init__ = __init__
-            return dataclasses.dataclass(cls, **kwargs)
+            return dataclasses.dataclass(cls)
 
     if _cls is None:
         return wrap
@@ -361,7 +359,7 @@ def is_cpu(x: object) -> bool:
 
 
 class IRNode:
-    _current_origins: ClassVar[OrderedSet[Any]] = field(init=False)
+    _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
     @staticmethod
     @contextlib.contextmanager
@@ -481,8 +479,8 @@ class Operation:
         return self.origins
 
     def get_operation_name(self) -> str:
-        # assert self.operation_name is not None
-        return ""
+        assert self.operation_name is not None
+        return self.operation_name
 
     def is_extern(self):
         return False
@@ -4161,11 +4159,7 @@ class CppTemplateBuffer(TemplateBuffer):
 
 @ir_dataclass
 class InputsKernel(OperationBuffer):
-<<<<<<< HEAD
-    inputs: List[Buffer] 
-=======
-    inputs: List[Buffer] = []
->>>>>>> b14ec7fb31f (Port Inductor dataclasses to be kw_only)
+    inputs: List[Buffer]
 
     def get_read_writes(self):
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
