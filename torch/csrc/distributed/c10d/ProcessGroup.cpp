@@ -1,7 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
-#include <thread>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
@@ -190,18 +189,13 @@ class WorkRegistry {
 
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
-    std::cout << "unregister_completed_works: before: " << registry_.size()
-              << std::endl;
     for (auto it = registry_.begin(); it != registry_.end();) {
       if (it->second->isCompleted()) {
-        std::cout << "unregister_completed_works: removed one" << std::endl;
         it = registry_.erase(it);
       } else {
         ++it;
       }
     }
-    std::cout << "unregister_completed_works: after: " << registry_.size()
-              << std::endl;
   }
 
   size_t get_work_registry_size() {
@@ -257,10 +251,6 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
   }
   return tensor;
 }
-
-// void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
-//   ::process_registry.unregister_work(work);
-// }
 
 void unregister_completed_works() {
   ::process_registry.unregister_completed_works();

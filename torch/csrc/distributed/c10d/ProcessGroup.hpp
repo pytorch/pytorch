@@ -30,8 +30,6 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
-// C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
-
 C10_EXPORT void unregister_completed_works();
 
 C10_EXPORT size_t get_work_registry_size();

@@ -1,8 +1,5 @@
 # Owner(s): ["module: dynamo"]
-import datetime
 import functools
-import io
-import sys
 import unittest
 from unittest.mock import patch
 
@@ -251,17 +248,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
 
-        class StdOutDiverter:
-            def __enter__(self):
-                self.stdout_orig = sys.stdout
-                self.stdout_new = io.StringIO()
-                sys.stdout = self.stdout_new
-                return self
-
-            def __exit__(self, *args):
-                self.captured = self.stdout_new.getvalue()
-                sys.stdout = self.stdout_orig
-
         def all_reduce_eager(x):
             y = x * x
             work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
@@ -272,14 +258,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             if torch.compiler.is_dynamo_compiling():
                 torch.ops.c10d_functional.wait_tensor(y)
             else:
-                work.wait(datetime.timedelta(seconds=100))
+                work.wait()
             # Under compile, if `wait_tensor(y)` above is correctly executed,
             # `y`'s data is in its final form and the output of this function will match eager;
             # otherwise, `y * y` will run in parallel with `all_reduce(y)` and the output of this function
             # will not match eager.
             return y * y
 
-        # with StdOutDiverter() as s:
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             x = torch.ones(12800, 12800, device="cuda") + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
