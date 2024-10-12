@@ -1867,23 +1867,23 @@ class QConvInt8ForBC final {
 class QConvoneDNN final {
  public:
   static at::Tensor run_pointwise(
-      at::Tensor act, // contains quantized values but not QTensor
+      at::Tensor const& act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
-      at::Tensor weight, // contains quantized values but not QTensor
-      at::Tensor weight_scales,
-      at::Tensor weight_zero_points,
-      std::optional<at::Tensor> bias,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
+      at::Tensor const& weight, // contains quantized values but not QTensor
+      at::Tensor const& weight_scales,
+      at::Tensor const& weight_zero_points,
+      std::optional<at::Tensor> const& bias,
+      std::vector<int64_t> stride,
+      std::vector<int64_t> padding,
+      std::vector<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
-      torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<c10::string_view> algorithm) {
+      std::string attr,
+      std::vector<std::optional<at::Scalar>> scalars,
+      std::optional<std::string> algorithm) {
 #if AT_MKLDNN_ENABLED()
     if (act.dim() == 3 || act.dim() == 5) {
       // Conv1D/3D post op check
@@ -1902,42 +1902,47 @@ class QConvoneDNN final {
         attr,
         ".")
     }
+    c10::List<int64_t> stride_list(stride);
+    c10::List<int64_t> padding_list(padding);
+    c10::List<int64_t> dilation_list(dilation);
+    c10::List<std::optional<at::Scalar>> scalars_list(scalars);
+
     return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
-        bias, stride, padding, dilation, /*transposed*/false,
+        bias, stride_list, padding_list, dilation_list, /*transposed*/false,
         groups, output_scale, output_zero_point,
         /*accum*/std::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
         /*output_dtype*/output_dtype, /*binary_attr*/std::nullopt, /*binary_alpha*/std::nullopt,
-        /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
+        /*unary_attr*/attr, /*unary_scalars*/scalars_list, /*unary_algorithm*/algorithm
     );
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
 #endif
   }
   static at::Tensor run_pointwise_binary(
-      at::Tensor act, // contains quantized values but not QTensor
+      at::Tensor const& act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
-      at::Tensor accum, // contains quantized values but not QTensor
+      at::Tensor const& accum, // contains quantized values but not QTensor
       double accum_scale,
       int64_t accum_zero_point,
-      at::Tensor weight, // contains quantized values but not QTensor
-      at::Tensor weight_scales,
-      at::Tensor weight_zero_points,
-      std::optional<at::Tensor> bias,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
+      at::Tensor const& weight, // contains quantized values but not QTensor
+      at::Tensor const& weight_scales,
+      at::Tensor const& weight_zero_points,
+      std::optional<at::Tensor> const& bias,
+      std::vector<int64_t> stride,
+      std::vector<int64_t> padding,
+      std::vector<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view binary_attr,
+      std::string binary_attr,
       std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
-      torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<c10::string_view> unary_algorithm) {
+      std::optional<std::string> unary_attr,
+      std::vector<std::optional<at::Scalar>> unary_scalars,
+      std::optional<std::string> unary_algorithm) {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
@@ -1954,14 +1959,20 @@ class QConvoneDNN final {
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
       ".")
+
+    c10::List<int64_t> stride_list(stride);
+    c10::List<int64_t> padding_list(padding);
+    c10::List<int64_t> dilation_list(dilation);
+    c10::List<std::optional<at::Scalar>> unary_scalars_list(unary_scalars);
+
     return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
-        bias, stride, padding, dilation, /*transposed*/false,
+        bias, stride_list, padding_list, dilation_list, /*transposed*/false,
         groups, output_scale, output_zero_point,
         accum, accum_scale, accum_zero_point,
         /*output_dtype*/output_dtype, binary_attr, alpha,
-        unary_attr, unary_scalars, unary_algorithm
+        unary_attr, unary_scalars_list, unary_algorithm
     );
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")

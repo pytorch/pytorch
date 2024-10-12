@@ -590,25 +590,6 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             None,
             op_overload=torch.ops.onednn.qconv2d_pointwise.default,
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -824,30 +805,6 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             None,
             op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor accum,
-                double accum_scale,
-                int64_t accum_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view binary_attr,
-                std::optional<at::Scalar> alpha,
-                std::optional<c10::string_view> attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -1316,21 +1273,6 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             if x_scale_zp_are_tensors
             else ("double", "int64_t")
         )
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view post_op_name,
-                torch::List<std::optional<at::Scalar>> post_op_args,
-                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -1529,26 +1471,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             if x_scale_zp_are_tensors
             else ("double", "int64_t")
         )
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> other,
-                std::optional<at::Tensor> bias,
-                double inv_output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                double other_scale,
-                int64_t other_zero_point,
-                c10::string_view binary_post_op,
-                double binary_alpha,
-                c10::string_view unary_post_op,
-                torch::List<std::optional<at::Scalar>> unary_post_op_args,
-                c10::string_view unary_post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
