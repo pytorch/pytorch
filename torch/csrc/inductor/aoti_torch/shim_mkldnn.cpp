@@ -235,7 +235,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<c10::Scalar>> scalars_list;
+    std::vector<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
@@ -246,7 +246,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
         pointer_to_optional<at::Tensor>(B),
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }

@@ -1158,13 +1158,6 @@ class MKLPackedLinear(ExternKernelAlloc):
             None,
             op_overload=torch.ops.mkl._mkl_linear.default,
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& self,
-                const at::Tensor& mkl_weight_t,
-                const at::Tensor& origin_weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -1219,15 +1212,6 @@ class LinearUnary(ExternKernelAlloc):
             if config.abi_compatible
             else None,
         )
-        self.cpp_kernel_key = "linear_pointwise"
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         if config.abi_compatible:
@@ -1299,14 +1283,6 @@ class LinearBinary(ExternKernelAlloc):
             if config.abi_compatible
             else None,
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& other_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                c10::string_view attr)
-        """
 
     def codegen(self, wrapper):
         if config.abi_compatible:
