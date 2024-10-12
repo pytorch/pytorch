@@ -300,16 +300,17 @@ Tensor mkldnn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::string attr,
+    std::vector<std::optional<at::Scalar>> scalars,
+    std::optional<std::string> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  c10::List<std::optional<at::Scalar>> scalars_list(scalars);
   return _mkldnn_convolution(
       input_t,
       weight_t,
@@ -320,7 +321,7 @@ Tensor mkldnn_convolution_pointwise(
       groups,
       use_channels_last,
       attr,
-      scalars,
+      scalars_list,
       algorithm);
 }
 

@@ -11,13 +11,13 @@ C10_API Tensor mkldnn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
+    std::vector<int64_t> padding,
+    std::vector<int64_t> stride,
+    std::vector<int64_t> dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm);
+    std::string attr,
+    std::vector<std::optional<at::Scalar>> scalars,
+    std::optional<std::string> algorithm);
 
 C10_API Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& input_t,
