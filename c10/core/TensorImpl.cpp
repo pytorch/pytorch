@@ -111,7 +111,6 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,7 +122,6 @@ TensorImpl::TensorImpl(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -137,7 +135,6 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     std::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
