@@ -177,6 +177,8 @@ void CUDAGraph::capture_end() {
   if (num_dynamic_args_) {
     // must do this before cudaGraphInstantiate, since it calls cudaGraphKernelNodeSetAttribute
     introspect_dynamic_graph();
+    // TODO: we could releasePool here? would save a good amount of memory...
+    // (because all our allocations will be redone and overwritten on every replay_dynamic)
   }
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -231,7 +233,8 @@ void CUDAGraph::capture_end() {
     // we don't need graph_ anymore.
     AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     has_graph_ = false;
-  } else {
+  }
+  if (_cuda_graphs_debug) {
     TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed until debug_dump is called.");
   }
 }
@@ -338,46 +341,73 @@ CUDAGraph::~CUDAGraph() {
   reset();
 }
 
-std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, const std::vector<TrackedAllocation>& allocations) {
-  for (size_t i = 0; i < allocations.size(); i++) {
-    void* begin = allocations[i].ptr;
-    void* end = (void*)((char*) begin + allocations[i].size);
-    if (ptr >= begin && ptr < end) {
-      size_t offset = (size_t)((char*)ptr - (char*)begin);
-      return std::make_tuple(i, offset);
-    }
+std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, const std::vector<TrackedAllocation>& sorted_allocations) {
+  // since allocations is sorted in ptr order, we can search it in log time
+  auto it = std::upper_bound(sorted_allocations.begin(), sorted_allocations.end(), ptr, [](const void* p, const TrackedAllocation& alloc) {
+    return p < alloc.ptr;
+  });
+  // upper_bound finds the first allocation whose ptr is strictly greater than our search
+  if (it == sorted_allocations.begin()) {
+    return std::nullopt; // the ptr is before our first allocation
+  }
+  // so we must decrement to get to the one we actually want
+  --it;
+  void* begin = it->ptr;
+  void* end = (char*) begin + it->size;
+  if (ptr >= begin && ptr < end) {
+    size_t offset = (char*) ptr - (char*) begin;
+    return std::make_tuple(it->alloc_idx, offset);
   }
   return std::nullopt;
-};
+}
 
 std::vector<TrackedAllocation> combine_ranges(const std::vector<TrackedAllocation>& input, size_t num_dynamic_args) {
-    std::vector<TrackedAllocation> ranges = input;
-    // combine according to overlap:
-    std::sort(ranges.begin(), ranges.end(), [](const TrackedAllocation& a, const TrackedAllocation& b) {
-      return a.ptr < b.ptr;
-    });
-    std::vector<TrackedAllocation> result;
-    for (const TrackedAllocation& range : ranges) {
-      if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
-        result.push_back(range); // No overlap, add new range
-      } else {
-        TrackedAllocation& last = result.back(); // Overlap found, extend the previous range
-        TORCH_CHECK(last.alloc_idx >= num_dynamic_args && range.alloc_idx >= num_dynamic_args, "Cannot combine argument allocations");
-        char* last_end = last.ptr + last.size;
-        char* range_end = range.ptr + range.size;
-        last.size = std::max(last_end, range_end) - last.ptr;
-      }
+  // the allocator can return overlaps, e.g. (128, 256) is allocated then freed, later (0, 256) could be given to another allocation
+  // in such a case, we don't know whether a reference to, say, 200 was from the first or second allocation
+  // to sidestep this conundrum, we will find any overlaps, and do one big allocation for the union of each overlapping area
+  std::vector<TrackedAllocation> ranges = input;
+  std::sort(ranges.begin(), ranges.end(), [](auto& a, auto& b) {
+    return a.ptr < b.ptr;
+  });
+  std::vector<TrackedAllocation> result;
+  for (const TrackedAllocation& range : ranges) {
+    if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
+      result.push_back(range); // No overlap, add new range
+    } else {
+      TrackedAllocation& last = result.back(); // Overlap found, extend the previous range
+      TORCH_CHECK(last.alloc_idx >= num_dynamic_args && range.alloc_idx >= num_dynamic_args, "Cannot combine argument allocations");
+      char* last_end = last.ptr + last.size;
+      char* range_end = range.ptr + range.size;
+      last.size = std::max(last_end, range_end) - last.ptr;
     }
-    // sort by original alloc_idx to bring the original dynamic args back to the beginning, in original order
-    // (since the dynamic args were allocated from a private pool, they should always be in ascending ptr order anyway? but let's just be safe)
-    std::sort(result.begin(), result.end(), [](const TrackedAllocation& a, const TrackedAllocation& b) {
-      return a.alloc_idx < b.alloc_idx;
-    });
-    return result;
+  }
+  // sort by original alloc_idx to bring the original dynamic args back to the beginning, in original order
+  // (since the dynamic args were allocated sequentially from a private pool, and never freed for the duration of the function, they should always be in ascending ptr order anyway? but there's no reason to believe that for the rest of the allocations)
+  std::sort(result.begin(), result.end(), [](auto& a, auto& b) {
+    return a.alloc_idx < b.alloc_idx;
+  });
+  for (size_t i = 0; i < result.size(); i++) {
+    if (i < num_dynamic_args) {
+      // really important, let's make absolutely sure that the inputs to the function emerge unscathed (no merging or reordering)
+      TORCH_INTERNAL_ASSERT(result[i].alloc_idx == i);
+    } else {
+      result[i].alloc_idx = i; // reassign alloc_idx to actually match the order we'll be going in
+    }
+  }
+  return result;
 }
 
 void CUDAGraph::introspect_dynamic_graph() {
   allocations_ = combine_ranges(allocations_, num_dynamic_args_);
+
+  std::vector<TrackedAllocation> sorted_allocations = allocations_;
+  // copy since we're going to mess up allocation order, just for this function
+  // we will need to look up a bunch of pointers, and binary search can speed this up from linear to log time
+  // therefore:
+  std::sort(sorted_allocations.begin(), sorted_allocations.end(), [](auto& a, auto& b) {
+    return a.ptr < b.ptr;
+  });
+
   size_t num_nodes;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
   std::cout << "number of nodes captured " << num_nodes << std::endl;
@@ -412,7 +442,7 @@ void CUDAGraph::introspect_dynamic_graph() {
         for (size_t address_start = 0; param_size - address_start >= 8;
              address_start += 8) {
           char* arg1_value = arg1_speculative_pointer[address_start / 8];
-          if (auto result = checkAllocationWithinGraph(arg1_value, allocations_)) {
+          if (auto result = checkAllocationWithinGraph(arg1_value, sorted_allocations)) {
             auto [alloc_idx, offset] = *result;
             std::cout << "LEIJURV: I have decided that " << address_start << " bytes into argument #" << param_index << " of kernel " << func_name << " is actually allocation " << alloc_idx << " indexed to offset " << offset << std::endl;
             cudaKernelNodeAttrValue attr_value = {
@@ -442,8 +472,8 @@ void CUDAGraph::introspect_dynamic_graph() {
     } else if (type == cudaGraphNodeTypeMemcpy) {
       cudaMemcpy3DParms memcpyParams1;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &memcpyParams1));
-      auto srcPtrResult = checkAllocationWithinGraph(memcpyParams1.srcPtr.ptr, allocations_);
-      auto dstPtrResult = checkAllocationWithinGraph(memcpyParams1.dstPtr.ptr, allocations_);
+      auto srcPtrResult = checkAllocationWithinGraph(memcpyParams1.srcPtr.ptr, sorted_allocations);
+      auto dstPtrResult = checkAllocationWithinGraph(memcpyParams1.dstPtr.ptr, sorted_allocations);
       if (!srcPtrResult && !dstPtrResult) {
         continue;
       }
@@ -482,7 +512,7 @@ void CUDAGraph::introspect_dynamic_graph() {
       cudaMemsetParams memsetParams1;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node, &memsetParams1));
 
-      auto dstPtrResult = checkAllocationWithinGraph(memsetParams1.dst, allocations_);
+      auto dstPtrResult = checkAllocationWithinGraph(memsetParams1.dst, sorted_allocations);
       if (!dstPtrResult) {
         continue;
       }
@@ -545,6 +575,7 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& input_tensors) {
   std::vector<void*> actualDataPtrs;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   for (size_t i = 0; i < allocations_.size(); i++) {
+    TORCH_INTERNAL_ASSERT(allocations_[i].alloc_idx == i);
     if (i < (size_t) num_dynamic_args_) {
       // the first few are inputs/outputs, so they are "prefilled"
       TORCH_CHECK(input_tensors[i].is_contiguous(), "All tensors must be contiguous");
