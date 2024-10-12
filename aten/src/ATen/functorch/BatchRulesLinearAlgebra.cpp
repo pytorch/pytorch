@@ -494,7 +494,7 @@ _scaled_dot_product_flash_attention_batch_rule(
   double dropout_p,
   bool is_causal,
   bool return_debug_mask,
-  c10::optional<double> scale
+  std::optional<double> scale
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
@@ -543,7 +543,7 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   bool compute_log_sumexp,
   double dropout_p,
   bool is_causal,
-  c10::optional<double> scale
+  std::optional<double> scale
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
@@ -585,7 +585,7 @@ _scaled_dot_product_cudnn_attention_batch_rule(
   double dropout_p,
   bool is_causal,
   bool return_debug_mask,
-  c10::optional<double> scale
+  std::optional<double> scale
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();

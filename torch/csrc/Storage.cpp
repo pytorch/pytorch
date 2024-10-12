@@ -482,8 +482,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     return THPByteUtils_newReal(value);
     /* Slice index */
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, slicelength, step;
+    Py_ssize_t start = 0, stop = 0, slicelength = 0, step = 0;
     if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
       return nullptr;
     }
@@ -554,8 +553,7 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     storage_set(storage, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
+    Py_ssize_t start = 0, stop = 0, step = 0;
     Py_ssize_t len = static_cast<Py_ssize_t>(storage.nbytes());
     if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
       return -1;
