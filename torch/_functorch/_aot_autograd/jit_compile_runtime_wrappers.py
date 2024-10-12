@@ -145,6 +145,13 @@ def aot_dispatch_base(
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    # Save the forward_graph_str right after aot_dispatch_base_graph,
+    # to save in the cache
+    aot_forward_graph_str = None
+    if autograd_cache_enabled():
+        aot_forward_graph_str = fw_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
 
     fakified_out_wrapper = FakifiedOutWrapper()
     (
@@ -209,6 +216,9 @@ def aot_dispatch_base(
             entry = AOTAutogradCacheEntry(
                 compiled_fw=CompiledForward(fw_key),
                 compiled_bw=None,
+                aot_joint_graph_str=None,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=None,
                 runtime_metadata=fw_metadata,
                 dispatch_wrappers=wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
@@ -350,7 +360,7 @@ def aot_dispatch_autograd(
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
-
+    joint_graph_str = None
     if aot_config.enable_log:
         aot_joint_log.info(
             "%s",
@@ -363,11 +373,12 @@ def aot_dispatch_autograd(
                 colored=True,
             ),
         )
+        joint_graph_str = fx_g.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: joint_graph_str,
         )
 
     with torch.no_grad():
@@ -536,6 +547,8 @@ def aot_dispatch_autograd(
                 if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
                     _indices_of_inps_to_detach.append(i)
 
+        fw_module_str = None
+        bw_module_str = None
         if aot_config.enable_log:
             aot_graphs_log.info(
                 "%s",
@@ -559,17 +572,19 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
+            fw_module_str = fw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
+            bw_module_str = bw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: fw_module_str,
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: bw_module_str,
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -771,11 +786,20 @@ def aot_dispatch_autograd(
                 # It's possible this changes in the future, in which case we should
                 # update backward_time_taken_ns to be more inclusive
                 backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
+
+                aot_forward_graph_str: Optional[str] = fw_module_str
+                aot_backward_graph_str: Optional[str] = bw_module_str
+                aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
                     CompiledForward(fw_key),
                     CompiledBackward(
-                        bw_key, backward_state_indices, num_symints_saved_for_bw
+                        bw_key,
+                        backward_state_indices,
+                        num_symints_saved_for_bw,
                     ),
+                    aot_joint_graph_str,
+                    aot_forward_graph_str,
+                    aot_backward_graph_str,
                     _fw_metadata,
                     wrappers,
                     maybe_subclass_meta,
