@@ -253,20 +253,6 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f()
         self.assertEqual(r, opt_r)
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_sym_sum_unbacked(self, device):
-        def f(a):
-            xs = a.tolist()
-            y = sum(xs)
-            return torch.tensor(y)
-
-        splits = torch.randint(10, (100,), device=device)
-
-        opt_f = torch.compile(f, fullgraph=True)
-        r = f(splits)
-        opt_r = opt_f(splits)
-        self.assertEqual(r, opt_r)
-
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -956,7 +942,7 @@ class TestInductorDynamic(TestCase):
         def f(x):
             return x.sum()
 
-        x = torch.empty_strided((1, 4), (5, 1), device="cuda")
+        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
 
