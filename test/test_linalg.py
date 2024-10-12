@@ -4575,6 +4575,7 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half)
+    @serialTest()
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
         os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
