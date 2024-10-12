@@ -7,6 +7,7 @@ import cProfile
 import dis
 import functools
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -120,6 +121,7 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
+from .variables.torch_function import torch_function_mode_stack_state_mgr
 
 
 np: Optional[ModuleType]
@@ -218,15 +220,18 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
-
             exit_stack = contextlib.ExitStack()
             exit_stack.enter_context(
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
+            exit_stack.enter_context(torch_function_mode_stack_state_mgr)
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                assert (
+                    torch._C._len_torch_function_stack() == 0
+                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -1070,6 +1075,18 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
+            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
+                # Remove entries that have set values which are functions
+                del d["reorderable_logging_functions"]
+                # Remove entries that have set values which are _TensorMeta
+                del d["traceable_tensor_subclasses"]
+
+                return {
+                    key: list(value) if isinstance(value, set) else value
+                    for key, value in d.items()
+                }
+
+            config_dict = handle_sets(config.shallow_copy_dict())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1103,6 +1120,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
+                json.dumps(config_dict),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
