@@ -1213,7 +1213,10 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         with self.assertLogs(logger_name, level="INFO") as captured:
             relu(torch.rand([3, 3], requires_grad=True)).sum().backward()
 
-        if is_dynamic_shape_test(self._testMethodName) or torch._dynamo.config.assume_outer_dim_dynamic_by_default:
+        if (
+            is_dynamic_shape_test(self._testMethodName)
+            or torch._dynamo.config.assume_outer_dim_dynamic_by_default
+        ):
             # an extra symint exists
             expected_msg = "bw_donated_idxs=[1]"
         else:

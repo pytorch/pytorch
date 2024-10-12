@@ -211,8 +211,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Should we just delete this test? It feels like the backwards laziness should be more explicit
         # instead of implicit based on number of symints saved for backwards.
 
-        pass
-
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
