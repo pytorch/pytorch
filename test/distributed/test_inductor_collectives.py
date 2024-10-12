@@ -274,7 +274,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
             # thus will produce the wrong result that fails the unit test.
 
-            # pure-eager test
+            # Test: pure-eager
             for _ in range(10):
                 work, y = all_reduce_eager(x)
                 out_ref = all_reduce_wait(work, y)
@@ -283,7 +283,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch._C._distributed_c10d._unregister_completed_works()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
-            # issue comm in eager -> wait for comm in compile test
+            # Test: issue comm in eager -> wait for comm in compile
             all_reduce_wait_compiled = torch.compile(
                 all_reduce_wait,
                 backend="inductor",
