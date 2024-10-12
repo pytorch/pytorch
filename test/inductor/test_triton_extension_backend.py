@@ -36,7 +36,7 @@ from torch._inductor.codegen.common import (
     register_device_op_overrides,
 )
 from torch._inductor.utils import get_triton_code
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, xfailIfRocm
 
 
 try:
@@ -70,6 +70,7 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
     Test creating a backend for inductor with Triton scheduling.
     """
 
+    @xfailIfRocm
     def test_open_device_registration(self):
         torch._register_device_module("privateuseone", self.module)
         register_backend_for_device(
