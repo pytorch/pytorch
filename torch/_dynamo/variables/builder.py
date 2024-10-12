@@ -1787,8 +1787,8 @@ class VariableBuilder:
                                 "name": name,
                                 "dim_changed": "scalar",
                                 "reason": "scalar change",
-                                "cached": frame_state_entry.scalar,
-                                "new": value,
+                                "cached": str(frame_state_entry.scalar),
+                                "new": str(value),
                             },
                         )
                         if self.source.guard_source().is_unspecialized_nn_module():
@@ -2504,8 +2504,8 @@ def _automatic_dynamic(
                             "name": name,
                             "dim_changed": "all",
                             "reason": "dimensionality change",
-                            "cached": frame_state_entry.size,
-                            "new": size,
+                            "cached": str(frame_state_entry.size),
+                            "new": str(size),
                         },
                     )
                     frame_state_entry.size = None
@@ -2532,8 +2532,8 @@ def _automatic_dynamic(
                                     "name": name,
                                     "dim_changed": i,
                                     "reason": "size change",
-                                    "cached": dim,
-                                    "new": size[i],
+                                    "cached": str(dim),
+                                    "new": str(size[i]),
                                 },
                             )
                             frame_state_entry.size[i] = None
@@ -2573,8 +2573,8 @@ def _automatic_dynamic(
                                         "name": name,
                                         "dim_changed": i,
                                         "reason": "stride change",
-                                        "cached": dim,
-                                        "new": stride[i],
+                                        "cached": str(dim),
+                                        "new": str(stride[i]),
                                     },
                                 )
                                 frame_state_entry.stride[i] = None
