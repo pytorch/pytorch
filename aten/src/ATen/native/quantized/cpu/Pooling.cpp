@@ -490,6 +490,8 @@ void check_maxpool3d_params(
               "Expected no strides or 3d strides, got", stride.size());
   TORCH_CHECK(padding.size() == 3, "Expected 3d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 3, "Expected 1d or 3d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 #ifdef USE_PYTORCH_QNNPACK
