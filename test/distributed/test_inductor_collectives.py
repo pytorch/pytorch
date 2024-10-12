@@ -270,7 +270,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             # We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
             # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
-            # thus guaranteeing `y * y` on GPU side will run in parallel with `all_reduce(y)` in the bad case.
+            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
+            # thus producing the wrong result.
             for _ in range(10):
                 work, y = all_reduce_eager(x)
                 out_ref = all_reduce_wait(work, y)
