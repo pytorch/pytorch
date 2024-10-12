@@ -381,13 +381,11 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
     std::optional<at::Tensor> bias,
     at::Tensor out) {
   int M = XQ.size(0);
-  int K = XQ.size(1);
   int N = WQ.size(1);
 
   // All the tiles we use have sizes which are multiples of 64, hence any
   // non-multiple of 64 will get padded anyways. Let's round up to simplify.
   M = round_up_to_nearest_multiple(M, 64);
-  K = round_up_to_nearest_multiple(K, 64);
   N = round_up_to_nearest_multiple(N, 64);
 
   // Small/skinny shapes with odd multiples of 64.
