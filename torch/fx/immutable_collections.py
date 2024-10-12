@@ -19,12 +19,13 @@ from ._compatibility import compatibility
 __all__ = ["immutable_list", "immutable_dict"]
 
 
-_help_mutation = """\
+_help_mutation = """
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:
-    new_args = ... # copy and mutate args
+
+    new_args = ...  # copy and mutate args
     node.args = new_args
-"""
+""".strip()
 
 
 _T = TypeVar("_T")
@@ -33,8 +34,8 @@ _VT = TypeVar("_VT")
 
 
 def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:
-    raise NotImplementedError(
-        f"'{type(self).__name__}' object does not support mutation. {_help_mutation}",
+    raise TypeError(
+        f"{type(self).__name__!r} object does not support mutation. {_help_mutation}",
     )
 
 
