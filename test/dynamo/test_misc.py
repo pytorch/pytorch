@@ -44,11 +44,12 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
+    requiresPy310,
     same,
     skipIfNotPy311,
     unsupported,
 )
-from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -306,6 +307,19 @@ class MiscTests(torch._inductor.test_case.TestCase):
             first_graph_break,
             "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
         )
+
+    def test_scalar_device_movement(self):
+        if not torch._dynamo.config.assume_static_by_default:
+            self.skipTest("Doesn't work with symints")
+
+        def add_fn(a, b, out):
+            res = torch.add(a, b, out=out)
+            return res
+
+        res = add_fn(2, 3, torch.tensor(0.0))
+        add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
+        res_compiled = add_fn(2, 3, torch.tensor(0.0))
+        self.assertEqual(res, res_compiled)
 
     @skipIfNNModuleInlined("fails internal CI")
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
@@ -1023,7 +1037,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 ret = ret + v
             return ret
 
-        from torch._dynamo.guards import build_guard_function, CLOSURE_VARS
+        from torch._dynamo.guards import build_guard_function
 
         x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
         _, guards = torch._dynamo.export(fn, x)
@@ -1999,6 +2013,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(opt_fn(cfg, x, x), 2 * x + 5))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    def test_data_access_in_inference_mode(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.data
+            return y
+
+        with torch.inference_mode():
+            x = torch.randn(3)
+            y = f(x)
+        self.assertEqual(y, x)
 
     def test_dataclass_fields(self):
         @dataclasses.dataclass
@@ -3354,6 +3379,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj42.y, x4 + 2))
         self.assertTrue(same(obj41.y, obj42.y))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_thread_local_setattr(self):
+        from threading import local
+
+        loc = local()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, l):
+            l.x = x
+            return x + 1
+
+        x = torch.ones(2, 2)
+        fn(x, loc)
+
+        self.assertTrue(loc.x is x)
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
@@ -5755,7 +5795,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a + b + c
 
         def count_graph_break_msgs(msgs):
-            return sum(msg.find("Graph break") != -1 for msg in msgs)
+            return sum("Graph break in user code" in msg for msg in msgs)
 
         with self.assertLogs(
             logger="torch._dynamo", level=logging.DEBUG
@@ -7875,49 +7915,6 @@ utils_device.CURRENT_DEVICE == None""".split(
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @expectedFailureDynamic
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
-    def test_compile_profiler(self):
-        class Model(torch.nn.Module):
-            def forward(self, input):
-                return input + input
-
-        model = Model()
-        prof = CompileProfiler()
-        compiled = torch.compile(model, backend=prof)
-        base_checker = (
-            lambda: FileCheck()
-            .check("Torchdynamo Profiler Report")
-            .check("Graph Breaks")
-            .check("No graph breaks detected.")
-            .check("Recompilation")
-        )
-        input = torch.rand((2, 3, 4))
-        _ = compiled(input)
-        base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((3, 3, 4))
-        _ = compiled(new_shape_input)
-
-        # Not an exhaustive test of dynamic shapes behavior, but some sanity
-        if torch._dynamo.config.assume_static_by_default:
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
-        else:
-            base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((4, 3, 4))
-        _ = compiled(new_shape_input)
-
-        base_checker().check("Recompile Reasons").check("'forward'").check(
-            "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-        ).check(
-            "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-        ).run(
-            prof.report()
-        )
-
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
 
@@ -9053,6 +9050,29 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_inline_closure_returned_by_another_function_and_captures(self):
+        x = torch.ones(1)
+
+        def fn():
+            def inner():
+                return x + 2
+
+            return inner
+
+        @torch.compile
+        def start():
+            # Obtain the `inner` function, which holds reference to `x`.
+            inner = fn()
+
+            # When we call `inner`, we end up looking up `x` from our inlining
+            # tracer, Dynamo must make sure it still has some modeling of `x` at
+            # that point.
+            res = inner()
+            return res
+
+        res = start()
+        self.assertEqual(torch.ones(1) * 3, res)
+
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
@@ -9754,6 +9774,113 @@ def ___make_guard_fn():
         }
         self.assertEqual(expected_fqn, gm.meta["dynamo_flat_name_to_original_fqn"])
 
+    def test_proxy_frozen_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_reconstruct_frozen_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            torch._dynamo.graph_break()
+            return dc.x + dc.y
+
+        fn_opt = torch.compile()(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+    def test_frozen_dataclass_default_value(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(default=5)
+            a: int = 6
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.z + dc.a
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_default_factory(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(default_factory=list)
+            a: int = dataclasses.field(default_factory=lambda: [5])
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a[0]
+
+        def fn(x, y):
+            dc = TestDataClass(x, y)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    @requiresPy310
+    def test_frozen_dataclass_kw_only(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int = dataclasses.field(kw_only=True)
+            a: int = dataclasses.field(kw_only=True)
+
+        @allow_in_graph
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
+
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
@@ -9829,6 +9956,9 @@ ShapeEnv not equal: field values don't match:
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
+  > Right: {}
+==> source_to_var: values don't match.
+  >  Left: {x.size()[0]: s0, x.size()[1]: s1}
   > Right: {}
 ==> val_to_var: values don't match.
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
@@ -10340,6 +10470,21 @@ fn
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+
+    def test_guard_size_oblivious_simplification(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            torch._check((2 * u0) % (u0 + u1) == 0)
+            torch._check((2 * u0) // (u0 + u1) != 0)
+            if guard_size_oblivious((2 * u0) // (u0 + u1) == 0):
+                return torch.tensor(True)
+            else:
+                return torch.tensor(False)
+
+        fn(torch.tensor([3, 3]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
@@ -11214,6 +11359,29 @@ fn
         self.assertEqual(r.y, torch.ones(2, 2) + 1)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_getattrvariable_as_python_constant(self):
+        from torch._dynamo.variables.misc import GetAttrVariable
+
+        @torch.compile(backend="eager")
+        def fn(x, rand1):
+            random.Random().setstate(rand1.getstate())
+            return x + rand1.random()
+
+        def get_rng():
+            rand1 = random.Random(1)
+            orig_random = rand1.random
+            rand1.random = lambda: orig_random()
+            return rand1
+
+        x = torch.randn(3, 3)
+        expected = fn.__wrapped__(x, get_rng())
+
+        with patch.object(GetAttrVariable, "as_python_constant", autospec=True) as po:
+            actual = fn(x, get_rng())
+
+        self.assertEqual(expected, actual)
+        self.assertGreater(po.call_count, 0)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
@@ -11242,6 +11410,59 @@ class TestTracer(JitTestCase):
         fn()
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
+
+
+class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
+    def test_autograd_function_with_matmul_folding_at_output(self):
+        """
+        When tensor folding occurs during matmul operation returned tensor is a view.
+        This can cause issues when matmul is used inside a custom function
+        and such view is then returned as output. Then it cannot be modified inplace
+        and causes errors.
+        It can be especially problematic when after such function inplace allreduce
+        is performed. This test recreates this behaviour.
+        Issue is resolved when unsafe_view is returned from matmul instead.
+        """
+
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                ctx.save_for_backward(inp2)
+                ctx.output_shape = inp1.size()
+                return torch.matmul(inp1, inp2)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                output_shape = ctx.output_shape
+                (inp2,) = ctx.saved_tensors
+                return (
+                    torch.mm(grad_output.squeeze(), inp2.t()).view(output_shape),
+                    None,
+                )
+
+        def outer_function(inp1, inp2):
+            res = CustomFunction.apply(inp1, inp2)
+            res.add_(1.0)
+            return res.sum()
+
+        def usual_function(inp1, inp2) -> torch.Tensor:
+            res = torch.matmul(inp1, inp2)
+            res.add_(1.0)
+            return res.sum()
+
+        inp1_custom = torch.randn(4, 1, 2, requires_grad=True)
+        inp1_usual = inp1_custom.detach().clone().requires_grad_(True)
+
+        inp2 = torch.randn(2, 4)
+        c_custom_func = torch.compile(outer_function)
+        c_usual_func = torch.compile(usual_function)
+
+        result_custom = c_custom_func(inp1_custom, inp2)
+        result_custom.backward()
+        result_usual = c_usual_func(inp1_usual, inp2)
+        result_usual.backward()
+
+        torch.allclose(inp1_custom.grad, inp1_usual.grad)
 
 
 if __name__ == "__main__":

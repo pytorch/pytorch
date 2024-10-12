@@ -6,15 +6,11 @@
 
 #include <c10/util/Exception.h>
 
-#include <algorithm>
-#include <functional>
-#include <map>
 #include <ostream>
 #include <string>
 #include <typeinfo>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 namespace {
 /// Joins names hierarchically: "name_prefix.name" if `name_prefix` is
 /// non-empty, else just "name".
@@ -415,5 +411,4 @@ serialize::InputArchive& operator>>(
   module->load(archive);
   return archive;
 }
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

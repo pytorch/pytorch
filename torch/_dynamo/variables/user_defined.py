@@ -2,12 +2,14 @@
 
 import collections
 import contextlib
+import dataclasses
 import enum
 import functools
 import inspect
 import itertools
 import random
 import sys
+import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -15,6 +17,7 @@ from typing import Dict, Generic, List, TYPE_CHECKING
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -39,6 +42,7 @@ from ..utils import (
     check_constant_args,
     get_custom_getattr,
     has_torch_function,
+    is_frozen_dataclass,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -79,11 +83,6 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
-        # TODO mlazos: Temporary to get this stack to pass
-        # remove in subsequent PR
-        from torch.overrides import BaseTorchFunctionMode
-
-        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -112,9 +111,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def as_python_constant(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_proxy(self):
         return self.value
@@ -197,6 +193,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
+            if isinstance(obj.__func__, property):
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -379,8 +379,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                items = args[0].force_unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
@@ -413,15 +413,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            # import here to avoid an unfortunate circular dependency.
+            from torch.overrides import TorchFunctionMode
+
             from .ctx_manager import GenericContextWrappingVariable
+            from .torch_function import TorchFunctionModeVariable
+
+            if issubclass(
+                self.value, TorchFunctionMode
+            ) and TorchFunctionModeVariable.is_supported_torch_function_mode(
+                self.value
+            ):
+                var_cls = TorchFunctionModeVariable
+            else:
+                var_cls = GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, GenericContextWrappingVariable, {}
+                self.source, self.value, var_cls, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
@@ -452,6 +462,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
+        elif is_frozen_dataclass(self.value) and self.is_standard_new():
+            from .builder import SourcelessBuilder
+
+            fields = dataclasses.fields(self.value)
+            items = list(args)
+            items.extend([None] * (len(fields) - len(items)))
+
+            default_kwargs = {}
+            for field, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field.name in kwargs:
+                        var_tracker = kwargs[field.name]
+                    else:
+                        if not field.init:
+                            continue
+
+                        if field.default is not dataclasses.MISSING:
+                            var_tracker = SourcelessBuilder.create(tx, field.default)
+                        elif field.default_factory is not dataclasses.MISSING:
+                            factory_fn = SourcelessBuilder.create(
+                                tx, field.default_factory
+                            )
+                            var_tracker = factory_fn.call_function(tx, [], {})
+                        else:
+                            # if we are subclass, the constructor could possibly
+                            # be missing args
+                            continue
+
+                    default_kwargs[field.name] = var_tracker
+            kwargs.update(default_kwargs)
+
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+            var.call_method(tx, "__init__", args, kwargs)
+            return var
         elif (
             self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -476,7 +520,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in self._in_graph_classes():
+        elif (
+            self.value in self._in_graph_classes()
+            or is_traceable_wrapper_subclass_type(self.value)
+        ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
@@ -674,7 +721,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method):
+            if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             # [NOTE] OrderedDict, dict subtypes must always have source
@@ -712,7 +759,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.unpack_var_sequence(tx):
+                for key in keys.force_unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
                             [key, self.odict_getitem(tx, key)],
@@ -772,7 +819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self):
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        )
+        ) and not isinstance(self.value, threading.local)
 
     def unpack_var_sequence(self, tx):
         if (
@@ -957,7 +1004,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1137,7 +1184,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():
@@ -1173,6 +1220,54 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class FrozenDataClassVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def create(tx, value, source):
+        from dataclasses import fields
+
+        assert is_frozen_dataclass(value)
+
+        from .builder import VariableBuilder
+
+        field_map = {}
+        for field in fields(value):
+            if hasattr(value, field.name):
+                field_map[field.name] = VariableBuilder(
+                    tx, AttrSource(source, field.name)
+                )(getattr(value, field.name))
+
+        return FrozenDataClassVariable(value, fields=field_map, source=source)
+
+    def __init__(self, value, fields=None, **kwargs) -> None:
+        super().__init__(value, **kwargs)
+        if fields is None:
+            fields = {}
+        self.fields = fields
+
+    def as_proxy(self):
+        from dataclasses import fields
+
+        args = []
+        kwargs = {}
+        for field in fields(self.value):
+            proxy = self.fields[field.name].as_proxy()
+            if hasattr(field, "kw_only") and field.kw_only:
+                kwargs[field.name] = proxy
+            else:
+                args.append(proxy)
+
+        return self.python_type()(*args, **kwargs)
+
+    # NB: This is called during __init__ for a frozen dataclass
+    # use this to accumulate the most up-to-date field values
+    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+        self.fields[name.as_python_constant()] = value
+        return super().method_setattr_standard(tx, name, value)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.value_type.__name__})"
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):

@@ -145,6 +145,11 @@ ALLOW_LIST = [
     ("onednn::qlinear_pointwise.binary_tensor", datetime.date(2024, 12, 31)),
     ("aten::_scaled_mm.out", datetime.date(2024, 12, 31)),
     ("aten::_scaled_mm", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
     # BC-breaking change in can_cast signature: 'from' -> 'from_'
     ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]

@@ -4,18 +4,22 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 import dataclasses
 import datetime
+import logging
 import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch._export import converter as _torchscript_converter
 from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
     import os
+
+
+logger = logging.getLogger(__name__)
 
 
 def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
@@ -32,6 +36,22 @@ def _take_first_line(text: str) -> str:
     if len(lines) > 1:
         first_line += "[...]"
     return first_line
+
+
+@contextlib.contextmanager
+def _patch_dynamo_unsupported_functions():
+    """Patch PyTorch to bypass some functions torch.export.export does not support."""
+    # TODO: Remove the patches once dynamo supports these functions.
+    import torch.jit
+
+    # Replace torch.jit.isinstance with isinstance
+    jit_isinstance = torch.jit.isinstance
+    torch.jit.isinstance = isinstance
+    logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
+    try:
+        yield
+    finally:
+        torch.jit.isinstance = jit_isinstance
 
 
 @dataclasses.dataclass
@@ -120,9 +140,23 @@ class TorchExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        return torch.export.export(
-            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
-        )
+        with _patch_dynamo_unsupported_functions():
+            try:
+                return torch.export.export(
+                    model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+                )
+            except torch._dynamo.exc.UserError as exc:
+                # Refine the dynamic shapes based on the suggested fixes.
+                try:
+                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                        exc.msg, dynamic_shapes
+                    )
+                except Exception:
+                    # If the dynamic shapes cannot be refined, re-raise the exception.
+                    raise exc from None
+                return torch.export.export(
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes
+                )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -148,9 +182,22 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        return torch.export.export(
-            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
-        )
+        try:
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
+            )
+        except torch._dynamo.exc.UserError as exc:
+            # Refine the dynamic shapes based on the suggested fixes.
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
+                )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+            )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -176,6 +223,9 @@ class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
+        # Avoid circular import
+        from torch._export import converter as _torchscript_converter
+
         del dynamic_shapes  # Unused
 
         flattened_args, spec = _pytree.tree_flatten((args, kwargs))

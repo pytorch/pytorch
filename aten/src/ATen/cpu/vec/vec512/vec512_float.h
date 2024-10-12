@@ -582,15 +582,20 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
 // kernel for transposing mxn where m, n <= 16
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, float>::value && M <= 16 && N <= 16, int> = 0>
-inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
+inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
   // load from src to registers
-  __mmask16 src_mask = (1 << N) - 1;
   __m512 input[16];
   int i;
-  for (i = 0; i < M; ++i) {
-    input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+  if (N == 16) {
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_loadu_ps(&src[i * ld_src]);
+    }
+  } else {
+    __mmask16 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      input[i] = _mm512_maskz_loadu_ps(src_mask, &src[i * ld_src]);
+    }
   }
   for (; i < 16; ++i) {
     // Not really needed but to avoid uninitialized variable warning.
@@ -640,16 +645,62 @@ inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t 
         _mm512_shuffle_f32x4(input[8 * i + 3], input[8 * i + 7], 0xdd);
   }
 
-  // store from registers to dst
-  __mmask16 dst_mask = (1 << M) - 1;
   for (i = 0; i < N; ++i) {
     if (i < 8) {
       input[i] = _mm512_shuffle_f32x4(temp[i], temp[8 + i], 0x88);
     } else {
       input[i] = _mm512_shuffle_f32x4(temp[i - 8], temp[i], 0xdd);
     }
-    _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
   }
+
+  // store from registers to dst
+  if (M == 16) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_ps(&dst[i * ld_dst], input[i]);
+    }
+  } else {
+    __mmask16 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
+    }
+  }
+}
+
+template<>
+inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+  int64_t i = 0;
+  for (; i < M / 16 * 16; i += 16) {
+    int64_t j = 0;
+    for (; j < N / 16 * 16; j += 16) {
+      transpose_mxn_16x16(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, 16, 16);
+    }
+    // handle remainder j
+    int nrem = N - j;
+    if (nrem > 0) {
+      transpose_mxn_16x16(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, 16, nrem);
+    }
+  }
+  // handle remainder i
+  int mrem = M - i;
+  if (mrem > 0) {
+    int j = 0;
+    for (; j < N / 16 * 16; j += 16) {
+      transpose_mxn_16x16(
+          src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, mrem, 16);
+    }
+    // handle remainder j
+    int nrem = N - j;
+    transpose_mxn_16x16(
+        src + i * ld_src + j, ld_src, dst + j * ld_dst + i, ld_dst, mrem, nrem);
+  }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same<T, float>::value, int> = 0>
+inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
+  transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }
 
 #endif

@@ -82,7 +82,6 @@ namespace at::meta {
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
   TORCH_CHECK(type != ScalarType::Bool &&
-      type != ScalarType::BFloat16 &&
       type != ScalarType::ComplexFloat &&
       type != ScalarType::ComplexDouble,
       "Unsupported input type encountered for isin(): ", type);

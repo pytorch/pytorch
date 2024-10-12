@@ -9,9 +9,12 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import IS_LINUX, parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, skipCUDAIf
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -193,6 +196,9 @@ class TestUnbackedSymints(InductorTestCase):
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
         torch._inductor.metrics.reset()
+
+        if device == "cpu":
+            raise unittest.SkipTest("This test requires cuda")
 
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
         def fn(x, y, repeats):

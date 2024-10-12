@@ -478,6 +478,12 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -2180,10 +2186,6 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
-        # Stash the compiler_fn to be used for backend match guard.
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -2382,8 +2384,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
@@ -2443,6 +2446,12 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    from torch._inductor.bisect_helper import BisectionManager
+
+    if bisect_backend := BisectionManager.get_backend():
+        backend = bisect_backend
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2667,3 +2676,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)

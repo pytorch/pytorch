@@ -6,7 +6,6 @@ from collections import Counter
 from typing import Dict
 
 import torch
-from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
     CUSTOM_KEY,
@@ -20,12 +19,13 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
 
 
-def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
-    debug_handle_map: Dict[torch.fx.Node, int] = {}
+def _extract_debug_handles(model) -> Dict[str, int]:
+    debug_handle_map: Dict[str, int] = {}
 
     for node in model.graph.nodes:
         if (
@@ -37,10 +37,6 @@ def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
             ]
 
     return debug_handle_map
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -58,15 +54,10 @@ class TestNumericDebugger(TestCase):
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
-    @unittest.skipIf(
-        is_fbcode(),
-        "fbcode changes the code path for `capture_pre_autograd_graph` "
-        "we can enable the test in fbcode after we remove `capture_pre_autograd_graph`",
-    )
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
 
         quantizer = XNNPACKQuantizer().set_global(
@@ -75,7 +66,7 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_debug_handles(m)
         res_counter = Counter(debug_handle_map.values())
-        repeated_debug_handle_ids = [3, 4, 7]
+        repeated_debug_handle_ids = [4, 5, 6]
         # 3 ids were repeated because we copy over the id from node to its output observer
         # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
@@ -87,7 +78,7 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         # same set of ids where repeated, because we copy over the id from observer/fake_quant to
         # dequantize node
-        repeated_debug_handle_ids = [3, 4, 7]
+        repeated_debug_handle_ids = [4, 5, 6]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
@@ -116,22 +107,20 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip("All nodes' meta are preserved but get_attr nodes' meta are wrong.")
+    @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
+    # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
 
         debug_handle_map_ref = _extract_debug_handles(m)
-        m_export = capture_pre_autograd_graph(m, example_inputs)
+        m_export = export_for_training(m, example_inputs).module()
         debug_handle_map = _extract_debug_handles(m_export)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip(
-        "All nodes' meta are preserved but the first arg for the first node seems to be dropped"
-    )
     def test_run_decompositions_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
@@ -152,7 +141,7 @@ class TestNumericDebugger(TestCase):
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
         m_logger = prepare_for_propagation_comparison(m)
         ref = m(*example_inputs)
@@ -161,14 +150,14 @@ class TestNumericDebugger(TestCase):
         from torch.ao.quantization.pt2e._numeric_debugger import OutputLogger
 
         loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
-        self.assertEqual(len(loggers), 8)
+        self.assertEqual(len(loggers), 7)
         self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
         self.assertEqual(res, ref)
 
     def test_extract_results_from_loggers(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
         m_ref_logger = prepare_for_propagation_comparison(m)
 
@@ -188,3 +177,53 @@ class TestNumericDebugger(TestCase):
         for node_summary in comparison_results.values():
             if len(node_summary.results) > 0:
                 self.assertGreaterEqual(node_summary.results[0].sqnr, 35)
+
+    def test_added_node_gets_unique_id(self) -> None:
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = export_for_training(m, example_inputs).module()
+        assert isinstance(m, torch.fx.GraphModule)
+        generate_numeric_debug_handle(m)
+        ref_handles = _extract_debug_handles(m)
+        ref_counter = Counter(ref_handles.values())
+        for k, v in ref_counter.items():
+            self.assertEqual(
+                v,
+                1,
+                msg=f"For handle {k}, there were {v} nodes with that handle, but expected only 1",
+            )
+
+        # Now that we have unique ids, add a new node into the graph and re-generate
+        # to make sure that the new node gets a unique id.
+        last_node = next(iter(reversed(m.graph.nodes)))
+        with m.graph.inserting_before(last_node):
+            arg = last_node.args[0]
+            self.assertIsInstance(arg, (list, tuple))
+            arg = arg[0]
+            # Add a function that only requires a single tensor input.
+            n = m.graph.call_function(torch.ops.aten.relu.default, args=(arg,))
+            arg.replace_all_uses_with(n, lambda x: x != n)
+        m.recompile()
+
+        # Regenerate handles, make sure only the new relu node has a new id, and
+        # it doesn't clash with any of the existing ids.
+        generate_numeric_debug_handle(m)
+        handles_after_modification = _extract_debug_handles(m)
+        handles_counter = Counter(handles_after_modification.values())
+        for name, handle in ref_handles.items():
+            self.assertIn(name, handles_after_modification)
+            # Check that handle was unchanged.
+            self.assertEqual(handles_after_modification[name], handle)
+            # Check that total count was unchanged.
+            ref_count = ref_counter[handle]
+            after_count = handles_counter[handle]
+            self.assertEqual(
+                after_count,
+                ref_count,
+                msg=f"For handle {handle}, there were {after_count} nodes with that handle, but expected only {ref_count}",
+            )
+
+        # Check for relu specifically. Avoid hardcoding the handle id since it
+        # may change with future node ordering changes.
+        self.assertNotEqual(handles_after_modification["relu_default"], 0)
+        self.assertEqual(handles_counter[handles_after_modification["relu_default"]], 1)

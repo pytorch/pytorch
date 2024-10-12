@@ -19,20 +19,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -72,14 +59,12 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
-    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
-    get_torch_function_mode_stack,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -113,18 +98,16 @@ from .variables.lists import (
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
-    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
-
-
-if TYPE_CHECKING:
-    from .variables.torch_function import TorchFunctionModeVariable
-
+from .variables.torch_function import (
+    SymbolicTorchFunctionState,
+    TorchFunctionModeVariable,
+)
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -283,9 +266,12 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index)
 
-    def exit(self, tx):
+    def exit(self, tx, is_graph_break):
         assert self.with_context is not None
-        return self.with_context.exit(tx)
+        if (
+            is_graph_break and self.with_context.exit_on_graph_break()
+        ) or not is_graph_break:
+            return self.with_context.exit(tx)
 
 
 class ReturnValueOp(Exception):
@@ -373,8 +359,57 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+explain = False
+
+
+def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
+    if user_stack is None:
+        user_stack = torch._guards.TracingContext.extract_stack()
+
+    # TODO: Also report the traceback from the parent frame
+    try:
+        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+    except IndexError:
+        # first instruction
+        frame_loc = (
+            code_options["co_filename"],
+            code_options["co_firstlineno"],
+        )
+
+    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+    # more actionable user code pointer
+    if (
+        graph_break_log.isEnabledFor(logging.DEBUG)
+        and not explain
+        and graph_break_dup_warning_checker.add(frame_loc)
+    ):
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        # This log line MUST contain the string "Graph break in user code",
+        # This log line is exercised from
+        #   python test/dynamo/test_exc.py -k test_graph_break_log
+        graph_break_log.debug(
+            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
+            exc_info=exc_info,
+        )
+    else:
+        # This log line MUST not contain the string "Graph break in user code",
+        # exercised by
+        #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+        graph_break_log.debug(
+            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+        )
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def jump_graph_break(self, inst, value, extra_msg=""):
+        log_graph_break(self.code_options, reason="Data-dependent jump")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
@@ -506,7 +541,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                result = x.call_function(self, [], {})  # type: ignore[arg-type]
+                result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
@@ -567,9 +602,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     return inner
 
 
-explain = False
-
-
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
@@ -593,40 +625,12 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                user_stack = excp.real_stack
-                # TODO: Also report the traceback from the parent frame
-                try:
-                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                except IndexError:
-                    # first instruction
-                    code_options = self.code_options
-                    frame_loc = (
-                        code_options["co_filename"],
-                        code_options["co_firstlineno"],
-                    )
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    graph_break_log.isEnabledFor(logging.DEBUG)
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    # This log line is exercised from
-                    #   python test/dynamo/test_exc.py -k test_graph_break_log
-                    graph_break_log.debug(
-                        "Graph break: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
-                else:
-                    # This log line MUST NOT contain the string "Graph break",
-                    # exercised by
-                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-                    log.debug(
-                        "Unsupported break in user code at %s:%s (details suppressed)",
-                        *frame_loc,
-                    )
+                log_graph_break(
+                    self.code_options,
+                    exc_info=True,
+                    reason=f"Unsupported: {excp}",
+                    user_stack=excp.real_stack,
+                )
 
                 if self.maybe_has_backedge():
                     msg = (
@@ -638,7 +642,7 @@ def break_graph_if_unsupported(*, push):
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
-                speculation.reason = GraphCompileReason(excp.msg, user_stack)
+                speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
             speculation.fail_and_restart_analysis()
 
         def handle_graph_break(
@@ -651,10 +655,19 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
+                # Don't exit any modes we have entered,
+                # output bytecode will mutate the tf mode stack accordingly
+                if isinstance(b.with_context, TorchFunctionModeVariable):
+                    cg.extend_output(
+                        b.resume_fn().try_except_torch_function_mode(
+                            cg.code_options, cleanup
+                        )
+                    )
+                    continue
                 assert b.with_context is not None
-                assert isinstance(b.with_context, ContextWrappingVariable)
+                assert isinstance(b.with_context, (ContextWrappingVariable))
                 b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
@@ -728,7 +741,7 @@ class InstructionTranslatorBase(
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
-    symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"]
+    symbolic_torch_function_state: SymbolicTorchFunctionState
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
@@ -1663,8 +1676,8 @@ class InstructionTranslatorBase(
 
         if not isinstance(
             argsvars, BaseListVariable
-        ) and argsvars.has_unpack_var_sequence(self):
-            argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
+        ) and argsvars.has_force_unpack_var_sequence(self):
+            argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
@@ -1770,6 +1783,7 @@ class InstructionTranslatorBase(
         speculation.fail_and_restart_analysis()
 
     def store_attr_graph_break(self, inst):
+        log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         self.output.compile_subgraph(
@@ -1833,7 +1847,7 @@ class InstructionTranslatorBase(
         items = []
         for seq in seqs:
             try:
-                items.extend(seq.unpack_var_sequence(self))
+                items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
         self.push(cls(items, mutable_local=MutableLocal()))
@@ -1871,7 +1885,7 @@ class InstructionTranslatorBase(
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
 
-        keys = keys.unpack_var_sequence(self)
+        keys = keys.force_unpack_var_sequence(self)
         assert len(keys) == len(values)
 
         self.push(
@@ -1961,8 +1975,8 @@ class InstructionTranslatorBase(
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        elif seq.has_unpack_var_sequence(self):
-            val = seq.unpack_var_sequence(self)
+        elif seq.has_force_unpack_var_sequence(self):
+            val = seq.force_unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         if len(val) != inst.argval:
@@ -1975,8 +1989,8 @@ class InstructionTranslatorBase(
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        if seq.has_unpack_var_sequence(self):
-            vals = list(seq.unpack_var_sequence(self))
+        if seq.has_force_unpack_var_sequence(self):
+            vals = list(seq.force_unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2305,7 +2319,10 @@ class InstructionTranslatorBase(
         ):
             unimplemented(f"{inst.opname} {ctx}")
 
-        if isinstance(ctx, GenericContextWrappingVariable):
+        if (
+            isinstance(ctx, GenericContextWrappingVariable)
+            and not ctx.supports_graph_breaks()
+        ):
             self.generic_context_manager_depth += 1
 
         # Need this redundant check for mypy
@@ -2400,7 +2417,7 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().unpack_var_sequence(self)))
+            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
@@ -2548,7 +2565,7 @@ class InstructionTranslatorBase(
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
-        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
+        symbolic_torch_function_state: SymbolicTorchFunctionState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -2563,7 +2580,7 @@ class InstructionTranslatorBase(
         self.output = output
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
-        self.symbolic_torch_function_mode_stack = symbolic_torch_function_mode_stack
+        self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
         # stack of variable names for tracking 3.13 closures
         self.name_stack: list[Any] = []
@@ -2652,6 +2669,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_locals,
         f_globals,
         f_builtins,
+        torch_function_mode_stack,
         code_options,
         compiler_fn,
         one_graph,
@@ -2677,6 +2695,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 local_scope=f_locals,
                 global_scope=f_globals,
                 f_code=f_code,
+                torch_function_mode_stack=torch_function_mode_stack,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -2686,7 +2705,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
-            symbolic_torch_function_mode_stack=collections.deque(),
+            symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -2721,7 +2740,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
-            self._init_torch_function_mode_stack()
+            self.symbolic_torch_function_state = SymbolicTorchFunctionState(
+                torch_function_mode_stack
+            )
 
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
@@ -2761,29 +2782,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
             unimplemented(msg)
-
-    def _init_torch_function_mode_stack(self):
-        from .variables.torch_function import TorchFunctionModeStackVariable
-
-        TorchFunctionModeStackVariable.reset()
-
-        self.symbolic_torch_function_mode_stack: Deque[
-            TorchFunctionModeVariable
-        ] = collections.deque()
-        # We want to retrieve all modes to properly reconstruct the stack if needed
-        py_stack = get_torch_function_mode_stack(filter_ignored=False)
-
-        if py_stack:
-            has_device_context = isinstance(
-                py_stack[0], torch.utils._device.DeviceContext
-            )
-
-        for i, val in enumerate(py_stack):
-            self.symbolic_torch_function_mode_stack.append(
-                variables.LazyVariableTracker.create(
-                    val, source=TorchFunctionModeStackSource(i)
-                )
-            )
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):
@@ -3116,7 +3114,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code,
                 sub_locals,
                 parent.symbolic_globals,
-                parent.symbolic_torch_function_mode_stack,
+                parent.symbolic_torch_function_state,
                 closure_cells,
                 func,
             )
@@ -3126,7 +3124,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code,
                 sub_locals,
                 parent.symbolic_globals,
-                parent.symbolic_torch_function_mode_stack,
+                parent.symbolic_torch_function_state,
                 closure_cells,
                 func,
             )
@@ -3179,7 +3177,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
-        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
+        symbolic_torch_function_state: SymbolicTorchFunctionState,
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3196,7 +3194,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            symbolic_torch_function_mode_stack=symbolic_torch_function_mode_stack,
+            symbolic_torch_function_state=symbolic_torch_function_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
@@ -3218,7 +3216,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())
 
-    def STORE_DEREF(self, inst):
+    def STORE_DEREF(self, inst):  # type: ignore[override]
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
             val = self.pop()
@@ -3276,7 +3274,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if name in self.closure_cells:
             return self.closure_cells[name]
         else:
-            return InlinedClosureVariable(name=name)
+            # We model unmodified cells captured by `UserFunctionVariable` as
+            # their contents, in `self.symbolic_locals`. See
+            # `UserFunctionVariable::bind_args`.
+            return self.symbolic_locals[name]
 
     def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):
