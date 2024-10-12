@@ -1,6 +1,7 @@
 #include <ATen/ThreadLocalState.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <utility>
 
 namespace c10d {
@@ -110,6 +111,8 @@ void Work::finish(std::exception_ptr exception) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
   }
+  throw std::runtime_error("yf225 DEBUG");
+  // c10d::unregister_work(c10::weak_intrusive_ptr<Work>(this));
   lock.unlock();
   cv_.notify_all();
 }

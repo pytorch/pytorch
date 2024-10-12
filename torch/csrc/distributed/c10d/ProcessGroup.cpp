@@ -1,5 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
@@ -155,6 +156,100 @@ void ProcessGroup::release_resources() {
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();
+}
+
+} // namespace c10d
+
+namespace {
+
+class WorkRegistry {
+ public:
+  void register_work(
+      const at::Tensor& tensor,
+      const c10::intrusive_ptr<c10d::Work>& work) {
+    auto storage = tensor.storage().getWeakStorageImpl();
+    std::unique_lock lock(lock_);
+    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
+    TORCH_CHECK(
+        inserted || it->second != work,
+        "The tensor storage is already associated with another work.");
+  }
+
+  c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
+    const auto storage = tensor.storage().getWeakStorageImpl();
+    std::unique_lock lock(lock_);
+    auto it = registry_.find(storage);
+    if (it == registry_.end()) {
+      return nullptr;
+    }
+    auto work = it->second;
+    registry_.erase(it);
+    return work;
+  }
+
+  void unregister_work(const c10::weak_intrusive_ptr<c10d::Work>& work_weakref) {
+    std::unique_lock lock(lock_);
+    auto work = work_weakref.lock();
+    if (work == nullptr) return;
+    for (auto it = registry_.begin(); it != registry_.end();) {
+      if (it->second == work) {
+        registry_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  ~WorkRegistry() {
+    // If there are still unwaited work objects, their corresponding process
+    // groups should have already been destroyed at this stage. Any attempts to
+    // wait for these work objects or to destroy them will only result in
+    // confusing errors. Therefore, we simply issue a warning and intentionally
+    // allow the unwaited work objects to leak.
+    if (!registry_.empty()) {
+      TORCH_WARN(
+          "At the time of process termination, there are still ",
+          registry_.size(),
+          " unwaited c10d_functional collective calls. "
+          "Please review your program to ensure c10d_functional.wait_tensor() "
+          "is invoked on all tensors returned from c10d_functional collective "
+          "ops before they are used.");
+    }
+    for (auto& it : registry_) {
+      it.second.release();
+    }
+  }
+
+ private:
+  std::unordered_map<
+      c10::weak_intrusive_ptr<c10::StorageImpl>,
+      c10::intrusive_ptr<c10d::Work>>
+      registry_;
+  std::mutex lock_;
+};
+
+static WorkRegistry process_registry;
+
+} // namespace
+
+namespace c10d {
+
+void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work) {
+  RankLocal<WorkRegistry>::get().register_work(tensor, work);
+}
+
+at::Tensor wait_tensor(const at::Tensor& tensor) {
+  auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
+  if (work != nullptr) {
+    work->wait();
+  }
+  return tensor;
+}
+
+void unregister_work(const c10::weak_intrusive_ptr<c10d::Work>& work_weakref) {
+  RankLocal<WorkRegistry>::get().unregister_work(work_weakref);
 }
 
 } // namespace c10d
