@@ -14,8 +14,8 @@
 #include <ATen/Functions.h>
 
 using ::c10::Dispatcher;
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
@@ -765,5 +765,4 @@ void insertPermutes(
   GRAPH_DUMP("After insertPermutes: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
