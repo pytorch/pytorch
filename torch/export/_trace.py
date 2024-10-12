@@ -66,6 +66,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -1652,13 +1653,22 @@ def _non_strict_export(
 
                 def forward(self, *args, **kwargs):
                     nonlocal out_spec
-                    if isinstance(self._export_root, torch.fx.GraphModule):
+                    mod = self._export_root
+                    if isinstance(mod, torch.fx.GraphModule):
+                        # NOTE: We're going to run this graph module with an fx interpreter,
+                        # which will not run any forward hooks. Thus, ideally, we should run
+                        # all forward hooks here. But the general logic for running them is
+                        # complicated (see nn/module.py), and probably not worth duplicating.
+                        # Instead we only look for, and run, an export-specific forward hook.
+                        if (
+                            _check_input_constraints_pre_hook
+                            in mod._forward_pre_hooks.values()
+                        ):
+                            _check_input_constraints_pre_hook(mod, args, kwargs)
                         with torch.fx.traceback.preserve_node_meta():
-                            tree_out = torch.fx.Interpreter(self._export_root).run(
-                                *args, **kwargs
-                            )
+                            tree_out = torch.fx.Interpreter(mod).run(*args, **kwargs)
                     else:
-                        tree_out = self._export_root(*args, **kwargs)
+                        tree_out = mod(*args, **kwargs)
                     flat_outs, out_spec = pytree.tree_flatten(tree_out)
                     return tuple(flat_outs)
 
