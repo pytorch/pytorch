@@ -1,26 +1,33 @@
 import torch
 torch.set_default_device('cuda')
-import functools
 
 def make_dynamic(func):
     graph = None
-    initialized = False
-    @functools.wraps(func) # keep debug info
     def wrapper(*args):
-        # TODO: Change to using pytrees
-        assert all(isinstance(arg, torch.Tensor) for arg in args), "All arguments must be tensors"
-        nonlocal graph, initialized
-        if not initialized:
+        nonlocal graph
+        if graph is None:
             graph = torch.cuda.CUDAGraph()
-            empty_args = [torch.empty_like(arg) for arg in args]
-            # could use args here - but let's demonstrate that the actual contents don't matter in the original capture
             with torch.cuda.graph(graph, dynamic_graph=True):
-                func(*empty_args)
-            graph.become_dynamic(empty_args)
-            initialized = True
-        # Replay the graph with the actual arguments
-        graph.replay_dynamic(list(args))
+                func(*args)
+            graph.become_dynamic(args)
+        graph.replay_dynamic(args)
     return wrapper
+
+@make_dynamic
+def myFuncSimple(a):
+    print("myFuncSimple is running")
+    a += 1
+
+test = torch.zeros(8)
+
+for i in range(10):
+    myFuncSimple(test)
+assert torch.equal(test, torch.full((8,), 10))
+
+for i in range(10):
+    test = test.clone() # force the tensor to a new memory location
+    myFuncSimple(test)
+assert torch.equal(test, torch.full((8,), 20))
 
 
 def myFunc(a, b, c):

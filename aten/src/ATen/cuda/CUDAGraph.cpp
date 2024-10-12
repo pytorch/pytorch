@@ -402,6 +402,8 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
       const char* func_name;
       globalContext().getNVRTC().cuFuncGetName(&func_name, func);
 
+      TORCH_CHECK(nodeParams.kernelParams && !nodeParams.extra, "Kernel launches that use `extra` instead of `kernelParams` are not supported");
+
       size_t param_index = 0;
       size_t param_offset;
       size_t param_size;
