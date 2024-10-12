@@ -26,6 +26,7 @@ from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import SAC_IGNORED_OPS
 
 
+__all__ = ["SACEstimator", "SACStats", "MSPS", "SACTradeOffStats", "SACGreedyOrderMeta"]
 aten = torch.ops.aten
 
 _ADDITIONAL_IGNORED_OPS = {
@@ -205,12 +206,14 @@ class SACGreedyOrderMeta:
         recomputed_ops (Set[int]): Set of operator indices to be recomputed.
         stored_ops (Set[int]): Set of operator indices to be stored.
         inplace_op_groups (Dict[int, Set[int]]): Dictionary of inplace operator groups from group-head to operators.
+        random_ops_group (Dict[int, Set[int]]): Dictionary of random op group head to random ops.
         msps_meta (List[MSPS]): List of Memory and Runtime Statistics for operators.
     """
 
     recomputed_ops: Set[int]
     stored_ops: Set[int]
     inplace_op_groups: Dict[int, Set[int]]
+    random_ops_group: Dict[int, Set[int]]
     msps_meta: List[MSPS]
 
 
@@ -222,7 +225,8 @@ class SACEstimator(TorchDispatchMode):
     runtime trade-offs of functions or ``torch.nn.Module``s for Selective Activation Checkpointing (SAC). It provides
     detailed statistics and metadata information for operators of each module and provides a greedy order for selecting
     the operators to be recomputed/checkpointed.  It also constructs the per-module trade-off graph of discarded memory
-    vs recomputation time for the obtained greedy order.
+    vs recomputation time for the obtained greedy order. Using ``RuntimeEstimator`` under the hood, it supports two
+    estimation modes, `operator-level-benchmark` and (`operator-level-cost-model` (roofline model).
 
     Attributes:
         sac_mod_stats (Dict[str, SACStats]): Dictionary from module FQN (fuly qualified name) to ``SACStats``.
@@ -241,7 +245,7 @@ class SACEstimator(TorchDispatchMode):
             with FakeTensorMode():
                 module = ...
                 inp = ...
-                with sac_estimator():
+                with sac_estimator('operator-level-cost-model'):
                     output = module(inp)
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
@@ -258,13 +262,14 @@ class SACEstimator(TorchDispatchMode):
             self._pack_hook, lambda x: x
         )
         self._saved_tensor_ids: Set[int] = set()
+        self._estimate_runtime = RuntimeEstimator._roofline_estimate
 
     def _pack_hook(self, x: torch.Tensor) -> torch.Tensor:
         # Hook function to track underlying storage IDs of tensors
         # Updates the _saved_tensor_ids set with the IDs of the tensor's storages
         # Used in conjunction with torch.autograd.graph.saved_tensors_hooks
         untyped_storages = _get_untyped_storages(x)
-        storage_ids = (id(st) for st in untyped_storages)
+        storage_ids = (hash(st) for st in untyped_storages)
         self._saved_tensor_ids.update(storage_ids)
         return x
 
@@ -312,7 +317,7 @@ class SACEstimator(TorchDispatchMode):
     ) -> SACStats:
         # 1. Ignore the operations that should be skipped by SAC such as aten.detach.default because autograd
         # inserts those during backward and it breaks the fwd-bwd alignment
-        data = [x for x in data if x.func not in OPS_TO_ALWAYS_SKIP]
+        filtered_data = [x for x in data if x.func not in OPS_TO_ALWAYS_SKIP]
 
         (
             ops,
@@ -323,7 +328,8 @@ class SACEstimator(TorchDispatchMode):
             inplace_ops_,
             view_like_ops_,
             rand_ops_,
-        ) = zip(*[astuple(x) for x in data], strict=True)
+        ) = zip(*[astuple(x) for x in filtered_data], strict=True)
+
         # 2. Extract the metadata information
         runtimes = list(runtimes_)
         memory = list(memory_)
@@ -361,6 +367,7 @@ class SACEstimator(TorchDispatchMode):
                 last_op -= 1
 
         memory[last_op] = 0
+
         # 5. Create a single ``SACStats`` object for the entire block of ``_SACMetadata``.
         return SACStats(
             func_names=func_names,
@@ -383,34 +390,37 @@ class SACEstimator(TorchDispatchMode):
             par for par in self._mod_tracker.parents if par not in self._leaf_modules
         }
         # 3. Output ids are the identifies of the storage objects corresponding to the tensors
-        output_ids = tuple(id(st) for st in out_storages)
+        output_ids = tuple(hash(st) for st in out_storages)
         # 4. If the function is not inplace, return
         if not is_inplace(func):
             return curr_idx, output_ids, {mod_fqn: () for mod_fqn in active_mod_fqns}
 
-        op_id = curr_idx
+        op_idx = curr_idx
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
-        mod_op_parent_ids: Dict[str, int] = {mod_fqn: -1 for mod_fqn in active_mod_fqns}
+        mod_op_parent_idxs: Dict[str, int] = {
+            mod_fqn: -1 for mod_fqn in active_mod_fqns
+        }
         for i, d in enumerate(self._sac_metadata):
             # 6. Find the first occurence of a tensor corresponding to each module that
             # shares the same storage as the current tensor
             past_output_ids = d.output_ids
             if output_ids in past_output_ids:
-                for mod_fqn, op_parent_id in mod_op_parent_ids.items():
-                    if op_parent_id == -1:
+                for mod_fqn, op_parent_idx in mod_op_parent_idxs.items():
+                    if op_parent_idx == -1:
                         if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                             if i >= acm_stats.start_idx:
-                                mod_op_parent_ids[mod_fqn] = i
+                                mod_op_parent_idxs[mod_fqn] = i
                         else:
                             assert mod_fqn == "Global"
-                            mod_op_parent_ids[mod_fqn] = i
+                            mod_op_parent_idxs[mod_fqn] = i
         # 7. If no parent tensor is found, then it's probably an inplace op on the arguments
-        # so one can just store the current-op id as parent id
-        for mod_fqn, op_parent_id in mod_op_parent_ids.items():
-            if op_parent_id < 0:
-                mod_op_parent_ids[mod_fqn] = op_id
+        # so one can just store the current-op idx as parent idx
+        for mod_fqn, op_parent_idx in mod_op_parent_idxs.items():
+            if op_parent_idx < 0:
+                mod_op_parent_idxs[mod_fqn] = op_idx
         mod_inplace_info = {
-            mod_fqn: (op_id, mod_op_parent_ids[mod_fqn]) for mod_fqn in active_mod_fqns
+            mod_fqn: (op_idx, mod_op_parent_idxs[mod_fqn])
+            for mod_fqn in active_mod_fqns
         }
         return curr_idx, output_ids, mod_inplace_info  # type: ignore[return-value]
 
@@ -418,34 +428,40 @@ class SACEstimator(TorchDispatchMode):
         self, func, types, args=..., kwargs=None
     ):
         # 1. Get the runtime estimate
-        out, op_time = RuntimeEstimator._roofline_estimate(func, args, kwargs)
+        out, op_time = self._estimate_runtime(func, args, kwargs)
         flat_outs, _ = tree_flatten(out)
-        out_storages: Set[UntypedStorage] = set()
-        devices: Set[torch.device] = set()
+        out_storages_cuda: Set[UntypedStorage] = set()
+        out_storages_cpu: Set[UntypedStorage] = set()
+        cuda_devices: Set[torch.device] = set()
         for o in flat_outs:
             if isinstance(o, torch.Tensor):
-                out_storages.update(_get_untyped_storages(o))
-                devices.add(o.device)
-        # 2. Get the memory consumed by output
+                if o.device.type == "cuda":
+                    out_storages_cuda.update(_get_untyped_storages(o))
+                    cuda_devices.add(o.device)
+                else:
+                    out_storages_cpu.update(_get_untyped_storages(o))
+
+        # Check if there's more than 1 CUDA device
         assert (
-            len(devices) <= 1
-        ), f"{func.__name__}'s output has more than 1 device types {devices}"
-        if devices and next(iter(devices)).type == "cuda":
-            nbytes = sum(
-                math.ceil(st.nbytes() / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-                for st in out_storages
-            )
-        else:
-            nbytes = sum(st.nbytes() for st in out_storages)
+            len(cuda_devices) <= 1
+        ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+
+        # 2. Get the memory consumed by output
+        nbytes_cuda = sum(
+            math.ceil(st.nbytes() / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
+            for st in out_storages_cuda
+        )
+        nbytes_cpu = sum(st.nbytes() for st in out_storages_cpu)
+        nbytes = nbytes_cuda + nbytes_cpu
         # 3. Get the current operator index, output storage identifiers and inplace metadata
+        out_storages = out_storages_cuda | out_storages_cpu
         curr_idx, output_ids, mod_inplace_info = self._get_inplace_metadata(
             func, out_storages
         )
         # 4. Determine if the function is in-place, random-op or a view-like
         is_view_like = is_view_fn(func) or is_inplace_view_fn(func)
         is_rand_op = torch.Tag.nondeterministic_seeded in func.tags
-        is_inplace_fn = is_inplace(func)
-        if is_view_like or is_inplace_fn:
+        if is_view_like:
             nbytes = 0
         # sdpa has non-deterministic seed, but might be deterministic
         # if no dropout is applied
@@ -476,7 +492,6 @@ class SACEstimator(TorchDispatchMode):
         return out
 
     def _get_greedy_order_meta(self, sac_stats: SACStats) -> SACGreedyOrderMeta:
-        # TODO @sanketpurandare: Figure out if random ops need to be stored or recomputed together as a group.
         # An inplace-op group is a set of inplace-ops that operate on the same underlying tensor storage.
         # 1. inplace_op_groups: A dictionary from the top-most parent of inplace-ops to the inplace-ops in the group
         #   The top-most op can itself be an inplace-op or can be a non-inplace op.
@@ -484,79 +499,82 @@ class SACEstimator(TorchDispatchMode):
         inplace_op_groups: Dict[int, Set[int]] = {}
         inplace_op_to_group_head: Dict[int, int] = dict(sac_stats.inplace_ops)
 
+        # Initialize inplace_op_groups using inplace_op_to_group_head
+        for op_idx, group_head_idx in inplace_op_to_group_head.items():
+            op_group = inplace_op_groups.setdefault(group_head_idx, {group_head_idx})
+            op_group.add(op_idx)
+
+        # Like inplace ops, all of the random ops in the function/module should all be either recomputed or saved
+        # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
+        # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
+        # as the leader of the random_ops_group.
+        random_ops_group: Dict[int, Set[int]] = {}
+        random_group_head_idx = min(sac_stats.rand_ops)
+        random_ops_group[random_group_head_idx] = set(sac_stats.rand_ops)
+
         # 1. Random ops are stored if force_store_random is set
         # 2. View-like ops are recomputed by default
-        # 3. For in-place ops we create a group, recording all the parent-child relations
+        # 3. For inplace_op_groups:
         #   a) If the head of this group is an inplace op, then we have to store the entire group.
         #   b) If any op in the group is random and force_store_random is set, then entire group will be stored.
         #   c) If none of ops in the group are random and the head of the group is not an in-place op, then
         #       this group can be considered for recomputation in its entireity
         stored_ops: Set[int] = set()
         recomputed_ops: Set[int] = set()
-        for op_idx in range(len(sac_stats.memory)):
-            if op_idx in sac_stats.view_like_ops:
-                # Case 2.
-                recomputed_ops.add(op_idx)
-                continue
-            store = False
-            if op_idx in sac_stats.rand_ops and sac_stats.force_store_random:
-                # Case 1.
-                store = True
+        # Case 1:
+        if sac_stats.force_store_random:
+            stored_ops.add(random_group_head_idx)
+        # Case 2:
+        recomputed_ops.update(set(sac_stats.view_like_ops))
 
-            if group_head_idx := inplace_op_to_group_head.get(op_idx, None):
-                if op_idx == group_head_idx:
-                    # Case 3.(a)
-                    stored_ops.add(op_idx)
-                    inplace_op_groups[op_idx] = {op_idx}
-                else:
-                    inplace_op_groups[group_head_idx].add(op_idx)
-                    if store and group_head_idx not in stored_ops:
-                        # Case 3.(b)
-                        stored_ops.add(group_head_idx)
-            elif store:
-                stored_ops.add(op_idx)
+        for group_head_idx, op_group in inplace_op_groups.items():
+            # Case 3a:
+            if group_head_idx in inplace_op_to_group_head:
+                stored_ops.add(group_head_idx)
+            # Case 3b:
+            if (
+                sac_stats.force_store_random & len(op_group & set(sac_stats.rand_ops))
+                > 0
+            ):
+                stored_ops.add(group_head_idx)
 
         # The potential recompute candidates are populated as:
-        # 1) The in-place op group heads that are not stored
-        # 2) The non-inplace ops that are neither stored nor recomputed by default
         recompute_candidates: Set[int] = set()
-        for op_idx in inplace_op_groups.keys():
-            if op_idx not in stored_ops:
-                recompute_candidates.add(op_idx)
-        for op_idx in range(len(sac_stats.memory)):
-            if (
-                (op_idx not in recomputed_ops)
-                and (op_idx not in inplace_op_to_group_head)
-                and (op_idx not in stored_ops)
-            ):
-                recompute_candidates.add(op_idx)
+        # 1) The random group head if it is not stored
+        if random_group_head_idx not in stored_ops:
+            recompute_candidates.add(random_group_head_idx)
+        # 2) The in-place op group heads that are not stored
+        recompute_candidates.update(set(inplace_op_groups.keys()) - stored_ops)
+        # 3) The non-inplace and non-random ops that are neither stored nor recomputed by default
+        recompute_candidates.update(
+            set(range(len(sac_stats.memory)))
+            - recomputed_ops
+            - stored_ops
+            - set(inplace_op_to_group_head.keys())
+            - set(sac_stats.rand_ops)
+        )
 
         # We define msps for a recomp candidate as the ratio of memory/runtime aka memory savings per second
         msps_meta: List[MSPS] = []
-        for cand in recompute_candidates:
-            if cand in inplace_op_groups:
-                mem = sum(
-                    sac_stats.memory[op_idx] for op_idx in inplace_op_groups[cand]
-                )
-                runtime = sum(
-                    sac_stats.runtimes[op_idx] for op_idx in inplace_op_groups[cand]
-                )
-                func_names = {
-                    sac_stats.func_names[op_idx] for op_idx in inplace_op_groups[cand]
-                }
-            else:
-                mem = sac_stats.memory[cand]
-                runtime = sac_stats.runtimes[cand]
-                func_names = {sac_stats.func_names[cand]}
+        for cand_idx in recompute_candidates:
+            op_indices = {cand_idx}
+            if cand_idx in inplace_op_groups:
+                op_indices.update(inplace_op_groups[cand_idx])
+            if cand_idx == random_group_head_idx:
+                op_indices.update(sac_stats.rand_ops)
+
+            mem = sum(sac_stats.memory[op_idx] for op_idx in op_indices)
+            runtime = sum(sac_stats.runtimes[op_idx] for op_idx in op_indices)
+            func_names = {sac_stats.func_names[op_idx] for op_idx in op_indices}
             msps = (mem / runtime) if runtime > 0 else sys.float_info.max
-            msps_meta.append(MSPS(func_names, cand, mem, runtime, msps))
+            msps_meta.append(MSPS(func_names, cand_idx, mem, runtime, msps))
         # We choose canidates to be recomputed based on increasing msps
         msps_meta.sort(key=lambda x: x.msps, reverse=True)
         return SACGreedyOrderMeta(
-            recomputed_ops, stored_ops, inplace_op_groups, msps_meta
+            recomputed_ops, stored_ops, inplace_op_groups, random_ops_group, msps_meta
         )
 
-    def _get_sac_tradeoff_stats(
+    def _get_sac_tradeoff_pwlf_stats(
         self,
         sac_stats: SACStats,
         greedy_order_meta: SACGreedyOrderMeta,
@@ -565,19 +583,29 @@ class SACEstimator(TorchDispatchMode):
         filename: str = "ac_tradeoff",
     ) -> SACTradeOffStats:
         try:
-            import numpy
-            import pwlf  # type: ignore[import-untyped]
+            import numpy as np  # type: ignore[import-not-found]
+            import pwlf  # type: ignore[import-untyped, import-not-found]
         except ImportError as err:
-            raise ImportError("Please install pwlf package.") from err
+            raise ImportError("Please install pwlf and numpy package.") from err
 
-        stored_ops, recomputed_ops, msps_meta = (
+        stored_ops, recomputed_ops, inplace_op_groups, random_ops_group, msps_meta = (
             greedy_order_meta.stored_ops,
             greedy_order_meta.recomputed_ops,
+            greedy_order_meta.inplace_op_groups,
+            greedy_order_meta.random_ops_group,
             greedy_order_meta.msps_meta,
         )
         # 1. Intitialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
-        discarded_mem = sum(sac_stats.memory[op_idx] for op_idx in recomputed_ops)
-        recomp_runtime = sum(sac_stats.runtimes[op_idx] for op_idx in recomputed_ops)
+        recomp_indices: Set[int] = set()
+        for r_idx in recomputed_ops:
+            recomp_indices.add(r_idx)
+            if r_idx in inplace_op_groups:
+                recomp_indices.update(inplace_op_groups[r_idx])
+            if r_idx in random_ops_group:
+                recomp_indices.update(random_ops_group[r_idx])
+
+        discarded_mem = sum(sac_stats.memory[op_idx] for op_idx in recomp_indices)
+        recomp_runtime = sum(sac_stats.runtimes[op_idx] for op_idx in recomp_indices)
         # 2. Initialize the max recomputation time and total recomputation memory
         sac_runtime = sum(sac_stats.runtimes)
         sac_memory = sum(sac_stats.memory)
@@ -598,8 +626,15 @@ class SACEstimator(TorchDispatchMode):
                 recomp_runtime / sac_runtime
             )
         # 6. Finally, we add the memory and recomputation time of the always stored ops.
-        discarded_mem += sum(sac_stats.memory[op_idx] for op_idx in stored_ops)
-        recomp_runtime += sum(sac_stats.runtimes[op_idx] for op_idx in stored_ops)
+        stored_indices: Set[int] = set()
+        for s_idx in stored_ops:
+            stored_indices.add(s_idx)
+            if s_idx in inplace_op_groups:
+                stored_indices.update(inplace_op_groups[s_idx])
+            if s_idx in random_ops_group:
+                stored_indices.update(random_ops_group[s_idx])
+        discarded_mem += sum(sac_stats.memory[op_idx] for op_idx in stored_indices)
+        recomp_runtime += sum(sac_stats.runtimes[op_idx] for op_idx in stored_indices)
         tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
             recomp_runtime / sac_runtime
         )
@@ -619,10 +654,12 @@ class SACEstimator(TorchDispatchMode):
             pwlf_: pwlf.PiecewiseLinFit, x: List[float], y: List[float], filename: str
         ) -> None:
             try:
-                import matplotlib.pyplot as plt
-                import numpy as np
+                import matplotlib.pyplot as plt  # type: ignore[import-not-found]
+                import numpy as np  # type: ignore[import-not-found]
             except ImportError as err:
-                raise ImportError from err
+                raise ImportError(
+                    "Install matplotlib and numpy using pip: pip install matplotlib numpy"
+                ) from err
             # predict for the determined points
             xHat = np.linspace(min(x), max(x), num=10000)
             yHat = pwlf_.predict(xHat)
@@ -650,8 +687,8 @@ class SACEstimator(TorchDispatchMode):
             save_prediction_graph(tradeoff_pwlf, x, y, filename)
         # 9. Obtain the slopes, intercepts and breakpoints of the fitted piecewise linear functions
         slopes = tradeoff_pwlf.calc_slopes().tolist()
-        assert isinstance(tradeoff_pwlf.intercepts, numpy.ndarray) and isinstance(
-            tradeoff_pwlf.fit_breaks, numpy.ndarray
+        assert isinstance(tradeoff_pwlf.intercepts, np.ndarray) and isinstance(
+            tradeoff_pwlf.fit_breaks, np.ndarray
         )
         intercepts = tradeoff_pwlf.intercepts.tolist()
         fit_breaks = tradeoff_pwlf.fit_breaks.tolist()
@@ -687,7 +724,7 @@ class SACEstimator(TorchDispatchMode):
             4. Memory (B): The operator memory usage in bytes.
             5. View-like: A flag indicating whether the operator is view-like.
             6. Random: A flag indicating whether the operator is random.
-            7. Saved Autograd: A flag indicating whether the operator's autograd result is saved.
+            7. Saved Autograd: A flag indicating whether the operator's result is saved by autograd engine.
             8. In-place: The index of the operator's first parent, or None if not in-place.
 
         If print_tabular is True, the table is printed in a tabular format.
@@ -791,10 +828,11 @@ class SACEstimator(TorchDispatchMode):
             ]
             table_data.append(row)
 
-        stored_ops, recomputed_ops, inplace_op_groups, msps_meta = (
+        stored_ops, recomputed_ops, inplace_op_groups, random_ops_group, msps_meta = (
             greedy_order_meta.stored_ops,
             greedy_order_meta.recomputed_ops,
             greedy_order_meta.inplace_op_groups,
+            greedy_order_meta.random_ops_group,
             greedy_order_meta.msps_meta,
         )
 
@@ -802,6 +840,8 @@ class SACEstimator(TorchDispatchMode):
             op_indices: Set[int] = {op_idx}
             if op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[op_idx])
+            if op_idx in random_ops_group:
+                op_indices.update(random_ops_group[op_idx])
             discarded_mem += sum(sac_stats.memory[i] for i in op_indices)
             recomp_runtime += sum(sac_stats.runtimes[i] for i in op_indices)
             func_names = {sac_stats.func_names[i] for i in op_indices}
@@ -813,12 +853,16 @@ class SACEstimator(TorchDispatchMode):
             op_indices = {cand.op_idx}
             if cand.op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[cand.op_idx])
+            if cand.op_idx in random_ops_group:
+                op_indices.update(random_ops_group[cand.op_idx])
             append_row(op_indices, cand.func_names, msps=cand.msps)
 
         for op_idx in stored_ops:
             op_indices = {op_idx}
             if op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[op_idx])
+            if op_idx in random_ops_group:
+                op_indices.update(random_ops_group[op_idx])
             discarded_mem += sum(sac_stats.memory[i] for i in op_indices)
             recomp_runtime += sum(sac_stats.runtimes[i] for i in op_indices)
             func_names = {sac_stats.func_names[i] for i in op_indices}
@@ -850,7 +894,7 @@ class SACEstimator(TorchDispatchMode):
                     )
                 )
 
-    def pwlf_sac_tradeoff_stats(
+    def pwlf_sac_tradeoff_curve(
         self,
         n_segments: int = 2,
         save_tradeoff_graphs: bool = False,
@@ -867,7 +911,7 @@ class SACEstimator(TorchDispatchMode):
         If save_tradeoff_graphs is True, the trade-off graphs are saved to file using the module FQN as the filename.
         """
         for mod_fqn, sac_stats in self.sac_mod_stats.items():
-            self.sac_mod_tradeoff_stats[mod_fqn] = self._get_sac_tradeoff_stats(
+            self.sac_mod_tradeoff_stats[mod_fqn] = self._get_sac_tradeoff_pwlf_stats(
                 sac_stats=sac_stats,
                 greedy_order_meta=self.sac_mod_greedy_order_meta[mod_fqn],
                 n_segments=n_segments,
@@ -903,6 +947,33 @@ class SACEstimator(TorchDispatchMode):
             self.display_sac_tradeoff_stats(
                 self.sac_mod_greedy_order_meta[mod_fqn], sac_stats, print_tabular
             )
+
+    def __call__(self, estimate_mode_type: str) -> Self:
+        """
+        Sets the estimate mode type.
+
+        Currently supported modes:
+            - "operator-level-benchmark": Estimates runtime using operator benchmarking.
+            - "operator-level-cost-model": Estimates runtime using roofline cost model.
+
+        Args:
+            estimate_mode_type (str): The type of estimate mode to use.
+
+        Returns:
+            SACEstimator: The SAC estimator instance.
+
+        Raises:
+            NotImplementedError: If the estimate mode type is not supported.
+        """
+        if estimate_mode_type == "operator-level-benchmark":
+            self._estimate_runtime = RuntimeEstimator._benchmark_estimate
+        elif estimate_mode_type == "operator-level-cost-model":
+            self._estimate_runtime = RuntimeEstimator._roofline_estimate
+        else:
+            raise NotImplementedError(
+                f"estimate_mode_type {estimate_mode_type} not supported"
+            )
+        return self
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
