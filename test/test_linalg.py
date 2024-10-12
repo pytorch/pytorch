@@ -4613,13 +4613,6 @@ class TestLinalg(TestCase):
         result_filename = f"tunableop_results{ordinal}.csv"
         assert os.path.exists(result_filename)
 
-        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
-        for filename in [untuned_filename, result_filename]:
-            try:
-                os.remove(filename)
-            except PermissionError:
-                pass
-
         # disables TunableOp, no file will be written, restore to default values
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.record_untuned_enable(False)
@@ -4627,6 +4620,14 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.set_max_tuning_iterations(100)
         assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
         assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+
+        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+        for filename in [untuned_filename, result_filename]:
+            try:
+                os.remove(filename)
+            # NB: The file is locked on Windows, so do this last
+            except (FileNotFoundError, PermissionError):
+                pass
 
     @onlyCUDA
     @skipCUDAIfNotRocm
