@@ -191,7 +191,7 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s1)"):
+    def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s4)"):
         l_inputs_ = L_inputs_
         l_hooks_0_keywords_fn_keywords_obj_counter = L_hooks_0_keywords_fn_keywords_obj_counter
 
@@ -199,7 +199,7 @@ class GraphModule(torch.nn.Module):
 
         new_grad: "f32[s0]" = torch.clone(getitem)
 
-        add: "Sym(s1 + 1)" = l_hooks_0_keywords_fn_keywords_obj_counter + 1;  l_hooks_0_keywords_fn_keywords_obj_counter = None
+        add: "Sym(s4 + 1)" = l_hooks_0_keywords_fn_keywords_obj_counter + 1;  l_hooks_0_keywords_fn_keywords_obj_counter = None
 
         result: "f32[s0]" = getitem * getitem;  getitem = None
 

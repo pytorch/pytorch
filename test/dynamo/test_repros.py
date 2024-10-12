@@ -996,8 +996,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """4""")
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """14""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.op_count, """12""")
 
     def test_boxes_len(self):
         def fn(boxes):

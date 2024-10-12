@@ -2473,13 +2473,13 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_lambda0_keywords_y_: "f32[s0, s1]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
-        mul_1: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        mul: "f32[s0, s1]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul_1: "f32[s0, s1]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_2: "f32[s0, s0]" = torch.mul(mul, mul_1);  mul = mul_1 = None
+        mul_2: "f32[s0, s1]" = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
 """,
             )
@@ -2521,14 +2521,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_lambda0_keywords_y_: "f32[s0, s1]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[s0, s1]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add: "f32[s0, s0]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[s0, s1]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1: "f32[s0, s0]" = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[s0, s1]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )
@@ -2572,14 +2572,14 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", L_lambda0_keywords_y_: "f32[s0, s0]"):
+    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_lambda0_keywords_y_: "f32[s0, s1]"):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
-        mul: "f32[s0, s0]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul: "f32[s0, s1]" = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
 
-        add: "f32[s0, s0]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+        add: "f32[s0, s1]" = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
 
-        mul_1: "f32[s0, s0]" = torch.mul(mul, add);  mul = add = None
+        mul_1: "f32[s0, s1]" = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
             )

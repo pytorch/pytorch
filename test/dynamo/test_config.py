@@ -38,7 +38,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
-                opt_fn(torch.randn(i), torch.randn(i))
+                opt_fn(torch.randn(1, i), torch.randn(1, i))
         # two graphs now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
