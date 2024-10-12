@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, Iterable, List, NoReturn, Tuple, Type, TypeVar
 from typing_extensions import Self
 
@@ -33,7 +32,7 @@ _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
 
 
-def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:
+def _no_mutation(self, *args: Any, **kwargs: Any) -> NoReturn:  # type: ignore[no-untyped-def]
     raise TypeError(
         f"{type(self).__name__!r} object does not support mutation. {_help_mutation}",
     )
