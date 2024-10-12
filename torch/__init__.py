@@ -2214,6 +2214,14 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if bisect_changes := BisectionManager.get_config_change("inductor"):
+            options = {} if options is None else options
+            options = (
+                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
+            )
+
         if not options:
             return
 

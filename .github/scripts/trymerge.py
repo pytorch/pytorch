@@ -1506,7 +1506,7 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 
 
 def checks_to_markdown_bullets(
-    checks: List[Tuple[str, Optional[str], Optional[int]]]
+    checks: List[Tuple[str, Optional[str], Optional[int]]],
 ) -> List[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
