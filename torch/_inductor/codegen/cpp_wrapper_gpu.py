@@ -18,7 +18,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import SymbolicCallArg
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -170,6 +170,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperGpu()
 
     def write_header(self):
         if V.graph.is_const_graph:
