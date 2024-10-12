@@ -691,7 +691,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'i0': None,
         'igamma': None,
         'igammac': None,
         'index_copy': None,
@@ -989,9 +988,6 @@ def mps_ops_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
-
-        # TODO: remove these once downstream function 'aten::i0.out' have been implemented
-        'signal.windows.kaiser': [torch.float32],
 
         # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
         'arange': [torch.uint8],
