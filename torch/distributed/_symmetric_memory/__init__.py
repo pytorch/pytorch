@@ -303,12 +303,10 @@ def _pipelined_produce_and_all2all(
         remote_rank = (rank - step) % group_size
         if step % 2 == 0:
             stream = torch.cuda.current_stream()
-            other_stream = backend_stream
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
             stream = backend_stream
-            other_stream = torch.cuda.current_stream()
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
         with torch.cuda.stream(stream):
