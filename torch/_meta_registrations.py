@@ -3389,10 +3389,6 @@ def meta_embedding_bag(
             lambda: "embedding_bag: per_sample_weights only supported with mode='sum'",
         )
         torch._check(
-            per_sample_weights.dtype == weight.dtype,
-            lambda: f"expected weight ({weight.dtype}) and per_sample_weights ({per_sample_weights.dtype}) to have same dtype",
-        )
-        torch._check(
             per_sample_weights.ndim == 1,
             lambda: f"expected per_sample_weights to be 1D tensor, got {per_sample_weights.ndim}D",
         )
