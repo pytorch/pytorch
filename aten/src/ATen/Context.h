@@ -313,7 +313,7 @@ class TORCH_API Context {
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32Mkldnn() const;
-  void setAllowTF32Mkldnn() const;
+  void setAllowTF32Mkldnn(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;

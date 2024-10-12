@@ -888,20 +888,21 @@ PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg){
+PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg)
+{
   HANDLE_TH_ERRORS
   TORCH_CHECK(
-    PyBool_Check(args),
-    "set_allow_tf32_mkldnn expects a bool, "
-    "but got ",
-    THPUtils_typename(arg));
-  at::globalContext().setAllowTF32Mkldnn(args == Py_True);
+      PyBool_Check(arg),
+      "set_allow_tf32_cublas expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowTF32Mkldnn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs){
-  if(at::globalContext().allowTF32CuDNN())
+PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs){ 
+  if( at::globalContext().allowTF32Mkldnn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -2417,3 +2418,4 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
+ 
