@@ -268,7 +268,8 @@ def _env_rendezvous_handler(
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
-    master_port = int(_get_env_or_raise("MASTER_PORT"))
+    # master_port = int(_get_env_or_raise("MASTER_PORT"))
+    master_port = 6792
     use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
     store = _create_c10d_store(

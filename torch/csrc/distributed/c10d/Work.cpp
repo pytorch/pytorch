@@ -1,8 +1,59 @@
 #include <ATen/ThreadLocalState.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
+
+#include <cxxabi.h>
+#include <execinfo.h>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+
+std::string demangle(const char* symbol) {
+  int status;
+  std::unique_ptr<char, void (*)(void*)> demangled(
+      abi::__cxa_demangle(symbol, nullptr, nullptr, &status), std::free);
+  return (status == 0) ? demangled.get() : symbol;
+}
+
+void print_demangled_stacktrace(uint64_t id) {
+  void* callstack[128];
+  int frames = backtrace(callstack, 128);
+  char** strs = backtrace_symbols(callstack, frames);
+
+  std::ostringstream trace_buf;
+  trace_buf << "id: " << id << std::endl;
+  for (int i = 0; i < frames; ++i) {
+    std::string frame(strs[i]);
+
+    // Find parentheses and +address offset surrounding mangled name
+    size_t pos = frame.find('(');
+    size_t pos2 = frame.find('+', pos);
+
+    if (pos != std::string::npos && pos2 != std::string::npos) {
+      std::string mangled = frame.substr(pos + 1, pos2 - pos - 1);
+      frame = frame.substr(0, pos) + "(" + demangle(mangled.c_str()) +
+          frame.substr(pos2);
+    }
+
+    trace_buf << frame << std::endl;
+  }
+
+  std::cout << trace_buf.str();
+  free(strs);
+}
+
+namespace {
+static std::atomic<uint32_t> id_counter{0};
+static std::mutex mutex;
+
+static uint64_t getNextId() {
+  std::lock_guard<std::mutex> lock(mutex);
+  return ++id_counter;
+}
+} // namespace
 
 namespace c10d {
 
@@ -12,6 +63,7 @@ Work::Work(
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
+  // print_demangled_stacktrace(id_);
   if (profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
@@ -44,6 +96,9 @@ OpType Work::retrieveOpType() const {
 }
 
 Work::~Work() = default;
+// {
+//   c10d::unregister_work(c10::weak_intrusive_ptr<Work>(c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this)));
+// }
 
 bool Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -111,8 +166,6 @@ void Work::finish(std::exception_ptr exception) {
     recordFunctionEndCallback_();
     recordFunctionEndCallback_ = nullptr;
   }
-  throw std::runtime_error("yf225 DEBUG");
-  // c10d::unregister_work(c10::weak_intrusive_ptr<Work>(this));
   lock.unlock();
   cv_.notify_all();
 }
@@ -128,6 +181,10 @@ void Work::finishAndThrow(std::exception_ptr exception) {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+}
+
+uint64_t Work::id() const {
+  return id_;
 }
 
 float Work::getDuration() const {

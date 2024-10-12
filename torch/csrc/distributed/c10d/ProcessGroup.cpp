@@ -1,6 +1,7 @@
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <thread>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
@@ -187,20 +188,29 @@ class WorkRegistry {
     return work;
   }
 
-  void unregister_work(const c10::weak_intrusive_ptr<c10d::Work>& work_weakref) {
+  void unregister_completed_works() {
     std::unique_lock lock(lock_);
-    auto work = work_weakref.lock();
-    if (work == nullptr) return;
+    std::cout << "unregister_completed_works: before: " << registry_.size()
+              << std::endl;
     for (auto it = registry_.begin(); it != registry_.end();) {
-      if (it->second == work) {
-        registry_.erase(it);
+      if (it->second->isCompleted()) {
+        std::cout << "unregister_completed_works: removed one" << std::endl;
+        it = registry_.erase(it);
       } else {
         ++it;
       }
     }
+    std::cout << "unregister_completed_works: after: " << registry_.size()
+              << std::endl;
+  }
+
+  size_t get_work_registry_size() {
+    std::unique_lock lock(lock_);
+    return registry_.size();
   }
 
   ~WorkRegistry() {
+    unregister_completed_works();
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
     // wait for these work objects or to destroy them will only result in
@@ -237,19 +247,27 @@ namespace c10d {
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  RankLocal<WorkRegistry>::get().register_work(tensor, work);
+  ::process_registry.register_work(tensor, work);
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
+  auto work = ::process_registry.pop_work(tensor);
   if (work != nullptr) {
     work->wait();
   }
   return tensor;
 }
 
-void unregister_work(const c10::weak_intrusive_ptr<c10d::Work>& work_weakref) {
-  RankLocal<WorkRegistry>::get().unregister_work(work_weakref);
+// void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
+//   ::process_registry.unregister_work(work);
+// }
+
+void unregister_completed_works() {
+  ::process_registry.unregister_completed_works();
+}
+
+size_t get_work_registry_size() {
+  return ::process_registry.get_work_registry_size();
 }
 
 } // namespace c10d

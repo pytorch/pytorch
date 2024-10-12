@@ -117,6 +117,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>&);
 
+  virtual uint64_t id() const;
+
  protected:
   // Completes the work object and optionally sets the exception in a
   // thread-safe manner. Notifies all waiting condition variables as well.
@@ -140,6 +142,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.
   std::function<void()> recordFunctionEndCallback_;
+
+  uint64_t id_;
 };
 
 struct TORCH_API WorkInfo {

@@ -22,15 +22,17 @@ class RankLocal {
   RankLocal(const RankLocal&) = delete;
   RankLocal& operator=(const RankLocal&) = delete;
 
-  static T& get() {
+  static T& get(std::optional<uint64_t> opt_fwd_thread_id = std::nullopt) {
     // Fast path: non-autograd threads can simply return
     // the object reference cached in TLS.
     if (cached_ != nullptr) {
       return *cached_;
     }
     const auto node = torch::autograd::get_current_node();
-    auto fwd_thread_id = node == nullptr ? at::RecordFunction::currentThreadId()
-                                         : node->thread_id();
+    auto fwd_thread_id = opt_fwd_thread_id.has_value()
+        ? opt_fwd_thread_id.value()
+        : (node == nullptr ? at::RecordFunction::currentThreadId()
+                           : node->thread_id());
     // Optimistically acquire the read lock first, since most likely we are in
     // an autograd thread and the object has already been constructed.
     {

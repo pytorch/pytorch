@@ -30,7 +30,11 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
-C10_EXPORT void unregister_work(const c10::weak_intrusive_ptr<c10d::Work>& work_weakref);
+// C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
+
+C10_EXPORT void unregister_completed_works();
+
+C10_EXPORT size_t get_work_registry_size();
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -174,8 +178,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootTensor,
         opts.asyncOp,
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -202,8 +205,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.sparseIndices,
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -226,8 +228,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -253,8 +254,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootRank,
         opts.rootTensor,
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -280,8 +280,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor_list : outputTensors) {
       for (const auto& tensor : tensor_list) {
         c10d::register_work(tensor, work);
@@ -314,8 +313,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     c10d::register_work(outputBuffer, work);
     return work;
   }
@@ -340,8 +338,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         outputTensorLists,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor_list : outputTensorLists) {
       for (const auto& tensor : tensor_list) {
         c10d::register_work(tensor, work);
@@ -369,8 +366,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : outputTensors) {
       c10d::register_work(tensor, work);
     }
@@ -395,8 +391,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor_list : outputTensors) {
       for (const auto& tensor : tensor_list) {
         c10d::register_work(tensor, work);
@@ -427,8 +422,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootRank,
         opts.asyncOp,
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : outputTensors) {
       c10d::register_work(tensor, work);
     }
@@ -455,8 +449,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : outputTensors) {
       c10d::register_work(tensor, work);
     }
@@ -484,8 +477,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.asyncOp,
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     c10d::register_work(outputBuffer, work);
     return work;
   }
@@ -513,8 +505,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : outputTensors) {
       c10d::register_work(tensor, work);
     }
@@ -543,8 +534,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         outputSplitSizes,
         inputSplitSizes,
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     c10d::register_work(outputBuffer, work);
     return work;
   }
@@ -567,8 +557,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : outputTensors) {
       c10d::register_work(tensor, work);
     }
@@ -653,8 +642,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         dstRank,
         tag);
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -677,8 +665,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         srcRank,
         tag);
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -698,8 +685,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         tag);
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     for (const auto& tensor : tensors) {
       c10d::register_work(tensor, work);
     }
@@ -740,8 +726,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.device_ids,
         opts.timeout.count());
-    // Associate output tensors with the work, so that `.wait_tensor(output)` will
-    // invoke the correct `work.wait()`.
+
     c10d::register_work(tensor, work);
     return work;
   }
