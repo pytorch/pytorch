@@ -82,7 +82,7 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, int num_dynamic_args) {
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, bool dynamic_graph) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -130,16 +130,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       CaptureId_t stream_capture_id;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
-  }, num_dynamic_args ? std::optional{[this](void* ptr, size_t size) {
-      std::cout << "tracked alloc " << allocations_.size() << " of size " << size << " returning " << ptr << std::endl;
-      allocations_.push_back(TrackedAllocation{
-        .ptr = (char*) ptr,
-        .size = size,
-        .alloc_idx = allocations_.size(),
-      });
-    }} : std::nullopt);
+  });
 
-  num_dynamic_args_ = num_dynamic_args;
+  dynamic_graph_ = dynamic_graph;
 
   // At this point, any NCCL watchdogs should be aware that we are in capture mode
   // and therefore should not enqueue any additional work that could be event-queried.
@@ -174,11 +167,16 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
 
-  if (num_dynamic_args_) {
-    // must do this before cudaGraphInstantiate, since it calls cudaGraphKernelNodeSetAttribute
-    introspect_dynamic_graph();
-    // TODO: we could releasePool here? would save a good amount of memory...
-    // (because all our allocations will be redone and overwritten on every replay_dynamic)
+  size_t numCUDAGraphNodes = 0;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
+  if (numCUDAGraphNodes == 0) {
+      TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
+                 "attempted to be captured on wrong device or stream.");
+  }
+
+  if (dynamic_graph_) {
+    // skip all instantiaton and such
+    return;
   }
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -220,21 +218,13 @@ void CUDAGraph::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
-  size_t numCUDAGraphNodes = 0;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
-  if (numCUDAGraphNodes == 0) {
-      TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
-                 "attempted to be captured on wrong device or stream.");
-  }
-
   // check if debug path is set
-  if (!_cuda_graphs_debug && !num_dynamic_args_) {
+  if (!_cuda_graphs_debug) {
     // Now that we've instantiated graph_ into graph_exec_,
     // we don't need graph_ anymore.
     AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     has_graph_ = false;
-  }
-  if (_cuda_graphs_debug) {
+  } else {
     TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed until debug_dump is called.");
   }
 }
@@ -242,7 +232,7 @@ void CUDAGraph::capture_end() {
 void CUDAGraph::replay() {
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
-  TORCH_CHECK(!num_dynamic_args_, "Call replay_dynamic instead");
+  TORCH_CHECK(!dynamic_graph_, "Call replay_dynamic instead");
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
@@ -318,11 +308,11 @@ void CUDAGraph::reset() {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
     has_graph_exec_ = false;
   }
-  if (num_dynamic_args_) {
+  if (dynamic_graph_) {
     allocations_.clear();
     kernel_param_updates_.clear();
     graph_node_param_updates_.clear();
-    num_dynamic_args_ = 0;
+    dynamic_graph_ = false;
   }
 }
 
@@ -341,9 +331,9 @@ CUDAGraph::~CUDAGraph() {
   reset();
 }
 
-std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, const std::vector<TrackedAllocation>& sorted_allocations) {
+std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, const std::vector<DynamicGraphAllocation>& sorted_allocations) {
   // since allocations is sorted in ptr order, we can search it in log time
-  auto it = std::upper_bound(sorted_allocations.begin(), sorted_allocations.end(), ptr, [](const void* p, const TrackedAllocation& alloc) {
+  auto it = std::upper_bound(sorted_allocations.begin(), sorted_allocations.end(), ptr, [](const void* p, const DynamicGraphAllocation& alloc) {
     return p < alloc.ptr;
   });
   // upper_bound finds the first allocation whose ptr is strictly greater than our search
@@ -361,52 +351,35 @@ std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, 
   return std::nullopt;
 }
 
-std::vector<TrackedAllocation> combine_ranges(const std::vector<TrackedAllocation>& input, size_t num_dynamic_args) {
-  // the allocator can return overlaps, e.g. (128, 256) is allocated then freed, later (0, 256) could be given to another allocation
-  // in such a case, we don't know whether a reference to, say, 200 was from the first or second allocation
-  // to sidestep this conundrum, we will find any overlaps, and do one big allocation for the union of each overlapping area
-  std::vector<TrackedAllocation> ranges = input;
-  std::sort(ranges.begin(), ranges.end(), [](auto& a, auto& b) {
-    return a.ptr < b.ptr;
-  });
-  std::vector<TrackedAllocation> result;
-  for (const TrackedAllocation& range : ranges) {
-    if (result.empty() || range.ptr >= result.back().ptr + result.back().size) { // ">=" because ranges are exclusive on upper end
-      result.push_back(range); // No overlap, add new range
-    } else {
-      TrackedAllocation& last = result.back(); // Overlap found, extend the previous range
-      TORCH_CHECK(last.alloc_idx >= num_dynamic_args && range.alloc_idx >= num_dynamic_args, "Cannot combine argument allocations");
-      char* last_end = last.ptr + last.size;
-      char* range_end = range.ptr + range.size;
-      last.size = std::max(last_end, range_end) - last.ptr;
-    }
-  }
-  // sort by original alloc_idx to bring the original dynamic args back to the beginning, in original order
-  // (since the dynamic args were allocated sequentially from a private pool, and never freed for the duration of the function, they should always be in ascending ptr order anyway? but there's no reason to believe that for the rest of the allocations)
-  std::sort(result.begin(), result.end(), [](auto& a, auto& b) {
-    return a.alloc_idx < b.alloc_idx;
-  });
-  for (size_t i = 0; i < result.size(); i++) {
-    if (i < num_dynamic_args) {
-      // really important, let's make absolutely sure that the inputs to the function emerge unscathed (no merging or reordering)
-      TORCH_INTERNAL_ASSERT(result[i].alloc_idx == i);
-    } else {
-      result[i].alloc_idx = i; // reassign alloc_idx to actually match the order we'll be going in
-    }
-  }
-  return result;
-}
+void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
+  TORCH_CHECK(dynamic_graph_, "Graph must have been captured with dynamic_graph=True");
+  TORCH_CHECK(allocations_.empty(), "Must not have already called become_dynamic");
+  TORCH_CHECK(!dynamic_tensors.empty(), "Must have at least one dynamic tensor");
+  TORCH_CHECK(has_graph_, "Must have already captured");
+  TORCH_INTERNAL_ASSERT(!has_graph_exec_);
 
-void CUDAGraph::introspect_dynamic_graph() {
-  allocations_ = combine_ranges(allocations_, num_dynamic_args_);
+  for (size_t i = 0; i < dynamic_tensors.size(); i++) {
+    const at::Tensor& tensor = dynamic_tensors[i];
+    TORCH_CHECK(tensor.is_contiguous(), "Dynamic tensors must be contiguous");
+    allocations_.push_back(DynamicGraphAllocation{
+      .ptr = (char*) tensor.data_ptr(),
+      .size = tensor.nbytes(),
+      .alloc_idx = i, // record the original order, since the user will use that order again in replay_dynamic
+    });
+  }
 
-  std::vector<TrackedAllocation> sorted_allocations = allocations_;
+  std::vector<DynamicGraphAllocation> sorted_allocations = allocations_;
   // copy since we're going to mess up allocation order, just for this function
   // we will need to look up a bunch of pointers, and binary search can speed this up from linear to log time
   // therefore:
   std::sort(sorted_allocations.begin(), sorted_allocations.end(), [](auto& a, auto& b) {
     return a.ptr < b.ptr;
   });
+
+  for (size_t i = 1; i < sorted_allocations.size(); i++) {
+    auto prev = sorted_allocations[i - 1];
+    TORCH_CHECK(prev.ptr + prev.size <= sorted_allocations[i].ptr, "Dynamic tensors may not overlap");
+  }
 
   size_t num_nodes;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
@@ -557,17 +530,19 @@ void CUDAGraph::introspect_dynamic_graph() {
       assert(false);
     }
   }
+  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
+  has_graph_exec_ = true;
 }
 
 void CUDART_CB hostMemoryFreeCallback(void* data) {
   at::getCPUAllocator()->raw_deallocate(data);
 }
 
-void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& input_tensors) {
-  TORCH_CHECK(num_dynamic_args_, "Must be a dynamic graph");
-  TORCH_CHECK(has_graph_exec_,
-              "Called CUDAGraph::replay_dynamic without a preceding successful capture.");
-  TORCH_CHECK(input_tensors.size() == (size_t) num_dynamic_args_);
+void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
+  TORCH_CHECK(dynamic_graph_, "Must be a dynamic graph");
+  TORCH_CHECK(has_graph_exec_, "Called CUDAGraph::replay_dynamic without a preceding successful capture.");
+  TORCH_CHECK(!allocations_.empty(), "Must have already called become_dynamic");
+  TORCH_CHECK(dynamic_tensors.size() == allocations_.size(), "Must pass the same number of tensors as are dynamic");
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -576,16 +551,10 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& input_tensors) {
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   for (size_t i = 0; i < allocations_.size(); i++) {
     TORCH_INTERNAL_ASSERT(allocations_[i].alloc_idx == i);
-    if (i < (size_t) num_dynamic_args_) {
-      // the first few are inputs/outputs, so they are "prefilled"
-      TORCH_CHECK(input_tensors[i].is_contiguous(), "All tensors must be contiguous");
-      // TODO ^ this isn't quite right. really, the assert should be that the stride is the same as the original input arg.
-      TORCH_CHECK(input_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
-      actualDataPtrs.push_back(input_tensors[i].data_ptr());
-    } else {
-      // the rest are allocated empty
-      actualDataPtrs.push_back(allocator->raw_alloc_with_stream(allocations_[i].size, stream));
-    }
+    TORCH_CHECK(dynamic_tensors[i].is_contiguous(), "All tensors must be contiguous");
+    // TODO ^ this isn't quite right. really, the assert should be that the stride is the same as the original input arg.
+    TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
+    actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
   }
 
   for (auto& update : graph_node_param_updates_) {
@@ -615,16 +584,10 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& input_tensors) {
   cudaGraphKernelNodeUpdate* deviceUpdates = (cudaGraphKernelNodeUpdate*) allocator->raw_alloc_with_stream(totalUpdatesSize, stream);
   AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, totalUpdatesSize, cudaMemcpyHostToDevice, stream));
   AT_CUDA_CHECK(cudaLaunchHostFunc(stream, hostMemoryFreeCallback, hostUpdates)); // free once the memcpy is done
-
   AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, stream));
-
   dynamic_graph_updater(deviceUpdates, kernel_param_updates_.size());
-
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
   allocator->raw_delete(deviceUpdates);
-  for (size_t i = num_dynamic_args_; i < actualDataPtrs.size(); i++) { // don't free prefilled
-    allocator->raw_delete(actualDataPtrs[i]);
-  }
 }
 
 } // namespace at::cuda

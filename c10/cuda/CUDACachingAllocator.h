@@ -219,8 +219,7 @@ class CUDAAllocator : public Allocator {
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter,
-      std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) = 0;
+      std::function<bool(cudaStream_t)> filter) = 0;
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
@@ -383,9 +382,8 @@ inline CheckpointDelta setCheckpointPoolState(
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter,
-    std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) {
-  get()->beginAllocateToPool(device, mempool_id, std::move(filter), std::move(allocation_logger));
+    std::function<bool(cudaStream_t)> filter) {
+  get()->beginAllocateToPool(device, mempool_id, std::move(filter));
 }
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

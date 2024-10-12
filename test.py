@@ -12,10 +12,11 @@ def make_dynamic(func):
         nonlocal graph, initialized
         if not initialized:
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, num_dynamic_args=len(args)):
-                empty_args = [torch.empty_like(arg) for arg in args]
+            empty_args = [torch.empty_like(arg) for arg in args]
+            # could use args here - but let's demonstrate that the actual contents don't matter in the original capture
+            with torch.cuda.graph(graph, dynamic_graph=True):
                 func(*empty_args)
-                # empty_args must stay in scope at least until here, so that its allocations can't be reused
+            graph.become_dynamic(empty_args)
             initialized = True
         # Replay the graph with the actual arguments
         graph.replay_dynamic(list(args))

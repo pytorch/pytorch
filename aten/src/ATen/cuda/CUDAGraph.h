@@ -31,11 +31,12 @@ struct DynamicGraphKernelParamUpdate {
 };
 
 struct DynamicGraphOtherNodeUpdate {
+  // for the (rare) case where a cudaMemsetAsync or cudaMemcpyAsync involved a dynamic tensor
   cudaGraphNode_t node;
   std::function<cudaGraphNodeParams(std::vector<void*>)> compute_new_params;
 };
 
-struct TrackedAllocation {
+struct DynamicGraphAllocation {
   char* ptr; // device-side pointer to the allocation
   size_t size; // size of the allocation
   size_t alloc_idx; // which allocation was this originally
@@ -54,17 +55,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal,
-      int num_dynamic_args = 0);
+      bool dynamic_graph = false);
   void capture_end();
   void replay();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
-  void replay_dynamic(const std::vector<at::Tensor>& tensors);
+  void become_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
+  void replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
 
  protected:
-  void introspect_dynamic_graph();
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
@@ -82,10 +83,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // used to identify when a stream is participating in capture
   CaptureId_t capture_id_ = -1;
 
-  // How many dynamic input tensors does this graph expect?
-  int num_dynamic_args_;
-  // (if dynamic) What allocations were made during capture?
-  std::vector<TrackedAllocation> allocations_;
+  // Will this graph have dynamic input/output tensors?
+  bool dynamic_graph_;
+  // (if dynamic) Which allocations are dynamic?
+  std::vector<DynamicGraphAllocation> allocations_;
   // (if dynamic) Which parameters of which kernels need to be updated to the input tensors or new allocations?
   std::vector<DynamicGraphKernelParamUpdate> kernel_param_updates_;
   // (if dynamic) Some Torch ops use cudaMemcpyAsync or cudaMemsetAsync, those also need to have their pointers updated

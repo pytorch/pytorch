@@ -259,9 +259,7 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 void CUDAPluggableAllocator::beginAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter,
-    std::optional<std::function<void(void*, size_t)>> allocation_logger) {
-  TORCH_CHECK(!allocation_logger, "Not supported");
+    std::function<bool(cudaStream_t)> filter) {
   if (begin_allocate_to_pool_fn_) {
     begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
   }

@@ -32,7 +32,7 @@ void THCPGraph_init(PyObject* module) {
           [](::at::cuda::CUDAGraph& self,
              std::optional<c10::cuda::MempoolId_t> pool_opt,
              std::string capture_error_mode,
-             int num_dynamic_args) {
+             bool dynamic_graph) {
             cudaStreamCaptureMode capture_mode;
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
@@ -49,11 +49,11 @@ void THCPGraph_init(PyObject* module) {
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
             }
-            return self.capture_begin(pool, capture_mode, num_dynamic_args);
+            return self.capture_begin(pool, capture_mode, dynamic_graph);
           },
           py::arg("pool"),
           py::arg("capture_error_mode"),
-          py::arg("num_dynamic_args"),
+          py::arg("dynamic_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
@@ -72,12 +72,19 @@ void THCPGraph_init(PyObject* module) {
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
       .def(
-          "replay_dynamic",
-          [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& tensors) {
+          "become_dynamic",
+          [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& dynamic_tensors) {
             py::gil_scoped_release release;
-            self.replay_dynamic(tensors);
+            self.become_dynamic(dynamic_tensors);
           },
-          py::arg("tensors"))
+          py::arg("dynamic_tensors"))
+      .def(
+          "replay_dynamic",
+          [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& dynamic_tensors) {
+            py::gil_scoped_release release;
+            self.replay_dynamic(dynamic_tensors);
+          },
+          py::arg("dynamic_tensors"))
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))

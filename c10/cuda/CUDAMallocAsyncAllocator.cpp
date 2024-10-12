@@ -777,15 +777,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>,
-      std::optional<std::function<void(void*, size_t)>> allocation_logger = std::nullopt) override {
+      std::function<bool(cudaStream_t)>) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
     TORCH_CHECK(
         !capture_underway,
-        "Only one capture at a time is allowed in a process.");
-    TORCH_CHECK(!allocation_logger, "Not supported");
+        "Only one capture at a time is allowed in a process.")
     capture_underway = true;
   }
 

@@ -61,7 +61,7 @@ namespace at { namespace cuda {
   _(cuFuncSetAttribute)                          \
   _(cuFuncGetAttribute)                          \
   _(cuFuncGetParamInfo)                          \
-  _(cuFuncGetName)
+  _(cuFuncGetName)                               \
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 #define AT_FORALL_NVRTC_EXTENDED(_)              \
