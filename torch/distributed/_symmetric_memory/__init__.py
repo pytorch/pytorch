@@ -231,32 +231,29 @@ def _pipelined_multi_all_gather_and_consume(
     # stream 0:       [ shard_consumer ][ cp ][ shard_consumer ]
     # stream 1: [ mv ][b][ cp ][ shard_consumer ]
     #
-    # Suboptimal scenario - "mv" is scheduled after the first shard_consumer:
+    # Suboptimal scenario 0 - "mv" is scheduled after the first shard_consumer:
     #
     # stream 0: [ shard_consumer ]               [ cp ][ shard_consumer ]
     # stream 1:                   [ mv ][b][ cp ][ shard_consumer ]
     #
-    # To prevent the suboptimal scenario, we do the following to maximize the
-    # likelihood that "mv" is either overlapped with or scheduled before the
-    # first shard_consumer:
-    # - Issue "mv" on stream 1 before issuing the first shard_consumer on
-    # stream 0.
-    # - Add a small sleep before the first shard_consumer on stream 0. The
-    # sleep duration is insignificant, but having an extra task in stream 0
-    # will almost guarantee that "mv" on stream 1 gets scheduled first, if it
-    # cannot overlap with the first shard_consumer.
-    with torch.cuda.stream(backend_stream):
-        copy_shard(dst=local_p2p_bufs, src=shard)
-        symm_mem.barrier(channel=1)
-
-    torch.cuda._sleep(100)
-    shard_consumer(shard, rank)
-
-    torch.cuda.current_stream().wait_stream(backend_stream)
+    # Suboptimal scenario 0 - "b" is scheduled after the first shard_consumer:
+    #
+    # stream 0:       [ shard_consumer ]         [ cp ][ shard_consumer ]
+    # stream 1: [ mv ]                  [b][ cp ][ shard_consumer ]
+    #
+    # We haven't yet figured out a way to ensure "mv" and "b" are either
+    # overlapped with or scheduled before the first shard_consumer. Thus, to
+    # prevent suboptimal scenarios, we are giving up the chance to overlap "mv"
+    # and "b" with the first shard_consumer for now.
+    copy_shard(dst=local_p2p_bufs, src=shard)
+    symm_mem.barrier(channel=1)
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
     # remote shards.
+    shard_consumer(shard, rank)
+
     for step in range(1, group_size):
         if step % 2 == 0:
             stream = torch.cuda.current_stream()
