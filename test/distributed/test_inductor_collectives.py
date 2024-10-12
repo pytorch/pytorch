@@ -275,9 +275,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # thus will produce the wrong result that fails the unit test.
 
             # Test: pure-eager
+            all_reduce_wait_eager = all_reduce_wait
             for _ in range(10):
                 work, y = all_reduce_eager(x)
-                out_ref = all_reduce_wait(work, y)
+                out_ref = all_reduce_wait_eager(work, y)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 10)
             torch.cuda.synchronize()
             torch._C._distributed_c10d._unregister_completed_works()
