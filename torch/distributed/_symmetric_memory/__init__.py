@@ -356,7 +356,7 @@ def _pipelined_produce_and_all2all(
             # will almost guarantee that the chunk_producer on stream 1 gets
             # scheduled first. Once the first chunk_producer is scheduled in
             # the correct order, there's very little room for the scheduling
-            # order of subsequent kernels to change.
+            # order of subsequent kernels to be inconsistent across ranks.
             if step == 2:
                 torch.cuda._sleep(100)
             chunk_producer((rank + step) % group_size, p2p_buf)
