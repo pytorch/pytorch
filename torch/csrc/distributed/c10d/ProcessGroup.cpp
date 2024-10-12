@@ -241,11 +241,11 @@ namespace c10d {
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  ::process_registry.register_work(tensor, work);
+  RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto work = ::process_registry.pop_work(tensor);
+  auto work = RankLocal<WorkRegistry>::get().pop_work(tensor);
   if (work != nullptr) {
     work->wait();
   }
@@ -253,11 +253,11 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
 }
 
 void unregister_completed_works() {
-  ::process_registry.unregister_completed_works();
+  RankLocal<WorkRegistry>::get().unregister_completed_works();
 }
 
 size_t get_work_registry_size() {
-  return ::process_registry.get_work_registry_size();
+  return RankLocal<WorkRegistry>::get().get_work_registry_size();
 }
 
 } // namespace c10d

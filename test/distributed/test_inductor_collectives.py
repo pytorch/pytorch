@@ -268,10 +268,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             x = torch.ones(12800, 12800, device="cuda") + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-            # We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
+
+            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
             # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
             # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
-            # thus producing the wrong result.
+            # thus will produce the wrong result that fails the unit test.
+
+            # pure-eager test
             for _ in range(10):
                 work, y = all_reduce_eager(x)
                 out_ref = all_reduce_wait(work, y)
@@ -280,6 +283,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch._C._distributed_c10d._unregister_completed_works()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
+            # issue comm in eager -> wait for comm in compile test
             all_reduce_wait_compiled = torch.compile(
                 all_reduce_wait,
                 backend="inductor",
