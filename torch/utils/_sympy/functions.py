@@ -89,10 +89,10 @@ __all__ = [
 ]
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., sympy.Float]:
+def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Any) -> Union[_T, sympy.Float]:
-        r = f(*args)
+        r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
@@ -140,7 +140,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
         return functools.reduce(math.gcd, integer_factors)
 
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
-    p, q = p / gcd, q / gcd
+    p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
     base_splits: List[Tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
@@ -148,8 +148,8 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
-            gcd = gcd * x
-    return gcd
+            gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
+    return gcd  # type: ignore[return-value]  # remove in py3.12
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -191,7 +191,7 @@ class FloorDiv(sympy.Function):
     def divisor(self) -> sympy.Basic:
         return self.args[1]
 
-    def _sympystr(self, printer: sympy.printing.printer.Printer) -> str:
+    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
@@ -199,7 +199,9 @@ class FloorDiv(sympy.Function):
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
-    def eval(cls, base: sympy.Basic, divisor: sympy.Basic) -> Union[sympy.Basic, None]:
+    def eval(
+        cls, base: sympy.Integer, divisor: sympy.Integer
+    ) -> Union[sympy.Basic, None]:
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
         # Assert triggered by inequality solver
         # assert base.is_integer, base
@@ -281,7 +283,7 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(
-        cls, base: sympy.Basic, divisor: sympy.Basic, modulus: sympy.Basic
+        cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
@@ -306,7 +308,7 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms: List[sympy.Basic] = []
+            new_terms: List[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
@@ -575,6 +577,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             args = cls._collapse_arguments(args, **assumptions)
             # find local zeros
             args = cls._find_localzeros(args, **assumptions)
+
         args = frozenset(args)
 
         if not args:
@@ -759,49 +762,44 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         When a value is identified as being more extreme than another member it
         replaces that member; if this is never true, then the value is simply
         appended to the localzeros.
+
+        Unlike the sympy implementation, we only look for zero and one, we don't
+        do generic is connected test pairwise which is slow
         """
-        localzeros = set()  # type: ignore[var-annotated]
-        for v in values:
-            is_newzero = True
-            localzeros_ = list(localzeros)
-            for z in localzeros_:
-                if id(v) == id(z):
-                    is_newzero = False
+
+        # First, collapse all numeric arguments
+        other_values = set()
+        num_value = None
+        for arg in values:
+            if arg.is_Number:
+                if num_value is None:
+                    num_value = arg
                 else:
-                    con = cls._is_connected(v, z)
-                    if con:
-                        is_newzero = False
-                        if con is True or con == cls:
-                            localzeros.remove(z)
-                            localzeros.update([v])
-            if is_newzero:
-                localzeros.update([v])
-        return localzeros
-
-    @classmethod
-    def _is_connected(cls, x, y):
-        """
-        Check if x and y are connected somehow.
-        """
-        if x == y:
-            return True
-        t, f = Max, Min
-        for op in "><":
-            for j in range(2):
-                try:
-                    if op == ">":
-                        v = x >= y
+                    if cls is Max:
+                        num_value = max(num_value, arg)
+                    elif cls is Min:
+                        num_value = min(num_value, arg)
                     else:
-                        v = x <= y
-                except TypeError:
-                    return False  # non-real arg
-                if not v.is_Relational:
-                    return t if v else f
-                t, f = f, t  # type: ignore[assignment]
-                x, y = y, x
-            x, y = y, x  # run next pass with reversed order relative to start
+                        raise AssertionError(f"impossible {cls}")
+            else:
+                other_values.add(arg)
 
-        return False
+        # Special cases when there is only one symbolic value
+        if num_value is None:
+            return other_values
+
+        if len(other_values) == 0:
+            return {num_value}
+
+        if len(other_values) == 1:
+            other_value = next(iter(other_values))
+            if num_value in (0.0, 0) and other_value.is_nonnegative:
+                return other_values if cls is Max else {num_value}
+            if num_value == 1 and other_value.is_positive:
+                return other_values if cls is Max else {num_value}
+
+        other_values.add(num_value)
+        return other_values
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
@@ -1156,7 +1154,7 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):

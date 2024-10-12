@@ -27,6 +27,7 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
+    UINT16 = 28
 
 
 class Layout(IntEnum):
@@ -361,6 +362,10 @@ class ModuleCallSignature:
     # And deserialized by calling pytree.treespec_dumps
     in_spec: str
     out_spec: str
+
+    # This field is used to prettify the graph placeholders
+    # after we ser/der and retrace
+    forward_arg_names: Optional[List[str]] = None
 
 
 @dataclass

@@ -21,8 +21,10 @@ import operator
 import os
 import re
 import sys
+import textwrap
 import threading
 import time
+import traceback
 import types
 import typing
 import uuid
@@ -804,6 +806,10 @@ class CompilationMetrics:
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
+    config_inline_inbuilt_nn_modules: Optional[bool]
+    specialize_float: Optional[bool]
+    dynamo_config: Optional[str]
 
 
 @dataclasses.dataclass
@@ -902,13 +908,20 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         event = self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -932,6 +945,12 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
@@ -958,7 +977,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1003,6 +1022,10 @@ class ChromiumEventLogger:
         :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
         :param str cname optional color for the arrow in the trace
         """
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
         event = {
             "name": event_name,
             "ts": time_ns / 1000,
@@ -1021,7 +1044,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2332,9 +2355,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2760,10 +2781,34 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         h(x)))
         ^^^^^
 
-    We need our own implementation since `format_frame_summary` in
+    We need our own implementation in < 3.13 since `format_frame_summary` in
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
+    if sys.version_info >= (3, 13):
+        # multiline traceback implemented in 3.13+
+        frame_summary = traceback.FrameSummary(
+            code.co_filename,
+            inst.positions.lineno,
+            code.co_name,
+            end_lineno=inst.positions.end_lineno,
+            colno=inst.positions.col_offset,
+            end_colno=inst.positions.end_col_offset,
+        )
+        result = traceback.format_list([frame_summary])[0]
+        # remove first line containing filename info
+        result = "\n".join(result.splitlines()[1:])
+        # indent lines with original indentation
+        orig_lines = [
+            linecache.getline(code.co_filename, lineno).rstrip()
+            for lineno in range(inst.positions.lineno, inst.positions.end_lineno + 1)
+        ]
+        orig_lines_dedent = textwrap.dedent("\n".join(orig_lines)).splitlines()
+        indent_len = len(orig_lines[0]) - len(orig_lines_dedent[0])
+        indent = orig_lines[0][:indent_len]
+        result = textwrap.indent(textwrap.dedent(result), indent)
+        return result
+
     assert inst.positions is not None
     if inst.positions.lineno is None:
         return ""
@@ -2894,18 +2939,28 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
-    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
+    from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    if isinstance(vt, TensorWithTFOverrideVariable):
-        return True
+    # Note on lazy vars: The value will either be realized or not throughout the course of execution
+    # if the value has a torch function, it will eventually be realized so we can realize it here
+    # if the value does not have a torch function, it may or may not be realized
+    # if it is realized it will be used and guards will be installed properly
+    # if it is not used, guards won't be installed, and it doesn't matter
+    # if the value has a torch function or not, so we should *not* realize it.
+    # NB: We technically know that if is_realized is False, LazyVariableTracker has the peek_value method
+    # but mypy does not unfortunately
+    if vt.is_realized() or (
+        hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
+    ):
+        if isinstance(vt, TensorWithTFOverrideVariable):
+            return True
 
-    if isinstance(vt, LazyVariableTracker):
-        LazyVariableTracker.realize(vt)
+        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+            vt.value, "__torch_function__"
+        )
 
-    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-        vt.value, "__torch_function__"
-    )
+    return False
 
 
 # see note [Tensor Fakification and Symbol Caching]
