@@ -529,16 +529,15 @@ void CUDAGraph::introspect_dynamic_graph() {
   }
 }
 
-void CUDART_CB hostMemoryFreeCallback(cudaStream_t stream, cudaError_t error, void* data) {
+void CUDART_CB hostMemoryFreeCallback(void* data) {
   at::getCPUAllocator()->raw_deallocate(data);
 }
 
-void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens) {
+void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& input_tensors) {
   TORCH_CHECK(num_dynamic_args_, "Must be a dynamic graph");
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay_dynamic without a preceding successful capture.");
-  TORCH_CHECK(prefilledDataPtrs.size() == (size_t) num_dynamic_args_);
-  TORCH_CHECK(prefilledLens.size() == prefilledDataPtrs.size());
+  TORCH_CHECK(input_tensors.size() == (size_t) num_dynamic_args_);
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -546,10 +545,12 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   std::vector<void*> actualDataPtrs;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   for (size_t i = 0; i < allocations_.size(); i++) {
-    if (i < prefilledDataPtrs.size()) {
+    if (i < (size_t) num_dynamic_args_) {
       // the first few are inputs/outputs, so they are "prefilled"
-      TORCH_CHECK(prefilledLens[i] == allocations_[i].size, "Prefilled tensors must be same shape");
-      actualDataPtrs.push_back(prefilledDataPtrs[i]);
+      TORCH_CHECK(input_tensors[i].is_contiguous(), "All tensors must be contiguous");
+      // TODO ^ this isn't quite right. really, the assert should be that the stride is the same as the original input arg.
+      TORCH_CHECK(input_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
+      actualDataPtrs.push_back(input_tensors[i].data_ptr());
     } else {
       // the rest are allocated empty
       actualDataPtrs.push_back(allocator->raw_alloc_with_stream(allocations_[i].size, stream));
@@ -582,7 +583,7 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   }
   cudaGraphKernelNodeUpdate* deviceUpdates = (cudaGraphKernelNodeUpdate*) allocator->raw_alloc_with_stream(totalUpdatesSize, stream);
   AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, totalUpdatesSize, cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaStreamAddCallback(stream, hostMemoryFreeCallback, hostUpdates, 0)); // free once the memcpy is done
+  AT_CUDA_CHECK(cudaLaunchHostFunc(stream, hostMemoryFreeCallback, hostUpdates)); // free once the memcpy is done
 
   AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, stream));
 
@@ -590,7 +591,7 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
 
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
   allocator->raw_delete(deviceUpdates);
-  for (size_t i = prefilledDataPtrs.size(); i < actualDataPtrs.size(); i++) { // don't free prefilled
+  for (size_t i = num_dynamic_args_; i < actualDataPtrs.size(); i++) { // don't free prefilled
     allocator->raw_delete(actualDataPtrs[i]);
   }
 }

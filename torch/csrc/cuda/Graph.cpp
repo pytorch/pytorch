@@ -73,20 +73,9 @@ void THCPGraph_init(PyObject* module) {
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
       .def(
           "replay_dynamic",
-          [](::at::cuda::CUDAGraph& self, py::list tensors) {
-            std::vector<void*> prefilledDataPtrs;
-            std::vector<size_t> prefilledLens;
-
-            for (const auto& item : tensors) {
-              auto tensor = item.cast<at::Tensor>();
-              TORCH_CHECK(tensor.is_contiguous(), "All tensors must be contiguous");
-              
-              prefilledDataPtrs.push_back(tensor.data_ptr());
-              prefilledLens.push_back(tensor.nbytes());
-            }
-
+          [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& tensors) {
             py::gil_scoped_release release;
-            self.replay_dynamic(prefilledDataPtrs, prefilledLens);
+            self.replay_dynamic(tensors);
           },
           py::arg("tensors"))
       .def(

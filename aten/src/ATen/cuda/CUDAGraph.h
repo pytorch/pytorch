@@ -61,7 +61,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
-  void replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens);
+  void replay_dynamic(const std::vector<at::Tensor>& tensors);
 
  protected:
   void introspect_dynamic_graph();

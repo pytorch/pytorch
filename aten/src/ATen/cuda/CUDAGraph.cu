@@ -10,10 +10,7 @@ __global__ void dynamic_graph_updater_kernel(cudaGraphKernelNodeUpdate* updates,
         for (int i = 0; i < local_num_updates; i++) {
             cudaGraphKernelNodeUpdate& this_update = updates[i + off];
             if (this_update.field == cudaGraphKernelNodeFieldParam) {
-                if (this_update.updateData.param.size != sizeof(void*)) {
-                    printf("dynamic graph updater only supports pointers\n");
-                    __trap();
-                }
+                CUDA_KERNEL_ASSERT_MSG(this_update.updateData.param.size == sizeof(void*), "Dynamic graph updater only supports pointers");
                 // assume pValue points directly to the data
                 pointer_indirection[i] = this_update.updateData.param.pValue;
                 // pointer_indirection[i] now points to the data
@@ -23,10 +20,7 @@ __global__ void dynamic_graph_updater_kernel(cudaGraphKernelNodeUpdate* updates,
             }
         }
         cudaError_t error = cudaGraphKernelNodeUpdatesApply(&updates[off], local_num_updates);
-        if (error != cudaSuccess) {
-            printf("cudaGraphKernelNodeUpdatesApply returned error %d\n", error);
-            __trap();
-        }
+        CUDA_KERNEL_ASSERT_MSG(error == cudaSuccess, "cudaGraphKernelNodeUpdatesApply did not succeed");
     }
 }
 
