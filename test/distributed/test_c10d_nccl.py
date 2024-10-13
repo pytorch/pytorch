@@ -3053,20 +3053,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         # Test that _unregister_completed_works() can unregister completed works
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 1
-        )  # 1 uncompleted
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 uncompleted
+        )
         work.wait(timedelta(seconds=10))
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 1
-        )  # 1 completed
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 completed
+        )
         work2 = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 2
-        )  # 1 completed + 1 uncompleted
+            torch._C._distributed_c10d._get_work_registry_size(),
+            2,  # 1 completed + 1 uncompleted
+        )
         work2.wait(timedelta(seconds=10))
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 2
-        )  # 2 completed
+            torch._C._distributed_c10d._get_work_registry_size(), 2  # 2 completed
+        )
         # Trigger _unregister_completed_works() without program exit
         torch._C._distributed_c10d._unregister_completed_works()
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
@@ -3074,20 +3075,21 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Test that _unregister_completed_works() does not unregister uncompleted works
         work = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 1
-        )  # 1 uncompleted
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 uncompleted
+        )
         work.wait(timedelta(seconds=10))
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 1
-        )  # 1 completed
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 completed
+        )
         work2 = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 2
-        )  # 1 completed + 1 uncompleted
+            torch._C._distributed_c10d._get_work_registry_size(),
+            2,  # 1 completed + 1 uncompleted
+        )
         torch._C._distributed_c10d._unregister_completed_works()
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 1
-        )  # 1 uncompleted
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 uncompleted
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
