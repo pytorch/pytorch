@@ -356,6 +356,10 @@ class IRNode:
         self.origins = OrderedSet(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
 
+    def _post_init_setattr(self, attr, value):
+        # Only use in __post_init__ for enforcing an invariant on a dataclass
+        object.__setattr__(self, attr, value)
+
     def get_read_names(self) -> OrderedSet[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
 
@@ -2621,7 +2625,8 @@ class ReinterpretView(BaseView):
     def __post_init__(self):
         super().__post_init__()
         if isinstance(self.data, BaseView):
-            object.__setattr__(self, "data", self.data.unwrap_view())
+            # Enforces that self.data is always a non-view
+            self._post_init_setattr("data", self.data.unwrap_view())
 
     def __str__(self) -> str:
         return self.str_helper(
@@ -2897,7 +2902,7 @@ class Layout(IRNode):
         device: torch.device,
         dtype: torch.dtype,
         size: List[Expr],
-        stride: Optional[Sequence[Union[Expr, int]]],
+        stride: Optional[Sequence[Union[Expr, int]]] = None,
         offset: Expr = Integer(0),
     ):
         assert stride is None or len(size) == len(
@@ -3090,23 +3095,12 @@ class Layout(IRNode):
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
-    def __init__(
-        self,
-        device: torch.device,
-        dtype: torch.dtype,
-        size: Union[List[Expr], List[int]],
-        stride: Optional[Sequence[Union[Expr, int]]] = None,
-        offset: Union[Expr, int] = Integer(0),
-    ):
-        if stride is None:
-            stride = FlexibleLayout.contiguous_strides(size)
-        super().__init__(
-            device=device,
-            dtype=dtype,
-            size=size,  # type: ignore[arg-type]
-            stride=stride,
-            offset=offset,  # type: ignore[arg-type]
-        )
+    def __post_init__(self):
+        if self.stride is None:
+            # Enforces that FixedLayout always has a real stride
+            self._post_init_setattr(
+                "stride", FlexibleLayout.contiguous_strides(self.size)
+            )
 
     def make_indexer(self):
         """A closure containing math to read a given element"""
@@ -3290,7 +3284,6 @@ class NonOwningLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
 
-@ir_dataclass
 class NoneLayout(IRNode):
     # This is janky, I figured out what fields to populate by just running
     # the model I was interested in and adding properties/methods as needed.
@@ -3312,7 +3305,6 @@ class NoneLayout(IRNode):
         return self
 
 
-@ir_dataclass
 class MutationLayoutSHOULDREMOVE(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
@@ -3528,13 +3520,11 @@ class OperationBuffer(Buffer, Operation):
         Operation.__post_init__(self)
 
 
-@ir_dataclass(frozen=False)
 class InputBuffer(Buffer):
     def num_reads(self):
         return 1
 
 
-@ir_dataclass(frozen=False)
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
@@ -3565,13 +3555,7 @@ class NoneAsConstantBuffer(IRNode):
 
 @ir_dataclass
 class ShapeAsConstantBuffer(IRNode):
-    def __init__(self, shape):
-        super().__init__()
-        self._shape = shape
-
-    @property
-    def shape(self):
-        return self._shape
+    shape: List[Expr]
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -3903,7 +3887,6 @@ class ComputedBuffer(OperationBuffer):
         return self.data.constant_to_device(device)
 
 
-@ir_dataclass(frozen=False)
 class TemplateBuffer(OperationBuffer):
     """
     Represents a Triton (in the future other type) of template operator
@@ -3960,7 +3943,6 @@ class TemplateBuffer(OperationBuffer):
         )
 
 
-@ir_dataclass(frozen=False)
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -4052,7 +4034,6 @@ class TritonTemplateCallerBase(ChoiceCaller):
         raise NotImplementedError
 
 
-@ir_dataclass(frozen=False)
 class MultiTemplateBuffer(TritonTemplateBuffer):
     """
     Represents a Buffer with multiple backing implementation choices.
@@ -4102,7 +4083,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return (min_choice, self.choice_timings[min_choice])
 
 
-@ir_dataclass(frozen=False)
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -4121,7 +4101,6 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
-@ir_dataclass(frozen=False)
 class CppTemplateBuffer(TemplateBuffer):
     def __init__(self, layout, inputs, make_kernel_render, template, choice):
         super().__init__(layout, inputs, make_kernel_render)
@@ -5066,7 +5045,6 @@ class ExternKernel(InputsKernel):
     __repr__ = __str__
 
 
-@ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -5122,7 +5100,6 @@ class ExternKernelOut(ExternKernel):
         return True
 
 
-@ir_dataclass(frozen=False)
 class RandomSeeds(ExternKernelOut):
     def __init__(self, count: int, device: torch.device):
         limits = torch.iinfo(torch.int64)
@@ -5145,7 +5122,6 @@ class RandomSeeds(ExternKernelOut):
         )
 
 
-@ir_dataclass(frozen=False)
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -5460,7 +5436,6 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         V.graph.never_reuse_buffers.add(variable.data.get_name())
 
 
-@ir_dataclass(frozen=False)
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor, storage_tensor):
         self_tensor.freeze_layout()
@@ -5745,7 +5720,6 @@ has_c_shim = OrderedSet(
 )
 
 
-@ir_dataclass(frozen=False)
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
         self,
@@ -6209,7 +6183,6 @@ class FallbackKernel(ExternKernelAlloc):
         return super().apply_constraint()
 
 
-@ir_dataclass(frozen=False)
 class ComplexView(FallbackKernel):
     """View a complex number as two dtyped numbers or vice versa"""
 
@@ -6226,7 +6199,6 @@ class MultiOutputLayout(IRNode):
     device: torch.device
 
 
-@ir_dataclass(frozen=False)
 class MultiOutput(ExternKernel):
     # Given an input MultiOutputLayout buffer, indexes out an actual buffer
     # from that result.  This doesn't actually produce multiple outputs,
