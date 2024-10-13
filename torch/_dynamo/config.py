@@ -69,6 +69,23 @@ specialize_float = True
 # legacy config, does nothing now!
 dynamic_shapes = True
 
+# This flag assumes the outermost dimension of tensors as dynamic by default. The benefit is that
+# it improves the cacheability of our graphs since many graphs tend to use the outermost dimension
+# as a batch dimension that varies over time.
+#
+# Precedence (assume_static_by_default): assume_outer_dim_dynamic_by_default takes precedence over
+# assume_static_by_default. Specifically, if assume_outer_dim_dynamic_by_default is True, the outermost dimension
+# will be marked as dynamic even if assume_static_by_default is True. However, If assume_static_by_default=False
+# setting this flag as false does not cause the first dimension to be static.
+#
+# Precedence (mark_static): mark_static takes precedence over assume_outer_dim_dynamic_by_default. Specifically,
+# if assume_outer_dim_dynamic_by_default is True, a torch._dynamo.mark_static call on the outer most dimension will
+# result in the dimension being marked as static.assume_static_by_default
+#
+# This is also turned off for export since it's unlikely to be of any benefit since we don't have caches
+# available on the export path.
+assume_outer_dim_dynamic_by_default = True
+
 use_lazy_graph_module = (
     os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
 )

@@ -2611,6 +2611,16 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
+    strides = e.stride()
+    outermost_dim = (
+        max(range(len(strides)), key=lambda i: strides[i]) if strides else -1
+    )
+    assume_outer_dim_dynamic_by_default_knob = JustKnobsConfig(
+        name="pytorch/compiler:assume_outer_dim_dynamic_by_default_knob",
+        env_name="ASSUME_OUTER_DIM_DYNAMIC_BY_DEFAULT",
+        default=True,
+    ).get()
+
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []
@@ -2699,9 +2709,18 @@ def _automatic_dynamic(
             # seems better to allow the user to override symbolic_context in this
             # case
             dynamic_size = DimDynamic.DYNAMIC
-        elif static_shapes or config.assume_static_by_default or marked_static:
+        elif static_shapes or marked_static:
             dynamic_size = DimDynamic.STATIC
-        else:
+        elif (
+            i == outermost_dim
+            and torch._dynamo.config.assume_outer_dim_dynamic_by_default
+            and assume_outer_dim_dynamic_by_default_knob
+        ):
+            # import fbvscode; fbvscode.set_trace()
+            dynamic_size = DimDynamic.DYNAMIC
+            # dynamic_size = DimDynamic.STATIC
+        elif config.assume_static_by_default:
+            dynamic_size = DimDynamic.STATIC
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:
