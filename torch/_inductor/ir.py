@@ -6276,7 +6276,9 @@ class MultiOutput(ExternKernel):
         ]
 
 
-@ir_dataclass(frozen=False)
+# We just use a normal dataclass for MutableBox/TensorBox/StorageBox since
+# they're mainly lowering-time constructs that we expect to mutate and such.
+@dataclasses.dataclass
 class MutableBox(IRNode):
     """
     TensorBox / StorageBox allow in-place mutation of Tensors
