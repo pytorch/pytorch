@@ -5,8 +5,19 @@ import inspect
 import math
 import operator
 import re
+from contextlib import contextmanager
 from inspect import Parameter
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
 import torch
 from torch._guards import detect_fake_mode
@@ -894,3 +905,16 @@ def _detect_fake_mode_from_gm(
                 fake_vals.append(fake_val)
 
     return detect_fake_mode(fake_inps + fake_vals)
+
+
+@contextmanager
+def _disable_load_state_dict_hooks(mod: torch.nn.Module):
+    state_dict_hooks: Dict[int, Callable] = dict(mod._state_dict_hooks)
+    state_dict_pre_hooks: Dict[int, Callable] = dict(mod._state_dict_pre_hooks)
+    mod._state_dict_hooks.clear()
+    mod._state_dict_pre_hooks.clear()
+    try:
+        yield
+    finally:
+        mod._state_dict_hooks = state_dict_hooks
+        mod._state_dict_pre_hooks = state_dict_pre_hooks

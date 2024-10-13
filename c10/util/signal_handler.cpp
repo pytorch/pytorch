@@ -175,7 +175,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
       ::getpid(),
       tid,
       c10::get_backtrace());
-  std::cerr << backtrace << std::endl;
+  std::cerr << backtrace << '\n';
   if (needsLock) {
     ul.unlock();
     writingCond.notify_all();
@@ -229,7 +229,7 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
         if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
           if (!signalReceived) {
             std::cerr << "signal lost waiting for stacktrace " << pid << ":"
-                      << tid << std::endl;
+                      << tid << '\n';
             break;
           }
         }

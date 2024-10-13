@@ -823,6 +823,15 @@ def forward(self, x_1):
             )
         )
 
+    def test_sym_max_multi_max_simplify(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        self.assertTrue(
+            statically_known_true(
+                torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
+            )
+        )
+
     def test_numpy_sym_max(self):
         self.assertEqual(torch.sym_max(np.int64(10), 12), 12)
         self.assertEqual(torch.sym_max(np.int64(12), 10), 12)
