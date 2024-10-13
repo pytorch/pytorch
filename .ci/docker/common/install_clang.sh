@@ -21,9 +21,9 @@ if [ -n "$CLANG_VERSION" ]; then
 
   sudo apt-get update
   if [[ $CLANG_VERSION -ge 18 ]]; then
-    apt-get install -y libomp-${CLANG_VERSION}-dev libclang-rt-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+    apt-get install -y libomp-${CLANG_VERSION}-dev libclang-rt-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION" lld-"$CLANG_VERSION"
   else
-    apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+    apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION" lld-"$CLANG_VERSION"
   fi
 
   # Install dev version of LLVM.
@@ -37,6 +37,10 @@ if [ -n "$CLANG_VERSION" ]; then
   # Override cc/c++ to clang as well
   update-alternatives --install /usr/bin/cc cc /usr/bin/clang 50
   update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++ 50
+
+  # Use lld too
+  update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-"$CLANG_VERSION" 50
+  update-alternatives --install /usr/bin/ld.gold ld.gold /usr/bin/ld.lld-"$CLANG_VERSION" 50
 
   # clang's packaging is a little messed up (the runtime libs aren't
   # added into the linker path), so give it a little help
