@@ -116,7 +116,9 @@ ProcessGroup::ProcessGroup(
 ProcessGroup::ProcessGroup(int rank, int size)
     : rank_(rank), size_(size), backendType_(BackendType::UNDEFINED) {}
 
-ProcessGroup::~ProcessGroup() = default;
+ProcessGroup::~ProcessGroup() {
+  c10d::unregister_completed_works();
+}
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
@@ -204,7 +206,6 @@ class WorkRegistry {
   }
 
   ~WorkRegistry() {
-    unregister_completed_works();
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
     // wait for these work objects or to destroy them will only result in
