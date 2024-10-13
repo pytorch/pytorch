@@ -3,7 +3,6 @@
 import copyreg
 import os.path as _osp
 import weakref
-from typing import TYPE_CHECKING
 
 import torch
 from torch.utils import (
@@ -12,6 +11,7 @@ from torch.utils import (
     data as data,
     deterministic as deterministic,
     hooks as hooks,
+    pytree as pytree,
 )
 from torch.utils.backend_registration import (
     generate_methods_for_privateuse1_backend,
@@ -19,10 +19,6 @@ from torch.utils.backend_registration import (
 )
 from torch.utils.cpp_backtrace import get_cpp_backtrace
 from torch.utils.throughput_benchmark import ThroughputBenchmark
-
-
-if TYPE_CHECKING:
-    from torch.utils import pytree as pytree
 
 
 def set_module(obj, mod):
