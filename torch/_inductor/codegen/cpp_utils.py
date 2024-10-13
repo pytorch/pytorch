@@ -655,7 +655,7 @@ class LocalBufferContext:
             new_loops = copy.copy(loops)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    name=node.get_name(), layout=node.get_layout(), data=new_loops
+                    node.get_name(), node.get_layout(), new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
