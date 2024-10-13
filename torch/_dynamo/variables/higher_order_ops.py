@@ -1998,8 +1998,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn: "VariableTracker",
         fn_name: str,
     ):
-        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
-
+        from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
