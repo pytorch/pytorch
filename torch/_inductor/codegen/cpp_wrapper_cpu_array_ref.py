@@ -15,6 +15,7 @@ from .wrapper import (
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
+    PythonWrapperCodegen,
 )
 
 
@@ -71,6 +72,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
+
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperCpuArrayRef()
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -420,17 +429,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 output_args,
             )
 
-    def codegen_device_copy(self, src, dst):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         if config.abi_compatible:
             # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
             # while stack-allocation results in ArrayRefTensor
             # so disable stack allocation here
             self.allow_stack_allocation = False
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
             )
         else:
-            self.writeline(f"{dst}.copy_({src});")
+            self.writeline(f"{dst}.copy_({src}, {non_blocking});")
 
     def codegen_reinterpret_view(
         self, data, size_list, stride_list, offset, writer, dtype=None

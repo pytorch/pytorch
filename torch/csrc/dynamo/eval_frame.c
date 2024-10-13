@@ -899,6 +899,10 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
+  #ifdef Py_GIL_DISABLED
+    PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
+  #endif
+
 #if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
     return NULL;
