@@ -61,6 +61,11 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
@@ -88,6 +93,9 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " to create new comm " << comm->repr()
+            << " with color_id " << color_id << " and rank " << rank;
   return comm;
 }
 #endif
