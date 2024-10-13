@@ -11,7 +11,7 @@ struct TORCH_API MAIAHooksInterface {
   // squelch -Werror=non-virtual-dtor
   virtual ~MAIAHooksInterface() = default;
 
-  virtual std::string showConfig() const {
+  std::string showConfig() const override {
     TORCH_CHECK(false, "Cannot query detailed MAIA version information.");
   }
 };
