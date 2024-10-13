@@ -49,16 +49,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
-  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
   # Conditional jump or move depends on uninitialised value(s)
   #    at 0x40303A: ~optional_base (Optional.h:281)
   #    by 0x40303A: call (Dispatcher.h:448)
-  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:10)
   #    by 0x403700: main (basic.cpp:16)
   #  Uninitialised value was created by a stack allocation
-  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:6)
   #
   # The problem does not appear with gcc or newer versions of clang (we tested
   # clang14).  So we suppress valgrind testing for clang9 specifically.
@@ -72,7 +72,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # using namespace at;
   #
-  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
   #   auto op = c10::Dispatcher::singleton()
   #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
   #       .typed<at::_ops::as_strided::schema>();
@@ -403,7 +403,7 @@ pr_time_benchmarks() {
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
-  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "$TEST_REPORTS_DIR/new_expected_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -664,15 +664,6 @@ test_inductor_torchbench_smoketest_perf() {
     --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
-
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
-    --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
-  # The threshold value needs to be actively maintained to make this check useful
-  # The perf number of nanogpt seems not very stable, e.g.
-  # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
-  # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
-  # we switch to use some other model.
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -1469,7 +1460,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
     checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
