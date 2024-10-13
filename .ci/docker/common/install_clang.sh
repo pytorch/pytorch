@@ -39,7 +39,7 @@ if [ -n "$CLANG_VERSION" ]; then
   update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++ 50
 
   # Use lld too
-  update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-10 100 --force
+  # update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-10 100 --force
   update-alternatives --install /usr/bin/lld lld /usr/bin/lld-"$CLANG_VERSION" 50
   update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-"$CLANG_VERSION" 50
   update-alternatives --install /usr/bin/ld.gold ld.gold /usr/bin/ld.lld-"$CLANG_VERSION" 50
