@@ -12,18 +12,25 @@ inside some nested collection. pytrees are helpful for implementing nested
 collection support for PyTorch APIs.
 """
 
-import os
-from typing import Callable, NamedTuple, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
+import os as _os
+from dataclasses import dataclass as _dataclass
+from typing import (
+    Callable as _Callable,
+    Literal as _Literal,
+    TYPE_CHECKING as _TYPE_CHECKING,
+    TypeVar as _TypeVar,
+)
+from typing_extensions import ParamSpec as _ParamSpec
 
 import torch.utils._pytree as python
 
 
-if TYPE_CHECKING:
+if _TYPE_CHECKING:
     from types import ModuleType
 
     import torch.utils._cxx_pytree as cxx
     from torch.utils._cxx_pytree import (
+        register_pytree_node as register_pytree_node,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
         tree_any as tree_any,
@@ -42,6 +49,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
     "tree_iter",
@@ -59,14 +67,18 @@ __all__ = [
 ]
 
 
-PYTORCH_USE_CXX_PYTREE: bool = os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {"0", ""}
+PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
+    "0",
+    "",
+}
 
 
-class PyTreeImplementation(NamedTuple):
+@_dataclass(frozen=True)
+class PyTreeImplementation:
     """The underlying implementation for PyTree utilities."""
 
-    module: "ModuleType"
-    name: str
+    module: "ModuleType" = python
+    name: _Literal["python", "cxx"] = "python"
 
 
 implementation = PyTreeImplementation(module=python, name="python")
@@ -77,43 +89,45 @@ if PYTORCH_USE_CXX_PYTREE:
             "Please install `optree` via `python -m pip install --upgrade optree`."
         )
 
-    import torch.utils._cxx_pytree as cxx  # noqa: F811
+    import torch.utils._cxx_pytree as cxx
 
     implementation = PyTreeImplementation(module=cxx, name="cxx")
 
 
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
+_P = _ParamSpec("_P")
+_T = _TypeVar("_T")
 
 
-def _reexport(func: Callable[_P, _T]) -> Callable[_P, _T]:
+def _reexport(func: _Callable[_P, _T]) -> _Callable[_P, _T]:
     import functools
 
     name = func.__name__
 
     @functools.wraps(func)
     def exported(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        impl: Callable[_P, _T] = getattr(implementation.module, name)
+        impl: _Callable[_P, _T] = getattr(implementation.module, name)
         return impl(*args, **kwargs)
 
     exported.__module__ = __name__
     return exported
 
 
-tree_flatten = _reexport(implementation.module.tree_flatten)  # noqa: F811
-tree_unflatten = _reexport(implementation.module.tree_unflatten)  # noqa: F811
-tree_iter = _reexport(implementation.module.tree_iter)  # noqa: F811
-tree_leaves = _reexport(implementation.module.tree_leaves)  # noqa: F811
-tree_structure = _reexport(implementation.module.tree_structure)  # noqa: F811
-tree_map = _reexport(implementation.module.tree_map)  # noqa: F811
-tree_map_ = _reexport(implementation.module.tree_map_)  # noqa: F811
-tree_map_only = _reexport(implementation.module.tree_map_only)  # noqa: F811
-tree_map_only_ = _reexport(implementation.module.tree_map_only_)  # noqa: F811
-tree_all = _reexport(implementation.module.tree_all)  # noqa: F811
-tree_any = _reexport(implementation.module.tree_any)  # noqa: F811
-tree_all_only = _reexport(implementation.module.tree_all_only)  # noqa: F811
-tree_any_only = _reexport(implementation.module.tree_any_only)  # noqa: F811
-treespec_pprint = _reexport(implementation.module.treespec_pprint)  # noqa: F811
+# flake8: noqa: F811
+register_pytree_node = _reexport(implementation.module.register_pytree_node)
+tree_flatten = _reexport(implementation.module.tree_flatten)
+tree_unflatten = _reexport(implementation.module.tree_unflatten)
+tree_iter = _reexport(implementation.module.tree_iter)
+tree_leaves = _reexport(implementation.module.tree_leaves)
+tree_structure = _reexport(implementation.module.tree_structure)
+tree_map = _reexport(implementation.module.tree_map)
+tree_map_ = _reexport(implementation.module.tree_map_)
+tree_map_only = _reexport(implementation.module.tree_map_only)
+tree_map_only_ = _reexport(implementation.module.tree_map_only_)
+tree_all = _reexport(implementation.module.tree_all)
+tree_any = _reexport(implementation.module.tree_any)
+tree_all_only = _reexport(implementation.module.tree_all_only)
+tree_any_only = _reexport(implementation.module.tree_any_only)
+treespec_pprint = _reexport(implementation.module.treespec_pprint)
 
 
 del _reexport
