@@ -15,7 +15,6 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
-from typing_extensions import deprecated
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -45,6 +44,7 @@ from torch._C._distributed_c10d import (
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.utils._typing_utils import not_none
+from typing_extensions import deprecated
 
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
@@ -676,9 +676,9 @@ class _World:
                     "pg_name": self.pg_names[pg],
                     "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": list(ranks.keys())
-                    if len(ranks) != default_pg_size
-                    else [],  # 'ranks' is an empty list when all ranks are involved in a pg
+                    "ranks": (
+                        list(ranks.keys()) if len(ranks) != default_pg_size else []
+                    ),  # 'ranks' is an empty list when all ranks are involved in a pg
                     "group_size": len(ranks),
                     "group_count": self.group_count,
                 }
@@ -4366,26 +4366,39 @@ def _create_process_group_wrapper(
     return wrapped_pg
 
 
-# helper function for deterministically hashing a list of ranks
-def _hash_ranks(ranks: List[int]):
-    return hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+# helper function for deterministically hashing a list of ranks to a unique
+# string
+def _hash_ranks_to_str(ranks: List[int]) -> str:
+    rank_join: str = "_".join(map(str, ranks))
+    # In case there is already a PG with the same rank composition
+    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
+    return hashlib.sha1(bytes(unique_str, "utf-8")).hexdigest()
 
 
 # Takes a list of ranks and computes an integer color
 def _process_group_color(ranks: List[int]) -> int:
-    # Convert our hash to an int, but avoid negative numbers by shifting a bit.
-    return int(_hash_ranks(ranks), 16) % (sys.maxsize >> 1)
+    # Convert list to tuple to make it hashable
+    ranks = tuple(ranks)
+    hash_value = hash(ranks)
+    # Split color must be:
+    # - a non-negative integer;
+    # - a type compatible with C's int because we are pybinding to the latter.
+    # Thus, we limit the hash value within global world size, since color does
+    # not need to be bigger than the latter.
+    world_size = get_world_size()
+    color = abs(hash_value) % world_size
+    return color
 
 
 def _process_group_name(ranks, use_hashed_name):
+    # Create name for a process group.
     global _world
     if use_hashed_name:
-        pg_name = _hash_ranks(ranks)
-        while pg_name in _world.pg_names.values():
-            pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
+        pg_name = _hash_ranks_to_str(ranks)
     else:
         pg_name = str(_world.group_count)
         _world.group_count += 1
+    # TODO: why is group count incremented only in the else path?
     return pg_name
 
 
