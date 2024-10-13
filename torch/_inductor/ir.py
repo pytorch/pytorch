@@ -114,28 +114,10 @@ from typing_extensions import dataclass_transform
 def ir_dataclass(_cls):
     def wrap(cls: _T) -> _T:
         if sys.version_info >= (3, 10):
-            # Use native kw_only for Python 3.10+
             return dataclasses.dataclass(cls, kw_only=True)  # type: ignore[call-overload]
         else:
-            # Polyfill for Python 3.9
-            def __init__(_self, **kwargs):
-                fields = dataclasses.fields(cls)
-                for field in fields:
-                    if (
-                        field.default == dataclasses.MISSING
-                        and field.default_factory == dataclasses.MISSING
-                    ):
-                        if field.name not in kwargs:
-                            raise TypeError(
-                                f"__init__() missing required keyword-only argument: '{field.name}'"
-                            )
-                    setattr(_self, field.name, kwargs.pop(field.name, field.default))
-                if kwargs:
-                    raise TypeError(
-                        f"__init__() got unexpected keyword arguments: {', '.join(kwargs.keys())}"
-                    )
-
-            cls.__init__ = __init__
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
             return dataclasses.dataclass(cls)
 
     if _cls is None:
@@ -3135,11 +3117,11 @@ class FixedLayout(Layout):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
         super().__init__(
-            device,
-            dtype,
-            size,  # type: ignore[arg-type]
-            stride,
-            offset,  # type: ignore[arg-type]
+            device=device,
+            dtype=dtype,
+            size=size,  # type: ignore[arg-type]
+            stride=stride,
+            offset=offset,  # type: ignore[arg-type]
         )
 
     def make_indexer(self):
