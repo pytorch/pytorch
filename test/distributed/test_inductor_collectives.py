@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import datetime
 import functools
 import unittest
 from unittest.mock import patch
@@ -258,7 +259,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             if torch.compiler.is_dynamo_compiling():
                 torch.ops.c10d_functional.wait_tensor(y)
             else:
-                work.wait()
+                work.wait(datetime.timedelta(seconds=10))
             # Under compile, if `wait_tensor(y)` above is correctly executed,
             # `y`'s data is in its final form and the output of this function will match eager;
             # otherwise, `y * y` will run in parallel with `all_reduce(y)` and the output of this function
@@ -280,7 +281,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 work, y = all_reduce_eager(x)
                 out_ref = all_reduce_wait_eager(work, y)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 10)
-            torch.cuda.synchronize()
             # Trigger _unregister_completed_works() without program exit
             torch._C._distributed_c10d._unregister_completed_works()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)

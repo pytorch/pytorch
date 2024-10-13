@@ -202,16 +202,18 @@ class WorkRegistry {
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
-      bool all_completed = true;
-      for (auto work : it->second) {
+      std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
+
+      for (const auto& work : it->second) {
         if (!work->isCompleted()) {
-          all_completed = false;
-          break;
+          uncompleted_works.push_back(work);
         }
       }
-      if (all_completed) {
+
+      if (uncompleted_works.empty()) {
         it = registry_.erase(it);
       } else {
+        it->second = std::move(uncompleted_works);
         ++it;
       }
     }
