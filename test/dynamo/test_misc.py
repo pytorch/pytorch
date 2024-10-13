@@ -32,9 +32,9 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.onnx.operators
-import torch.utils.pytree as pytree
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
