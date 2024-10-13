@@ -291,7 +291,9 @@ def make_set_enable_dynamic(enable: bool):
         return config._make_closure_patcher(assume_static_by_default=False)
     else:
         return config._make_closure_patcher(
-            automatic_dynamic_shapes=False, assume_static_by_default=True
+            automatic_dynamic_shapes=False,
+            assume_static_by_default=True,
+            assume_outer_dim_dynamic_by_default=False,
         )
 
 

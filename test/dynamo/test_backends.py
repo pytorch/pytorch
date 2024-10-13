@@ -99,11 +99,11 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, options=None):
+    def _check_backend_works(self, backend, dynamic=None, options=None):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
-        r2 = torch.compile(model, backend=backend, options=options)(input)
+        r2 = torch.compile(model, backend=backend, dynamic=dynamic, options=options)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):
@@ -124,7 +124,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
 
     @_force_skip_lazy_graph_module()
     def test_aot_ts(self):
-        self._check_backend_works("aot_ts")
+        self._check_backend_works("aot_ts", dynamic=False)
 
     @requires_cuda
     def test_aot_cudagraphs(self):
