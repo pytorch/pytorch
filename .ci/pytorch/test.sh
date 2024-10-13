@@ -233,8 +233,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
 
-    # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
+    LD_PRELOAD=$(clang-15 --print-file-name=libclang_rt.asan-x86_64.so)
+    export LD_PRELOAD
     # Disable valgrind for asan
     export VALGRIND=OFF
 
