@@ -76,7 +76,10 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
+        return Buffer(
+            name=name,
+            layout=FixedLayout(torch.device("cuda:0"), dtype=torch.float32, size=shape),
+        )
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
