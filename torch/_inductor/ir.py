@@ -3998,11 +3998,19 @@ class ChoiceCaller:
     Children classes: TritonTemplateCaller, CUDATemplateCaller.
     """
 
-    def __init__(self, name, input_nodes, layout, description):
+    def __init__(
+        self,
+        name: str,
+        input_nodes: List[Buffer],
+        layout: Layout,
+        description: str,
+    ):
         super().__init__()
         self.name = name
         self.layout = layout
         self.input_nodes = input_nodes
+        # An additional description used to describe the choice (useful for
+        # knowing what autotuning is choosing)
         self.description = description
 
     def benchmark(self, *args, out) -> float:
