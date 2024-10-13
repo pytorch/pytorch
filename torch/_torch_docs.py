@@ -3318,6 +3318,38 @@ Example::
 )
 
 add_docstr(
+    torch.cumsum,
+    r"""
+cumsum(input, dim, *, dtype=None, out=None) -> Tensor
+
+Returns the cumulative sum of elements of :attr:`input` in the dimension
+:attr:`dim`.
+
+For example, if :attr:`input` is a vector of size N, the result will also be
+a vector of size N, with elements.
+
+.. math::
+    y_i = x_1 + x_2 + x_3 + \dots + x_i
+
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+
+Keyword args:
+    {dtype}
+    {out}
+
+Example::
+
+    >>> a = torch.randint(1, 20, (10,))
+    >>> a
+    tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
+    >>> torch.cumsum(a, dim=0)
+    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
+""".format(**reduceops_common_args),
+)
+
+add_docstr(
     torch.count_nonzero,
     r"""
 count_nonzero(input, dim=None) -> Tensor
@@ -3966,10 +3998,14 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
+Note that tensors containing NaNs are never equal to each other.
+
 Example::
 
     >>> torch.equal(torch.tensor([1, 2]), torch.tensor([1, 2]))
     True
+    >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
+    False
 """,
 )
 
@@ -10342,7 +10378,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None) -> Tensor
+squeeze(input: Tensor, dim: Optional[Union[int, List[int]]]) -> Tensor
 
 Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 
@@ -12431,7 +12467,7 @@ ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
 above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.blackman_window(L, periodic=True)`` equal to
-``torch.blackman_window(L + 1, periodic=False)[:-1])``.
+``torch.blackman_window(L + 1, periodic=False)[:-1]``.
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
