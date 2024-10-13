@@ -1379,6 +1379,15 @@ class X86InductorQuantizer(Quantizer):
                 if not is_all_inputs_connected_to_quantized_op(input_nodes_to_check):
                     return
                 self._annotate_cat(node, quantization_config)
+            elif (
+                node.target is torch.ops.aten.flatten.using_ints
+                and len(node.users) > 0
+                and not any(
+                    user.target in quantizable_ops for user in node.users.keys()
+                )
+            ):
+                # Recipe of flatten: check if any users of flatten node are quantizable ops or not
+                return
             else:
                 input_node = node.all_input_nodes[0]
                 if not is_all_inputs_connected_to_quantized_op(

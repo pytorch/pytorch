@@ -363,6 +363,7 @@ def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
+    using_training_ir: bool = True,
     **kwargs,
 ) -> GraphModule:
     """
@@ -372,11 +373,19 @@ def _get_aten_graph_module_for_pattern(
         example_inputs = tuple(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,  # type: ignore[arg-type]
-        example_inputs,
-        kwargs,
-    )
+
+    if using_training_ir:
+        aten_pattern = torch.export.export_for_training(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+        ).module()
+    else:
+        aten_pattern = capture_pre_autograd_graph(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+        )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
