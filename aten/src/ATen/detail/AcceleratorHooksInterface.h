@@ -29,14 +29,17 @@ struct TORCH_API AcceleratorHooksInterface {
 
   virtual DeviceIndex getCurrentDevice() const {
     TORCH_CHECK(false, "Backend doesn't support getCurrentDevice()");
+    return -1;
   }
 
   virtual DeviceIndex exchangeDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support exchangeDevice()");
+    return -1;
   }
 
   virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
+    return -1;
   }
 
   virtual bool isPinnedPtr(const void* data) const {
@@ -45,14 +48,7 @@ struct TORCH_API AcceleratorHooksInterface {
 
   virtual Allocator* getPinnedMemoryAllocator() const {
     TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
-  }
-
-  virtual std::string showConfig() const {
-    TORCH_CHECK(false, "Backend doesn't support showConfig()");
-  }
-
-  virtual void deviceSynchronize(DeviceIndex device) const {
-    TORCH_CHECK(false, "Backend doesn't support deviceSynchronize()");
+    return nullptr;
   }
 
   virtual Device getDeviceFromPtr(void* data) const {
