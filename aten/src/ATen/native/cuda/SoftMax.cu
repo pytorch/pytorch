@@ -822,7 +822,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
     TORCH_CHECK(input_.scalar_type() == ScalarType::Half, "conversion is supported for Half type only");
   }
   auto input = input_.contiguous();
-  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
+  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
   TORCH_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
@@ -961,7 +961,7 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
     return;
   }
   auto grad = grad_.contiguous();
-  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
+  static_assert(std::is_same_v<acc_type<at::Half, true>, float>, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
   TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
