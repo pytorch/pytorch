@@ -1091,6 +1091,7 @@
   "torch.utils.pytree": [
     "python",
     "cxx",
+    "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
     "tree_iter",
