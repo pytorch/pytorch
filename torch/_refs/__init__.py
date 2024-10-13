@@ -3141,7 +3141,7 @@ def _normalize(
         a_acc, dim=norm_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    out = (a - mean) * rstd
+    out = (a_acc - mean) * rstd
     return out, mean, rstd
 
 
