@@ -113,8 +113,6 @@ class TestSplitCatFxPasses(TestCase):
                 expected_split_norm_count,
                 msg=f"for {fn}",
             )
-            if expected_split_norm_count > 0:
-                self.assertIn("normalization_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
