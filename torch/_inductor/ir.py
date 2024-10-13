@@ -110,31 +110,30 @@ aten = torch.ops.aten
 from typing_extensions import dataclass_transform
 
 
-# ir_dataclass = dataclass_transform()(
-#     functools.partial(dataclasses.dataclass, kw_only=True)
-# )
-
-
 @dataclass_transform()
 def ir_dataclass(_cls):
     def wrap(cls: _T) -> _T:
         if sys.version_info >= (3, 10):
             # Use native kw_only for Python 3.10+
-            return dataclasses.dataclass(cls, kw_only=True)
+            return dataclasses.dataclass(cls, kw_only=True)  # type: ignore[call-overload]
         else:
             # Polyfill for Python 3.9
-            def __init__(_self):
+            def __init__(_self, **kwargs):
                 fields = dataclasses.fields(cls)
                 for field in fields:
                     if (
                         field.default == dataclasses.MISSING
                         and field.default_factory == dataclasses.MISSING
                     ):
-                        if field.name not in init_kwargs:
+                        if field.name not in kwargs:
                             raise TypeError(
                                 f"__init__() missing required keyword-only argument: '{field.name}'"
                             )
-                dataclasses.dataclass(cls).__init__(_self)
+                    setattr(_self, field.name, kwargs.pop(field.name, field.default))
+                if kwargs:
+                    raise TypeError(
+                        f"__init__() got unexpected keyword arguments: {', '.join(kwargs.keys())}"
+                    )
 
             cls.__init__ = __init__
             return dataclasses.dataclass(cls)
@@ -372,12 +371,13 @@ class IRNode:
             IRNode._current_origins = old
 
     def __post_init__(self):
-        object.__setattr__(self, "origins", OrderedSet(self._current_origins))
-        object.__setattr__(
-            self,
-            "traceback",
-            traceback.format_stack() if config.debug_ir_traceback else None,
-        )
+        self.origins = OrderedSet(self._current_origins)
+        self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
+        # object.__setattr__(self, "origins", )
+        # object.__setattr__(
+        #     self,
+        #     "traceback",
+        # )
 
     def get_read_names(self) -> OrderedSet[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
@@ -3440,8 +3440,7 @@ class Buffer(IRNode):
 
     def __post_init__(self):
         super().__post_init__()
-        object.__setattr__(self, "origin_node", None)
-        # self.origin_node = None
+        self.origin_node = None
 
     def make_indexer(self):
         return self.layout.make_indexer()
