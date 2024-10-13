@@ -1512,38 +1512,9 @@ class Reduction(Loops):
         )
 
 
+@ir_dataclass
 class WelfordReduction(Reduction):
     output_index: int
-
-    def __init__(
-        self,
-        device,
-        dtype,
-        inner_fns,
-        ranges,
-        reduction_ranges,
-        reduction_type,
-        reduction_hint,
-        output_index,
-    ):
-        if len(inner_fns) == 1:
-            loader = inner_fns[0]
-        else:
-
-            def loader(idx, reduction_idx):
-                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
-
-        super().__init__(
-            device=device,
-            dtype=dtype,
-            inner_fn=loader,
-            ranges=ranges,
-            reduction_ranges=reduction_ranges,
-            reduction_type=reduction_type,
-            src_dtype=dtype,
-            reduction_hint=reduction_hint,
-        )
-        self.output_index = output_index
 
     def store_reduction(self, output_name, indexer, vars, reduction_vars):
         values = ops.reduction(
@@ -1654,17 +1625,25 @@ class WelfordReduction(Reduction):
                 reduction_hint,
             )
 
+        if len(inner_fns) == 1:
+            loader = inner_fns[0]
+        else:
+
+            def loader(idx, reduction_idx):
+                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
+
         results = [
             TensorBox.create(
                 WelfordReduction(
-                    device,
-                    dtype,
-                    inner_fns,
-                    ranges,
-                    reduction_ranges,
-                    reduction_type,
-                    reduction_hint,
-                    output_idx,
+                    device=device,
+                    dtype=dtype,
+                    inner_fn=loader,
+                    ranges=ranges,
+                    reduction_ranges=reduction_ranges,
+                    reduction_type=reduction_type,
+                    src_dtype=dtype,
+                    reduction_hint=reduction_hint,
+                    output_index=output_idx,
                 )
             )
             for output_idx in range(3)
@@ -2758,6 +2737,7 @@ class DtypeView(BaseView):
         return loader
 
 
+@ir_dataclass
 class SliceView(View):
     @classmethod
     def normalize_start_end(cls, x, dim, start, end):
@@ -3106,6 +3086,7 @@ class Layout(IRNode):
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
 
 
+@ir_dataclass
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -3142,6 +3123,7 @@ class FixedLayout(Layout):
         return indexer
 
 
+@ir_dataclass
 class FlexibleLayout(Layout):
     """A Tensor layout we are allowed to change"""
 
@@ -3282,6 +3264,7 @@ class FlexibleLayout(Layout):
         super().__init__(device, dtype, size, strides)
 
 
+@ir_dataclass
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
@@ -3329,6 +3312,7 @@ class NoneLayout(IRNode):
         return self
 
 
+@ir_dataclass
 class MutationLayoutSHOULDREMOVE(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
@@ -3544,11 +3528,13 @@ class OperationBuffer(Buffer, Operation):
         Operation.__post_init__(self)
 
 
+@ir_dataclass(frozen=False)
 class InputBuffer(Buffer):
     def num_reads(self):
         return 1
 
 
+@ir_dataclass(frozen=False)
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
@@ -3917,6 +3903,7 @@ class ComputedBuffer(OperationBuffer):
         return self.data.constant_to_device(device)
 
 
+@ir_dataclass(frozen=False)
 class TemplateBuffer(OperationBuffer):
     """
     Represents a Triton (in the future other type) of template operator
@@ -3973,6 +3960,7 @@ class TemplateBuffer(OperationBuffer):
         )
 
 
+@ir_dataclass(frozen=False)
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -4064,6 +4052,7 @@ class TritonTemplateCallerBase(ChoiceCaller):
         raise NotImplementedError
 
 
+@ir_dataclass(frozen=False)
 class MultiTemplateBuffer(TritonTemplateBuffer):
     """
     Represents a Buffer with multiple backing implementation choices.
@@ -4113,6 +4102,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return (min_choice, self.choice_timings[min_choice])
 
 
+@ir_dataclass(frozen=False)
 class CUDATemplateBuffer(TemplateBuffer):
     def __init__(
         self,
@@ -4131,6 +4121,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         return self.workspace_size if self.workspace_size is not None else 0
 
 
+@ir_dataclass(frozen=False)
 class CppTemplateBuffer(TemplateBuffer):
     def __init__(self, layout, inputs, make_kernel_render, template, choice):
         super().__init__(layout, inputs, make_kernel_render)
@@ -4140,7 +4131,7 @@ class CppTemplateBuffer(TemplateBuffer):
 
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
-    inputs: List[Buffer] 
+    inputs: List[TensorBox]
 
     def get_read_writes(self):
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
@@ -4198,11 +4189,13 @@ class InputsKernel(OperationBuffer):
         return 1
 
 
+@ir_dataclass(frozen=False)
 class NopKernel(InputsKernel):
     def is_no_op(self):
         return True
 
 
+@ir_dataclass(frozen=False)
 class ConcatKernel(NopKernel):
     """
     There isn't actually a real kernel for concat, we just change the
@@ -4368,34 +4361,7 @@ class ExternKernel(InputsKernel):
     )
     mutation_outputs: List[MutationOutput] = dataclasses.field(default_factory=list)
 
-    def __init__(
-        self,
-        name,
-        layout,
-        inputs,
-        constant_args=(),
-        kwargs=None,
-        output_view=None,
-        python_kernel_name=None,
-        cpp_kernel_name=None,
-        ordered_kwargs_for_cpp_kernel=(),
-        op_overload=None,
-    ):
-        super().__init__(
-            name=name,
-            layout=layout,
-            inputs=inputs,
-        )
-        self.constant_args = constant_args
-        self.kwargs = kwargs if kwargs else {}
-        self.output_view = output_view
-        self.op_overload = op_overload
-        self.set_cpp_kernel_name(cpp_kernel_name)
-        self.set_python_kernel_name(python_kernel_name)
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
-        self.collect_arg_kwarg_properties()
-        self.unbacked_bindings = {}
-        self.mutation_outputs = []
+    def __post_init__(self):
         self.fx_node = V.graph.current_node
 
     def get_outputs(self) -> List[Buffer]:
@@ -5156,6 +5122,7 @@ class ExternKernelOut(ExternKernel):
         return True
 
 
+@ir_dataclass(frozen=False)
 class RandomSeeds(ExternKernelOut):
     def __init__(self, count: int, device: torch.device):
         limits = torch.iinfo(torch.int64)
@@ -5178,6 +5145,7 @@ class RandomSeeds(ExternKernelOut):
         )
 
 
+@ir_dataclass(frozen=False)
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -5223,6 +5191,7 @@ class ExternKernelAlloc(ExternKernel):
         raise NotImplementedError
 
 
+@ir_dataclass(frozen=False)
 class MutationOutput(Buffer):
     """
     An output buffer that represents the mutation of a pre-existing buffer
@@ -5246,6 +5215,7 @@ class MutationOutput(Buffer):
         return False
 
 
+@ir_dataclass(frozen=False)
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
@@ -5347,6 +5317,7 @@ class UserDefinedTritonKernel(ExternKernel):
         return self.device
 
 
+@ir_dataclass(frozen=False)
 class InplaceBernoulliFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -5392,6 +5363,7 @@ class InplaceBernoulliFallback(ExternKernel):
 
 
 # Used to deal with torch.complex types
+@ir_dataclass(frozen=False)
 class InplaceCopyFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -5442,6 +5414,7 @@ class InplaceCopyFallback(ExternKernel):
         return result
 
 
+@ir_dataclass(frozen=False)
 class MutatingFirstArgExternKernel(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -5469,6 +5442,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
         return True
 
 
+@ir_dataclass(frozen=False)
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
     def __init__(self, variable, new_size):
         assert isinstance(new_size, int), "TODO: dynamic shapes"
@@ -5486,6 +5460,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         V.graph.never_reuse_buffers.add(variable.data.get_name())
 
 
+@ir_dataclass(frozen=False)
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor, storage_tensor):
         self_tensor.freeze_layout()
@@ -5508,6 +5483,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
 
 
+@ir_dataclass(frozen=False)
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
@@ -5583,6 +5559,7 @@ class ScatterFallback(ExternKernel):
         V.graph.register_operation(self)
 
 
+@ir_dataclass(frozen=False)
 class IndexPutFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation and indices properly
@@ -5668,6 +5645,7 @@ class DeviceCopy(ExternKernelOut):
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
 
 
+@ir_dataclass(frozen=False)
 class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
@@ -5692,6 +5670,7 @@ class DynamicScalar(ExternKernel):
         wrapper.codegen_dynamic_scalar(self)
 
 
+@ir_dataclass(frozen=False)
 class AssertScalar(ExternKernel):
     """
     The result of a call to aten._assert_scalar
@@ -5766,6 +5745,7 @@ has_c_shim = OrderedSet(
 )
 
 
+@ir_dataclass(frozen=False)
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
         self,
@@ -6240,31 +6220,13 @@ class ComplexView(FallbackKernel):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
-    def __init__(
-        self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        *,
-        unbacked_bindings=None,
-    ):
-        super().__init__(
-            layout,
-            kernel,
-            tensor_args,
-            nontensor_args,
-            unflatten_args,
-            unbacked_bindings=unbacked_bindings,
-        )
-
 
 @ir_dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
 
+@ir_dataclass(frozen=False)
 class MultiOutput(ExternKernel):
     # Given an input MultiOutputLayout buffer, indexes out an actual buffer
     # from that result.  This doesn't actually produce multiple outputs,
@@ -6377,12 +6339,14 @@ class MutableBox(IRNode):
     __repr__ = __str__
 
 
+@ir_dataclass(frozen=False)
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):
         return TensorBox(StorageBox(data))
 
 
+@ir_dataclass(frozen=False)
 class StorageBox(MutableBox):
     def is_input_buffer(self):
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
@@ -6496,7 +6460,7 @@ class Conditional(ExternKernel):
 
     def __init__(
         self,
-        predicate: IRNode,
+        predicate: TensorBox,
         operands: List[TensorBox],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
@@ -6734,6 +6698,7 @@ class WhileLoop(ExternKernel):
         wrapper.codegen_while_loop(self)
 
 
+@ir_dataclass(frozen=False)
 class EffectfulKernel(FallbackKernel):
     def __init__(
         self,
@@ -6965,11 +6930,11 @@ class _WaitKernel(_CollectiveKernel):
             ) = cls.process_kernel(kernel, inp)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         packed = cls(
-            NoneLayout(inp.get_device()),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
+            layout=NoneLayout(inp.get_device()),
+            kernel=kernel,
+            tensor_args=tensor_args,
+            nontensor_args=non_tensor_args,
+            unflatten_args=unflatten_args,
         )
         packed.mutation_outputs.append(
             MutationOutput(NoneLayout(inp.get_device()), inp, packed)

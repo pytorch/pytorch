@@ -541,7 +541,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
         src.layout = ir.NonOwningLayout(dst)
-        kernel.inputs.append(src)
+        kernel.inputs.append(ir.TensorBox(src))
 
     kernel.name = V.graph.register_buffer(kernel)
     kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
