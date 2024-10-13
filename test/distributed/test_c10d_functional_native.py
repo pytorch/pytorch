@@ -417,6 +417,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
         torch.ops._c10d_functional.wait_tensor(output)
+        # `wait_tensor(output)` will pop the work from the work registry immediately
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     @skip_if_lt_x_gpu(2)
