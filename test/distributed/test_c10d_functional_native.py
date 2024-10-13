@@ -695,7 +695,7 @@ class CompileTest(TestCase):
             return ag0
 
         args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
-        compiled = torch.compile(func)
+        compiled = torch.compile(func, dynamic=False)
         code = run_and_get_triton_code(compiled, args)
         (
             FileCheck()

@@ -208,7 +208,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(torch.ones(4), mesh, [Shard(0)], run_check=False)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 

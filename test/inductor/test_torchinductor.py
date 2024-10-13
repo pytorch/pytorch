@@ -373,6 +373,7 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    dynamic=None,
     copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
@@ -437,7 +438,7 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
+    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython, dynamic=dynamic)(run)
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
@@ -10198,7 +10199,7 @@ class CommonTemplate:
         args.append(256)
 
         if is_cpp_backend(self.device):
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch._dynamo.optimize("inductor", dynamic=False)(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
             FileCheck().check_count(
                 "static_cast<int64_t>(256)",
@@ -10206,7 +10207,7 @@ class CommonTemplate:
                 exactly=True,
             ).run(code)
 
-        self.common(fn, args)
+        self.common(fn, args, dynamic=False)
 
     def test_cumsum_pattern_matcher_issue(self):
         def fn(input_ids) -> torch.Tensor:
@@ -10233,7 +10234,7 @@ class CommonTemplate:
         x_opt_arg = x.clone()
         x_numel = x.numel()
         torch._dynamo.reset_code_caches()
-        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+        opt_fn = torch._dynamo.optimize_assert(compile_fx, dynamic=False)(fn)
         correct = fn(x_ref_arg, size_or_y, memory_format)
         actual = opt_fn(x_opt_arg, size_or_y, memory_format)
 
