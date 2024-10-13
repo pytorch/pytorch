@@ -15,6 +15,7 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing_extensions import deprecated
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -44,7 +45,6 @@ from torch._C._distributed_c10d import (
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.utils._typing_utils import not_none
-from typing_extensions import deprecated
 
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
