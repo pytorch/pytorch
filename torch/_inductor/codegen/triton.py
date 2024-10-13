@@ -647,16 +647,10 @@ class TritonPrinter(PythonPrinter):
 texpr = TritonPrinter().doprint
 
 
-def triton_compute_type(dtype):
+def triton_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
-    elif (
-        triton_type_name in ("float16", "bfloat16")
-        and config.triton.codegen_upcast_to_fp32
-    ):
-        # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
     elif triton_type_name == "float8_e4m3fn":
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
@@ -666,6 +660,12 @@ def triton_compute_type(dtype):
     elif triton_type_name == "float8_e5m2fnuz":
         triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
+
+
+def triton_compute_type(dtype):
+    if config.triton.codegen_upcast_to_fp32 and dtype in (torch.float16, torch.float32):
+        dtype = torch.float32
+    return triton_type(dtype)
 
 
 def _get_primitive_bitwidth(dtype):
@@ -1319,6 +1319,7 @@ class CooperativeReductionWorkspaceCache:
         self.prior_loop = []
         self.ready_for_reuse = collections.defaultdict(collections.deque)
         self.loop_count = 0
+        self.store_count = 0
 
     def allocate(self, nbytes: sympy.Expr):
         cached = self.ready_for_reuse.get(nbytes)
@@ -1335,6 +1336,11 @@ class CooperativeReductionWorkspaceCache:
         self.prior_loop = self.current_loop
         self.current_loop = []
         self.loop_count += 1
+
+    def increment_store_count(self):
+        prior = self.store_count
+        self.store_count += 1
+        return prior
 
 
 class TritonKernel(SIMDKernel):
@@ -1355,6 +1361,9 @@ class TritonKernel(SIMDKernel):
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
+        self.cooperative_reduction = self.should_use_cooperative_reduction(groups)
+        if self.cooperative_reduction:
+            override_persistent_reduction = False
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -1374,15 +1383,18 @@ class TritonKernel(SIMDKernel):
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
 
-        self.cooperative_reduction = self.should_use_cooperative_reduction()
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
 
         self.codegen_range_tree()
 
-    def should_use_cooperative_reduction(self) -> bool:
+    @staticmethod
+    def should_use_cooperative_reduction(groups) -> bool:
         """Heuristic to decide self.cooperative_reduction should be used."""
-        if not self.inside_reduction:
+        if len(groups) != 2:
+            return False
+        xnumel, rnumel = groups
+        if rnumel == 1:
             return False
         if config.force_cooperative_reductions:
             return True
@@ -1392,10 +1404,9 @@ class TritonKernel(SIMDKernel):
             not config.split_reductions
         ), "config.split_reductions and config.cooperative_reductions are mutually exclusive, disable one of them"
 
-        # TODO(jansel): test with persistent reduction
-        assert not self.persistent_reduction
+        # TODO(jansel): bail out on low SM count
 
-        xnumel, rnumel = self.numels
+        # TODO(jansel): base this on num_bytes_read rather than numel
         xhint = V.graph.sizevars.size_hint(xnumel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
@@ -1408,6 +1419,8 @@ class TritonKernel(SIMDKernel):
     def init_cooperative_reduction(self):
         """One time setup code for cooperative reductions."""
         assert self.cooperative_reduction
+        # TODO(jansel): cooperative+persistent reductions still does not work
+        assert not self.persistent_reduction
 
         for tree in self.range_trees:
             if tree.grid_dim is not None:
@@ -1418,13 +1431,15 @@ class TritonKernel(SIMDKernel):
         self.cooperative_reduction_workspace_cache = CooperativeReductionWorkspaceCache(
             self.args
         )
+        # TODO(jansel): this calculation below may leave some entirely masked off
+        # iterations on the last thread block, is it worth skipping them?
         self.body.splice(
             """
             rsplit_id = tl.program_id(0)
-            rsplit_chunk = (rnumel + RSPLIT - 1) // RSPLIT
+            num_rblocks = (rnumel + RBLOCK - 1) // RBLOCK
+            rsplit_chunk = (num_rblocks + RSPLIT - 1) // RSPLIT * RBLOCK
             rsplit_start = rsplit_chunk * rsplit_id
             rsplit_end = rsplit_chunk * (rsplit_id + 1)
-            first_block = (rsplit_id == 0)
             """,
             strip=True,
         )
@@ -1460,20 +1475,16 @@ class TritonKernel(SIMDKernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
+        threshold = {
+            ReductionHint.INNER: 1024,
+        }.get(self.reduction_hint, 64)
 
-        if config.triton.force_persistent_reductions_threshold:
-            threshold = config.triton.force_persistent_reductions_threshold
-        else:
-            threshold = {
-                ReductionHint.INNER: 1024,
-            }.get(self.reduction_hint, 64)
-            # If multi_kernel is enabled, we do more aggressive persistent reduction.
-            # This may result in some persistent reductions slower than the
-            # corresponding non-persistent reductions. MultiKernel will do benchmarking
-            # to pick the faster one.
-            if config.triton.multi_kernel:
-                threshold *= 16
-
+        # If multi_kernel is enabled, we do more aggressive persistent reduction.
+        # This may result in some persistent reductions slower than the
+        # corresponding non-persistent reductions. MultiKernel will do benchmarking
+        # to pick the faster one.
+        if config.triton.multi_kernel:
+            threshold *= 16
         last_numel = self.numels[-1]
         return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
 
@@ -2060,8 +2071,8 @@ class TritonKernel(SIMDKernel):
         exit_stack.close()
 
     def guard_cooperative_store(self, name, buffer):
-        # TODO(jansel): should we rotate the block that does the write?
-        buffer.writeline(DeferredLine(name, "if first_block:"))
+        idx = self.cooperative_reduction_workspace_cache.increment_store_count()
+        buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
 
     def bucketize(
@@ -2169,8 +2180,8 @@ class TritonKernel(SIMDKernel):
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
-                _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                {result_var} = {self.reduction_resize(f'{result_var}_idx')}
                 """
             )
 
@@ -2241,7 +2252,6 @@ class TritonKernel(SIMDKernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                assert not self.cooperative_reduction, "TODO"
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
@@ -2262,7 +2272,6 @@ class TritonKernel(SIMDKernel):
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
             elif is_welford_reduction(reduction_type):
-                assert not self.cooperative_reduction, "TODO"
                 accumulator = f"{result_var}_mean"
                 accumulator_m2 = f"{result_var}_m2"
                 accumulator_weight = f"{result_var}_weight"
@@ -2307,17 +2316,16 @@ class TritonKernel(SIMDKernel):
                 result_mean = result_var
                 result_m2 = self.cse.newvar()
                 result_weight = self.cse.newvar()
-                self.post_loop_combine.splice(
-                    f"""\
-                {result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp = triton_helpers.welford(
-                    {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
+                result_var = self.welford_reduce_final_reduction(
+                    self.post_loop_combine,
+                    result_mean,
+                    result_m2,
+                    result_weight,
+                    accumulator,
+                    accumulator_m2,
+                    accumulator_weight,
+                    dim,
                 )
-                {result_mean} = {self.reduction_resize(f'{result_mean}_tmp')}
-                {result_m2} = {self.reduction_resize(f'{result_m2}_tmp')}
-                {result_weight} = {self.reduction_resize(f'{result_weight}_tmp')}
-                """
-                )
-                result_var = result_mean, result_m2, result_weight
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -2343,32 +2351,55 @@ class TritonKernel(SIMDKernel):
                     )
 
         if self.cooperative_reduction:
-            xnumel, rnumel = self.numels
-            nbytes = xnumel * acc_dtype(src_dtype).itemsize
-            ws_name, ws_offset = self.cooperative_reduction_workspace_cache.allocate(
-                nbytes
-            )
-            mask = "None"
-            if xnumel != 1 and not self.no_x_dim:
-                mask = "xindex < xnumel"
-            self.post_loop_combine.splice(
-                f"""
-                if RSPLIT > 1:
-                    {result_var}_ws = ({ws_name} + {self.index_to_str(ws_offset)}).to(tl.pointer_type({acc_type}))
-                    tl.store({result_var}_ws + (xindex * RSPLIT + rsplit_id), {result_var}, {mask})
-                """,
-                strip=True,
-            )
-            expand = "" if self.no_x_dim else "[None,:]"
-            self.post_loop_store.splice(
-                f"""
-                if RSPLIT > 1:
-                    {result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT)){expand},
-                                                 {mask}, eviction_policy='evict_first')
-                    {result_var} = {final_reduction(f"{result_var}_peers")}
-                """,
-                strip=True,
-            )
+            exit_stack = contextlib.ExitStack()
+            for buf in (self.post_loop_combine, self.post_loop_store):
+                # only do cooperative reduction combines if we have more than one thread block
+                buf.writeline("if RSPLIT > 1:")
+                exit_stack.enter_context(buf.indent())
+
+            if reduction_type in {"argmax", "argmin"}:
+                self.post_loop_combine.writeline(
+                    f"{result_var}_bval = {self.reduction_resize(f'{result_var}_val')}"
+                )
+                peer_val = self.codegen_cooperative_reduction_peer_combine(
+                    f"{result_var}_bval", src_dtype
+                )
+                peer_idx = self.codegen_cooperative_reduction_peer_combine(
+                    result_var, dtype
+                )
+                final_argreduce(self.post_loop_store, result_var, peer_val, peer_idx)
+            elif is_welford_reduction(reduction_type):
+                assert reduction_type == "welford_reduce"
+                result_mean, result_m2, result_weight = result_var
+                peer_mean = self.codegen_cooperative_reduction_peer_combine(
+                    result_mean, acc_dtype(src_dtype)
+                )
+                peer_m2 = self.codegen_cooperative_reduction_peer_combine(
+                    result_m2, acc_dtype(src_dtype)
+                )
+                peer_weight = self.codegen_cooperative_reduction_peer_combine(
+                    result_weight, acc_dtype(src_dtype)
+                )
+                assert dim == 1
+                self.welford_reduce_final_reduction(
+                    self.post_loop_store,
+                    result_mean,
+                    result_m2,
+                    result_weight,
+                    peer_mean,
+                    peer_m2,
+                    peer_weight,
+                    dim,
+                )
+            else:
+                peers = self.codegen_cooperative_reduction_peer_combine(
+                    result_var, acc_dtype(src_dtype)
+                )
+                self.post_loop_store.writeline(
+                    f"{result_var} = {final_reduction(peers)}"
+                )
+
+            exit_stack.close()
 
         self.cse.reduction_cache[cache_key] = result_var
 
@@ -2380,6 +2411,55 @@ class TritonKernel(SIMDKernel):
             self.outside_loop_vars.add(result_var)
 
         return result_var
+
+    def welford_reduce_final_reduction(
+        self,
+        buf,
+        result_mean,
+        result_m2,
+        result_weight,
+        accumulator,
+        accumulator_m2,
+        accumulator_weight,
+        dim,
+    ):
+        buf.splice(
+            f"""\
+            {result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp = triton_helpers.welford(
+                {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
+            )
+            {result_mean} = {self.reduction_resize(f'{result_mean}_tmp')}
+            {result_m2} = {self.reduction_resize(f'{result_m2}_tmp')}
+            {result_weight} = {self.reduction_resize(f'{result_weight}_tmp')}
+            """
+        )
+        return result_mean, result_m2, result_weight
+
+    def codegen_cooperative_reduction_peer_combine(self, result_var, dtype):
+        """
+        Generate code to save a [XBLOCK, RSPLIT] temporary workspace,
+        where each thread block writes a different column.  After the
+        barrier, every thread block loads the completed value.
+        """
+        xnumel, rnumel = self.numels
+        mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
+        expand = "" if self.no_x_dim else "[None,:]"
+
+        nbytes = xnumel * dtype.itemsize * TRITON_MAX_RSPLIT
+        ws_name, ws_offset = self.cooperative_reduction_workspace_cache.allocate(nbytes)
+
+        self.post_loop_combine.splice(
+            f"""
+                {result_var}_ws = ({ws_name} + {self.index_to_str(ws_offset)}).to(tl.pointer_type({triton_type(dtype)}))
+                tl.store({result_var}_ws + (xindex * RSPLIT + rsplit_id), {result_var}, {mask})
+            """,
+            strip=True,
+        )
+        self.post_loop_store.writeline(
+            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + tl.arange(0, RSPLIT){expand}), "
+            f"{mask}, eviction_policy='evict_first')"
+        )
+        return f"{result_var}_peers"
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         assert self.inside_reduction
@@ -2674,7 +2754,7 @@ class TritonKernel(SIMDKernel):
             self.body.splice(
                 f"""
                 if RSPLIT > 1:
-                    first_block = triton_helpers.gpu_barrier({sem_ptr}, RSPLIT, True)
+                    triton_helpers.gpu_barrier({sem_ptr}, RSPLIT, True)
                 """,
                 strip=True,
             )

@@ -630,10 +630,6 @@ def gpu_barrier(
         sem: an int32 semaphores, zero initialized
         total: how many other blocks are running
         first_barrier: True if we can skip waiting for exit for last barrier
-
-    Returns:
-        True on the first thread leaving the barrier
-
     """
     # ensure stores before this are visible
     tl.debug_barrier()
@@ -654,7 +650,6 @@ def gpu_barrier(
         # all other threads are spinning on count_down mode starting
         # the last thread flips from count_up mode to count_down mode
         tl.atomic_xchg(sem, count_down * (total - 1), sem="relaxed")
-        return True
     else:
         prior = 0
         while prior < count_down:  # wait for last thread to flip the mode to count_down
@@ -665,5 +660,3 @@ def gpu_barrier(
 
         if prior != count_down * (total - 1):  # did the cas decrement already?
             tl.atomic_add(sem, -count_down, sem="relaxed")
-            # when last thread reaches here sem is back to 0
-        return False
