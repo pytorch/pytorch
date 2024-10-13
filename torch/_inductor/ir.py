@@ -373,11 +373,6 @@ class IRNode:
     def __post_init__(self):
         self.origins = OrderedSet(self._current_origins)
         self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
-        # object.__setattr__(self, "origins", )
-        # object.__setattr__(
-        #     self,
-        #     "traceback",
-        # )
 
     def get_read_names(self) -> OrderedSet[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
@@ -531,7 +526,7 @@ class Operation:
         return 0
 
 
-@dataclasses.dataclass(kw_only=True)
+@ir_dataclass
 class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
