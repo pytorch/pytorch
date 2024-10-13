@@ -27,7 +27,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 import optree
 from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
@@ -884,16 +884,20 @@ def treespec_loads(serialized: str) -> TreeSpec:
     return treespec
 
 
-class _DummyLeaf:
+class _Asterisk(str):
+    def __new__(cls) -> Self:
+        return super().__new__(cls, "*")
+
     def __repr__(self) -> str:
-        return "*"
+        return "*"  # no quotes
+
+
+_asterisk = _Asterisk()
+del _Asterisk
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten(
-        [_DummyLeaf() for _ in range(treespec.num_leaves)],
-        treespec,
-    )
+    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
     return repr(dummy_tree)
 
 
