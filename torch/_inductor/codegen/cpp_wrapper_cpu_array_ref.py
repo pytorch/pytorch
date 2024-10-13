@@ -405,6 +405,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
         else:
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
@@ -418,6 +419,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
