@@ -12,9 +12,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 @config.patch(
-    cooperative_reductions=True,
-    split_reductions=False,
-    force_cooperative_reductions=True,
+    {
+        "triton.cooperative_reductions": True,
+        "triton.force_cooperative_reductions": True,
+    }
 )
 @instantiate_parametrized_tests
 class CooperativeReductionTests(TestCase):

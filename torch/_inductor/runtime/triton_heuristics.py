@@ -285,7 +285,7 @@ class CachingAutotuner(KernelInterface):
 
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
-                and not self.inductor_meta.get("persistent_reduction", False)
+                and not self.inductor_meta.get("persistent_reduction")
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
                 # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
@@ -1607,15 +1607,14 @@ def cooperative_reduction(
         size_hints = [1, *size_hints[1:]]
     xnumel, rnumel = size_hints
 
+    # TODO(jansel): we should base target on the SM count of the local GPU
     target = 64
-    if rnumel < 1048576:
-        target = 32
     split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reductionc_configs(
-            size_hints, reduction_hint, inductor_meta
+            [xnumel, rnumel // split], reduction_hint, inductor_meta
         )
     else:
         configs = _reduction_configs(
@@ -1623,7 +1622,6 @@ def cooperative_reduction(
         )
     for config in configs:
         config.kwargs["RSPLIT"] = split
-
     # TODO(jansel): add more configs in max_autotune
 
     return cached_autotune(

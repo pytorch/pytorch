@@ -1361,8 +1361,12 @@ class TritonKernel(SIMDKernel):
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        self.cooperative_reduction = self.should_use_cooperative_reduction(groups)
+        self.cooperative_reduction = (
+            not override_persistent_reduction
+            and self.should_use_cooperative_reduction(groups)
+        )
         if self.cooperative_reduction:
+            # TODO(jansel): cooperative+persistent reductions does not work yet
             override_persistent_reduction = False
         super().__init__(
             *groups,
@@ -1396,15 +1400,10 @@ class TritonKernel(SIMDKernel):
         xnumel, rnumel = groups
         if rnumel == 1:
             return False
-        if config.force_cooperative_reductions:
+        if config.triton.force_cooperative_reductions:
             return True
-        if not config.cooperative_reductions:
+        if not config.triton.cooperative_reductions:
             return False
-        assert (
-            not config.split_reductions
-        ), "config.split_reductions and config.cooperative_reductions are mutually exclusive, disable one of them"
-
-        # TODO(jansel): bail out on low SM count
 
         # TODO(jansel): base this on num_bytes_read rather than numel
         xhint = V.graph.sizevars.size_hint(xnumel, fallback=2)
@@ -1414,14 +1413,15 @@ class TritonKernel(SIMDKernel):
             threshold = 2097152
         else:
             return False
+        # TODO(jansel): should this default on for dynamic shapes?
         return V.graph.sizevars.statically_known_geq(rnumel, threshold)
 
     def init_cooperative_reduction(self):
         """One time setup code for cooperative reductions."""
         assert self.cooperative_reduction
-        # TODO(jansel): cooperative+persistent reductions still does not work
         assert not self.persistent_reduction
 
+        # shift all the grids over since tl.program_id(0) is for rsplit
         for tree in self.range_trees:
             if tree.grid_dim is not None:
                 tree.grid_dim += 1
@@ -1431,8 +1431,6 @@ class TritonKernel(SIMDKernel):
         self.cooperative_reduction_workspace_cache = CooperativeReductionWorkspaceCache(
             self.args
         )
-        # TODO(jansel): this calculation below may leave some entirely masked off
-        # iterations on the last thread block, is it worth skipping them?
         self.body.splice(
             """
             rsplit_id = tl.program_id(0)
@@ -1443,15 +1441,17 @@ class TritonKernel(SIMDKernel):
             """,
             strip=True,
         )
+        if not self._has_constant_mask(self.range_trees[-1]):
+            self.body.writeline(
+                "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
+            )
 
     def codegen_range_tree(self):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop:
                 self.iteration_ranges_codegen_header(tree, self.body)
-
         if self.inside_reduction and self.range_trees[-1].is_loop:
-            # TODO(jansel): do we need to change this?  Is it still needed?
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
             self.body.writeline(
@@ -2071,6 +2071,10 @@ class TritonKernel(SIMDKernel):
         exit_stack.close()
 
     def guard_cooperative_store(self, name, buffer):
+        """
+        For cooperative reductions only one thread block should write out the result.
+        We rotate which thread block does each write for better parallelism
+        """
         idx = self.cooperative_reduction_workspace_cache.increment_store_count()
         buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
@@ -2398,7 +2402,6 @@ class TritonKernel(SIMDKernel):
                 self.post_loop_store.writeline(
                     f"{result_var} = {final_reduction(peers)}"
                 )
-
             exit_stack.close()
 
         self.cse.reduction_cache[cache_key] = result_var
@@ -2423,6 +2426,7 @@ class TritonKernel(SIMDKernel):
         accumulator_weight,
         dim,
     ):
+        """Helper to codegen call to triton_helpers.welford"""
         buf.splice(
             f"""\
             {result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp = triton_helpers.welford(
@@ -2437,9 +2441,9 @@ class TritonKernel(SIMDKernel):
 
     def codegen_cooperative_reduction_peer_combine(self, result_var, dtype):
         """
-        Generate code to save a [XBLOCK, RSPLIT] temporary workspace,
-        where each thread block writes a different column.  After the
-        barrier, every thread block loads the completed value.
+        Generate code to save a [XBLOCK, RSPLIT] temporary workspace, where each thread block writes a different
+        column.  After the barrier, every thread block loads the completed value so that it can compute the final
+        value independently.
         """
         xnumel, rnumel = self.numels
         mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
@@ -3393,6 +3397,14 @@ class TritonScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
+        if (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
+            return {
+                **cls.backend_features,
+                BackendFeature.REDUCE_TO_SINGLE_ELEMENT: None,
+            }
         return cls.backend_features
 
     def codegen_comment(self, node_schedule):

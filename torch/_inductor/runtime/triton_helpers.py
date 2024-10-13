@@ -623,13 +623,14 @@ def gpu_barrier(
     """
     Wait for all other thread blocks to reach this barrier before returning.
 
-    if *sem<=total: we are in count_up mode waiting for all threads to enter
-    if *sem>=total*2: we are in count_down mode waiting for all threads to leave
+    if *sem <= total:   we are in count_up mode waiting for all threads to enter
+    if *sem >= total*2: we are in count_down mode waiting for all threads to leave
 
     Args:
         sem: an int32 semaphores, zero initialized
         total: how many other blocks are running
-        first_barrier: True if we can skip waiting for exit for last barrier
+        first_barrier: True if we can skip waiting for exit from last barrier.  Can set either on the first call,
+                       or if one ping-pongs between two semaphores.
     """
     # ensure stores before this are visible
     tl.debug_barrier()
@@ -640,7 +641,6 @@ def gpu_barrier(
     if not first_barrier:
         # all threads must exit prior barrier before we start
         # expect this to already be true in common case
-        # TODO(jansel): we could avoid the need for this with two semaphores we ping-ping between
         while tl.load(sem, volatile=True) >= count_down:
             pass
 

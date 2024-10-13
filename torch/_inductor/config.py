@@ -443,14 +443,11 @@ conv_1x1_as_mm = False
 
 # For reductions with a small output size (usually 1, e.g. x.sum()) there is not enough
 # parallelism to saturate the GPU.  We have two ways of handling this, either `split_reductions`
-# or `cooperative_reductions` which are mutually exclusive.
+# or `triton.cooperative_reductions` which are mutually exclusive.
 #   split_reductions: uses multiple kernels to gain more parallelism
-#   cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
+#   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
+# enabling both of these will implicitly disable split_reductions
 split_reductions = False
-cooperative_reductions = True
-
-# used for debugging cooperative reduction codegen
-force_cooperative_reductions = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -947,6 +944,14 @@ class triton:
     persistent_reductions = (
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
+
+    # For small output size reductions uses cross thread-block synchronization to gain more parallelism
+    cooperative_reductions = (
+        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "1") == "1"
+    )
+
+    # used for debugging cooperative reduction codegen, always generate cooperative_reductions
+    force_cooperative_reductions = False
 
     # 0/False: disable
     # 1/True: enable, use tuning to pick between different subkernels
