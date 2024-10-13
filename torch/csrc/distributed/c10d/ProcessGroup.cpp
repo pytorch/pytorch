@@ -171,28 +171,45 @@ class WorkRegistry {
       const c10::intrusive_ptr<c10d::Work>& work) {
     auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
-    TORCH_CHECK(
-        inserted || it->second != work,
-        "The tensor storage is already associated with another work.");
+
+    auto it = registry_.find(storage);
+    if (it == registry_.end()) {
+      registry_.emplace(
+          std::move(storage),
+          std::vector<c10::intrusive_ptr<c10d::Work>>{work});
+    } else {
+      // There is no guarantee that the previous work object for this tensor
+      // storage is completed before the new work object is registered.
+      // Therefore we need to maintain a list of work objects for each tensor
+      // storage.
+      it->second.push_back(work);
+    }
   }
 
-  c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
+  std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
+      const at::Tensor& tensor) {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
     if (it == registry_.end()) {
-      return nullptr;
+      return {};
     }
-    auto work = it->second;
+    auto works = it->second;
     registry_.erase(it);
-    return work;
+    return works;
   }
 
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
-      if (it->second->isCompleted()) {
+      bool all_completed = true;
+      for (auto work : it->second) {
+        if (!work->isCompleted()) {
+          all_completed = false;
+          break;
+        }
+      }
+      if (all_completed) {
         it = registry_.erase(it);
       } else {
         ++it;
@@ -202,7 +219,11 @@ class WorkRegistry {
 
   size_t get_work_registry_size() {
     std::unique_lock lock(lock_);
-    return registry_.size();
+    size_t total_size = 0;
+    for (const auto& [storage, works] : registry_) {
+      total_size += works.size();
+    }
+    return total_size;
   }
 
   ~WorkRegistry() {
@@ -214,21 +235,23 @@ class WorkRegistry {
     if (!registry_.empty()) {
       TORCH_WARN(
           "At the time of process termination, there are still ",
-          registry_.size(),
+          get_work_registry_size(),
           " unwaited c10d_functional collective calls. "
           "Please review your program to ensure c10d_functional.wait_tensor() "
           "is invoked on all tensors returned from c10d_functional collective "
           "ops before they are used.");
     }
     for (auto& it : registry_) {
-      it.second.release();
+      for (auto& work : it.second) {
+        work.release();
+      }
     }
   }
 
  private:
   std::unordered_map<
       c10::weak_intrusive_ptr<c10::StorageImpl>,
-      c10::intrusive_ptr<c10d::Work>>
+      std::vector<c10::intrusive_ptr<c10d::Work>>>
       registry_;
   std::mutex lock_;
 };
@@ -246,8 +269,8 @@ void register_work(
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto work = RankLocal<WorkRegistry>::get().pop_work(tensor);
-  if (work != nullptr) {
+  auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+  for (const auto& work : works) {
     work->wait();
   }
   return tensor;

@@ -281,7 +281,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 out_ref = all_reduce_wait_eager(work, y)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 10)
             torch.cuda.synchronize()
-            # trigger _unregister_completed_works() without program exit
+            # Trigger _unregister_completed_works() without program exit
             torch._C._distributed_c10d._unregister_completed_works()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
