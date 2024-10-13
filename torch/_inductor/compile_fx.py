@@ -10,13 +10,24 @@ import sys
 import time
 import warnings
 from itertools import count
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
+from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
     compiled_autograd,
@@ -284,17 +295,11 @@ def _recursive_joint_graph_passes(gm):
     joint_graph_passes(gm)
 
 
-def _recursive_post_grad_passes(
-    gm, is_inference: bool = False, example_inputs=None, fake_mode=None
-):
+def _recursive_post_grad_passes(gm, is_inference: bool = False):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(
-            subgraph, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
-        )
-    post_grad_passes(
-        gm, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
-    )
+        _recursive_post_grad_passes(subgraph, is_inference)
+    post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -646,7 +651,6 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-
             compiled_graph = FxGraphCache.load(
                 codegen_and_compile,
                 gm,
@@ -775,12 +779,9 @@ def fx_codegen_and_compile(
 
         with V.set_fake_mode(fake_mode):
             # has some issues with memory in training
-            _recursive_post_grad_passes(
-                gm,
-                is_inference=is_inference,
-                example_inputs=example_inputs,
-                fake_mode=fake_mode,
-            )
+            cuda_context = get_cuda_device_context(gm)
+            with cuda_context:
+                _recursive_post_grad_passes(gm, is_inference=is_inference)
             V.debug.fx_graph_transformed(gm, example_inputs)
             post_grad_graphs_log.debug(
                 "%s",
@@ -823,6 +824,7 @@ def fx_codegen_and_compile(
                     user_visible_outputs=user_visible_outputs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
+                    is_backward=is_backward,
                     is_const_graph=True,
                 )
                 with V.set_graph_handler(const_graph):
@@ -844,6 +846,7 @@ def fx_codegen_and_compile(
                 user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
+                is_backward=is_backward,
                 const_output_index=const_output_index,
                 const_code=const_code,
                 const_module=const_graph,
@@ -1283,6 +1286,36 @@ def get_cpp_wrapper_config():
     }
 
 
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
+    """
+    Returns a cuda device context manager if there is a single device in the graph
+    """
+    if not torch.cuda.is_available():
+        return contextlib.nullcontext()
+
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
+    input_devices: OrderedSet[torch.device] = OrderedSet(
+        node.meta["val"].device
+        for node in placeholder_nodes
+        if isinstance(node.meta.get("val"), torch.Tensor)
+    )
+
+    out_devices: OrderedSet[torch.device] = OrderedSet(
+        arg.meta["val"].device
+        for arg in output_node(gm).args[0]
+        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
+    )
+    cuda_devices: OrderedSet[torch.device] = OrderedSet(
+        device for device in (input_devices | out_devices) if device.type == "cuda"
+    )
+
+    return (
+        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
+        if len(cuda_devices) == 1
+        else contextlib.nullcontext()
+    )
+
+
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1485,10 +1518,12 @@ def compile_fx(
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
-        def partition_fn(graph, joint_inputs, **kwargs):
-            _recursive_joint_graph_passes(graph)
+        def partition_fn(gm: torch.fx.GraphModule, joint_inputs, **kwargs):
+            cuda_context = get_cuda_device_context(gm)
+            with cuda_context:
+                _recursive_joint_graph_passes(gm)
             return min_cut_rematerialization_partition(
-                graph, joint_inputs, **kwargs, compiler="inductor"
+                gm, joint_inputs, **kwargs, compiler="inductor"
             )
 
         def bw_compiler(
