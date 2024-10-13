@@ -41,6 +41,7 @@ if [ -n "$CLANG_VERSION" ]; then
   # Use lld too
   update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-"$CLANG_VERSION" 50
   update-alternatives --install /usr/bin/ld.gold ld.gold /usr/bin/ld.lld-"$CLANG_VERSION" 50
+  update-alternatives --install /usr/bin/lld lld /usr/bin/lld-"$CLANG_VERSION" 50
 
   # clang's packaging is a little messed up (the runtime libs aren't
   # added into the linker path), so give it a little help
