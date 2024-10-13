@@ -12,7 +12,7 @@ TEST_CODES = [
     "CUdeviceptr var = reinterpret_cast<CUdeviceptr>(arg.data_ptr());",
     "at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal());",
     # Hipification should be idempotent, hipifying should be a no-op for already hipified files
-    "at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal());",
+    "at::hip::HIPStreamGuardMasqueradingAsCUDA guard(at::hip::getStreamFromExternalMasqueradingAsCUDA());",
 ]
 
 HIP_CODES = [
@@ -20,8 +20,8 @@ HIP_CODES = [
     "hipFunction_t kernel = nullptr;",
     "static hipFunction_t kernel = nullptr;",
     "hipDeviceptr_t var = reinterpret_cast<hipDeviceptr_t>(arg.data_ptr());",
-    "at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal());",
-    "at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal());",
+    "at::hip::HIPStreamGuardMasqueradingAsCUDA guard(at::hip::getStreamFromExternalMasqueradingAsCUDA());",
+    "at::hip::HIPStreamGuardMasqueradingAsCUDA guard(at::hip::getStreamFromExternalMasqueradingAsCUDA());",
 ]
 
 
@@ -41,7 +41,12 @@ class TestCppWrapperHipify(TestCase):
             do {                                               \\
                 hipError_t code = EXPR;                          \\
                 const char *msg;                               \\
-                hipDrvGetErrorString(code, &msg);                  \\
+                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \\
+                if (code_get_error != hipSuccess) {          \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string("invalid error code!"));   \\
+                }                                              \\
                 if (code != hipSuccess) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\
