@@ -498,7 +498,7 @@ Stats stats() {
 
 } // namespace torch::unwind
 
-extern "C" __attribute__((used, visibility("default"))) void unwind_c(
+extern "C" C10_USED void unwind_c(
     std::vector<void*>* result,
     int64_t rsp,
     int64_t rbp) {
