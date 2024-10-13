@@ -471,6 +471,7 @@ class GraphLowering(torch.fx.Interpreter):
     def cached_allocate_semaphores(
         self, count: sympy.Expr, device: torch.device
     ) -> str:
+        """Attempt to share semaphore allocations across kernels"""
         if device in self.semaphores_allocation_prior:
             prior_count, prior_name = self.semaphores_allocation_prior[device]
             if V.graph.sizevars.statically_known_leq(count, prior_count):

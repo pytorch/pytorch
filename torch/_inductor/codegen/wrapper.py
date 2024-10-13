@@ -44,7 +44,7 @@ from .. import async_compile, config, ir
 from ..codecache import output_code_log
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, GPU_BARRIER_STATE_DTYPE
+from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -1526,7 +1526,7 @@ class PythonWrapperCodegen(CodeGen):
         line = self.make_allocation(
             name,
             device,
-            GPU_BARRIER_STATE_DTYPE,
+            torch.int32,
             shape=(count,),
             stride=(1,),
         )
