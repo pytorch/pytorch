@@ -32,7 +32,8 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.onnx.operators
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
+import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
@@ -88,7 +89,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = pytree._cxx_pytree_exists
+HAS_OPTREE = python_pytree._cxx_pytree_exists
 if HAS_OPTREE:
     import torch.utils._cxx_pytree as cxx_pytree
 else:
@@ -8433,8 +8434,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8451,8 +8450,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8469,8 +8466,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8507,8 +8502,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8557,7 +8550,6 @@ def ___make_guard_fn():
         self.assertEqual(cnt.frame_count, 2)
 
     def test_tracing_py_tree_tensor_subclass(self):
-        import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
@@ -8578,8 +8570,6 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             def mapper(x):
                 return x.clone()
@@ -9910,7 +9900,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -9944,7 +9934,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -9994,7 +9984,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
