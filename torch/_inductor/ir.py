@@ -106,43 +106,6 @@ _IntLike: TypeAlias = Union[int, Expr]
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-from typing_extensions import dataclass_transform
-
-
-# ir_dataclass = dataclass_transform()(
-#     functools.partial(dataclasses.dataclass, kw_only=True)
-# )
-
-
-@dataclass_transform()
-def ir_dataclass(_cls):
-    def wrap(cls: T) -> T:
-        return dataclasses.dataclass(cls, kw_only=True)
-        if sys.version_info >= (3, 10):
-            # Use native kw_only for Python 3.10+
-            return dataclasses.dataclass(cls, kw_only=True)
-        else:
-            # Polyfill for Python 3.9
-            def __init__(_self, **init_kwargs):
-                fields = dataclasses.fields(cls)
-                for field in fields:
-                    if (
-                        field.default == dataclasses.MISSING
-                        and field.default_factory == dataclasses.MISSING
-                    ):
-                        if field.name not in init_kwargs:
-                            raise TypeError(
-                                f"__init__() missing required keyword-only argument: '{field.name}'"
-                            )
-                dataclasses.dataclass(cls, **kwargs).__init__(_self, **init_kwargs)
-
-            cls.__init__ = __init__
-            return dataclasses.dataclass(cls, **kwargs)
-
-    if _cls is None:
-        return wrap
-    return wrap(_cls)
-
 
 """ [Note: Inductor IR]
 
@@ -4145,7 +4108,7 @@ class CppTemplateBuffer(TemplateBuffer):
 
 @dataclasses.dataclass
 class InputsKernel(OperationBuffer):
-    inputs: List[Buffer] 
+    inputs: List[Buffer]
 
     def get_read_writes(self):
         reads: OrderedSet[dependencies.Dep] = OrderedSet()
