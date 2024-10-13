@@ -203,13 +203,11 @@ class WorkRegistry {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
       std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
-
       for (const auto& work : it->second) {
-        if (!work->isCompleted()) {
+        if (work.defined() && !work->isCompleted()) {
           uncompleted_works.push_back(work);
         }
       }
-
       if (uncompleted_works.empty()) {
         it = registry_.erase(it);
       } else {
