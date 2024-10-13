@@ -103,7 +103,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
-        r2 = torch.compile(model, backend=backend, dynamic=dynamic, options=options)(input)
+        r2 = torch.compile(model, backend=backend, dynamic=dynamic, options=options)(
+            input
+        )
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):

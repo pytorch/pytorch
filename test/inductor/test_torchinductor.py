@@ -438,7 +438,9 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython, dynamic=dynamic)(run)
+    run = torch._dynamo.optimize(
+        compile_fx_wrapper, nopython=nopython, dynamic=dynamic
+    )(run)
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
