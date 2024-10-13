@@ -157,7 +157,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot query CUDART version without ATen_cuda library. ", CUDA_HELP);
   }
 
-  std::string showConfig() const override {
+  virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -192,7 +192,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 #endif
 
-  void deviceSynchronize(DeviceIndex /*device_index*/) const override {
+  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
   }
 };
