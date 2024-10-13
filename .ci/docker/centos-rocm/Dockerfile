@@ -108,10 +108,10 @@ ENV CMAKE_C_COMPILER cc
 ENV CMAKE_CXX_COMPILER c++
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/triton-rocm.txt triton-rocm.txt
+COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
+RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 # Install AOTriton (Early fail)
 COPY ./aotriton_version.txt aotriton_version.txt

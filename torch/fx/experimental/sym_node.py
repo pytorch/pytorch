@@ -436,9 +436,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expect_rational=False
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return float(r)
         except Exception:
@@ -803,15 +801,15 @@ def _sympy_ge(a, b):
 
 
 def _sympy_min(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Min
 
-    return sympy.Min(a, b)
+    return Min(a, b)
 
 
 def _sympy_max(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Max
 
-    return sympy.Max(a, b)
+    return Max(a, b)
 
 
 def _sympy_ite(a, t, f):
@@ -943,6 +941,8 @@ def sympy_is_channels_last_contiguous_3d(sizes, strides):
 def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     import sympy
 
+    from torch.utils._sympy.functions import Max
+
     dim = len(sizes)
 
     if dim != len(dim_order):
@@ -973,7 +973,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
         #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
         #     channels_last
-        m = strides[d] * sympy.Max(sizes[d], 1)
+        m = strides[d] * Max(sizes[d], 1)
 
     return r
 

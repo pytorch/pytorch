@@ -136,17 +136,6 @@ Why is compilation slow?
   as long (as many iterations) as you were running when you ran into
   trouble, and the profiler will accumulate statistics over this duration.
 
-.. code-block:: python
-
-   from torch._dynamo.utils import CompileProfiler
-
-   def my_model():
-       ...
-
-   with CompileProfiler() as prof:
-       profiler_model = torch.compile(my_model, backend=prof)
-       profiler_model()
-       print(prof.report())
 
 Why are you recompiling in production?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

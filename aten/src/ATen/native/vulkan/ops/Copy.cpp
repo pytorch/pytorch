@@ -123,7 +123,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
             .to(convert_dtype(v_src.dtype()));
 }
 
-void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
+static void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
   api::PipelineBarrier pipeline_barrier{};
