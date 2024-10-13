@@ -3973,7 +3973,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         layout,
         inputs,
         make_kernel_render,
-        debug_extra=None,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
     ):
         """
@@ -3986,7 +3985,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         and we mark them as mutated inputs.
         """
         super().__init__(layout, inputs, make_kernel_render)
-        self.debug_extra = debug_extra
         self.mutated_inputs = mutated_inputs
         self.outputs: List[Buffer] = [self]
         if mutated_inputs is not None:
@@ -4008,7 +4006,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         return self.outputs
 
     def __str__(self) -> str:
-        out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
+        out = f"TritonTemplateBuffer(layout={self.layout})"
         return out
 
 
@@ -4024,11 +4022,12 @@ class ChoiceCaller:
     Children classes: TritonTemplateCaller, CUDATemplateCaller.
     """
 
-    def __init__(self, name, input_nodes, layout):
+    def __init__(self, name, input_nodes, layout, description):
         super().__init__()
         self.name = name
         self.layout = layout
         self.input_nodes = input_nodes
+        self.description = description
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()

@@ -512,9 +512,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             old_len = len(choices)
             for swizzle in [1, 2, 4, 8]:
                 # breakpoint()
-                self.maybe_append_choice(choices, op=op, swizzle=swizzle)
-                if len(choices) > old_len:
-                    choices[-1].debug_extra = name + f" swizzle={swizzle}"
+                description = name + f" swizzle={swizzle}"
+                self.maybe_append_choice(choices, description=description, op=op, swizzle=swizzle)
+
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
@@ -815,7 +815,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         return op
 
-    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def gen_ops(self) -> "List[Tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
         """
         Creates a list of Cutlass GemmOperation instances that match the operation this template is designed to represent.
         The matching is carried out with respect to the input and output specifications of the operation.
@@ -823,8 +823,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         No function arguments.
 
         Returns:
-            List[cutlass_gemm_op.GemmOperation]: A list of GemmOperation instances that are compatible with the
-            operation requirements of this template.
+            List[Tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
+            tuples that are compatible with the operation requirements of this template.
         """
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -844,7 +844,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        # breakpoint()
         return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
