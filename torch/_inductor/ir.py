@@ -111,7 +111,7 @@ from typing_extensions import dataclass_transform
 
 
 @dataclass_transform(frozen_default=True)
-def ir_dataclass(_cls=None, frozen: bool = False):
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
     def wrap(cls: _T) -> _T:
         if sys.version_info >= (3, 10):
             return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
@@ -120,9 +120,9 @@ def ir_dataclass(_cls=None, frozen: bool = False):
             # that only kwargs are used (and is not available on 3.9)
             return dataclasses.dataclass(cls)
 
-    if _cls is None:
+    if cls is None:
         return wrap
-    return wrap(_cls)
+    return wrap(cls)
 
 
 """ [Note: Inductor IR]
