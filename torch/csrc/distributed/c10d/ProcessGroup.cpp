@@ -178,8 +178,8 @@ class WorkRegistry {
           std::move(storage),
           std::vector<c10::intrusive_ptr<c10d::Work>>{work});
     } else {
-      // There is no guarantee that the previous work object for this tensor
-      // storage is completed before the new work object is registered.
+      // There is no guarantee that the previous work object for this
+      // tensor storage is completed before the new work object is registered.
       // Therefore we need to maintain a list of work objects for each tensor
       // storage.
       it->second.push_back(work);
