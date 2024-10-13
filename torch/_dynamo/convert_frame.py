@@ -7,6 +7,7 @@ import cProfile
 import dis
 import functools
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -1074,6 +1075,18 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
+            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
+                # Remove entries that have set values which are functions
+                del d["reorderable_logging_functions"]
+                # Remove entries that have set values which are _TensorMeta
+                del d["traceable_tensor_subclasses"]
+
+                return {
+                    key: list(value) if isinstance(value, set) else value
+                    for key, value in d.items()
+                }
+
+            config_dict = handle_sets(config.shallow_copy_dict())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1107,6 +1120,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
+                json.dumps(config_dict),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

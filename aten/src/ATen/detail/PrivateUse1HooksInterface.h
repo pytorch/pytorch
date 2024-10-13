@@ -32,7 +32,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  virtual at::Device getDeviceFromPtr(void* data) const {
+  at::Device getDeviceFromPtr(void* data) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
