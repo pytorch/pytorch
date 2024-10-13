@@ -234,10 +234,11 @@ class WorkRegistry {
     // wait for these work objects or to destroy them will only result in
     // confusing errors. Therefore, we simply issue a warning and intentionally
     // allow the unwaited work objects to leak.
-    if (!registry_.empty()) {
+    size_t registry_size = get_work_registry_size();
+    if (registry_size > 0) {
       TORCH_WARN(
           "At the time of process termination, there are still ",
-          get_work_registry_size(),
+          registry_size,
           " unwaited c10d_functional collective calls. "
           "Please review your program to ensure c10d_functional.wait_tensor() "
           "is invoked on all tensors returned from c10d_functional collective "
