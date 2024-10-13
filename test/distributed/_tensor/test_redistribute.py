@@ -5,10 +5,10 @@ import itertools
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor._collective_utils import shard_dim_alltoall
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -207,7 +207,7 @@ class RedistributeTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
-        from torch.distributed._tensor._redistribute import Redistribute
+        from torch.distributed.tensor._redistribute import Redistribute
 
         comm_mode = CommDebugMode()
 
@@ -510,6 +510,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
             ([Shard(0), Shard(1), Shard(2)], [Shard(2), Shard(1), Shard(0)]),
             ([Shard(1), Shard(0), Shard(0)], [Replicate(), Shard(0), Shard(0)]),
             ([Shard(1), Replicate(), Shard(0)], [Replicate(), Shard(0), Shard(0)]),
+            ([Shard(0), Shard(0), Shard(1)], [Shard(0), Shard(1), Shard(2)]),
         ]
         comm_counts_3d = [
             3,  # 2: S0 - R, 1: S1 -> R, 0: S0 -> S1
@@ -517,6 +518,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
             2,  # 2: S2 -> R, 0: S1 -> S2
             1,  # 0: S1 -> R
             2,  # 2: S0 -> R, 1: R -> S0, 2: R -> S0, 0: S1 -> R
+            2,  # 2: S1 -> S2, 1: S0 -> S1
         ]
 
         comm_mode = CommDebugMode()

@@ -25,6 +25,7 @@ from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -53,18 +54,19 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        import pynvml  # type: ignore[import]
+        if not _version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -508,12 +510,14 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
     return prop.major, prop.minor
 
 
-def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+def get_device_properties(device: Optional[_device_t] = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
-        device (torch.device or int or str): device for which to return the
-            properties of the device.
+        device (torch.device or int or str, optional): device for which to return the
+            properties of the device.  It uses the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
 
     Returns:
         _CudaDeviceProperties: the properties of the device
@@ -1120,7 +1124,11 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
+    clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
+        return clock_info["cur_clk"]
+    else:
+        return clock_info["clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1570,6 +1578,7 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",
     "cudaStatus",
@@ -1626,6 +1635,7 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

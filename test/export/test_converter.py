@@ -9,6 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
@@ -837,6 +838,32 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    def test_convert_if_duplicate_attr_names(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = 1
+                self.h = 2
+
+            def forward(self, x: torch.Tensor, y: int):
+                self.w = self.w * 10
+                self.h = self.h * 20
+
+                if y > 10:
+                    res = self.w + x
+                else:
+                    res = self.h + x
+
+                if y < 10:
+                    res = self.w + res
+                else:
+                    res = self.h + res
+
+                return res
+
+        inp = (torch.ones(3), 5)
+        self._check_equal_ts_ep_converter(M(), inp, option=["script"])
+
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -1361,6 +1388,70 @@ class TestConverter(TestCase):
         # TODO: (3/N)
         # Trace unrolls the loop.
         # self._check_equal_ts_ep_converter(func3, inp, ["script"])
+
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows does not support qnnpack",
+    )
+    def test_ts2ep_convert_quantized_model(self):
+        class Standalone(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.ao.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.conv2(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+            def fuse_model(self):
+                torch.ao.quantization.fuse_modules(
+                    self, [["conv2", "relu"]], inplace=True
+                )
+
+        with override_quantized_engine("qnnpack"):
+            model = Standalone()
+            model.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+            model.fuse_model()
+            torch.ao.quantization.prepare(model, inplace=True)
+            model(torch.randn(4, 1, 4, 4))
+            torch.ao.quantization.convert(model, inplace=True)
+
+            # Use customized checking here, because state_dict of quantization will be
+            # modified by the quantization pass.
+            inp = (torch.randn(4, 1, 4, 4),)
+            original_ts_model = torch.jit.script(model)
+            ts_model = torch.jit.script(model)
+            converter = TS2EPConverter(ts_model, inp)
+            ep = converter.convert()
+
+            orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
+            ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
+            self._check_tensor_list_equal(orig_out, ep_out)
+
+    def test_ts2ep_convert_quantized_model_with_opcontext(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(x, self.linear_op)
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
 if __name__ == "__main__":
