@@ -232,12 +232,14 @@ def list_mode_options(
         # enable max-autotune
         "max-autotune-no-cudagraphs": {
             "max_autotune": True,
+            "coordinate_descent_tuning": True,
         },
         # enable max-autotune
         # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
             "triton.cudagraphs": True,
+            "coordinate_descent_tuning": True,
         },
     }
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
