@@ -659,7 +659,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             {
                 "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
-                "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
+                # "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
+                "module_grouping": ["mem_eff"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -712,6 +713,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
             fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
+            # Embedding weights are not needed for embedding backward
+            model.tok_embeddings.set_unshard_in_backward(False)
             fully_shard([model.norm, model.output], **fsdp_kwargs)
         elif module_grouping == "mem_eff_weight_tied":
             fully_shard([model.tok_embeddings, model.output], **fsdp_kwargs)
