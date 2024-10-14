@@ -1,7 +1,6 @@
 import inspect
 
 import torch
-from torch.utils._pytree import register_pytree_node, SequenceKey
 
 
 __all__ = ["pytree_register_structseq", "all_return_types"]
@@ -13,6 +12,8 @@ return_types = torch._C._return_types  # type: ignore[attr-defined]
 
 
 def pytree_register_structseq(cls):
+    from torch.utils._pytree import register_pytree_node, SequenceKey
+
     def structseq_flatten(structseq):
         return list(structseq), None
 

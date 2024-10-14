@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C._functorch import (
     CFunctionalizeInterpreterPtr,
     CGradInterpreterPtr,
@@ -163,7 +163,7 @@ class GradInterpreter(FuncTorchInterpreter):
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
-            torch.Tensor, self._cptr.lift, [args, kwargs]
+            torch.Tensor, self._cptr.lift, (args, kwargs)
         )
         return args, kwargs
 
@@ -197,7 +197,7 @@ class JvpInterpreter(FuncTorchInterpreter):
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
-            torch.Tensor, self._cptr.lift, [args, kwargs]
+            torch.Tensor, self._cptr.lift, (args, kwargs)
         )
         return args, kwargs
 
