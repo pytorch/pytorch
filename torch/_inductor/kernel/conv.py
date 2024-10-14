@@ -662,11 +662,14 @@ def convolution(
                     **cfg.kwargs,
                 )
 
+    # import pdb; pdb.set_trace()
+
     if use_ck_template(layout):
+        ck_w = ir.ExternKernel.require_channels_last(weight)
         CKConvTemplate.add_ck_conv_choices(
             choices,
             layout,
-            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
+            input_nodes=(x, ck_w) + ((bias,) if bias is not None else tuple()),
             stride=stride,
             padding=padding,
             dilation=dilation,
