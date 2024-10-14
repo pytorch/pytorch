@@ -232,14 +232,12 @@ def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
 def invoke_subgraph_proxy_torch_dispatch_mode(
     proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands
 ):
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+    # TODO(anijain2305) - Implement proxy tensor caching.
     example_out = invoke_subgraph(subgraph, identifier, operands)
-    graph = proxy_mode.has_traced_invoke_subgraph_before(identifier)
-    if graph is None:
-        graph = reenter_make_fx(subgraph)(*operands)
-        proxy_mode.add_traced_invoke_subgraph(identifier, graph)
-        qualname = proxy_mode.tracer.get_fresh_qualname("invoke_subgraph")
-        proxy_mode.tracer.root.register_module(qualname, graph)
+    graph = reenter_make_fx(subgraph)(*operands)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+    qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
+    proxy_mode.tracer.root.register_module(qualname, graph)
 
     node_args = (graph, identifier, operands)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
