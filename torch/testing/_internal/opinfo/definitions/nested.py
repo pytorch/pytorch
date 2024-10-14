@@ -315,6 +315,31 @@ def sample_inputs_special_polygamma_n(n):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"n": n})
 
 
+def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    for njt in _sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[2, 3, 4],
+    ):
+        other_dtypes = (
+            d for d in (torch.float32, torch.half, torch.double) if d is not dtype
+        )
+        for other_dtype in other_dtypes:
+            sample_name = f"{njt.dim()}D: {dtype} -> {other_dtype}"
+            yield SampleInput(
+                njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name
+            )
+
+        # only include device transfer for CUDA inputs
+        if "cuda" in device:
+            other_device = "cpu"
+            sample_name = f"{njt.dim()}D: {device} -> {other_device}"
+            yield SampleInput(
+                njt.clone().detach(), kwargs={"device": other_device}, name=sample_name
+            )
+
+
 def sample_inputs_masked_select(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
@@ -384,6 +409,39 @@ def reference_nn_functional_embedding_bag(op, sample):
     return torch.cat(output, dim=0)
 
 
+def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4, 5]
+    ):
+        # with bias
+        NUM_OUTPUT = 10
+        weight = torch.randn(
+            NUM_OUTPUT,
+            njt.size(-1),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        bias = torch.randn(
+            NUM_OUTPUT, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        yield SampleInput(
+            njt,
+            kwargs={
+                "weight": weight,
+                "bias": bias,
+            },
+        )
+
+        # without bias
+        yield SampleInput(
+            njt,
+            kwargs={
+                "weight": weight,
+            },
+        )
+
+
 def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -425,10 +483,12 @@ njt_sample_inputs = {
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
+    "nn.functional.linear": sample_inputs_nn_functional_linear,
     "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
+    "to": sample_inputs_to,
     "masked_select": sample_inputs_masked_select,
 }
 

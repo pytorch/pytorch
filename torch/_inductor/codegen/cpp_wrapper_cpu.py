@@ -15,10 +15,10 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer
+from .common import IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
     DEVICE_TO_ATEN,
@@ -66,7 +66,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        # For GEMM kernels that must be initialized and are resolved at linking.
+        self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
+
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperCpu()
 
     def generate_kernel_call(
         self,
@@ -123,7 +133,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     else:
                         # arg is a scalar
                         new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+                # debug printer related logic for cpp kernel type.
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.set_printer_args(
+                    call_args,
+                    kernel_name,
+                    None,
+                    None,
+                    "cpp",
+                )
+                with debug_printer_manager:
+                    self.writeline(self.wrap_kernel_call(kernel_name, new_args))
             else:
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
@@ -657,11 +677,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
+
+        # Tell compiler we need to link with the non-mangled symbols
+        for kernel in self.initialized_kernels.values():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            signature = kernel.get_signature()
+            self.prefix.writeline(f'extern "C" {signature};')
+
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel = set(self.src_to_kernel.values()) - set(
+            self.initialized_kernels.keys()
+        )
         declare_kernel.update(
             entry[0] for entry in self.user_defined_kernel_cache.values()
         )
@@ -673,6 +704,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.prefix.writeline(
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
+        for name, kernel in self.initialized_kernels.items():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            kernel_ptr = f"(*{name})"
+            signature = kernel.get_signature().replace(name, kernel_ptr)
+            self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
@@ -747,6 +785,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
+
+                if name in V.graph.folded_constants:
+                    constant_type_str = "FoldedConstant"
+                elif name.startswith("_tensor_constant"):
+                    constant_type_str = "TensorConstant"
+                elif any(
+                    name == normalize_name(parameter_name)
+                    for parameter_name, _ in V.graph.orig_gm.named_parameters()
+                ):
+                    constant_type_str = "Parameter"
+                elif any(
+                    name == normalize_name(buffer_name)
+                    for buffer_name, _ in V.graph.orig_gm.named_buffers()
+                ):
+                    constant_type_str = "Buffer"
+                else:
+                    constant_type_str = "Unknown"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].type = static_cast<int32_t>(torch::aot_inductor::ConstantType::{constant_type_str});"
                 )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
@@ -1245,7 +1303,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            if hasattr(extern_kernel, "outputs"):
+            if getattr(extern_kernel, "outputs", None):
                 # ir.ExternKernelAlloc may have outputs if it returns a tuple
                 self.generate_c_shim_fallback_kernel(extern_kernel, args)
             else:
@@ -1472,8 +1530,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_device(self, device):
         if config.abi_compatible:
-            self.used_cached_devices.add(device.type)
-            return f"cached_torch_device_type_{device.type}, {device.index if device.index else 0}"
+            assert device.type in DEVICE_TO_ATEN, (
+                device.type + " not found in DEVICE_TO_ATEN"
+            )
+            device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
+            self.used_cached_devices.add(device_str)
+            return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
         else:
             return (
                 f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
@@ -1766,13 +1828,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             return final_tmp_name
 
-    def codegen_device_copy(self, src, dst):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         if config.abi_compatible:
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
             )
         else:
-            self.writeline(f"{dst}.copy_({src});")
+            self.writeline(f"{dst}.copy_({src}, {non_blocking});")
 
     def codegen_multi_output(self, name, value):
         # in the abi_compatible mode, outputs are retrieved by passing
@@ -1858,6 +1920,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
 
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        # TODO (desertfire) - This function is the old way of supporting
+        # subgraph codegen by inlining subgraphs in the output code. For python
+        # wrapper, we have moved to lifting subgraphs as functions, supported by
+        # PythonWrapperCode `codegen_subgraph` function. We should perhaps
+        # support lifting of subgraphs as functions for cpp wrapper as well.
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
+                )
+            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+        finally:
+            self.pop_codegened_graph()
+
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
         outer_carried_inputs = [
@@ -1926,7 +2007,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline("}")
 
     def generate_extern_kernel_args_decl_if_needed(
-        self, op_overload, raw_args, output_args
+        self,
+        op_overload,
+        raw_args,
+        output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -2014,13 +2099,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type):
+        def fill_output_arg(arg, return_type, is_mutated_output: bool):
             if isinstance(return_type, torch.TensorType):
-                self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
-                )
-                self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
+                if not is_mutated_output:
+                    self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
+                    )
+                    self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
@@ -2044,13 +2130,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg in output_args:
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
             assert output_arg is not None, "Optional return types are not yet supported"
             if isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
-                    fill_output_arg(out, torch.TensorType.get())
+                    fill_output_arg(
+                        out,
+                        torch.TensorType.get(),
+                        isinstance(raw_output_arg, ir.MutationOutput),
+                    )
             else:
-                fill_output_arg(output_arg, torch.TensorType.get())
+                fill_output_arg(
+                    output_arg,
+                    torch.TensorType.get(),
+                    isinstance(raw_output_arg, ir.MutationOutput),
+                )
 
         return new_tensor_args, new_int_args
 
@@ -2072,32 +2166,37 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
+            elif isinstance(out, ir.MutationOutput):
+                mutated_buf_names = out.get_mutation_names()
+                assert (
+                    isinstance(mutated_buf_names, list) and len(mutated_buf_names) == 1
+                ), "Expect only one mutated buffer in MutationOutput"
+                return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
             else:
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = None
-        if config.abi_compatible:
-            if outputs is None:
-                # outputs is not specified, the default is to write to buf_name
-                output_args = [buf_name]
-            else:
-                output_args = extract_output_name(outputs)
-                if isinstance(output_args, str):
-                    output_args = [output_args]
+        if outputs is None:
+            # outputs is not specified, the default is to write to buf_name
+            output_args = [buf_name]
+        else:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
-            assert outputs is not None
+            assert output_args is not None
 
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
         else:
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
@@ -2111,6 +2210,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
@@ -2148,6 +2248,17 @@ if (custom_op_wrapper.get() == NULL) {
 
         self.custom_op_wrapper_loaded = True
 
+    def generate_float_value(self, val):
+        assert isinstance(val, float)
+        if val == float("inf"):
+            return "std::numeric_limits<float>::infinity()"
+        elif val == float("-inf"):
+            return "-std::numeric_limits<float>::infinity()"
+        elif val == float("nan"):
+            return "std::numeric_limits<float>::quiet_NaN()"
+        else:
+            return f"{val}"
+
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             if raw_arg is None:
@@ -2177,7 +2288,7 @@ if (custom_op_wrapper.get() == NULL) {
                 )
                 return f"PyLong_FromLongLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
-                return f"PyFloat_FromDouble({raw_arg})"
+                return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
             elif isinstance(arg_type, torch.BoolType):
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
@@ -2188,7 +2299,7 @@ if (custom_op_wrapper.get() == NULL) {
                 if isinstance(raw_arg, int):
                     return f"PyLong_FromLongLong({raw_arg})"
                 elif isinstance(raw_arg, float):
-                    return f"PyFloat_FromDouble({raw_arg})"
+                    return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
                 elif isinstance(raw_arg, bool):
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
@@ -2202,6 +2313,9 @@ if (custom_op_wrapper.get() == NULL) {
                     )
             elif isinstance(raw_arg, torch.dtype):
                 # dtype
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             else:
@@ -2240,6 +2354,7 @@ if (custom_op_wrapper.get() == NULL) {
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
@@ -2303,11 +2418,19 @@ if (py_{buf_name}.get() == NULL) {{
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
-                if output_arg is not None
-            ]
+            if raw_outputs:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                    if output_arg is not None
+                    and not isinstance(raw_output_arg, ir.MutationOutput)
+                ]
+            else:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg in output_args  # type: ignore[arg-type]
+                    if output_arg is not None
+                ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines
             )
@@ -2319,12 +2442,16 @@ if (py_{buf_name}.get() == NULL) {{
         op_overload,
         raw_args,  # contains both args and flatten kwargs
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,
             int_call_args,
         ) = self.generate_extern_kernel_args_decl_if_needed(
-            op_overload, raw_args, output_args
+            op_overload,
+            raw_args,
+            output_args,
+            raw_outputs,
         )
 
         tensor_call_args_str = ", ".join(tensor_call_args)
@@ -2368,9 +2495,7 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(type_, torch.NumberType):
             if isinstance(val, bool):
                 return "int32_t"
-            elif isinstance(val, int):
-                return "int64_t"
-            elif isinstance(val, float):
+            elif isinstance(val, (int, float)):
                 return "double"
             elif val is None:
                 # This could happen when val is an optional value
@@ -2404,11 +2529,8 @@ if (py_{buf_name}.get() == NULL) {{
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
-        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
-            if val == float("inf"):
-                return "std::numeric_limits<float>::infinity()"
-            else:
-                return "-std::numeric_limits<float>::infinity()"
+        elif isinstance(val, float):
+            return self.generate_float_value(val)
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
