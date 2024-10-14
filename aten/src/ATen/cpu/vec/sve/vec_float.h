@@ -5,7 +5,7 @@
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <c10/util/irange.h>
 #include <cmath>
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF)
 #include <sleef.h>
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
