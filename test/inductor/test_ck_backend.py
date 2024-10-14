@@ -384,9 +384,9 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 4,
+                "compile_threads": 1,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 4,
+                "rocm.n_max_profiling_configs": 1,
             }
         ):
 
