@@ -3199,7 +3199,12 @@ class TestBinaryUfuncs(TestCase):
         ):
             shift_left_expected = torch.zeros_like(input)
             shift_right_expected = torch.clamp(input, -1, 0)
-            for shift in chain(range(-100, -1), range(bits, 100)):
+            # NumPy 2 does not support negative shift values.
+            if np.__version__ > "2":
+                iterator = range(bits, 100)
+            else:
+                iterator = chain(range(-100, -1), range(bits, 100))
+            for shift in iterator:
                 shift_left = input << shift
                 self.assertEqual(shift_left, shift_left_expected, msg=f"<< {shift}")
                 self.compare_with_numpy(
