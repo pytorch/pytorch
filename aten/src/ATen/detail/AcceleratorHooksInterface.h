@@ -58,17 +58,7 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
   }
 
-  virtual const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
-  }
-
-  virtual Generator getNewGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
-  }
-
-  virtual std::tuple<size_t, size_t, ptrdiff_t, uint64_t, bool, c10::IPCHandlePimpl>
+  virtual std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
   StorageShareDevice(const c10::Storage& storage) const {
     TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
   };

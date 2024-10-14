@@ -466,14 +466,16 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   c10::cuda::device_synchronize();
 }
 
-std::tuple<size_t, size_t, ptrdiff_t, uint64_t, bool, c10::IPCHandlePimpl>
+std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
 CUDAHooks::StorageShareDevice(const c10::Storage& storage) const {
-    std::ostringstream ss1, ss2, ss3;
     uint64_t ref_counter_offset = 0;
     bool event_sync_required = false;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto shandle = c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
     ptrdiff_t offset_bytes = shandle.offset;
     size_t ipc_memory_handle_size = shandle.handle.size();
+    std::string memory_handle(ipc_memory_handle_size, '\0');
+    std::memcpy(memory_handle.data(), shandle.handle.c_str(), shandle.handle.size());
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
@@ -483,6 +485,8 @@ CUDAHooks::StorageShareDevice(const c10::Storage& storage) const {
     auto sent_data =
         static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
+    std::string ref_counter(sent_data->handle().size(), '\0');
+    std::memcpy(ref_counter.data(), (sent_data->handle()).c_str(), sent_data->handle().size());
     ref_counter_offset = sent_data->offset();
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -492,17 +496,15 @@ CUDAHooks::StorageShareDevice(const c10::Storage& storage) const {
             cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
     }
     size_t ipc_event_handle_size = CUDA_IPC_HANDLE_SIZE;
+    std::string event_handle(ipc_event_handle_size, '\0');
+    std::memcpy(event_handle.data(), (char*)&ipc_event_handle, ipc_event_handle_size);
     event_sync_required = sent_data->event_sync_required_;
-
-    ss1.write(shandle.handle.c_str(), CUDA_IPC_HANDLE_SIZE);
-    ss2.write(sent_data->handle().c_str(), sent_data->handle().size());
-    ss3.write((char*)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
-    auto ipc_handles = IPCHandlePimpl{ss1.str(), ss2.str(), ss3.str()};
 
     // Return the results as a tuple
     return std::make_tuple(ipc_memory_handle_size, ipc_event_handle_size,
-                           offset_bytes, ref_counter_offset,
-                           event_sync_required, ipc_handles);
+                           offset_bytes, std::move(memory_handle),
+                           std::move(event_handle), std::move(ref_counter),
+                           ref_counter_offset, event_sync_required);
 }
 
 
@@ -518,7 +520,7 @@ c10::DataPtr CUDAHooks::StorageNewSharedDevice(c10::DeviceIndex device,
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaEvent_t event = nullptr;
+    cudaEvent_t event;
     cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     C10_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));

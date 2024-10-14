@@ -56,7 +56,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
-  std::tuple<size_t, size_t, ptrdiff_t, uint64_t, bool, c10::IPCHandlePimpl>
+  std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
   StorageShareDevice(const c10::Storage& storage) const override;
   c10::DataPtr StorageNewSharedDevice(c10::DeviceIndex device,
                                       bool event_sync_required,
