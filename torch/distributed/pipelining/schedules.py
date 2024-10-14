@@ -1845,7 +1845,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-        enable_zero_bubble: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -1855,13 +1854,11 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-            use_full_backward=not enable_zero_bubble,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
         self.number_of_rounds = max(1, n_microbatches // self.pp_group_size)
         self.microbatches_per_round = n_microbatches // self.number_of_rounds
-        self.enable_zero_bubble = enable_zero_bubble
         if n_microbatches % self.number_of_rounds != 0:
             raise ValueError(
                 "Interleaved 1F1B requires the number of microbatches to be a "
@@ -1883,7 +1880,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 self.n_local_stages - 1
             ) * self.microbatches_per_round
             # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 1 if self.enable_zero_bubble else 2
+            multiply_factor = 2
             warmup_ops = warmups_ops_last_stage + multiply_factor * (
                 (self.pp_group_size - 1) - rank
             )
@@ -1910,7 +1907,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         )
 
         # Calculates the stage index based on step and pp_group_size
-
         def forward_stage_index(step):
             # Get the local index from 0 to n_local_stages-1
             local_index = (step // self.microbatches_per_round) % self.n_local_stages
