@@ -109,7 +109,7 @@ jobs:
           push: true
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@retry-docker-build-step
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
