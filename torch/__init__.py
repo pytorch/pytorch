@@ -935,6 +935,7 @@ for __name in dir(_C):
                 # TODO: fix their module from C++ side
                 if __name not in {
                     "DisableTorchFunctionSubclass",
+                    "EnableTorchFunction",
                     "DisableTorchFunction",
                     "Generator",
                 }:
