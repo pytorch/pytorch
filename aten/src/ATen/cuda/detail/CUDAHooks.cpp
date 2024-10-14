@@ -84,7 +84,7 @@ struct _Initializer {
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-void CUDAHooks::initCUDA() const {
+void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
