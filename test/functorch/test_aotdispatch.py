@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import nullcontext
+from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
@@ -5746,6 +5746,62 @@ def forward(self, tangents_1, tangents_2):
             self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
 
 
+class GradsNoForceContiguousContextManager(ContextDecorator):
+    def __enter__(self):
+        # flake8: noqa: TOR901
+        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+        self.lib.define("foo(Tensor x) -> Tensor")
+        self.lib.define("foo2(Tensor x) -> Tensor")
+
+        def foo_impl(a):
+            return a.clone()
+
+        def foo_meta(a):
+            return a.clone()
+
+        def foo2_impl(x):
+            self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            return x.clone()
+
+        def foo2_meta(a):
+            return a.clone()
+
+        for backend in ["CPU", "CUDA"]:
+            self.lib.impl("foo", foo_impl, backend)
+            self.lib.impl("foo2", foo2_impl, backend)
+
+        self.lib.impl("foo", foo_meta, "Meta")
+        self.lib.impl("foo2", foo2_meta, "Meta")
+
+        def foo_bwd(ctx, grad):
+            torch.ops._mylib.foo2(grad)
+            return grad.clone()
+
+        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.lib._destroy()
+        return False
+
+    def reset_counters(self):
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
@@ -5969,12 +6025,172 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    # Next several tests are related to issue:
+    # https://github.com/pytorch/pytorch/issues/134644
+    # AOTD tries to predict tangents for tracing ahead of time.
+    # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
+    # But for models working in channels_last memory format this will add additional contiguous() calls.
+    # The fix is predicting tangents memory format to be similar to outputs memory format.
+    # And coerce runtime tangents to that traced memory format.
+    def test_grads_no_force_contiguous_dense(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y, cont_inp):
+                    z = y + 3
+                    y.mul_(2)
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return (
+                        r,
+                        r.transpose(0, 1),
+                        z.view(-1),
+                        z.transpose(0, 1),
+                        cont_inp * 2,
+                    )
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def dense_inps():
+                return (
+                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True),
+                )
+
+            ref_inps = dense_inps()
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            inps = dense_inps()
+            outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 1)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r, y + 1
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn():
+                return (
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                    torch.randn(3, 2, requires_grad=True).clone(),
+                )
+
+            ref_outs = m(*inps_fn())
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps_fn())
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 2)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn(x):
+                return (
+                    TwoTensor(
+                        TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                    ),
+                )
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            ref_inps = inps_fn(x)
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            inps = inps_fn(x)
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+            self.assertEqual(ctx.d[torch.channels_last], 4)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_tensor_tangent(self):
+        # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
+        # Adding test to verify that it is handled.
+        def fn(x):
+            return x.clone()
+
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(nt)
+        out_buffer = out.values()
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                self.wt = torch.randn(3, 4)
 
             def forward(self, x):
                 return (
@@ -5982,6 +6198,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                         dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
                     )
                     + self.w
+                    + self.wt
                 )
 
         m = M()
@@ -6090,12 +6307,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_segment_reduce", "lengths"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail(
-        "_segment_reduce", "offsets"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "_upsample_bilinear2d_aa"

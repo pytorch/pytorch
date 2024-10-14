@@ -243,10 +243,14 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
             optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
+            # We should always do the normalization_pass first
+            if "normalization_pass" in config.pre_grad_fusion_options:
+                pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
-                if pass_name in PRE_GRAD_FUSIONS:
+                if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(

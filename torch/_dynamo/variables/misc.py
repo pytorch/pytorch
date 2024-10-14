@@ -8,7 +8,8 @@ import random
 import re
 import sys
 import types
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+import warnings
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -348,21 +349,6 @@ class ClosureVariable(UnknownVariable):
         codegen.append_output(codegen.create_load_closure(self.name))
 
 
-# closure variable created by an inlined function
-class InlinedClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -441,9 +427,11 @@ class InspectSignatureVariable(VariableTracker):
             if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
-                    k: None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
+                    k: (
+                        None
+                        if self.source is None
+                        else DefaultsSource(self.source, k, is_kw=True)
+                    )
                     for k in self.fn.__kwdefaults__
                 }
                 defaults = {
@@ -658,11 +646,12 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
-        if (
-            requires_grad
-            and torch.is_grad_enabled()
-            and config.capture_autograd_function
-        ):
+        if requires_grad and torch.is_grad_enabled():
+            if config.capture_autograd_function:
+                warnings.warn(
+                    "The config.capture_autograd_function flag is deprecated, it's now always true."
+                )
+
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
@@ -1628,9 +1617,6 @@ class RandomVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.random
-
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        raise NotImplementedError
 
     @staticmethod
     def is_supported_random_obj(val):
