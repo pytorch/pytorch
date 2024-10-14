@@ -12,8 +12,8 @@ import dataclasses
 import functools
 import importlib
 import itertools
-import logging
 import json
+import logging
 import os
 import shutil
 import signal
@@ -50,7 +50,6 @@ from tqdm.auto import tqdm, trange
 import torch
 import torch._dynamo
 import torch._dynamo.utils
-from torch._dynamo.utils import calculate_time_spent
 import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
@@ -381,7 +380,9 @@ def output_csv(filename, headers, row):
 def get_suite_from_model_iter_fn(model_iter_fn):
     # TODO: This is a bit of a hack
     suite = None
-    if (runner := getattr(model_iter_fn, '__self__', None)) and hasattr(runner, "suite_name"):
+    if (runner := getattr(model_iter_fn, "__self__", None)) and hasattr(
+        runner, "suite_name"
+    ):
         suite = runner.suite_name
     return suite
 
@@ -401,20 +402,52 @@ def output_signpost(data, args, suite, error=None):
     # I generated this list by reading through all the configs and dropping
     # ones that looked irrelevant or redundant
     for k in [
-        "filter", "exclude", "exclude_exact", "dump_raw_metrics",
-        "log_operator_inputs", "distributed_master_port",
-        "skip_accuracy_check", "generate_aot_autograd_stats", "output",
-        "output_directory", "disable_output", "export_profiler_trace",
-        "profiler_trace_name", "explain", "stats", "print_memory",
-        "print_compilation_time", "print_dataframe_summary",
-        "print_graph_breaks", "log_graph_breaks", "timing", "progress",
-        "timeout", "per_process_memory_fraction", "minify", "verbose",
-        "quiet", "print_fx", "print_aten_ops", "log_conv_args",
-        "recompile_profiler", "find_batch_sizes",
+        "filter",
+        "exclude",
+        "exclude_exact",
+        "dump_raw_metrics",
+        "log_operator_inputs",
+        "distributed_master_port",
+        "skip_accuracy_check",
+        "generate_aot_autograd_stats",
+        "output",
+        "output_directory",
+        "disable_output",
+        "export_profiler_trace",
+        "profiler_trace_name",
+        "explain",
+        "stats",
+        "print_memory",
+        "print_compilation_time",
+        "print_dataframe_summary",
+        "print_graph_breaks",
+        "log_graph_breaks",
+        "timing",
+        "progress",
+        "timeout",
+        "per_process_memory_fraction",
+        "minify",
+        "verbose",
+        "quiet",
+        "print_fx",
+        "print_aten_ops",
+        "log_conv_args",
+        "recompile_profiler",
+        "find_batch_sizes",
         # Redundant
-        "batch_size", "batch_size_file", "only", "diff_branch", "tag",
-        "coverage", "overhead", "speedup_dynamo_ts", "speedup_fx2trt",
-        "speedup_fx2trt_fp16", "accuracy", "performance", "tolerance",
+        "batch_size",
+        "batch_size_file",
+        "only",
+        "diff_branch",
+        "tag",
+        "coverage",
+        "overhead",
+        "speedup_dynamo_ts",
+        "speedup_fx2trt",
+        "speedup_fx2trt_fp16",
+        "accuracy",
+        "performance",
+        "tolerance",
     ]:
         del filtered_args[k]
 
@@ -426,20 +459,28 @@ def output_signpost(data, args, suite, error=None):
     elif args.performance:
         event_name = "performance"
 
+    from torch._dynamo.utils import calculate_time_spent, compilation_time_metrics
+
     open_source_signpost(
         subsystem="dynamo_benchmark",
         name=event_name,
-        parameters=json.dumps({
-            **data,
-            # TODO: Arguably the rest of these should be in the CSV too
-            "suite": suite,
-            # Better than using compile_times utils directly
-            "compilation_metrics": calculate_time_spent(),
-            "simple_call_counter": simple_call_counter,
-            # NB: args has training vs inference
-            "args": filtered_args,
-            "error": error,
-        }),
+        parameters=json.dumps(
+            {
+                **data,
+                # TODO: Arguably the rest of these should be in the CSV too
+                "suite": suite,
+                # Better than using compile_times utils directly
+                # NB: Externally, compilation_metrics colloquially refers to
+                # the coarse-grained phase timings, even though internally
+                # they are called something else
+                "compilation_metrics": calculate_time_spent(),
+                "detailed_compilation_metrics": compilation_time_metrics,
+                "simple_call_counter": simple_call_counter,
+                # NB: args has training vs inference
+                "args": filtered_args,
+                "error": error,
+            }
+        ),
     )
 
 
@@ -2803,7 +2844,7 @@ class BenchmarkRunner:
 
             output_signpost(
                 dict(zip(o_headers, o_fields)),
-                args,
+                self.args,
                 self.suite_name,
             )
 
@@ -3122,10 +3163,7 @@ class BenchmarkRunner:
                 write_csv_when_exception(
                     self.args, current_name, "warmup_failed", current_device
                 )
-                # If you use this for more stuff beyond quantization, update
-                # the hardcoded "quantization" below too
-                assert args.backend == "torchao"
-                output_signpost({}, args, self.suite_name, error="warmup_failed")
+                output_signpost({}, self.args, self.suite_name, error="warmup_failed")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -3287,7 +3325,7 @@ class BenchmarkRunner:
                 write_csv_when_exception(
                     self.args, current_name, "warmup_failed", current_device
                 )
-                output_signpost({}, args, self.suite_name, error="warmup_failed")
+                output_signpost({}, self.args, self.suite_name, error="warmup_failed")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -4761,7 +4799,12 @@ def run(runner, args, original_dir=None):
                     write_csv_when_exception(args, name, status, device)
                     # NB: current_name/current_device not set, so pass
                     # explicitly
-                    output_signpost({"name": name, "dev": device}, args, runner.suite_name, error=status)
+                    output_signpost(
+                        {"name": name, "dev": device},
+                        args,
+                        runner.suite_name,
+                        error=status,
+                    )
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -4876,7 +4919,9 @@ def run(runner, args, original_dir=None):
                 write_csv_when_exception(args, name, "timeout")
                 # NB: device is potentially multiple here, though we should
                 # try our best to report in anyway TODO
-                output_signpost({"name": name}, args, runner.suite_name, error="timeout")
+                output_signpost(
+                    {"name": name}, args, runner.suite_name, error="timeout"
+                )
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
                 print("Output: ", e.output, file=sys.stderr)
