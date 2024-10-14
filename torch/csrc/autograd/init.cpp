@@ -383,10 +383,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
-  m.def("_unsafe_set_version_counter", [](const at::Tensor& t, int64_t i) {
-    auto vc = torch::autograd::impl::version_counter(t);
-    vc.set_version(i);
-  });
+  m.def(
+      "_unsafe_set_version_counter",
+      [](const std::vector<at::Tensor>& tensors,
+         const std::vector<int64_t>& versions) {
+        auto tensors_len = tensors.size();
+        auto versions_len = versions.size();
+        TORCH_CHECK(
+            tensors_len == versions_len,
+            "tensors_len=",
+            tensors_len,
+            ", versions_len=",
+            versions_len);
+        for (const auto i : c10::irange(tensors_len)) {
+          auto vc = torch::autograd::impl::version_counter(tensors[i]);
+          vc.set_version(versions[i]);
+        }
+      });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
