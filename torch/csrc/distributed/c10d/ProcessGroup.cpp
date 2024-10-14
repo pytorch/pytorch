@@ -169,6 +169,14 @@ class WorkRegistry {
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
+    if (!tensor.has_storage()) {
+      TORCH_WARN_ONCE(
+          "Registering collective work for tensor without storage is not supported. "
+          "Calling c10d_functional.wait_tensor() on this tensor will not wait for the collective to complete. "
+          "Unsupported tensor type: " +
+          tensor.toString());
+      return;
+    }
     auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
 
@@ -237,10 +245,11 @@ class WorkRegistry {
       TORCH_WARN(
           "At the time of process termination, there are still ",
           registry_size,
-          " unwaited c10d_functional collective calls. "
-          "Please review your program to ensure c10d_functional.wait_tensor() "
-          "is invoked on all tensors returned from c10d_functional collective "
-          "ops before they are used.");
+          " unwaited collective calls. "
+          "Please review your program to ensure that:\n"
+          "1. c10d_functional.wait_tensor() is invoked on all tensors returned from c10d_functional collective,\n"
+          "2. work.wait() is invoked on work object returned from torch.distributed collective with async_op=True,\n"
+          "before the output tensors of the collective are used.");
     }
     for (auto& it : registry_) {
       for (auto& work : it.second) {
