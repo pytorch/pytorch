@@ -3008,6 +3008,15 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuStreamWriteValue32",
             ("hipStreamWriteValue32", CONV_STREAM, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cuMemGetAllocationGranularity",
+         ("hipMemGetAllocationGranularity", CONV_MEM, API_DRIVER)
+        ),
+        ("cuMemExportToShareableHandle",
+         ("hipMemExportToShareableHandle", CONV_MEM, API_DRIVER)
+        ),
+        ("cuMemImportFromShareableHandle",
+         ("hipMemImportFromShareableHandle", CONV_MEM, API_DRIVER)
+        ),
         (
             "cuStreamBatchMemOp",
             ("hipStreamBatchMemOp", CONV_STREAM, API_DRIVER, HIP_UNSUPPORTED),
