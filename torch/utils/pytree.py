@@ -15,8 +15,11 @@ collection support for PyTorch APIs.
 import os as _os
 from dataclasses import dataclass as _dataclass
 from typing import (
+    Any as _Any,
     Callable as _Callable,
     Literal as _Literal,
+    Optional as _Optional,
+    Type as _Type,
     TYPE_CHECKING as _TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
@@ -30,7 +33,10 @@ if _TYPE_CHECKING:
 
     import torch.utils._cxx_pytree as cxx
     from torch.utils._cxx_pytree import (
-        register_pytree_node as register_pytree_node,
+        FlattenFunc as FlattenFunc,
+        FlattenWithKeysFunc as FlattenWithKeysFunc,
+        FromDumpableContextFn as FromDumpableContextFunc,
+        ToDumpableContextFn as ToDumpableContextFunc,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
         tree_any as tree_any,
@@ -45,6 +51,7 @@ if _TYPE_CHECKING:
         tree_structure as tree_structure,
         tree_unflatten as tree_unflatten,
         treespec_pprint as treespec_pprint,
+        UnflattenFunc as UnflattenFunc,
     )
 
 
@@ -94,6 +101,63 @@ if PYTORCH_USE_CXX_PYTREE:
     implementation = PyTreeImplementation(module=cxx, name="cxx")
 
 
+def register_pytree_node(
+    cls: _Type[_Any],
+    /,
+    # intentionally use `*_func` over `*_fn` to match annotations
+    flatten_func: "FlattenFunc",
+    unflatten_func: "UnflattenFunc",
+    *,
+    serialized_type_name: _Optional[str] = None,
+    to_dumpable_context: _Optional["ToDumpableContextFunc"] = None,
+    from_dumpable_context: _Optional["FromDumpableContextFunc"] = None,
+    # intentionally use `*_func` over `*_fn` to match annotations
+    flatten_with_keys_func: _Optional["FlattenWithKeysFunc"] = None,
+) -> None:
+    """Register a container-like type as pytree node.
+
+    Args:
+        cls (type): A Python type to treat as an internal pytree node.
+        flatten_func (callable): A function to be used during flattening, taking an instance of
+            ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
+            recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
+            passed to the ``unflatten_func``.
+        unflatten_func (callable): A function taking two arguments: the auxiliary data that was
+            returned by ``flatten_func`` and stored in the treespec, and the unflattened children.
+            The function should return an instance of ``cls``.
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
+        to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable representation. This is
+            used for json serialization, which is being used in :mod:`torch.export` right now.
+        from_dumpable_context (callable, optional): An optional keyword argument to custom specify
+            how to convert the custom json dumpable representation of the context back to the
+            original context. This is used for json deserialization, which is being used in
+            :mod:`torch.export` right now.
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> # Registry a Python type with lambda functions
+        >>> register_pytree_node(
+        ...     set,
+        ...     lambda s: (sorted(s), None, None),
+        ...     lambda children, _: set(children),
+        ... )
+    """
+    implementation.module.register_pytree_node(
+        cls,
+        # intentionally use `*_func` over `*_fn` to match annotations
+        flatten_fn=flatten_func,
+        unflatten_fn=unflatten_func,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+        # intentionally use `*_func` over `*_fn` to match annotations
+        flatten_with_keys_fn=flatten_with_keys_func,
+    )
+
+
 _P = _ParamSpec("_P")
 _T = _TypeVar("_T")
 
@@ -113,7 +177,6 @@ def _reexport(func: _Callable[_P, _T]) -> _Callable[_P, _T]:
 
 
 # flake8: noqa: F811
-register_pytree_node = _reexport(implementation.module.register_pytree_node)
 tree_flatten = _reexport(implementation.module.tree_flatten)
 tree_unflatten = _reexport(implementation.module.tree_unflatten)
 tree_iter = _reexport(implementation.module.tree_iter)
