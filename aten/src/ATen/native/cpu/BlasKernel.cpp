@@ -14,29 +14,29 @@ void fp16_gemv_notrans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy);
 
 void fp16_gemv_trans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy);
 
 float fp16_dot_with_fp32_arith(
-  const float16_t* x,
-  const float16_t* a,
+  const Half* x,
+  const Half* a,
   int64_t len);
 
 float bf16_dot_with_fp32_arith(
@@ -342,7 +342,7 @@ void gemm_notrans_(
     int64_t ldc) {
   // c += alpha * (a @ b)
   if (n == 1 && beta == 0.0 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
+    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, a, lda, b, 1, 0.0, c, 1);
     return;
   }
   for (const auto i : c10::irange(m)) {
@@ -369,9 +369,7 @@ inline float32x4_t load_as_float32x4(const BFloat16* ptr) {
 
 static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
   return at::native::blas_impl::fp16_dot_with_fp32_arith(
-    reinterpret_cast<const float16_t*>(a),
-    reinterpret_cast<const float16_t*>(b),
-    len);
+      a, b, len);
 }
 
 static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
@@ -389,7 +387,7 @@ void gemm_transa_(
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
   if (n == 1 && beta == 0.0 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, 0.0, c, 1);
     return;
   }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
