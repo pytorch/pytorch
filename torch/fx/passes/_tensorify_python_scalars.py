@@ -63,12 +63,6 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # TODO: make sure this runs before CPU->CUDA pass for cudagraph friendliness
 
 
-SUPPORTED_OPS = {
-    torch.ops.aten.mul.Tensor,
-    torch.ops.aten.add.Tensor,
-}
-
-
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 def tensorify_python_scalars(
     gm: GraphModule, shape_env: ShapeEnv, fake_mode: fake_tensor.FakeTensorMode
@@ -210,8 +204,10 @@ def tensorify_python_scalars(
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
                 for a in node.args:
-                    if isinstance(a, fx.Node) and isinstance(
-                        zf := a.meta["val"], torch.SymFloat
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
                         transform = True
                         try:
