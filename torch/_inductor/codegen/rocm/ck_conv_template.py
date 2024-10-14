@@ -352,6 +352,11 @@ class CKConvTemplate(CKTemplate):
             argument.Print();
             return -23;
         }
+        if (workspace_size) {
+            *workspace_size = conv.GetWorkSpaceSize(&argument);
+            return 0;
+        }
+
         if (p_a == nullptr) {
             std::cerr << "p_a is nullptr" << std::endl;
             return -1;
@@ -364,10 +369,7 @@ class CKConvTemplate(CKTemplate):
             std::cerr << "p_e is nullptr" << std::endl;
             return -1;
         }
-        if (workspace_size) {
-            *workspace_size = conv.GetWorkSpaceSize(&argument);
-            return 0;
-        }
+
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
