@@ -155,7 +155,7 @@ mha_varlen_fwd(const at::Tensor &q,                   // total_q x num_heads x h
                const at::Tensor &cu_seqlens_q,  // b+1
                const at::Tensor &cu_seqlens_k,  // b+1
                c10::optional<at::Tensor> & /*seqused_k*/,
-               //               c10::optional<at::Tensor> &block_table_,  // batch_size x max_num_blocks_per_seq
+               c10::optional<at::Tensor> &block_table_,  // batch_size x max_num_blocks_per_seq
                c10::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
                int max_seqlen_q,
                const int max_seqlen_k,

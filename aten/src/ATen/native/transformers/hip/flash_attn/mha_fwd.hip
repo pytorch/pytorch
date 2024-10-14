@@ -2,10 +2,15 @@
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
-#include "flash_common_hip.hpp"
+#include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
 
 #include "third_party/composable_kernel/example/ck_tile/01_fmha/fmha_fwd.hpp"
 #include "third_party/composable_kernel/example/ck_tile/01_fmha/mask.hpp"
+
+
+
+namespace pytorch_flash {
+
 
 fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                                        std::string dtype,
@@ -40,7 +45,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                                    const at::Tensor q,
                                    const at::Tensor k,
                                    const at::Tensor v,
-                                   c10::optional<at::Tensor> &alibi_slopes_,
+                                   std::optional<at::Tensor> &alibi_slopes_,
                                    at::Tensor out,
                                    at::Tensor softmax_lse,
                                    at::Tensor dropout_randval,
@@ -139,7 +144,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          drop_seed_offset};
 }
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num_heads x head_size
+mha_fwd(const at::Tensor &q,                      // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,                      // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &v,                      // batch_size x seqlen_k x num_heads_k x head_size
         c10::optional<at::Tensor> &out_,          // batch_size x seqlen_q x num_heads xhead_size
@@ -206,25 +211,26 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
     // H/t Daniel Haziza
     const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value();
     const int ngroups = num_heads / num_heads_k;
+    at::Tensor temp_q = q;
     if (seqlenq_ngroups_swapped) {
-        q = q.reshape({batch_size, num_heads_k, ngroups, head_size}).transpose(1, 2);
+        temp_q = q.reshape({batch_size, num_heads_k, ngroups, head_size}).transpose(1, 2);
         seqlen_q = ngroups;
         num_heads = num_heads_k;
     }
 
-    CHECK_SHAPE(q, batch_size, seqlen_q, num_heads, head_size);
+    CHECK_SHAPE(temp_q, batch_size, seqlen_q, num_heads, head_size);
     CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size);
     CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size);
 
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size % 8 != 0) {
-        q_padded = at::pad(q, {0, 8 - head_size % 8});
+        q_padded = at::pad(temp_q, {0, 8 - head_size % 8});
         k_padded = at::pad(k, {0, 8 - head_size % 8});
         v_padded = at::pad(v, {0, 8 - head_size % 8});
     }
     else {
-        q_padded = q;
+        q_padded = temp_q;
         k_padded = k;
         v_padded = v;
     }
@@ -350,8 +356,9 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
 
     if (seqlenq_ngroups_swapped) {
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
-        q = q.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
+        q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
     return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
+} //namespace pytorch_flash
