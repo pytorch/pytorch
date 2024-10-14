@@ -69,7 +69,6 @@ SUPPORTED_OPS = {
     torch.ops.aten.sub.Tensor,
 }
 
-
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 def tensorify_python_scalars(
     gm: GraphModule, shape_env: ShapeEnv, fake_mode: fake_tensor.FakeTensorMode
@@ -205,7 +204,7 @@ def tensorify_python_scalars(
                     )
 
             # Look for functions to convert
-            if node.op == "call_function" and node.target in SUPPORTED_OPS:
+            if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
                 args = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
@@ -231,7 +230,7 @@ def tensorify_python_scalars(
                         args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
 
                 if transform:
-                    replacement_proxy = node.target(*args)
+                    replacement_proxy = torch.ops.aten.mul.Tensor(*args)
 
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
