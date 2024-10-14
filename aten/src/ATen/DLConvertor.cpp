@@ -22,6 +22,13 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::Int1:
+    case ScalarType::Int2:
+    case ScalarType::Int3:
+    case ScalarType::Int4:
+    case ScalarType::Int5:
+    case ScalarType::Int6:
+    case ScalarType::Int7:
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
