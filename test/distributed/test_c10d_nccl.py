@@ -3110,6 +3110,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_wait_tensor(self) -> None:
+        # Verify that c10d_functional.wait_tensor() can be invoked on output tensor of non-functional collective
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
+        torch.ops.c10d_functional.wait_tensor(input1)
+
+        input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
+        work.wait()
+        self.assertEqual(input1, input2)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_nccl_warn_not_in_group_debug_detail(self):
         self._test_warn_not_in_group(backend="nccl")
