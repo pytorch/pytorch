@@ -6307,12 +6307,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_segment_reduce", "lengths"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail(
-        "_segment_reduce", "offsets"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "_upsample_bilinear2d_aa"
@@ -6627,7 +6621,7 @@ class MockFXGraphCache:
             graph = make_boxed_func(graph)
         return graph, {}
 
-    def post_compile(self, graph, constants, inputs, cudagraphs):
+    def post_compile(self, graph, gm, inputs, cudagraphs):
         return graph
 
 

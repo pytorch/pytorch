@@ -335,10 +335,7 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        constants = result.get_constants_from_gm(gm)
-        FxGraphCache.post_compile(
-            result, constants, example_inputs, fx_config["cudagraphs"]
-        )
+        FxGraphCache.post_compile(result, gm, example_inputs, fx_config["cudagraphs"])
         result._boxed_call = True
         return result
 
@@ -374,6 +371,12 @@ class AOTAutogradCacheEntry:
     # Forward and Backward info
     compiled_fw: CompiledForward
     compiled_bw: Optional[CompiledBackward]
+
+    # Code of the joint graph using print_readable()
+    # Used for logging purposes
+    aot_joint_graph_str: Optional[str]
+    aot_forward_graph_str: Optional[str]
+    aot_backward_graph_str: Optional[str]
 
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
@@ -418,6 +421,25 @@ class AOTAutogradCacheEntry:
 
         Which we'll handle separately later on, if necessary.
         """
+
+        # Log the output of AOTAutogradCache
+        if aot_config.enable_log:
+            # TODO: maybe also log to aot_graphs_log
+            # Unfortunately aot_graphs_log uses
+            # slightly different formatting though
+            if self.aot_joint_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+            if self.aot_forward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_forward_graph", payload_fn=lambda: self.aot_forward_graph_str
+                )
+            if self.aot_backward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+
         compiled_fw_func = self.compiled_fw.load(gm, args, fx_config)
         compiled_bw_func = None
         if self.compiled_bw is not None:

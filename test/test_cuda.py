@@ -749,7 +749,7 @@ class TestCuda(TestCase):
 
         # Record another stream on a shifted view tensor.
         view = base[5:]
-        assert view.storage_offset() > 0
+        self.assertTrue(view.storage_offset() > 0)
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
@@ -1048,7 +1048,9 @@ except RuntimeError as e:
             return torch.stack([t1, t2]).unique().shape[0]
 
         # Use CPU as reference. The results should not deviate too much.
-        assert abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+        self.assertTrue(
+            abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+        )
 
     @parametrize("dtype", [torch.float32, torch.double])
     def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
@@ -1071,7 +1073,7 @@ except RuntimeError as e:
                 run(func, torch.device("cuda"), dtype)
                 - run(func, torch.device("cpu"), dtype)
             )
-            assert deviation < 50_000, deviation
+            self.assertTrue(deviation < 50_000, deviation)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -1627,7 +1629,7 @@ torch.cuda.synchronize()
 
         g.replay()
 
-        self.assertTrue(b.sum().item() == 11000.0)
+        self.assertEqual(b.sum().item(), 11000.0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -1704,7 +1706,7 @@ torch.cuda.synchronize()
             graph_offset = get_final_offsets_of_states(default_generator_state)
 
             # Compare the final offsets of states for both generators to ensure consistency
-            self.assertTrue(offset == graph_offset)
+            self.assertEqual(offset, graph_offset)
             # Compare the states generated outside and inside the graph
             self.assertEqual(random_values, graphed_random_values)
 
@@ -1759,12 +1761,14 @@ torch.cuda.synchronize()
             expected_blocks_diff = 2 * num_generators
             expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
 
-            self.assertTrue(
-                (num_blocks - baseline_num_blocks) == expected_blocks_diff,
+            self.assertEqual(
+                (num_blocks - baseline_num_blocks),
+                expected_blocks_diff,
                 "Unexpected number of active blocks.",
             )
-            self.assertTrue(
-                (total_size - baseline_total_size) == expected_size_diff,
+            self.assertEqual(
+                (total_size - baseline_total_size),
+                expected_size_diff,
                 "Unexpected total memory size.",
             )
 
@@ -1775,8 +1779,9 @@ torch.cuda.synchronize()
             clear_cuda_cache()
 
             # Assert that memory stats return to baseline after cleanup
-            self.assertTrue(
-                get_memory_stats() == baseline,
+            self.assertEqual(
+                get_memory_stats(),
+                baseline,
                 "Memory stats do not match baseline after cleanup.",
             )
 
@@ -1804,7 +1809,7 @@ torch.cuda.synchronize()
 
         g.replay()
 
-        self.assertTrue(b.sum().item() == 11000.0)
+        self.assertEqual(b.sum().item(), 11000.0)
 
         g.reset()
 
@@ -1817,7 +1822,7 @@ torch.cuda.synchronize()
         torch.cuda.current_stream().wait_stream(s)
 
         g.replay()
-        self.assertTrue(b.sum().item() == 22000.0)
+        self.assertEqual(b.sum().item(), 22000.0)
 
         g.reset()
         del g
@@ -3519,8 +3524,8 @@ class TestCudaMallocAsync(TestCase):
                 thealloc()
                 thefree()
                 ss = json.dumps(torch.cuda.memory._snapshot())
-                self.assertTrue(("thefree" in ss) == (context == "all"))
-                self.assertTrue(("thealloc" in ss) == (context != "state"))
+                self.assertEqual(("thefree" in ss), (context == "all"))
+                self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
@@ -3576,7 +3581,7 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory.empty_cache()
 
                 ss = json.dumps(torch.cuda.memory._snapshot())
-                self.assertTrue(("empty_cache" in ss) == (context == "all"))
+                self.assertEqual(("empty_cache" in ss), (context == "all"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
@@ -3599,7 +3604,7 @@ class TestCudaMallocAsync(TestCase):
             for seg in ss:
                 for b in seg["blocks"]:
                     if b["requested_size"] == 311 * 411 * 4:
-                        self.assertTrue(b["frames"][0]["name"] == "foo")
+                        self.assertEqual(b["frames"][0]["name"], "foo")
                         found_it = True
             self.assertTrue(found_it)
 
@@ -3613,7 +3618,7 @@ class TestCudaMallocAsync(TestCase):
         pre_reserved = torch.cuda.memory_reserved()
         total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
-        assert int(fraction_allowed * all_memory) == total_allowed
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
         def alloc(n):
@@ -3644,7 +3649,7 @@ class TestCudaMallocAsync(TestCase):
         pre_reserved = torch.cuda.memory_reserved()
         total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
-        assert int(fraction_allowed * all_memory) == total_allowed
+        self.assertEqual((fraction_allowed * all_memory), total_allowed)
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
         def alloc(n):
@@ -3704,11 +3709,11 @@ class TestCudaMallocAsync(TestCase):
         pow2_div4_mem = torch.cuda.memory_stats()[key_allocated]
         current_requested = torch.cuda.memory_stats()[key_requested]
 
-        self.assertTrue(reg_mem - start_mem == nbytes)
+        self.assertEqual(reg_mem - start_mem, nbytes)
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
-            self.assertTrue(pow2_div4_mem - reg_mem == power2_div(nbytes, 4))
-            self.assertTrue(current_requested - start_requested == nbytes)
+            self.assertEqual(pow2_div4_mem - reg_mem, power2_div(nbytes, 4))
+            self.assertEqual(current_requested - start_requested, nbytes)
 
         torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5")
         torch.cuda.memory._set_allocator_settings(
@@ -3720,7 +3725,7 @@ class TestCudaMallocAsync(TestCase):
         start_mem = torch.cuda.memory_stats()[key_allocated]
         z = torch.rand(nelems, device="cuda")
         reg_mem = torch.cuda.memory_stats()[key_allocated]
-        self.assertTrue(reg_mem - start_mem == nbytes)
+        self.assertEqual(reg_mem - start_mem, nbytes)
 
         # roundup_power2_divisions knob array syntax
         torch.cuda.memory.empty_cache()
@@ -3733,7 +3738,7 @@ class TestCudaMallocAsync(TestCase):
         pow2_div8_mem = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
-            self.assertTrue(pow2_div8_mem - start_mem == power2_div(nbytes, 8))
+            self.assertEqual(pow2_div8_mem - start_mem, power2_div(nbytes, 8))
 
         torch.cuda.memory.empty_cache()
         start_mem = torch.cuda.memory_stats()[key_allocated]
@@ -3742,14 +3747,14 @@ class TestCudaMallocAsync(TestCase):
         pow2_div2_mem = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
-            self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
+            self.assertEqual(pow2_div2_mem - start_mem, power2_div(nbytes_big, 2))
 
         torch.cuda.memory.empty_cache()
         torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
         start_mem = torch.cuda.memory_stats()[key_allocated]
         w = torch.rand(nelems, device="cuda")
         reg_mem = torch.cuda.memory_stats()[key_allocated]
-        self.assertTrue(reg_mem - start_mem == nbytes)
+        self.assertEqual(reg_mem - start_mem, nbytes)
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
@@ -3878,8 +3883,8 @@ class TestCudaMallocAsync(TestCase):
                                     self.assertTrue("case.py" in frame_text)
                                 found = True
                 last_action = mem["device_traces"][0][-1]
-                self.assertTrue(last_action["action"] == "alloc")
-                self.assertTrue(last_action["size"] == 311 * 411 * 4)
+                self.assertEqual(last_action["action"], "alloc")
+                self.assertEqual(last_action["size"], 311 * 411 * 4)
                 self.assertTrue(found)
             finally:
                 m.record(False, False)
@@ -3918,7 +3923,7 @@ class TestCudaMallocAsync(TestCase):
                 nonlocal total
                 idx = random.randrange(0, len(mem))
                 v, x = mem.pop(idx)
-                assert torch.all(v == x)
+                self.assertTrue(torch.all(v == x))
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
@@ -4221,7 +4226,7 @@ class TestBlockStateAbsorption(TestCase):
         device = outputs[0].device.index
 
         for i in range(len(outputs)):
-            self.assertTrue(outputs[i].mean(dtype=torch.float) == 2)
+            self.assertEqual(outputs[i].mean(dtype=torch.float), 2)
 
         state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
@@ -4239,13 +4244,13 @@ class TestBlockStateAbsorption(TestCase):
         ]
 
         for i in range(len(reconstructed_tensors)):
-            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 2)
+            self.assertEqual(reconstructed_tensors[i].mean(dtype=torch.float), 2)
 
         inp.add_(1)
         graph.replay()
 
         for i in range(len(reconstructed_tensors)):
-            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
+            self.assertEqual(reconstructed_tensors[i].mean(dtype=torch.float), 3)
 
         self.setCheckpointPoolState(
             device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]]
