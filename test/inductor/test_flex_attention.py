@@ -1345,8 +1345,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=True)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=False)
+        block_mask_a = torch.compile(create_block_mask)(causal_mask, 1, 1, 512, 512)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512)
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -2069,6 +2069,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
     @supported_platform
+    def test_block_mask_non_divisible(self):
+        seq = torch.arange(1023, device="cuda") // 128
+
+        def mod(b, h, q, kv):
+            return seq[q] == seq[kv]
+
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device="cuda")
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device="cuda")
+        self.run_test_with_call(
+            lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
+            Q_S=1023,
+            KV_S=1023,
+        )
+
+    @supported_platform
     def test_causal_block_non_divisible(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -2562,10 +2577,14 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
+        seq = torch.arange(512, device="cuda") // 127
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        def mask_mod(b, h, q, kv):
+            return (q >= kv) & (seq[q] == seq[kv])
+
+        block_mask = torch.compile(create_block_mask, fullgraph=True)(
+            mask_mod, 1, 1, 512, 512
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
@@ -2576,21 +2595,21 @@ class TestBlockMask(InductorTestCase):
             return q >= kv
 
         torch._dynamo.reset()
-        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
 
         # automatic dynamic shapes triggered and recompilation.
-        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
         # no recompilation.
-        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
@@ -2867,23 +2886,21 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         offsets = length_to_offsets(lengths, device)
 
         document_causal_mask = generate_doc_mask_mod(offsets)
-        block_mask_compiled = create_block_mask(
+        block_mask_compiled = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
-        block_mask = create_block_mask(
+        block_mask = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
         self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
         self.assertEqual(
