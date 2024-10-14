@@ -47,8 +47,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
-invoke_subgraph.tags = ()
-invoke_subgraph.is_view = False
+invoke_subgraph.tags = ()  # type: ignore[attr-defined]
+invoke_subgraph.is_view = False  # type: ignore[attr-defined]
 
 
 def create_invoke_subgraph_op(subgraph, operands):
