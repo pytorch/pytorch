@@ -208,18 +208,11 @@ if HAS_CPU and not torch.backends.mps.is_available():
     copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
 
 if HAS_GPU and not TEST_WITH_ASAN:
-    if GPU_TYPE == "cuda":
 
-        class EfficientConvBNEvalCudaTests(TestCase):
-            device = "cuda"
+    class EfficientConvBNEvalGpuTests(TestCase):
+        device = GPU_TYPE
 
-        copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCudaTests, "cuda")
-    elif GPU_TYPE == "xpu":
-
-        class EfficientConvBNEvalXpuTests(TestCase):
-            device = "xpu"
-
-        copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalXpuTests, "xpu")
+    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalGpuTests, GPU_TYPE)
 
 del EfficientConvBNEvalTemplate
 
