@@ -125,11 +125,13 @@ fi
 (
     set -x
 
-    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+    if [ "$(uname -m)" != "s390x" ]; then
+        # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
+        # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
+        sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
+        sudo systemctl daemon-reload
+        sudo systemctl restart docker
+    fi
 
     DOCKER_BUILDKIT=1 docker build  \
         ${DOCKER_GPU_BUILD_ARG} \
