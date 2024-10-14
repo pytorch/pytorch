@@ -1509,7 +1509,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
     # Do not allow assignment of tensor attributes during export unless
     # the attribute is registered as a buffer.
 
-    STD_ATTRS = {
+    NN_MODULE_STD_ATTRS = [
         "_backward_hooks",
         "_backward_pre_hooks",
         "_buffers",
@@ -1527,6 +1527,14 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         "_state_dict_hooks",
         "_state_dict_pre_hooks",
         "training",
+    ]
+    NN_MODULE_LAZY_STD_ATTRS = [
+        "_initialize_hook",
+        "_load_hook",
+    ]
+    STD_ATTRS = {
+        *NN_MODULE_STD_ATTRS,
+        *NN_MODULE_LAZY_STD_ATTRS,
     }
 
     def _get_attributes(mod):
