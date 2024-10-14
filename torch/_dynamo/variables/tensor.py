@@ -225,6 +225,7 @@ class TensorVariable(VariableTracker):
         # (1) the tensor is a traceable tensor subclass
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
+            fake_val = self.proxy.node.meta["example_value"]
             attrs, ctx = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
             example_value = getattr(fake_val, name)
@@ -242,19 +243,14 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            return
-
-        from ..guards import CLOSURE_VARS, GuardBuilder
+            raise NotImplementedError
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
+
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
-        scope = {
-            "L": tx.output.local_scope,
-            "G": tx.output.global_scope,
-            **CLOSURE_VARS,
-        }
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
         try:
             # We raise in case we get a typerror bug w/ SuperSource.
             # SuperSource has bugs in it atm, and can produce code like
@@ -263,25 +259,25 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            msg = f"{exc!r} raised in eval('{self.source.name()}')"
-            raise NotImplementedError(msg) from exc
+            raise NotImplementedError from exc
 
-        real_value = getattr(_input_associated_real_value, name)
         if _input_associated_real_value is None:
-            return
+            raise NotImplementedError
 
         if object_has_getattribute(_input_associated_real_value):
-            return
+            raise NotImplementedError
 
         if get_custom_getattr(_input_associated_real_value):
-            return
+            raise NotImplementedError
 
+        real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            return
+            raise NotImplementedError
 
+        from ..guards import GuardBuilder
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
@@ -514,8 +510,36 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
+
+        # Only override builtin tensor methods
+        # The user can manually add override handling
+        # with a decorator for other methods (e.g. a dispatch subclass with other methods)
+        has_torch_function_override = False
+        try:
+            inspect.getattr_static(torch.Tensor, name)
+            has_torch_function_override = True
+        except AttributeError:
+            has_torch_function_override = False
+
+        if (
+            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            and has_torch_function_override
+        ):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx, AttrSource(AttrSource(self.source, "__class__"), name)
+                )(inspect.getattr_static(torch.Tensor, name))
+            else:
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
+
+            return dispatch_torch_function(
+                tx, func_var, tuple([self] + list(args)), kwargs
+            )
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -606,6 +630,10 @@ class TensorVariable(VariableTracker):
     def method_is_floating_point(self):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
+
+    def method_is_inference(self):
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return ConstantVariable.create(fake.is_inference())
 
     def method_is_complex(self):
         if self.dtype is not None:
@@ -772,6 +800,30 @@ class TensorVariable(VariableTracker):
             self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
 
+    def method___getitem__(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import wrap_fx_proxy
+
+        tx = InstructionTranslator.current_tx()
+        if isinstance(args[0], SymNodeVariable):
+            # Standard indexing will force specialization due to
+            # __index__.  Rewrite as a regular torch op which will
+            # trace fine
+            fn, args = torch.select, [
+                variables.ConstantVariable.create(0),
+                args[0],
+            ]
+        else:
+            fn = operator.getitem
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            fn,
+            *proxy_args_kwargs([self] + list(args), kwargs),
+        )
+
+        return wrap_fx_proxy(tx, proxy)
+
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
@@ -822,15 +874,6 @@ class TensorVariable(VariableTracker):
             else:
                 return False
 
-        if (
-            has_bool_key(key)
-            and isinstance(value, TensorVariable)
-            and value.requires_grad
-            and torch.is_grad_enabled()
-        ):
-            unimplemented(
-                "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
-            )
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
@@ -1173,6 +1216,8 @@ class NumpyNdarrayVariable(TensorVariable):
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
 
+        result = None
+
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
 
@@ -1191,7 +1236,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 (self.as_proxy(), name),
                 {},
             )
-            return NumpyNdarrayVariable.create(tx, proxy)
+            result = NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -1220,8 +1265,9 @@ class NumpyNdarrayVariable(TensorVariable):
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
-        else:
-            return super().var_getattr(tx, name)
+        if result is None:
+            raise NotImplementedError
+        return result
 
     @staticmethod
     def patch_args(name, args, kwargs):

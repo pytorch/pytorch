@@ -4,8 +4,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
-#include <limits>
-
 namespace torch::lazy {
 
 std::vector<int64_t> DropDimensions(
@@ -57,7 +55,8 @@ int64_t GetCanonicalPosition(
     c10::ArrayRef<int64_t> dimensions,
     int64_t dim,
     int64_t pos) {
-  dim = GetCanonicalDimensionIndex(dim, dimensions.size());
+  dim =
+      GetCanonicalDimensionIndex(dim, static_cast<int64_t>(dimensions.size()));
   if (pos < 0) {
     pos = GetCanonicalDimensionIndex(pos, dimensions[dim]);
   } else {

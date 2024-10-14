@@ -7,7 +7,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class Foo(torch.nn.Module):
@@ -43,8 +43,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()
 
-        self.model = Foo().to("cuda")
-        self.inputs = torch.ones((2048, 1), device="cuda")
+        self.model = Foo().to(GPU_TYPE)
+        self.inputs = torch.ones((2048, 1), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)

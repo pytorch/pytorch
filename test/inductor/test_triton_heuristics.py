@@ -126,6 +126,7 @@ class TestTritonHeuristics(TestCase):
             "configs": configs,
             "save_cache_hook": False,
             "mutated_arg_names": [],
+            "optimize_mem": True,
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
@@ -146,7 +147,7 @@ class TestTritonHeuristics(TestCase):
             autotuner = CachingAutotuner(**args)
 
     def test_autotune_hints_to_configs(self):
-        device_props = DeviceProperties.create(torch.device("cuda"))
+        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
 
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}

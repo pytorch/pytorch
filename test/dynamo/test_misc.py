@@ -92,18 +92,12 @@ HAS_OPTREE = importlib.util.find_spec("optree")
 if HAS_OPTREE:
     import optree
 
-mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
 
 # Defined in CPython's Include/object.h
 TPFLAGS_MAPPING = 1 << 6
-
-
-# A class defined in the global scope, used in MiscTests.test_const_getattr
-class _B:
-    def __init__(self):
-        pass
 
 
 # Specializes a test to run only if translation validation is set.
@@ -1043,7 +1037,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 ret = ret + v
             return ret
 
-        from torch._dynamo.guards import build_guard_function, CLOSURE_VARS
+        from torch._dynamo.guards import build_guard_function
 
         x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
         _, guards = torch._dynamo.export(fn, x)
@@ -1416,28 +1410,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         # One recompile per differing input type
         self.assertEqual(cnts.frame_count, 3)
 
-    def test_const_getattr(self):
-        # See https://github.com/pytorch/pytorch/issues/118675
-        def fn(x):
-            y = x[f"{_B.__module__}.{_B.__name__}"]
-            z = x[f"{_B.__class__.__module__}.{_B.__name__}"]
-            u = x[f"{_B.__class__.__module__}.{_B.__class__.__qualname__}"]
-            return y + z + u
-
-        args = (
-            {
-                f"{_B.__module__}._B": torch.randn(10),
-                "builtins._B": torch.randn(10),
-                "builtins.type": torch.randn(10),
-            },
-        )
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-
-        self.assertEqual(fn(*args), opt_fn(*args))
-        self.assertEqual(cnts.frame_count, 1)
-
     def test_cell_output1(self):
         out = None
 
@@ -1684,8 +1656,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_namedtuple1(self):
         def fn(a, b):
-            tmp = mytuple(a, b, a + b)
-            return mytuple(tmp.a, tmp[1], tmp.ab + b)
+            tmp = MyTuple(a, b, a + b)
+            return MyTuple(tmp.a, tmp[1], tmp.ab + b)
 
         v1 = torch.Tensor([10])
         v2 = torch.Tensor([20])
@@ -1708,23 +1680,47 @@ utils_device.CURRENT_DEVICE == None""".split(
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertEqual(opt_fn(mytuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
     def test_namedtuple3(self):
         def fn(x, packed):
-            if isinstance(packed, mytuple):
+            if isinstance(packed, MyTuple):
                 return x + 1
             else:
                 return x - 1
 
         x = torch.rand([2, 3])
-        packed = mytuple(1, 2, 3)
+        packed = MyTuple(1, 2, 3)
         ref = fn(x, packed)
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, packed)
         self.assertTrue(same(ref, res))
+
+    def test_structseq1(self):
+        def fn(x, y):
+            return torch.return_types.max((x, y))
+
+        x = torch.randn(3, 2)
+        y = torch.randn(2, 4)
+        expected = fn(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x, y)
+
+        self.assertEqual(actual, expected)
+
+    def test_structseq2(self):
+        def fn(x, y):
+            return tuple(torch.return_types.qr((2 * x, y - 1)))
+
+        x = torch.randn(3, 2)
+        y = torch.randn(2, 4)
+        expected = fn(x, y)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x, y)
+
+        self.assertEqual(actual, expected)
 
     def test_range_input(self):
         def fn(a, rng):
@@ -5823,7 +5819,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a + b + c
 
         def count_graph_break_msgs(msgs):
-            return sum(msg.find("Graph break") != -1 for msg in msgs)
+            return sum("Graph break in user code" in msg for msg in msgs)
 
         with self.assertLogs(
             logger="torch._dynamo", level=logging.DEBUG
@@ -7347,7 +7343,9 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     # NOTE this test can be removed once multiline errors are in Python.
     # See https://github.com/python/cpython/issues/106922
+    # Covered by test_logging.py:test_trace_call* tests in 3.13+
     @skipIfNotPy311
+    @unittest.skipIf(sys.version_info >= (3, 13), "feature landed in 3.13")
     def test_get_instruction_source_311(self):
         def f():
             # flake8: noqa
@@ -9078,6 +9076,29 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_inline_closure_returned_by_another_function_and_captures(self):
+        x = torch.ones(1)
+
+        def fn():
+            def inner():
+                return x + 2
+
+            return inner
+
+        @torch.compile
+        def start():
+            # Obtain the `inner` function, which holds reference to `x`.
+            inner = fn()
+
+            # When we call `inner`, we end up looking up `x` from our inlining
+            # tracer, Dynamo must make sure it still has some modeling of `x` at
+            # that point.
+            res = inner()
+            return res
+
+        res = start()
+        self.assertEqual(torch.ones(1) * 3, res)
+
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
@@ -9886,6 +9907,132 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
+    def test_pytree_tree_leaves(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x):
+                    tree = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            collections.deque([0.0, -x]),
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    leaves = module.tree_leaves(tree)
+                    return leaves
+
+                x = torch.randn(3, 2)
+                expected = fn(x)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x)
+
+                self.assertEqual(actual, expected)
+
+    def test_pytree_tree_flatten_unflatten(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x, y):
+                    tree = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            [0.0, -x],
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    leaves, treespec = module.tree_flatten(tree)
+                    new_leaves = [
+                        x - 1,
+                        y,
+                        x * y,
+                        3.0,
+                        y - 2,
+                        torch.zeros(2, 2),
+                        2 * y,
+                        -y,
+                        x + y,
+                        x - y,
+                        torch.ones(3, 2),
+                        1,
+                    ]
+                    new_tree = module.tree_unflatten(leaves, treespec)
+                    return leaves, new_tree
+
+            x = torch.randn(3, 2)
+            y = torch.randn(3, 2)
+            expected = fn(x, y)
+            fn_opt = torch.compile(fullgraph=True)(fn)
+            actual = fn_opt(x, y)
+
+            self.assertEqual(actual, expected)
+
+    def test_pytree_tree_map(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x, y):
+                    tree1 = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            [0.0, -x],
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": torch.return_types.qr((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    tree2 = collections.OrderedDict(
+                        [
+                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("a", [y, y + 1]),
+                            ("b", y + 2),
+                            (
+                                "d",
+                                {
+                                    "f": MyTuple(torch.ones(4, 3), -y, y + 1),
+                                    "e": torch.return_types.qr((2 * y, None)),
+                                },
+                            ),
+                        ],
+                    )
+                    return module.tree_map(lambda u, v: (u, v), tree1, tree2)
+
+                x = torch.randn(3, 2)
+                y = torch.randn(3, 2)
+                expected = fn(x, y)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x, y)
+
+                self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
@@ -9961,6 +10108,9 @@ ShapeEnv not equal: field values don't match:
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
+  > Right: {}
+==> source_to_var: values don't match.
+  >  Left: {x.size()[0]: s0, x.size()[1]: s1}
   > Right: {}
 ==> val_to_var: values don't match.
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
@@ -11383,6 +11533,125 @@ fn
 
         self.assertEqual(expected, actual)
         self.assertGreater(po.call_count, 0)
+
+    class AssertNumOutputBackend:
+        """
+        A backend that checks the number of output for compiled graph, and
+        return the graph as is.
+        """
+
+        def __init__(self, test_case, expected_num_output: int):
+            self.test_case = test_case
+            self.expected_num_output = expected_num_output
+
+        def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+            outputs = gm(*example_inputs)
+            self.test_case.assertEqual(self.expected_num_output, len(outputs))
+            return gm
+
+    def test_returning_nested_func_with_captured_tensor(self):
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
+        def test():
+            x = torch.rand(1)
+
+            def func():
+                return x + x
+
+            # Returning `func` forces dynamo to output `x` in the compiled
+            # graph, so that we can store it as `func`'s closure. The output of
+            # compiled graph would be `(x, x + x)`.
+            return func, func()
+
+        test()
+
+    def test_running_nested_func_with_captured_tensor(self):
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 1))
+        def test():
+            x = torch.rand(1)
+
+            def func():
+                return x + x
+
+            # `x` is no longer needed after running the compiled graph, so we
+            # shouldn't return it. The output of compiled graph would be `(x +
+            # x,)`.
+            return func()
+
+        test()
+
+    def test_returning_func_with_captured_func_and_tensor(self):
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
+        def test():
+            x = torch.rand(1)
+
+            def nested():
+                return x + x
+
+            def func():
+                return nested()
+
+            # Returning `func` forces dynamo to output `x` in the compiled
+            # graph, so that we can store it as `func`'s closure. The output of
+            # compiled graph would be `(x, x + x)`.
+            return func, func()
+
+        test()
+
+    def test_running_func_with_captured_func_and_tensor(self):
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 1))
+        def test():
+            x = torch.rand(1)
+
+            def nested():
+                return x + x
+
+            def func():
+                return nested()
+
+            # `x` is no longer needed after running the compiled graph, so we
+            # shouldn't return it. The output of compiled graph would be `(x)`.
+            return func()
+
+        test()
+
+    def test_escaping_closure_var_with_backward_hook(self):
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
+        def fn(x):
+            temp = x * x
+            captured_var = temp + 1
+
+            # This is where the lambda escapes the lifetime of `fn`, so
+            # dynamo must generate proper bytecode to update `captured_var`.
+            x.register_hook(lambda _: captured_var)
+
+            # The output of compiled graph would be `(x * x, x * x + 1)`.
+            return temp
+
+        ones = torch.ones(4, requires_grad=True)
+        fn(ones).sum().backward()
+
+    def test_escaping_closure_var_with_nonlocal_var(self):
+        nonlocal_fn = None
+
+        @torch.compile(backend=self.AssertNumOutputBackend(self, 2))
+        def fn(x):
+            temp = x * x
+            captured_var = x + 1
+
+            def inner():
+                return captured_var
+
+            # This is where `inner` escapes the lifetime of `fn`, so dynamo must
+            # generate proper bytecode to update `captured_var`.
+            nonlocal nonlocal_fn
+            nonlocal_fn = inner
+
+            # The output of compiled graph would be `(x * x, x * x + 1)`.
+            return temp
+
+        ones = torch.ones(4, requires_grad=True)
+        fn(ones)
+        nonlocal_fn()
 
 
 class TestTracer(JitTestCase):
