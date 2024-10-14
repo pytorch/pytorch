@@ -2117,7 +2117,9 @@ def forward(self, pred_1, x_1):
         x = torch.randn(3, 10, 2, device=device)
         # Expected to fail, as the pointwise combine_mode does not allow non-pointwise operations
         with self.assertRaisesRegex(
-            Exception,
+            # Exception,
+            # "For combine_mode='pointwise', the combine_fn needs to be pointwise",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "For combine_mode='pointwise', the combine_fn needs to be pointwise",
         ):
             out = associative_scan(
