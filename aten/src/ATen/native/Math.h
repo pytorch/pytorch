@@ -1235,7 +1235,7 @@ C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
 }
 
 template <typename T>
-inline typename std::enable_if_v<std::is_integral_v<T>, T>
+inline typename std::enable_if_t<std::is_integral_v<T>, T>
 calc_gcd(T a, T b) {
   a = abs_impl(a);
   b = abs_impl(b);
