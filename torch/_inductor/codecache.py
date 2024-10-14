@@ -69,8 +69,6 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassTy
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
-from .runtime import autotune_cache
-from .runtime.autotune_cache import AutotuneCacheBundler
 from .utils import _align
 
 
@@ -1118,9 +1116,6 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
-
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -1592,10 +1587,7 @@ class CompiledFxGraph:
 
     def __call__(self, inputs: List[Any]) -> Any:
         assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
+        return self.current_callable(inputs)
 
 
 def run_command_and_check(cmd_: str) -> None:
