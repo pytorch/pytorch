@@ -212,8 +212,10 @@ def tensorify_python_scalars(
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
                 for a in node.args:
-                    if isinstance(a, fx.Node) and isinstance(
-                        zf := a.meta["val"], torch.SymFloat
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
                         transform = True
                         try:
