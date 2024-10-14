@@ -295,7 +295,8 @@ namespace c10d {
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  // always clean up previously completed work objects, so that
+  // Always clean up previously completed work objects, so that even if
+  // the user keeps issuing new collectives without waiting on previous ones,
   // the registry size would not grow unbounded.
   RankLocal<WorkRegistry>::get().unregister_completed_works();
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
