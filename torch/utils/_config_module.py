@@ -52,7 +52,10 @@ def install_config_module(module: ModuleType) -> None:
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
-                setattr(dest, key, proxy)
+                if dest is module:
+                    setattr(dest, key, proxy)
+                else:
+                    dest.__dict__[key] = proxy
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 

@@ -1,9 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
@@ -27,6 +25,4 @@ void parseOperators(
       (module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK));
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

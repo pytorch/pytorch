@@ -3,6 +3,7 @@
 import copy
 import functools
 import unittest
+from contextlib import nullcontext
 from typing import Dict
 
 import torch
@@ -29,7 +30,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class TestFullyShardStateDictMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_save_load(self):
@@ -77,8 +78,21 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_cpu_offload(self):
+        self.run_subtests(
+            {
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
+                "cpu_state_dict": [True, False],
+            },
+            self._test_dp_state_dict_cpu_offload,
+        )
+
+    def _test_dp_state_dict_cpu_offload(
+        self, offload_policy: CPUOffloadPolicy, cpu_state_dict: bool
+    ):
         mlp_dim = 4
-        offload_policy = CPUOffloadPolicy(pin_memory=True)
         torch.manual_seed(42)
         with torch.device("meta"):
             model = nn.Sequential(
@@ -97,6 +111,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             sharded_tensor = distribute_tensor(
                 full_tensor, dtensor.device_mesh, dtensor.placements
             )
+            if cpu_state_dict:
+                sharded_tensor = sharded_tensor.cpu()
             state_dicts.append({name: sharded_tensor})
 
         # check that we can load with some parameters still on meta device
@@ -105,27 +121,106 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # lazy init without error
         inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
-        model(inp)
 
-        state_dict = model.state_dict()
-        for name, dtensor in state_dict.items():
-            self.assertEqual(dtensor.device.type, "cpu")
+        context = (
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Found following parameters on non-CPU device: \[\('0.weight', device\(type='cuda'",
+            )
+            if not cpu_state_dict
+            else nullcontext()
+        )
+        with context:
+            model(inp).sum()
+            state_dict = model.state_dict()
+            for name, dtensor in state_dict.items():
+                self.assertEqual(dtensor.device.type, "cpu")
 
-    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
-    # TODO: re-enable this test once 2d state_dict is ready.
+    def test_2d_state_dict_correctness(self):
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        mlp_dim = 4
+
+        # model init
+        model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
+        model_2d = copy.deepcopy(model)
+
+        # FSDP + TP
+        model_2d = parallelize_module(
+            model_2d,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in model_2d:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model_2d, mesh=dp_mesh)
+
+        # state_dict parity check
+        model_state_dict = model.state_dict()
+        model_2d_state_dict = model_2d.state_dict()
+        for tensor, dtensor in zip(
+            model_state_dict.values(), model_2d_state_dict.values()
+        ):
+            self.assertTrue(isinstance(dtensor, DTensor))
+            self.assertEqual(tensor, dtensor.full_tensor())
+
     @skip_if_lt_x_gpu(2)
-    def _temp_disable_test_dp_tp_state_dict_save_load(self):
+    def test_dp_tp_state_dict_save_load(self):
         dp_size = 2
         global_mesh = init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
         self.run_subtests(
-            {"mlp_dim": [2, 3, 4, 5]},
+            {"mlp_dim": [4, 6, 8, 10]},
             functools.partial(self._test_dp_tp_state_dict_save_load, global_mesh),
         )
 
     def _test_dp_tp_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
+        model = parallelize_module(
+            model,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model, mesh=dp_mesh)
+        self._test_state_dict_save_load(model)
+
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_tp_state_dict_save_load(self):
+        global_mesh = init_device_mesh(
+            "cuda",
+            (2, 2, self.world_size // 4),
+            mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
+        )
+        self.run_subtests(
+            {"mlp_dim": [4, 6, 8, 10]},
+            functools.partial(self._test_hsdp_tp_state_dict_save_load, global_mesh),
+        )
+
+    def _test_hsdp_tp_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
+        dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
         model = parallelize_module(

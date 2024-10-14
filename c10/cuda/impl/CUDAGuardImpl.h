@@ -71,13 +71,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
+    CUDAStream cs(s);
     auto old_stream = getCurrentCUDAStream(s.device().index());
-    setStream(s);
+    setCurrentCUDAStream(cs);
     return old_stream.unwrap();
-  }
-  void setStream(Stream s) const override {
-    const CUDAStream stream(s);
-    setCurrentCUDAStream(stream);
   }
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
@@ -222,7 +219,8 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
 
-  void syncStreamsOnDevice(const c10::DeviceIndex device_index) const override {
+  // Note: synchronizeDevice can be safely called from any device
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     DeviceIndex orig_device{-1};
     C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
     C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));

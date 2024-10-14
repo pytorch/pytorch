@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -43,7 +43,19 @@ static_weight_shapes = True
 cse = True
 
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
 
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
@@ -137,11 +149,6 @@ visualize_memory_budget_pareto = (
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
 aggressive_recomputation = False
-
-# If FakeTensor.data_ptr() should error.
-# This option is independent of AOTAutograd and torch.compile, but our policy
-# is to turn it off during torch.compile.
-fake_tensor_allow_unsafe_data_ptr_access = True
 
 # Unlifts effect tokens from the inputs/outputs in the traced graph and instead
 # inserts make_token/sink_token calls in the graph to create tokens and then

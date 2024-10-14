@@ -330,7 +330,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
-  args.collect(f->saved_variables);
+  args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);
@@ -413,8 +413,7 @@ PyObject* PyNode::to_py_args(
     throw_python_error();
   auto& output_info = py_fn->output_info;
   for (const auto i : c10::irange(num_inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* input;
+    PyObject* input = nullptr;
     if (inputs[i].defined() || !py_fn->materialize_grads ||
         (input_metadata(i).was_default_constructed() &&
          !py_fn->materialize_non_diff_grads)) {
@@ -1133,14 +1132,11 @@ PyObject* process_outputs(
     _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = nullptr;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = nullptr;
+    Py_CLEAR(grad_fn->to_save);
+    Py_CLEAR(grad_fn->non_differentiable);
   }
 
-  Py_XDECREF(grad_fn->saved_for_forward);
-  grad_fn->saved_for_forward = nullptr;
+  Py_CLEAR(grad_fn->saved_for_forward);
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
@@ -1648,8 +1644,8 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
@@ -1792,7 +1788,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */

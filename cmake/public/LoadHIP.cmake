@@ -146,6 +146,7 @@ if(HIP_FOUND)
   set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
   set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
   set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
+  set(hiprtc_DIR ${ROCM_PATH}/lib/cmake/hiprtc)
 
 
   find_package_and_print_version(hip REQUIRED)
@@ -164,6 +165,7 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
+  find_package_and_print_version(hiprtc REQUIRED)
 
 
   find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${ROCM_PATH}/lib)

@@ -45,6 +45,11 @@ def _load_val_from_tensor(t: torch.Tensor):
     return t.shape[0]
 
 
+# serialization function must be defined at top level
+def _rebuild_njt(constructor_kwargs):
+    return NestedTensor(**constructor_kwargs)
+
+
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
@@ -209,10 +214,7 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
-    def data_ptr(self) -> int:
-        return self._values.data_ptr()
-
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""
@@ -221,18 +223,30 @@ class NestedTensor(torch.Tensor):
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
 
+    # TODO: Remove this in favor of the default tensor subclass serialization logic.
+    # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
 
+        # Cached PyCapsules for sizes / strides are not serializable.
+        # See Note [Tensor Subclass custom size/stride caching strategy]
+        self._clear_non_serializable_cached_data()
         # SymNodes are not serializable
         assert "_size" in state and "_strides" in state
         state = dict(state)
         del state["_size"]
         del state["_strides"]
 
-        # TODO: Update this to handle the other inner tensors
-        func = NestedTensor
-        args = (self._values, self._offsets)
+        func = _rebuild_njt
+        constructor_kwargs = {
+            "values": self._values,
+            "offsets": self._offsets,
+            "lengths": self._lengths,
+            "_ragged_idx": self._ragged_idx,
+            "_metadata_cache": self._metadata_cache,
+            "requires_grad": self.requires_grad,
+        }
+        args = (constructor_kwargs,)
         return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
 
     def __tensor_flatten__(self):
@@ -295,6 +309,13 @@ class NestedTensor(torch.Tensor):
         if fn is not None:
             return fn(*args, **kwargs)
 
+        # Poor man's redispatch for composite ops. This becomes relevant under inference
+        # mode, where disabling autograd key dispatch prevents decomposition.
+        dk = torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor
+        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+            with torch.overrides.enable_reentrant_dispatch():
+                return func._op_dk(dk, *args, **kwargs)
+
         raise NotImplementedError(func)
 
     @classmethod
@@ -302,14 +323,19 @@ class NestedTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
+
         from .ops import jagged_torch_function
 
-        try:
-            return jagged_torch_function(func, *args, **kwargs)
-        except NotImplementedError:
-            pass
-        with torch._C.DisableTorchFunctionSubclass():
-            return func(*args, **kwargs)
+        # This should be removed after
+        # https://github.com/pytorch/pytorch/pull/125941/ lands
+        with maybe_enable_thunkify():
+            try:
+                return jagged_torch_function(func, *args, **kwargs)
+            except NotImplementedError:
+                pass
+            with torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **kwargs)
 
 
 # NB: These fake view autograd.Functions are superseded by real view ops. Don't use them!
@@ -560,3 +586,28 @@ def nested_view_from_values_offsets_lengths(
         min_seqlen_tensor,
         max_seqlen_tensor,
     )  # type: ignore[return-value]
+
+
+def nested_from_padded(
+    padded, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None, sum_S=None
+):
+    if ragged_idx != 1:
+        raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
+
+    min_seqlen_tensor = None
+    if min_seqlen is not None:
+        min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
+
+    max_seqlen_tensor = None
+    if max_seqlen is not None:
+        max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
+
+    return torch._nested_from_padded_tensor(
+        padded,
+        offsets,
+        _nt_view_dummy(),
+        ragged_idx,
+        min_seqlen_tensor,
+        max_seqlen_tensor,
+        sum_S,
+    )

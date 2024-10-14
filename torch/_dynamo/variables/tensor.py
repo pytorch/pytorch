@@ -603,6 +603,10 @@ class TensorVariable(VariableTracker):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
+    def method_is_inference(self):
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return ConstantVariable.create(fake.is_inference())
+
     def method_is_complex(self):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_complex)
@@ -794,6 +798,20 @@ class TensorVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
         return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+
+    def method_addcmul_(self, tensor1, tensor2, *, value=None):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        if value is not None:
+            from .. import polyfills
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(tx, polyfills.addcmul_inplace),
+                [self, tensor1, tensor2, value],
+                {},
+            )
 
     def method___setitem__(self, key, value):
         def has_bool_key(v):
@@ -992,12 +1010,15 @@ class TensorVariable(VariableTracker):
 
             from .builder import wrap_fx_proxy
 
+            self_proxy = self.as_proxy()
+            self_proxy.node.meta["has_backward_hook"] = True
+
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(), bw_state_proxy),
+                    (self_proxy, bw_state_proxy),
                     {},
                 ),
             )
@@ -1313,9 +1334,6 @@ class TensorSubclassVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
 
 class UntypedStorageVariable(VariableTracker):
