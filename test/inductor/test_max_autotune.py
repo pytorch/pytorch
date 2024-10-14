@@ -235,7 +235,7 @@ class TestMaxAutotune(TestCase):
 
         class FakeChoiceCaller(ChoiceCaller):
             def __init__(self) -> None:
-                super().__init__("none", [], Mock())
+                super().__init__("none", [], Mock(), description="")
                 self.thread_id = None
 
             def precompile(self):
