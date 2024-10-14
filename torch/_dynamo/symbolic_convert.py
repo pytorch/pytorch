@@ -88,6 +88,7 @@ from .variables.functions import (
     UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
+from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -98,7 +99,6 @@ from .variables.lists import (
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
-    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -360,8 +360,57 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+explain = False
+
+
+def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
+    if user_stack is None:
+        user_stack = torch._guards.TracingContext.extract_stack()
+
+    # TODO: Also report the traceback from the parent frame
+    try:
+        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+    except IndexError:
+        # first instruction
+        frame_loc = (
+            code_options["co_filename"],
+            code_options["co_firstlineno"],
+        )
+
+    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+    # more actionable user code pointer
+    if (
+        graph_break_log.isEnabledFor(logging.DEBUG)
+        and not explain
+        and graph_break_dup_warning_checker.add(frame_loc)
+    ):
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        # This log line MUST contain the string "Graph break in user code",
+        # This log line is exercised from
+        #   python test/dynamo/test_exc.py -k test_graph_break_log
+        graph_break_log.debug(
+            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
+            exc_info=exc_info,
+        )
+    else:
+        # This log line MUST not contain the string "Graph break in user code",
+        # exercised by
+        #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+        graph_break_log.debug(
+            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+        )
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def jump_graph_break(self, inst, value, extra_msg=""):
+        log_graph_break(self.code_options, reason="Data-dependent jump")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
@@ -554,9 +603,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     return inner
 
 
-explain = False
-
-
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
@@ -580,40 +626,12 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                user_stack = excp.real_stack
-                # TODO: Also report the traceback from the parent frame
-                try:
-                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                except IndexError:
-                    # first instruction
-                    code_options = self.code_options
-                    frame_loc = (
-                        code_options["co_filename"],
-                        code_options["co_firstlineno"],
-                    )
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    graph_break_log.isEnabledFor(logging.DEBUG)
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    # This log line is exercised from
-                    #   python test/dynamo/test_exc.py -k test_graph_break_log
-                    graph_break_log.debug(
-                        "Graph break: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
-                else:
-                    # This log line MUST NOT contain the string "Graph break",
-                    # exercised by
-                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-                    log.debug(
-                        "Unsupported break in user code at %s:%s (details suppressed)",
-                        *frame_loc,
-                    )
+                log_graph_break(
+                    self.code_options,
+                    exc_info=True,
+                    reason=f"Unsupported: {excp}",
+                    user_stack=excp.real_stack,
+                )
 
                 if self.maybe_has_backedge():
                     msg = (
@@ -625,7 +643,7 @@ def break_graph_if_unsupported(*, push):
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
-                speculation.reason = GraphCompileReason(excp.msg, user_stack)
+                speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
             speculation.fail_and_restart_analysis()
 
         def handle_graph_break(
@@ -780,16 +798,27 @@ class InstructionTranslatorBase(
                     return True
         return False
 
+    def cellvars(self):
+        if not hasattr(self, "_cellvars"):
+            self._cellvars = tuple(self.code_options["co_cellvars"] or [])
+            # An inlined function might depend on the cellvar of the parent
+            # function. So, recursively obtain parent cellvars.
+            if isinstance(self, InliningInstructionTranslator):
+                self._cellvars += self.parent.cellvars()
+        return self._cellvars
+
+    def freevars(self):
+        if not hasattr(self, "_freevars"):
+            self._freevars = tuple(self.code_options["co_freevars"] or [])
+            # An inlined function might depend on the freevar of the parent
+            # function. So, recursively obtain parent freevars.
+            if isinstance(self, InliningInstructionTranslator):
+                self._freevars += self.parent.freevars()
+        return self._freevars
+
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
-            self._cell_and_freevars = tuple(
-                self.code_options["co_cellvars"] or []
-            ) + tuple(self.code_options["co_freevars"] or [])
-
-            # An inlined function might depend on the freevar of the parent
-            # function. So, recursively obtain parent cell and freevars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._cell_and_freevars += self.parent.cell_and_freevars()
+            self._cell_and_freevars = self.cellvars() + self.freevars()
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
@@ -797,11 +826,98 @@ class InstructionTranslatorBase(
         # implicit use by super()
         # reads = reads | {"__class__"}
         # output variables?
-        reads = reads | set(self.cell_and_freevars())
+        reads = reads | set(self.freevars())
+
+        # First we prune the non-cell local vars, this allows us to prune more
+        # cell local vars later on (e.g., if we manage to prune a
+        # `NestedUserFunctionVariable` that makes use of some cell locals).
+        cellvars = set(self.cellvars())
         self.symbolic_locals = {
-            k: v for k, v in self.symbolic_locals.items() if k in reads
+            k: v for k, v in self.symbolic_locals.items() if k in cellvars or k in reads
         }
+
+        # Then we prune the side effects, which might enable us to prune more
+        # cellvars afterwards.
         self.output.side_effects.prune_dead_object_new(self)
+
+        # Then we prune the cell locals.
+        #
+        # Note that we keep certain cell locals, because the current mechanism
+        # for codegen closure initialization for nested function creation is:
+        # 1. `NestedUserFunctionVariable` codegen assumes its closure has been
+        #    initialized properly by its creator, i.e., the tuple of cells will
+        #    be populated with correct content before the function is used.
+        # 2. `OutputGraph::compile_subgraph`, we populate the tuple of cells
+        #    _after_ emitting the `MAKE_FUNCTION` bytecode, via `STORE_DEREF`;
+        #    these `STORE_DEREF` are generated partly based on the current
+        #    `symbolic_locals`.
+        # As a result, we must be careful not to prune the cell locals that'll
+        # allow `OutputGraph` to generate the proper `STORE_DEREF`.
+        #
+        # On the other hand, we do want to prune away the truly dead ones, e.g.,
+        # say after we invoke a nested function, and the function is never used
+        # again. So here we do some conservative pruning, by tracing from a
+        # series of must-live root variables -- for any reachable cell, it must
+        # be kept alive.
+        #
+        # TODO(#137123) there are extra complexities due to side-effects (e.g.,
+        # the nested function leaking out into backward hook or globals). We
+        # could probably improve the variable tracing here to include the
+        # relevant variables in `output.side_effects`.
+        if self.output.side_effects.is_empty():
+            cellvars_that_must_live = set()
+            visited = set()
+
+            def visit(var: VariableTracker):
+                if var in visited:
+                    return
+                visited.add(var)
+
+                # Avoid realizing the lazy variable which could end up adding a
+                # graph input which isn't needed, this is sound because there's
+                # there doesn't seem to be a way to go from a
+                # `LazyVariableTracker` to `ClosureVariable`. TODO is this
+                # really true in general?
+                if isinstance(var, LazyVariableTracker):
+                    return
+
+                # We need to do this explicitly to walk the entire use chain,
+                # e.g., from a `ClosureVariable` to its underlying
+                # `NestedUserFunctionVariable`, rather than just stopping at the
+                # `ClosureVariable` with a name.
+                if isinstance(var, ClosureVariable):
+                    cellvars_that_must_live.add(var.name)
+
+                    # We only recur if the closure variable has been initialized.
+                    actual_var = self.symbolic_locals.get(var.name, None)
+                    if actual_var is not None:
+                        VariableTracker.visit(visit, actual_var)
+
+            # Populate `cellvars_that_must_live`
+            #
+            # NOTE: Don't trace from the cell locals which aren't explicitly
+            # read anymore; if they are indirectly used, they will be reached by
+            # other roots. These initially excluded cells are the ones that will
+            # hopefully be pruned.
+            local_roots = [
+                var
+                for name, var in self.symbolic_locals.items()
+                if name not in cellvars or name in reads
+            ]
+            VariableTracker.visit(
+                visit, (local_roots, self.stack, self.output.backward_state)
+            )
+            # Manually release the self-referential nested function, which
+            # captures `self.symbolic_locals` and affects parts of PT test/logic
+            # that are sensitive to when certain objects get released.
+            del visit
+
+            # Only keep locals that will be read, or are cellvars that must live.
+            self.symbolic_locals = {
+                k: v
+                for k, v in self.symbolic_locals.items()
+                if k in reads or k in cellvars_that_must_live
+            }
 
     def call_function(
         self,
@@ -1766,6 +1882,7 @@ class InstructionTranslatorBase(
         speculation.fail_and_restart_analysis()
 
     def store_attr_graph_break(self, inst):
+        log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         self.output.compile_subgraph(
@@ -2028,13 +2145,7 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
-    def FORMAT_VALUE(self, inst):
-        flags = inst.arg
-        if (flags & 0x04) == 0x04:
-            fmt_spec = self.pop()
-        else:
-            fmt_spec = ConstantVariable.create("")
-
+    def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
             from torch._dynamo.variables.lazy import (
@@ -2057,6 +2168,15 @@ class InstructionTranslatorBase(
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+
+    def FORMAT_VALUE(self, inst):
+        flags = inst.arg
+        if (flags & 0x04) == 0x04:
+            fmt_spec = self.pop()
+        else:
+            fmt_spec = ConstantVariable.create("")
+
+        return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst):
         format_string_parts: List[str] = []
@@ -2454,20 +2574,11 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
-    def _format_value_313(self, fmt_spec):
-        value = self.pop()
-        if isinstance(value, SymNodeVariable):
-            value = ConstantVariable.create(str(value.sym_num))
-
-        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
-
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
-
     def FORMAT_SIMPLE(self, inst):
-        self._format_value_313(ConstantVariable.create(""))
+        self._format_value(ConstantVariable.create(""), 0)
 
     def FORMAT_WITH_SPEC(self, inst):
-        self._format_value_313(self.pop())
+        self._format_value(self.pop(), 0)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
@@ -2599,6 +2710,7 @@ class InstructionTranslatorBase(
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
+        self.num_calls: Dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
         self.one_graph = False
@@ -3256,7 +3368,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if name in self.closure_cells:
             return self.closure_cells[name]
         else:
-            return InlinedClosureVariable(name=name)
+            # We model unmodified cells captured by `UserFunctionVariable` as
+            # their contents, in `self.symbolic_locals`. See
+            # `UserFunctionVariable::bind_args`.
+            return self.symbolic_locals[name]
 
     def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):

@@ -4046,11 +4046,27 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         layout: Layout,
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+        unfiltered_choices: List[ChoiceCaller],
     ):
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
+        self._output_plannable = all(
+            isinstance(choice, TritonTemplateCallerBase)
+            or (
+                isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller)
+                and choice.has_out_variant
+            )
+            for choice in unfiltered_choices
+        )
+
+    @property
+    def output_plannable(self) -> bool:
+        """
+        Are all possible choices TritonTemplates or Extern Kernels with out variants
+        """
+        return self._output_plannable
 
     @property
     def choice_timings(self) -> Dict[ChoiceCaller, float]:
@@ -4269,10 +4285,31 @@ class ConcatKernel(NopKernel):
         return kernel
 
     @classmethod
-    def can_realize_into_without_copy(cls, src):
+    def can_realize_into_without_copy(cls, src, dst=None):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.can_realize_into_without_copy(src.data)
+            return cls.can_realize_into_without_copy(src.data, dst)
+
+        if isinstance(src.data, MultiTemplateBuffer):
+            if (
+                not isinstance(src.data.layout, FixedLayout)
+                or not src.data.output_plannable
+            ):
+                return False
+
+            # we call can_realize_into_without_copy in cat lowering before we've decided
+            # on output format, optimistically assume layout matches
+            if dst is None:
+                return True
+
+            # otherwise, check equality of layouts
+            if not len(src.get_stride()) == len(dst.get_stride()):
+                return False
+
+            return all(
+                V.graph.sizevars.statically_known_equals(s1, s2)
+                for s1, s2 in zip(src.get_stride(), dst.get_stride())
+            )
 
         return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
             src.data, ExternKernelAlloc
@@ -4291,11 +4328,12 @@ class ConcatKernel(NopKernel):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst)
+
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
-            if cls.can_realize_into_without_copy(src):
+            if cls.can_realize_into_without_copy(src, dst):
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
@@ -4435,9 +4473,9 @@ class ExternKernel(InputsKernel):
             # Try to construct cpp_kernel_name from op_overload
             if kernel.namespace == "aten":
                 # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
+                # repeat_interleave(const at::Tensor & repeats, std::optional<int64_t> output_size=std::nullopt)
                 # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
+                #       std::optional<int64_t> dim=std::nullopt, std::optional<int64_t> output_size=std::nullopt)
                 opname = (
                     kernel.__name__.split(".")[0]
                     if kernel._overloadname == "default"
@@ -6028,15 +6066,23 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
+            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
+            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
+            # fix would require changing all the uses of self.mutation_outputs.
             return_type = returns[0].real_type
-            output_arguments = [handle_single_output(return_type, self.outputs)]
+            output_arguments = [
+                handle_single_output(
+                    return_type, [*self.outputs, *self.mutation_outputs]
+                )
+            ]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
-            assert isinstance(self.outputs, tuple)
-            assert len(returns) == len(self.outputs)
+            # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(returns, self.outputs)
+                for return_schema, output in zip(
+                    returns, [*self.outputs, *self.mutation_outputs]
+                )
             ]
 
         node = ExternKernelNode(
@@ -6100,7 +6146,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
-                self.outputs,
+                [*self.outputs, *self.mutation_outputs],
             )
         else:
             self.codegen_comment(wrapper)
