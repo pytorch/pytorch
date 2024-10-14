@@ -9,6 +9,7 @@
 #include <c10/util/Gauge.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/llvmMathExtras.h>
@@ -2039,11 +2040,11 @@ class DeviceCachingAllocator {
     }
   }
 
-  void maybeMakeNewPoolAndInc(MempoolId_t mempool_id) {
+  void ensureExistsAndIncrefPool(MempoolId_t mempool_id) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    maybe_make_new_pool_and_inc_use_count(mempool_id);
+    ensure_exists_and_incref_pool(mempool_id);
   }
 
   // See Note [Interaction with CUDA graph capture]
@@ -2053,7 +2054,7 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    maybe_make_new_pool_and_inc_use_count(mempool_id);
+    ensure_exists_and_incref_pool(mempool_id);
     for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
          ++it2) {
       TORCH_CHECK(
@@ -2090,7 +2091,7 @@ class DeviceCachingAllocator {
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
     auto pp = get_private_pool(mempool_id);
-    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
+    decref_pool_and_maybe_mark_free(mempool_id, pp);
   }
 
   int getPoolUseCount(MempoolId_t mempool_id) {
@@ -2099,10 +2100,10 @@ class DeviceCachingAllocator {
     return pp->use_count;
   }
 
-  void decPoolUseCountAndMaybeMarkPoolFree(MempoolId_t mempool_id) {
+  void decrefPoolAndMaybeMarkFree(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
-    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
+    decref_pool_and_maybe_mark_free(mempool_id, pp);
   }
 
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
@@ -2173,7 +2174,7 @@ class DeviceCachingAllocator {
     return blocks;
   }
 
-  void maybe_make_new_pool_and_inc_use_count(MempoolId_t mempool_id) {
+  void ensure_exists_and_incref_pool(MempoolId_t mempool_id) {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
@@ -2199,7 +2200,7 @@ class DeviceCachingAllocator {
     return it->second.get();
   }
 
-  void dec_use_count_and_maybe_mark_pool_freeable(
+  void decref_pool_and_maybe_mark_free(
       MempoolId_t mempool_id,
       PrivatePool* pool) {
     auto uc = --(pool->use_count);
@@ -3189,10 +3190,28 @@ class DeviceCachingAllocator {
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
-bool forceUncachedAllocator() {
-  static bool force_uncached =
-      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+static bool forceUncachedAllocator() {
+  // Allow either CUDA or HIP name for env var for maximum user comfort
+  // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
+  static bool has_cuda_env =
+      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
+  static bool has_rocm_env =
+      c10::utils::has_env("PYTORCH_NO_HIP_MEMORY_CACHING");
+  static bool force_uncached = has_cuda_env || has_rocm_env;
   return force_uncached;
+}
+
+static void* uncached_allocate(size_t size) {
+  void* devPtr = nullptr;
+  // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
+  // if someone tries to use forceUncachedAllocator while capturing.
+  C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_memory_allocation(
+        c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
+  }
+  return devPtr;
 }
 
 static void uncached_delete(void* ptr) {
@@ -3212,6 +3231,9 @@ void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
+  // allows this allocator to be turned on and off programmatically
+  bool enable_ = true;
+
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
@@ -3386,6 +3408,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
+  void enable(bool value) override {
+    enable_ = value;
+  }
+
+  bool isEnabled() const override {
+    return enable_;
+  }
+
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
@@ -3520,17 +3550,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     void (*deleteFunc)(void*) = &local_raw_delete;
     CUDAStream stream = cuda::getCurrentCUDAStream(device);
 
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       deleteFunc = &uncached_delete;
-
-      // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
-      // if someone tries to use forceUncachedAllocator while capturing.
-      C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
-      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
-        (*interp)->trace_gpu_memory_allocation(
-            c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
-      }
+      devPtr = uncached_allocate(size);
     } else {
       if (size != 0) {
         this->malloc(&devPtr, device, size, stream);
@@ -3544,7 +3566,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    if (forceUncachedAllocator()) {
+    if (forceUncachedAllocator() || !isEnabled()) {
       return &uncached_delete;
     } else {
       return &local_raw_delete;
@@ -3577,10 +3599,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->resetPeakStats();
   }
 
-  void maybeMakeNewPoolAndInc(c10::DeviceIndex device, MempoolId_t mempool_id)
+  void ensureExistsAndIncrefPool(c10::DeviceIndex device, MempoolId_t mempool_id)
       override {
     assertValidDevice(device);
-    device_allocator[device]->maybeMakeNewPoolAndInc(std::move(mempool_id));
+    device_allocator[device]->ensureExistsAndIncrefPool(std::move(mempool_id));
   }
 
   // CUDAGraph interactions
@@ -3610,11 +3632,11 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  void decPoolUseCountAndMaybeMarkPoolFree(
+  void decrefPoolAndMaybeMarkFree(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->decPoolUseCountAndMaybeMarkPoolFree(
+    device_allocator[device]->decrefPoolAndMaybeMarkFree(
         std::move(mempool_id));
   }
 
@@ -3622,10 +3644,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    c10::DeviceIndex device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
-    malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+    if (forceUncachedAllocator() || !isEnabled()) {
+      r = uncached_allocate(nbytes);
+    } else {
+      c10::DeviceIndex device = 0;
+      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+      malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+    }
     return r;
   }
 
@@ -3633,10 +3659,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    c10::DeviceIndex device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
-    malloc(&r, device, nbytes, stream);
+    if (forceUncachedAllocator() || !isEnabled()) {
+      r = uncached_allocate(nbytes);
+    } else {
+      c10::DeviceIndex device = 0;
+      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+      malloc(&r, device, nbytes, stream);
+    }
     return r;
   }
 
@@ -3681,7 +3711,11 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void raw_delete(void* ptr) override {
-    this->free(ptr);
+    if (forceUncachedAllocator() || !isEnabled()) {
+      uncached_delete(ptr);
+    } else {
+      this->free(ptr);
+    }
   }
 
   // In CUDA IPC, sender sends a tensor to receiver via shareIPCHandle,
@@ -3710,9 +3744,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         c10::DeviceIndex device,
         std::string& handle,
         const DeviceCachingAllocator& allocator)
-        : device_(device),
-          expandable_segment_(nullptr),
-          cuda_ipc_ptr_(nullptr) {
+        : device_(device) {
       int type = SHAREABLE_CUDA_MALLOC;
       std::istringstream ss(handle);
       if (handle.size() != CUDA_IPC_HANDLE_SIZE) {
@@ -3762,8 +3794,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       }
     }
     c10::DeviceIndex device_;
-    ExpandableSegment* expandable_segment_;
-    void* cuda_ipc_ptr_; // nullptr if expandable_segment_ is not null
+    ExpandableSegment* expandable_segment_{nullptr};
+    void* cuda_ipc_ptr_{nullptr}; // nullptr if expandable_segment_ is not null
     std::weak_ptr<void> wp_;
   };
 
@@ -3833,9 +3865,9 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (val != nullptr) {
-      const std::string config(val);
+    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    if (val.has_value()) {
+      const std::string& config = val.value();
 
       std::regex exp("[\\s,]+");
       std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
@@ -3896,12 +3928,12 @@ MemPool::MemPool(
     id_ = {uuid_++, 0};
   }
   device_ = c10::cuda::current_device();
-  CUDACachingAllocator::maybeMakeNewPoolAndInc(device_, id_);
+  CUDACachingAllocator::ensureExistsAndIncrefPool(device_, id_);
 }
 
 MemPool::~MemPool() {
   TORCH_INTERNAL_ASSERT(use_count() == 1);
-  CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(device_, id_);
+  CUDACachingAllocator::decrefPoolAndMaybeMarkFree(device_, id_);
 }
 
 MempoolId_t MemPool::id() {

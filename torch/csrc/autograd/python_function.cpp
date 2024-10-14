@@ -297,7 +297,7 @@ auto PyNode::compiled_autograd_should_lift() const -> bool {
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
@@ -1132,14 +1132,11 @@ PyObject* process_outputs(
     _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = nullptr;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = nullptr;
+    Py_CLEAR(grad_fn->to_save);
+    Py_CLEAR(grad_fn->non_differentiable);
   }
 
-  Py_XDECREF(grad_fn->saved_for_forward);
-  grad_fn->saved_for_forward = nullptr;
+  Py_CLEAR(grad_fn->saved_for_forward);
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
@@ -1791,7 +1788,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */
