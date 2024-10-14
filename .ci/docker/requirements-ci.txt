@@ -352,3 +352,8 @@ pwlf==2.2.1 ; python_version >= "3.8"
 #Description: required for testing torch/distributed/_tools/sac_estimator.py
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
+
+pulp==2.9.0 ; python_version >= "3.8"
+#Description: required for tesing ilp formulaiton under torch/distributed/_tools
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py
