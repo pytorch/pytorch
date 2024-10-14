@@ -4033,7 +4033,10 @@ def _index_fill(
         )  # type: ignore[arg-type]
     else:
         value = torch.scalar_tensor(
-            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+            value,
+            dtype=x.dtype,
+            layout=x.layout,
+            device=x.device,  # type: ignore[arg-type]
         )
 
     # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
@@ -4070,7 +4073,10 @@ def index_add(
 ):
     # index_add always returns a new contiguous tensor
     return x.clone(memory_format=torch.contiguous_format).index_add_(
-        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+        dim,
+        index,
+        tensor,
+        alpha=alpha,  # type: ignore[arg-type]
     )
 
 
@@ -6210,6 +6216,12 @@ def _dot_check(self, other):
         lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
     )
 
+    torch._check(
+        self.dtype == other.dtype,
+        lambda: "dot : expected both vectors to have same dtype, but found "
+        f"{self.dtype} and {other.dtype}",
+    )
+
     def numel_error():
         return (
             f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
@@ -6221,10 +6233,6 @@ def _dot_check(self, other):
 
 @register_decomposition(aten.dot)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "other"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def dot(self, other):
     if self.is_complex():
         if self.is_conj():
@@ -6241,10 +6249,6 @@ def dot(self, other):
 
 @register_decomposition(aten.vdot)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("self", "other"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def vdot(self, other):
     if not self.is_complex():
         return torch.dot(self, other)
