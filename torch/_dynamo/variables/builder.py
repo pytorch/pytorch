@@ -40,7 +40,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
+from torch._utils_internal import justknobs_check, JustKnobsConfig
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -2721,6 +2721,7 @@ def _automatic_dynamic(
             # dynamic_size = DimDynamic.STATIC
         elif config.assume_static_by_default:
             dynamic_size = DimDynamic.STATIC
+        else:
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:
