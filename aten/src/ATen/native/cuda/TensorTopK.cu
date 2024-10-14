@@ -13,6 +13,7 @@
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/cuda/cub.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 
 #include <c10/macros/Macros.h>
@@ -50,7 +51,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
                            at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
                            IndexType indicesWithinSliceStride,
-                           T* kthValues) {
+                           T* kthValues,
+                           TORCH_DSA_KERNEL_ARGS) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
 #if defined(USE_ROCM)
@@ -123,8 +125,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
         smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK) {
-      int writeIndex = writeIndexStart + index;
-      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+      const auto writeIndex = writeIndexStart + index;
+      CUDA_KERNEL_ASSERT2(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
@@ -141,11 +143,11 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
-  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
+  CUDA_KERNEL_ASSERT2(outputSliceSize >= writeIndexStart);
   IndexType topKRemaining = (outputSliceSize - writeIndexStart);
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
-    bool inRange = (i < inputSliceSize);
+    const bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
@@ -157,8 +159,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
         smem, hasTopK, &index, &carry, AddOp<int>());
 
     if (hasTopK && index < topKRemaining) {
-      int writeIndex = writeIndexStart + index;
-      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+      const auto writeIndex = writeIndexStart + index;
+      CUDA_KERNEL_ASSERT2(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
@@ -197,7 +199,12 @@ void launch(
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     int warp_size = at::cuda::warp_size();
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
-    gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    TORCH_DSA_KERNEL_LAUNCH(
+        (gatherTopK<T, IndexType, Dim, /* WithKthValues= */false>),
+        grid,
+        block,
+        0,
+        c10::cuda::getCurrentCUDAStream(),
         input,
         inputSliceSize,
         outputSliceSize,
@@ -209,7 +216,6 @@ void launch(
         indices,
         indicesWithinSliceStride,
         nullptr);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 } // namespace sbtopk
 
@@ -513,7 +519,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
                            T *kthValues,
                            uint32_t* withinKCounts,
                            uint32_t* kthCounts,
-                           uint32_t num_blocks) {
+                           uint32_t num_blocks,
+                           TORCH_DSA_KERNEL_ARGS) {
 
   uint32_t items_per_block = items_per_thread * BLOCK_THREADS;
   uint32_t tidx = threadIdx.x;
@@ -739,11 +746,11 @@ void launch(
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);
   // copy topk values to output tensor
-  gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
+  TORCH_DSA_KERNEL_LAUNCH(
+    (gatherTopK<T, IndexType, Dim>), grid, block, 0, stream,
     input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
     topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
     blocks_per_slice, kthValues, withinKCounts, kthCounts, num_blocks);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // Find topk values based on kth values
   {
@@ -751,7 +758,9 @@ void launch(
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     int warp_size = at::cuda::warp_size();
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
-    sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, stream>>>(
+    TORCH_DSA_KERNEL_LAUNCH(
+        (sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true>),
+        grid, block, 0, stream,
         input,
         inputSliceSize,
         outputSliceSize,
@@ -763,7 +772,6 @@ void launch(
         indices,
         indicesWithinSliceStride,
         kthValues);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 #endif
 }
