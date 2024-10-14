@@ -137,30 +137,27 @@ static_assert(
     "");
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<typename Type<int>::type>().find("*"),
-    "");
+    get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
 
 // but with remove_pointer applied, there is no '*' in the type name anymore
 static_assert(
     string_view::npos ==
-        get_fully_qualified_type_name<
-            std::remove_pointer_t<typename Type<int>::type>>()
-            .find("*"),
-    "");
-
+    get_fully_qualified_type_name<
+        std::remove_pointer_t<typename Type<int>::type>>()
+        .find('*'));
 TEST(TypeIndex, TypeComputationsAreResolved) {
   EXPECT_NE(
       string_view::npos,
       get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
   EXPECT_NE(
       string_view::npos,
-      get_fully_qualified_type_name<typename Type<int>::type>().find("*"));
+      get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
   // but with remove_pointer applied, there is no '*' in the type name anymore
   EXPECT_EQ(
       string_view::npos,
       get_fully_qualified_type_name<
           std::remove_pointer_t<typename Type<int>::type>>()
-          .find("*"));
+          .find('*'));
 }
 
 struct Functor final {
@@ -170,10 +167,8 @@ struct Functor final {
 static_assert(
     // NOLINTNEXTLINE(misc-redundant-expression)
     get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>() ==
-        get_fully_qualified_type_name<
-            typename c10::guts::infer_function_traits_t<Functor>::func_type>(),
-    "");
-
+    get_fully_qualified_type_name<
+        typename c10::guts::infer_function_traits_t<Functor>::func_type>());
 TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
   EXPECT_EQ(
       get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
@@ -187,15 +182,12 @@ class Dummy final {};
 
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<Dummy(int)>().find(
-            "test_function_arguments_and_returns::Dummy"),
-    "");
+    get_fully_qualified_type_name<Dummy(int)>().find(
+        "test_function_arguments_and_returns::Dummy"));
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<void(Dummy)>().find(
-            "test_function_arguments_and_returns::Dummy"),
-    "");
-
+    get_fully_qualified_type_name<void(Dummy)>().find(
+        "test_function_arguments_and_returns::Dummy"));
 TEST(TypeIndex, FunctionArgumentsAndReturns) {
   EXPECT_NE(
       string_view::npos,
