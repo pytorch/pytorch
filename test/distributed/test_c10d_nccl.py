@@ -769,8 +769,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
-        ng1 = c10d.split_group(pg, [[0, 1]])
-        backend1 = pg._get_backend(torch.device(device))
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -782,10 +784,18 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
-        dist.broadcast(tensor, 0, group=ng1)
-        self.assertEqual(tensor, torch.full((1,), 0))
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
 
-        ng2 = c10d.split_group(pg, [[0, 1]])
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
 
