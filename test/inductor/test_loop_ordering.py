@@ -77,8 +77,13 @@ class ImplDetailTest(TestCase):
 
         box_a = ir.TensorBox.create(
             ir.Buffer(
-                "a",
-                ir.FixedLayout(torch.device(GPU_TYPE), torch.float32, sizes, strides),
+                name="a",
+                layout=ir.FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
             )
         )
         box_a_loader = box_a.make_loader()
