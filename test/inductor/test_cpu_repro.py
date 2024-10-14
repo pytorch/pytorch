@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     slowTest,
+    TEST_MKL,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -205,6 +206,24 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
+
+    @config.patch(freezing=True)
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkl_linear(self):
+        dtypes = [torch.float32]
+        options = itertools.product([[2, 3, 10]], [2], [True, False], dtypes)
+        for input_shape, out_dim, bias, dtype in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod.to(dtype),
+                    (v.to(dtype),),
+                )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
