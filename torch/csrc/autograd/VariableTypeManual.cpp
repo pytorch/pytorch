@@ -20,8 +20,8 @@ using torch::autograd::as_view;
 using torch::autograd::CreationMeta;
 
 namespace torch {
-namespace autograd {
-namespace VariableType {
+
+namespace autograd::VariableType {
 
 static std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
     at::ArrayRef<at::Backend> backends) {
@@ -43,7 +43,7 @@ std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
@@ -52,7 +52,7 @@ std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types() {
-  at::globalContext().lazyInitPrivateUse1();
+  at::globalContext().lazyInitDevice(c10::DeviceType::PrivateUse1);
   return allTypesForBackends(
       {Backend::PrivateUse1, Backend::SparsePrivateUse1});
 }
@@ -372,8 +372,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 } // namespace
-} // namespace VariableType
-} // namespace autograd
+} // namespace autograd::VariableType
 
 namespace ADInplaceOrView {
 #define CREATION_META_DEFINITION                            \
