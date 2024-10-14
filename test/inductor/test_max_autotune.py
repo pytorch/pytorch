@@ -580,7 +580,6 @@ class TestMaxAutotune(TestCase):
 
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_baddmm(self):
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
