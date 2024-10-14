@@ -602,7 +602,7 @@ class TestMaxAutotune(TestCase):
         out, code = run_and_get_code(m_c, x)
         self.assertEqual(out, mod(x))
 
-        FileCheck().check("triton_tem_fused_baddbmm").run(code)
+        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
