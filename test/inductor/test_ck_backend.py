@@ -384,7 +384,6 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "layout_optimization": True,
                 "compile_threads": 4,
                 "rocm.ck_dir": self.ck_dir,
                 "rocm.n_max_profiling_configs": 4,
@@ -395,8 +394,8 @@ class TestCKBackend(TestCase):
             def conv2d(x, w):
                 return torch.conv2d(x, w)
 
-            Y_compiled = conv2d(x_cl, w_cl).to(memory_format=torch.contiguous_format)
             Y_eager = torch.conv2d(x, w)
+            Y_compiled = conv2d(x, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 

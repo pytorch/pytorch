@@ -7,7 +7,7 @@ import os
 import random
 import subprocess
 from typing import Tuple, Optional, List
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.utils import IndentedBuffer
@@ -16,6 +16,19 @@ from ck4inductor.util import library_path
 
 log = logging.getLogger(__name__)
 
+
+def torch_layout_to_ck_layouts(torch_layout):
+    # logically, torch tensors are always NCHW,
+    # and channels-last memory layout is visible in the strides
+    if torch_layout.stride[-1] == 1:
+        # when input or output is NCHW
+        # NB: torch.conv2d result is always NCHW
+        return ["NGCHW", "GKCYX", "NGKHW"]
+    elif torch_layout.stride[-3] == 1:
+        # when input or output or weight is channels-last
+        return ["NHWGC", "GKYXC", "NHWGK"]
+    else:
+        return None
 
 @dataclass
 class CKConvOp:
@@ -207,17 +220,24 @@ def gen_conv_ops_library() -> List[CKConvOp]:
         spec_range = conv_specs if sub_spec else [instance.conv_forward_specialization]
         for scheduler in schedulers_range:
             for spec in spec_range:
-                substitute_instances.append(
-                    replace(
-                        instance,
-                        block_gemm_pipeline_scheduler=scheduler,
-                        conv_forward_specialization=spec,
-                        gemm_specialization="GemmSpecialization::MNKPadding",
-                        n_dim_spatial=2,
-                        a_layout="NHWGC",
-                        b_layout="GKYXC",
-                        e_layout="NHWGK",
-                    )
+                for channels_last in [True, False]:
+                    if channels_last:
+                        a_layout = "NHWGC"
+                        e_layout = "NHWGK"
+                    else:
+                        a_layout = "NGCHW"
+                        e_layout = "NGKHW"
+                    substitute_instances.append(
+                        replace(
+                            instance,
+                            block_gemm_pipeline_scheduler=scheduler,
+                            conv_forward_specialization=spec,
+                            gemm_specialization="GemmSpecialization::MNKPadding",
+                            n_dim_spatial=2,
+                            a_layout=a_layout,
+                            b_layout="GKYXC",
+                            e_layout=e_layout,
+                        )
                 )
 
     return substitute_instances
@@ -368,6 +388,10 @@ class CKConvTemplate(CKTemplate):
                 using GKXC   = ck::tensor_layout::convolution::GKXC;
                 using GKYXC  = ck::tensor_layout::convolution::GKYXC;
                 using GKZYXC = ck::tensor_layout::convolution::GKZYXC;
+
+                using GKCX   = ck::tensor_layout::convolution::GKCX;
+                using GKCYX  = ck::tensor_layout::convolution::GKCYX;
+                using GKCZYX = ck::tensor_layout::convolution::GKCZYX;
 
                 using GNWK   = ck::tensor_layout::convolution::GNWK;
                 using GNHWK  = ck::tensor_layout::convolution::GNHWK;
@@ -560,13 +584,22 @@ class CKConvTemplate(CKTemplate):
             return None
         if op.e_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
+        # disable the instance if layouts don't match
+        if op.a_layout not in torch_layout_to_ck_layouts(X_meta):
+            return None
+        if op.b_layout not in torch_layout_to_ck_layouts(W_meta):
+            return None
+        if op.e_layout not in torch_layout_to_ck_layouts(Y_meta):
+            return None
         return op
 
     def gen_ops(self):
         unfiltered_instances = gen_conv_ops_library()
+
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
         )
+        # import pdb; pdb.set_trace()
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
