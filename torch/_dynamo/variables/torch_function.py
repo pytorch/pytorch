@@ -2,22 +2,37 @@
 
 import collections
 import contextlib
+import functools
 import inspect
+import operator
 from typing import Deque, Dict, List, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
 from torch._guards import Source
-from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
+from torch.overrides import (
+    _get_overloaded_args,
+    BaseTorchFunctionMode,
+    get_default_nowrap_functions,
+    TorchFunctionMode,
+)
 from torch.utils._device import DeviceContext
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
+from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
-from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
+from ..utils import (
+    class_has_getattribute,
+    clear_torch_function_mode_stack,
+    get_safe_global_name,
+    has_torch_function,
+    is_tensor_base_attr_getter,
+    set_torch_function_mode_stack,
+)
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import ContextWrappingVariable
+from .ctx_manager import GenericContextWrappingVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -49,6 +64,125 @@ if TYPE_CHECKING:
 
 # To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
+bin_ops = [
+    operator.pow,
+    operator.mul,
+    operator.matmul,
+    operator.floordiv,
+    operator.truediv,
+    operator.mod,
+    operator.add,
+    operator.lt,
+    operator.gt,
+    operator.ge,
+    operator.le,
+    operator.ne,
+    operator.eq,
+    operator.sub,
+    operator.ipow,
+    operator.imul,
+    operator.imatmul,
+    operator.ifloordiv,
+    operator.itruediv,
+    operator.imod,
+    operator.iadd,
+    operator.isub,
+]
+
+bin_int_ops = [
+    operator.and_,
+    operator.or_,
+    operator.xor,
+    operator.iand,
+    operator.ixor,
+    operator.ior,
+]
+
+un_int_ops = [operator.invert]
+
+tensor_and_int_ops = [
+    operator.lshift,
+    operator.rshift,
+    operator.ilshift,
+    operator.irshift,
+    operator.getitem,
+]
+
+un_ops = [
+    operator.abs,
+    operator.pos,
+    operator.neg,
+    operator.not_,  # Note: this has a local scalar dense call
+    operator.length_hint,
+]
+
+BUILTIN_TO_TENSOR_FN_MAP = {}
+
+# These functions represent the r* versions of the above ops
+# Basically, if __add__(1, Tensor) is called, it is translated
+# to __radd__(Tensor, 1).
+# In the builtin var, we check if there is a tensor in the first args position,
+# if not, we swap the args and use the r* version of the op.
+BUILTIN_TO_TENSOR_RFN_MAP = {}
+
+
+def populate_builtin_to_tensor_fn_map():
+    global BUILTIN_TO_TENSOR_FN_MAP
+
+    most_recent_func = None
+
+    class GetMethodMode(BaseTorchFunctionMode):
+        """
+        Mode to extract the correct methods from torch function invocations
+        (Used to get the correct torch.Tensor methods from builtins)
+        """
+
+        def __torch_function__(self, func, types, args=(), kwargs=None):
+            kwargs = kwargs or {}
+            nonlocal most_recent_func
+            most_recent_func = func
+            return func(*args, **kwargs)
+
+    inp0 = torch.ones(1)
+    inp1 = torch.ones(1)
+    inp0_int = torch.ones(1, dtype=torch.int32)
+    inp1_int = torch.ones(1, dtype=torch.int32)
+    with GetMethodMode():
+        setups_and_oplists = [
+            (lambda o: o(inp0), un_ops),
+            (lambda o: o(inp0_int), un_int_ops),
+            (lambda o: o(inp0, inp1), bin_ops),
+            (lambda o: o(inp0_int, inp1_int), bin_int_ops),
+            (lambda o: o(inp0_int, 0), tensor_and_int_ops),
+        ]
+        for setup_fn, op_list in setups_and_oplists:
+            for op in op_list:
+                setup_fn(op)
+                assert most_recent_func is not None
+                BUILTIN_TO_TENSOR_FN_MAP[op] = most_recent_func
+
+        # gather the reverse functions
+        rsetups_and_oplists = [
+            (
+                lambda o: o(1, inp1),
+                bin_ops,
+            ),  # Get r* ops, (ex. __sub__(int, Tensor) -> __rsub__(Tensor, int))
+            (lambda o: o(1, inp1_int), bin_int_ops),
+            (lambda o: o(0, inp0_int), tensor_and_int_ops),
+        ]
+
+        rskips = {operator.matmul, operator.imatmul, operator.getitem}
+        for setup_fn, op_list in rsetups_and_oplists:
+            for op in op_list:
+                if op in rskips:
+                    continue
+                setup_fn(op)
+                assert most_recent_func is not None
+                if most_recent_func != BUILTIN_TO_TENSOR_FN_MAP[op]:
+                    BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
+
+
+populate_builtin_to_tensor_fn_map()
 
 banned_attrs = [
     fn.__self__.__name__
@@ -56,11 +190,38 @@ banned_attrs = [
     if is_tensor_base_attr_getter(fn)
 ]
 
-# Today set default device is placed in the graph and guarded on separately
-# so we should not trace through it. In the future we can trace it once
-# mode tracing is implemented and not put in the graph, but this is more
-# of a BE project and can be evaluated later
-IGNORED_MODES = {DeviceContext}
+
+@functools.lru_cache(None)
+def get_prev_stack_var_name():
+    from ..bytecode_transformation import unique_id
+
+    return unique_id("___prev_torch_function_mode_stack")
+
+
+# Used to clear/restore the python torch function mode stack and temporarily restore it as needed
+class TorchFunctionModeStackStateManager:
+    def __init__(self):
+        self.stack = []
+
+    def __enter__(self):
+        self.stack = torch.overrides._get_current_function_mode_stack()
+        clear_torch_function_mode_stack()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        set_torch_function_mode_stack(self.stack)
+        self.stack = []
+
+    @contextlib.contextmanager
+    def temp_restore_stack(self):
+        prev = torch.overrides._get_current_function_mode_stack()
+        set_torch_function_mode_stack(self.stack)
+        try:
+            yield
+        finally:
+            set_torch_function_mode_stack(prev)
+
+
+torch_function_mode_stack_state_mgr = TorchFunctionModeStackStateManager()
 
 
 class SymbolicTorchFunctionState:
@@ -189,9 +350,26 @@ class TorchFunctionModeStackVariable(VariableTracker):
         return ind + cls.offset
 
 
-class TorchFunctionModeVariable(ContextWrappingVariable):
+class TorchFunctionModeVariable(GenericContextWrappingVariable):
+    @staticmethod
+    def is_supported_torch_function_mode(ty):
+        # Supported in this sense means we can support graph breaks under the
+        # context.
+        # We are able to trace custom modes but if there are graph breaks under them
+        # and they have a custom __enter__/__exit__ we don't handle this for the
+        # same reason we don't handle generic context managers: there may be side effects
+        # that are now affected by executing the funtion across two frames instead of one
+        # Today we support the enter/exit of the default TorchFunctionMode as well as
+        # DeviceContext (which is used for set_default_device)
+        return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (
+            not class_has_getattribute(ty)
+            and inspect.getattr_static(ty, "__enter__") == TorchFunctionMode.__enter__
+            and inspect.getattr_static(ty, "__exit__") == TorchFunctionMode.__exit__
+        )
+
     def __init__(self, value, source=None, **kwargs):
-        super().__init__(value, **kwargs)
+        if value is not None:
+            super().__init__(value, **kwargs)
         self.value = value
         self.cm_obj = value  # needed for BC with calling enter from CM code
         self.source = source
@@ -221,8 +399,39 @@ class TorchFunctionModeVariable(ContextWrappingVariable):
             kwargs,
         )
 
-    def _call_func(self, tx: "InstructionTranslator", values):
-        unimplemented("enter/exit for torch function mode NYI")
+    def enter(self, tx):
+        from .torch import TorchInGraphFunctionVariable
+
+        if isinstance(self.value, NoEnterTorchFunctionMode):
+            return ConstantVariable.create(None)
+
+        TorchInGraphFunctionVariable(
+            torch._C._push_on_torch_function_stack
+        ).call_function(tx, [self], {})
+        return ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        from .torch import TorchInGraphFunctionVariable
+
+        TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
+            tx, [], {}
+        )
+        return ConstantVariable.create(None)
+
+    def reconstruct_type(self, codegen):
+        ty = NoEnterTorchFunctionMode
+        codegen(
+            AttrSource(
+                codegen.tx.import_source(ty.__module__),
+                ty.__name__,
+            )
+        )
+
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return False
 
 
 def _get_all_args(args, kwargs):
@@ -233,7 +442,6 @@ def _flatten_vts(vts):
     from collections import deque
 
     from .dicts import ConstDictVariable
-    from .lazy import LazyVariableTracker
     from .lists import ListVariable
 
     vts = deque(vts)
@@ -241,13 +449,17 @@ def _flatten_vts(vts):
 
     while vts:
         vt = vts.pop()
-        LazyVariableTracker.realize_all(vt)
-        if isinstance(vt, ListVariable):
-            vts.extend(vt.items)
-        elif isinstance(vt, ConstDictVariable):
-            vts.extend(vt.items.values())
-        else:
-            output.append(vt)
+
+        if not vt.is_realized() and vt.peek_type() in (dict, list, tuple):
+            vt.realize()
+
+        if vt.is_realized():
+            if isinstance(vt, ListVariable):
+                vts.extend(vt.items)
+            elif isinstance(vt, ConstDictVariable):
+                vts.extend(vt.items.values())
+
+        output.append(vt)
 
     return output
 
@@ -295,8 +507,15 @@ def call_torch_function(
 
 
 def build_torch_function_fn(tx: "InstructionTranslator", value, source):
+    from types import FunctionType
+
+    func = value.__torch_function__.__func__
+
+    if not isinstance(func, FunctionType):
+        unimplemented("Builtin/C++ torch function implementations NYI")
+
     source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.create(tx, value.__torch_function__.__func__, source)
+    return VariableTracker.create(tx, func, source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):

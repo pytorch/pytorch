@@ -109,34 +109,15 @@ ALLOW_LIST = [
     ("aten::mps_max_pool2d_backward.out", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
-    ("aten::_flash_attention_forward", datetime.date(2023, 12, 30)),
-    ("aten::_flash_attention_backward", datetime.date(2023, 12, 30)),
     ("aten::_scaled_dot_product_cudnn_attention", datetime.date(9999, 1, 1)),
-    ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     # BetterTransformer 1.0 internal operators
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
     ("aten::_native_decoder_only_multi_head_attention", datetime.date(9999, 1, 1)),
-    ("c10d::_allgather_base_", datetime.date(2023, 12, 30)),
-    ("c10d::_reduce_scatter_base_", datetime.date(2023, 12, 30)),
-    ("c10d::broadcast_", datetime.date(2023, 12, 30)),
-    ("c10d::scatter_", datetime.date(2023, 12, 30)),
     # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
-    ("aten::to_sparse.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse.sparse_dim_out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsr.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
-    ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
-    ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
-    ("aten::_efficient_attention_forward", datetime.date(2024, 7, 1)),
-    ("aten::_efficient_attention_backward", datetime.date(2024, 7, 1)),
     ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
     ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
@@ -150,8 +131,6 @@ ALLOW_LIST = [
     ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
     ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
     ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
-    # BC-breaking change in can_cast signature: 'from' -> 'from_'
-    ("aten::can_cast", datetime.date(2024, 5, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
