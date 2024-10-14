@@ -286,12 +286,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_mps(const Tensor& self,
                                                           const bool return_inverse,
                                                           const bool return_counts,
                                                           std::optional<int64_t> dim) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: unique_consecutive op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::unique_consecutive(self.to("cpu"), return_inverse, return_counts, dim));
-  }
-
   return _unique_impl_mps(self, return_inverse, return_counts, true, dim);
 }
 
@@ -299,12 +293,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_consecutive_mps(const Tensor& self
                                                               int64_t dim,
                                                               const bool return_inverse,
                                                               const bool return_counts) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: unique_dim_consecutive op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::unique_dim_consecutive(self.to("cpu"), dim, return_inverse, return_counts));
-  }
-
   return _unique_impl_mps(self, return_inverse, return_counts, true, std::make_optional((int64_t)dim));
 }
 
@@ -312,12 +300,6 @@ std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,
                                                 const bool sorted,
                                                 const bool return_inverse,
                                                 const bool return_counts) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: _unique2 op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return castToMPS(at::_unique2(self.to("cpu"), sorted, return_inverse, return_counts));
-  }
-
   return _unique_impl_mps(self, return_inverse, return_counts, false, std::nullopt);
 }
 

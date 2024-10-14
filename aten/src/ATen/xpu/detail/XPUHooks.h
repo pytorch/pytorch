@@ -7,7 +7,7 @@ namespace at::xpu::detail {
 // The real implementation of XPUHooksInterface
 struct XPUHooks : public at::XPUHooksInterface {
   XPUHooks(at::XPUHooksArgs) {}
-  void initXPU() const override;
+  void init() const override;
   bool hasXPU() const override;
   std::string showConfig() const override;
   int32_t getGlobalIdxFromDevice(const at::Device& device) const override;
@@ -21,6 +21,8 @@ struct XPUHooks : public at::XPUHooksInterface {
   Allocator* getPinnedMemoryAllocator() const override;
   bool isPinnedPtr(const void* data) const override;
   bool hasPrimaryContext(DeviceIndex device_index) const override;
+  DeviceIndex deviceCount() const override;
+  DeviceIndex getCurrentDevice() const override;
 };
 
 } // namespace at::xpu::detail

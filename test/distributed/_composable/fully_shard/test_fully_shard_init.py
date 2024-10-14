@@ -330,7 +330,7 @@ class TestInitialization(FSDPTest):
         model = CompositeParamModel(device=device)
         model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
         with self.assertRaisesRegex(
-            ValueError, "Change scalar_p to a 1D tensor with numel equals to 1."
+            ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
         ):
             fully_shard(model)
 
