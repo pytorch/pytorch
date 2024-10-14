@@ -642,6 +642,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return out0, out1, a(x)
 
         inp = torch.ones(3)
+        # test that decorating b has no overall side effect
+        self.assertEqual(a(inp), inp + 1)
+
         self.assertEqual(b(inp), inp + 2)
         self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
 

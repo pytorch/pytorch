@@ -235,10 +235,33 @@ def set_stance(stance: str):
     Can be used as a function, context manager, or decorator.
     Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
 
+    .. code-block:: python
+
+        @torch.compile
+        def foo(x):
+            ...
+
+        @torch.compiler.set_stance("force_eager")
+        def bar():
+            # will not be compiled
+            foo(...)
+
+        bar()
+
+        with torch.compiler.set_stance("force_eager"):
+            # will also not be compiled
+            foo(...)
+
+        # will be compiled
+        foo(...)
+
     Args:
         stance: The stance to set the compiler to. Valid values are:
             - "default": The default stance, used for normal compilation.
             - "force_eager": Ignore all `torch.compile` directives.
+            - "eager_on_recompile": Run code eagerly when a recompile is necessary.
+                If there is cached compiled code valid for the input, it will still be used.
+            - "fail_on_recompile": Raise an error when recompiling a function.
     """
     import torch._dynamo
 

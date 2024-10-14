@@ -144,6 +144,7 @@ def _callback_from_stance(callback):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'"
             )
 
+        # to prevent cache miss due to different callback
         fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
 
         return fail_callback
