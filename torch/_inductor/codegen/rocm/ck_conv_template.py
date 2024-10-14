@@ -352,6 +352,18 @@ class CKConvTemplate(CKTemplate):
             argument.Print();
             return -23;
         }
+        if (p_a == nullptr) {
+            std::cerr << "p_a is nullptr" << std::endl;
+            return -1;
+        }
+        if (p_b == nullptr) {
+            std::cerr << "p_b is nullptr" << std::endl;
+            return -1;
+        }
+        if (p_e == nullptr) {
+            std::cerr << "p_e is nullptr" << std::endl;
+            return -1;
+        }
         if (workspace_size) {
             *workspace_size = conv.GetWorkSpaceSize(&argument);
             return 0;
