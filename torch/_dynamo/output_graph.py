@@ -941,6 +941,7 @@ class OutputGraph:
             needs_alias[stolen_name].append(x)
 
         visited = {}
+        updated_vars: Set[VariableTracker] = set()
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
@@ -953,6 +954,13 @@ class OutputGraph:
             list_name = arg.source.local_name
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
+                # We need this check because we update `VariableTracker.source`
+                # below, which could wipe the original `GetItemSource`.
+                if x in updated_vars:
+                    continue
+
+                # A small codegen optimization because we might have different
+                # VariableTrackers that share the same source.
                 list_idx = x.source.index
                 if list_idx not in visited:
                     alias_name = self.new_var(
@@ -972,7 +980,7 @@ class OutputGraph:
 
                 # operate on alias, handled by suffix codegen
                 x.source = LocalSource(visited[list_idx])
-
+                updated_vars.add(x)
         return alias_insts
 
     def compile_subgraph(

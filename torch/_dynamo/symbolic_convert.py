@@ -70,7 +70,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
+from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
