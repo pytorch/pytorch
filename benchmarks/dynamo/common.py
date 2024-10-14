@@ -474,6 +474,7 @@ def output_signpost(data, args, suite, error=None):
                 # the coarse-grained phase timings, even though internally
                 # they are called something else
                 "compilation_metrics": calculate_time_spent(),
+                "agg_compilation_metrics": {k: sum(v) for k, v in compilation_time_metrics.items()},
                 "detailed_compilation_metrics": compilation_time_metrics,
                 "simple_call_counter": simple_call_counter,
                 # NB: args has training vs inference
