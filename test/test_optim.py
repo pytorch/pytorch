@@ -931,11 +931,11 @@ class TestOptimRenewed(TestCase):
             max_mems = []
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
-                # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
-                # meaning any tensor that occupies <512 bytes of memory will allocate a whole
-                # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
+                # The 16 * 8 = 128 is critical here! Our CUDACachingAllocator allocates in blocks
+                # of 512, meaning any tensor that occupies <512 bytes of memory will allocate a
+                # whole 512 bytes anyway. We use 128 (cuz datasize would be 4 bytes) so that param
                 # is size 512 exactly, making our later calculations for intermediate_size easy.
-                param = torch.rand(128, device=device, dtype=dtype)
+                param = torch.rand(16, 8, device=device, dtype=dtype)
                 params = [torch.rand_like(param) for _ in range(nparams)]
 
                 optimizer = optim_cls(params, **kwargs)
@@ -984,11 +984,16 @@ class TestOptimRenewed(TestCase):
                     else:
                         nintermediates = 4
 
-            elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
+            elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop", "Adafactor"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
                 # RMSprop uses avg and grads
+                # Adafactor uses row/col var and its mean
                 nintermediates = 2
+
+                if optim_cls.__name__ == "Adafactor" and kwargs.get("maximize", False):
+                    # When maximize is True, Adafactor also tracks device_grad
+                    nintermediates = 3
 
             # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
             # which makes the foreach memory check fail
@@ -1023,6 +1028,41 @@ class TestOptimRenewed(TestCase):
         ):
             self.skipTest("MPS supports only torch.float16 and torch.float32")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
+
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=(torch.float32,),
+    )
+    def test_fused_error_on_params_on_meta(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
+
+        with torch.device("meta"):
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 3),
+                torch.nn.Sigmoid(),
+                torch.nn.Linear(3, 1),
+                torch.nn.Sigmoid(),
+            ).to(dtype)
+
+        optimizer = optim_info.optim_cls(model.parameters(), fused=True)
+        with torch.device("meta"):
+            for p in model.parameters():
+                p.grad = torch.rand_like(p)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "`fused=True` requires all the params to be floating point Tensors",
+        ):
+            optimizer.step()
+
+        optimizer.zero_grad(set_to_none=True)
+        model.to_empty(device=device)
+        for p in model.parameters():
+            p.grad = torch.rand_like(p)
+        optimizer.step()
 
     @onlyNativeDeviceTypes
     @largeTensorTest("64GB")
@@ -1964,10 +2004,16 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @optims(
-        [o for o in optim_db if "foreach" in o.supported_impls], dtypes=[torch.float32]
+        [
+            o
+            for o in optim_db
+            if ("foreach" in o.supported_impls and o.optim_cls.__name__ != "Adafactor")
+        ],
+        dtypes=[torch.float32],
     )
     def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
         # Test that the default implementations for optimizers are changed to foreach
+        # except Adafactor, which defaults to the single tensor impl for memory efficiency.
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)

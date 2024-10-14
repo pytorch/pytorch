@@ -3,7 +3,7 @@
 import copy
 import itertools
 import unittest
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.distributed as dist
@@ -23,7 +23,6 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -34,6 +33,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
@@ -129,14 +129,22 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
         model = MLP(8)
-        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\('cuda', \[\[\[0\]\], \[\[1\]\]\]\)"
+        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh"
         with self.assertRaisesRegex(ValueError, regex):
+            fully_shard(model, mesh=mesh)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_2d_mesh_without_mesh_dim_names(self):
+        mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        model = MLP(8)
+        regex = "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+        with self.assertRaisesRegex(AssertionError, regex):
             fully_shard(model, mesh=mesh)
 
 
@@ -382,6 +390,18 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
         ):
             fully_shard(model)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_noncontiguous_parameter(self):
+        """
+        Tests raising an exception when the model has non-contiguous
+        parameters. This is due to lack of implementation support.
+        """
+        conv2d = nn.Conv2d(8, 8, 3).to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support non-contiguous parameters"
+        ):
+            fully_shard(conv2d)
 
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
@@ -991,6 +1011,149 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
         # Check that we can run an iteration without erroring
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
         model(inp).sum().backward()
+
+
+class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    def _init_models(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=3, dropout_p=0.0)
+        model = Transformer(model_args)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        return model, ref_model
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_transformer_shard_largest_dim(self):
+        model, ref_model = self._init_models()
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            return Shard(largest_dim)
+
+        for layer in model.layers:
+            fully_shard(layer, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        any_shard_dim1 = False
+        for param in model.parameters():
+            self.assertEqual(len(param.placements), 1)
+            self.assertIsInstance(param.placements[0], Shard)
+            any_shard_dim1 |= param.placements[0].dim == 1
+        self.assertTrue(any_shard_dim1)
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_transformer_shard_dim_neg1(self):
+        model, ref_model = self._init_models()
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            # Check that FSDP will normalize this dim to non-negative
+            return Shard(-1)
+
+        for layer in model.layers:
+            fully_shard(layer, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_2d_transformer_shard_diff_dim(self):
+        model, ref_model = self._init_models()
+
+        dp_size, tp_size = self.world_size // 2, 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            if isinstance(param, DTensor):
+                for placement in param.placements:
+                    if isinstance(placement, Shard):
+                        shard_dim = param.ndim - 1 - placement.dim
+                        assert shard_dim >= 0, f"{param.shape}"
+                        return Shard(shard_dim)
+            return Shard(0)
+
+        for layer in model.layers:
+            fully_shard(
+                layer, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+            )
+        fully_shard(
+            model, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+        )
+
+        linear_weight_names = ["wq", "wk", "wv", "wo", "w1", "w2"]
+        for param_name, param in model.named_parameters():
+            if (
+                any(n in param_name for n in linear_weight_names)
+                and "weight" in param_name
+            ):
+                total_placement_dims = 0
+                for placement in param.placements:
+                    self.assertTrue(isinstance(placement, Shard))
+                    total_placement_dims += placement.dim
+                self.assertEqual(param.ndim, 2)
+                # Check that FSDP shards on either dim-0 or dim-1, and TP
+                # shards on the other
+                self.assertEqual(total_placement_dims, 1)
+            else:
+                self.assertTrue(
+                    any(isinstance(placement, Shard) for placement in param.placements)
+                )
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_uneven_shard_largest_dim(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
+            return Shard(largest_dim)
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support uneven sharding on dim 1"
+        ):
+            fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_invalid_shard_dim(self):
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            return Shard(1)
+
+        # Shard(1) is invalid for 1D bias parameters
+        with self.assertRaisesRegex(
+            AssertionError, "Shard dim 1 is invalid for 1D tensor"
+        ):
+            fully_shard(model, shard_placement_fn=shard_placement_fn)
 
 
 if __name__ == "__main__":
