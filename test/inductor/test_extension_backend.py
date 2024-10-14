@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -50,6 +51,9 @@ TestCase = test_torchinductor.TestCase
 
 class BaseExtensionBackendTests(TestCase):
     module = None
+    # Use a temp dir as build root as there might be multiple tests trying to
+    # build the same extension at the same time
+    build_directory = tempfile.mkdtemp()
 
     @classmethod
     def setUpClass(cls):
@@ -67,6 +71,7 @@ class BaseExtensionBackendTests(TestCase):
                 str(source_file),
             ],
             extra_cflags=["-g"],
+            build_directory=cls.build_directory,
             verbose=True,
         )
 
