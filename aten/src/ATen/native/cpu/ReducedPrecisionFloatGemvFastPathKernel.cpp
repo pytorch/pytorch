@@ -18,32 +18,17 @@ namespace at::native {
 inline namespace CPU_CAPABILITY {
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 
-// We need the shift for reduce(), hence the extra constants.
-constexpr auto kF16ElementsPerIterationShift = 7;
-constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
-static_assert(kF16ElementsPerIteration == 128);
-
-constexpr auto kF16ElementsPerRegisterShift = 3;
-constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
-static_assert(kF16ElementsPerRegister == 8);
-
-constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
-constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
-static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
-
-constexpr auto kF32ElementsPerIterationShift = 5;
-constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
-static_assert(kF32ElementsPerIteration == 32);
-
-constexpr auto kF32ElementsPerRegisterShift = 2;
-constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
-static_assert(kF32ElementsPerRegister == 4);
-
 constexpr auto kF32RegisterPairsPerIteration = 4;
 constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
-constexpr auto kF32RegistersPerIterationShift = 3;
-static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
-static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
+constexpr auto kF32ElementsPerRegister = vec::Vectorized<float>::size();
+constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;;
+
+namespace {
+template <typename T>
+constexpr int IntegerLog2(T n, int p = 0) {
+  return (n <= 1) ? p : IntegerLog2(n / 2, p + 1);
+}
+} // namespace
 
 /*
  * NOTE [ GGML Copyright Notice ]
@@ -74,9 +59,13 @@ static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
  * SOFTWARE.
  */
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+constexpr auto kF16RegistersPerIteration = 16;
+constexpr auto kF16ElementsPerRegister = vec::Vectorized<Half>::size();
+constexpr auto kF16ElementsPerIteration = kF16RegistersPerIteration * kF16ElementsPerRegister;
+
 static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
   int offset = kF16RegistersPerIteration;
-  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+  c10::ForcedUnroll<IntegerLog2(kF16RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
     for (int i = 0; i < offset; ++i) {
       x[i] = x[i] + x[offset + i];
@@ -120,7 +109,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 
 static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   int offset = kF32RegistersPerIteration;
-  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+  c10::ForcedUnroll<IntegerLog2(kF32RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
     for (int i = 0; i < offset; ++i) {
       x[i] = vaddq_f32(x[i], x[offset + i]);
