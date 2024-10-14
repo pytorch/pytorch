@@ -917,11 +917,11 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs) -> None:
+    def __init__(self, tensors, prev_versions, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
-        self.tensor = tensor
-        self.prev_version = prev_version
+        self.tensors = tensors
+        self.prev_versions = prev_versions
 
     def enter(self, tx):
         pass
@@ -931,7 +931,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
         return variables.TorchInGraphFunctionVariable(
             _unsafe_set_version_counter
-        ).call_function(tx, [self.tensor, self.prev_version], {})
+        ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen):
         unimplemented(

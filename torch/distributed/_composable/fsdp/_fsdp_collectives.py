@@ -317,9 +317,11 @@ def foreach_all_gather_copy_out(
             post_param_size[shard_dim] *= world_size
             cat_out = target_all_gather_output.view(post_param_size)
             torch.cat(chunks, dim=shard_dim, out=cat_out)
-            torch._C._autograd._unsafe_set_version_counter(
-                target_all_gather_output, target_all_gather_output._version - 1
-            )
+        # decrement version counters of all outputs at once
+        old_versions = [x._version - 1 for x in fsdp_param.all_gather_outputs]
+        torch._C._autograd._unsafe_set_version_counter(
+            fsdp_param.all_gather_outputs, old_versions
+        )
 
 
 @torch.no_grad()

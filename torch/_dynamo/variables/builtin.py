@@ -1808,7 +1808,7 @@ class BuiltinVariable(VariableTracker):
                         version = x._version
                         if version > 0:
                             version = version - 1
-                        torch._C._autograd._unsafe_set_version_counter(x, version)
+                        torch._C._autograd._unsafe_set_version_counter((x,), (version,))
                         return x
 
                     tx.output.create_proxy(
