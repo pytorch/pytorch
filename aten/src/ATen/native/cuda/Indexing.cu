@@ -1350,7 +1350,7 @@ template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
     const Tensor& self,
-    uint64_t dim,
+    int64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
   auto selfDims = self.dim() == 0 ? 1 : self.dim();
@@ -1506,24 +1506,27 @@ Tensor& index_select_out_cuda(
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
-  if (self.is_quantized()){
+  if (self.is_quantized()) {
     TORCH_CHECK(
-      self.qscheme() == kPerTensorAffine,
-      "Only per_tensor quantized quantized tensors are supported by index_select.")
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
     AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
-      index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index);
+      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
     AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
-        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), AT_EXPAND(AT_FLOAT8_TYPES),
+        AT_WRAP([&] {
+          index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+        }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
         kHalf,
         kBool,
-        kBFloat16
-        );
+        kBFloat16);
   }
 
   return out;
