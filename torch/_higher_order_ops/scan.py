@@ -61,17 +61,6 @@ def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
 def _(t, dim, idx):
     return t.select(dim, 0)
 
-
-@torch.library.custom_op("_scan_helper::get_size", mutates_args=())
-def _get_size(t: torch.Tensor, dim: int) -> int:
-    return t.size(dim)
-
-
-@torch.library.register_fake("_scan_helper::get_size")
-def _(t: torch.Tensor, dim: int) -> int:
-    return t.size(dim)
-
-
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]

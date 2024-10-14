@@ -1982,9 +1982,11 @@ class GraphLowering(torch.fx.Interpreter):
     def get_output_names(self) -> List[str]:
         return [
             # Subgraph can return symint as outputs (e.g. the cond_fn of while_loop might check whether
-            # a symint is larger than a trip_count). We give an output name so that wrapper codegen can 
+            # a symint is larger than a trip_count). We give an output name so that wrapper codegen can
             # generate an output name to return.
-            f"sym_expr_ret{i}" if isinstance(node, ir.ShapeAsConstantBuffer) else node.get_name() 
+            f"sym_expr_ret{i}"
+            if isinstance(node, ir.ShapeAsConstantBuffer)
+            else node.get_name()
             for i, node in enumerate(self.graph_outputs)
             if not isinstance(node, ir.NoneAsConstantBuffer)
         ]

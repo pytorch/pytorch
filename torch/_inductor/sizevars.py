@@ -415,7 +415,7 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right)), breakpoint()
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:

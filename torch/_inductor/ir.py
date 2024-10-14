@@ -6780,20 +6780,25 @@ class WhileLoop(ExternKernel):
                 ),
                 while_loop,
                 [(list, i)],
-            ) if not isinstance(output, ShapeAsConstantBuffer) else output
+            )
+            if not isinstance(output, ShapeAsConstantBuffer)
+            else output
             for i, output in enumerate(body_outputs)
             if i not in body_fn.graph.mutated_input_idxs
         ]
 
         for inp, out in zip(carried_inputs, outputs):
-            if not isinstance(inp, ShapeAsConstantBuffer) and inp.get_name() in V.graph.graph_inputs:
+            if (
+                not isinstance(inp, ShapeAsConstantBuffer)
+                and inp.get_name() in V.graph.graph_inputs
+            ):
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations
                 # is zero. due to this, we can't (generally) reuse the
                 # output buffers corresponding to the graph inputs, as
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
-        
+
         while_loop.outputs = outputs
         while_loop.mutation_outputs.extend(
             [

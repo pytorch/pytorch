@@ -1053,19 +1053,6 @@ class ScanModels:
                 dim=self.dim,
                 reverse=self.reverse,
             )
-    
-    class ScanWithScatter(torch.nn.Module):
-        def __init__(self, reverse, dim):
-            super().__init__()
-            self.reverse = reverse
-            self.dim = dim
-        
-        def forward(self, scan_op, init, xs):
-            def combine_fn(carry, x):
-                full = torch.full_like(x, 1)
-                return carry + torch.scatter(full, 0, torch.tensor([0]), 1), x_view.clone()
-
-            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
 
     class SimpleWithPytreeInOuts(torch.nn.Module):
         def __init__(self, reverse, dim):
