@@ -1019,7 +1019,8 @@ class _DispatchCacheKey:
 @dataclass(frozen=True)
 class _DispatchCacheEntryOutputInfo:
     """
-    Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
+    Entry type for the FakeTensor dispatch cache for an output. Accounts for two
+    possibilities:
     1) The op is inplace, and a hit means we need to alias the argument at a
        given index.
     2) We need to synthesize a new FakeTensor given tensor metadata. For view
@@ -1035,11 +1036,11 @@ class _DispatchCacheEntryOutputInfo:
 @dataclass(frozen=True)
 class _DispatchCacheEntry:
     """
-    Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
-    1) The op is inplace, and a hit means we need to alias the argument at a
-       given index.
-    2) We need to synthesize a new FakeTensor given tensor metadata. For view
-       ops, we further capture the index of the arg to alias.
+    Entry type for the FakeTensor dispatch cache. It supports two types of outputs
+    1) tensor
+    2) tuple of tensors
+
+    is_output_tuple flag helps in differentiating the return type
     """
 
     output_infos: Optional[_DispatchCacheEntryOutputInfo]
@@ -1592,7 +1593,6 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        # breakpoint()
         if output is None:
             output_info = _DispatchCacheEntryOutputInfo(
                 inplace_idx=None, metadata=None, view_idx=None

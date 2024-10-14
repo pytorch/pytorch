@@ -53,6 +53,9 @@ class basic_string_view final {
   /* implicit */ basic_string_view(const ::std::basic_string<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
+  /* implicit */ basic_string_view(const ::std::basic_string_view<CharT>& str)
+      : basic_string_view(str.data(), str.size()) {}
+
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
   constexpr basic_string_view& operator=(
@@ -60,6 +63,10 @@ class basic_string_view final {
     begin_ = rhs.begin_;
     size_ = rhs.size_;
     return *this;
+  }
+
+  operator ::std::basic_string_view<CharT>() const {
+    return ::std::basic_string_view<CharT>(data(), size());
   }
 
   explicit operator ::std::basic_string<CharT>() const {
@@ -587,8 +594,8 @@ constexpr inline void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
-
-using string_view = basic_string_view<char>;
+using std::string_view;
+using string_view_ext = basic_string_view<char>;
 
 } // namespace c10
 
