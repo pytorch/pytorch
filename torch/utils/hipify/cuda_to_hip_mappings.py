@@ -2536,6 +2536,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipMemAttachSingle", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         (
+            "CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR",
+            ("hipMemHandleTypePosixFileDescriptor", CONV_TYPE, API_DRIVER),
+        ),
+        (
             "CU_MEMORYTYPE_HOST",
             ("hipMemTypeHost", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
