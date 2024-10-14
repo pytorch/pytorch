@@ -1046,7 +1046,7 @@ class _DispatchCacheEntry:
     is_output_tuple flag helps in differentiating the return type
     """
 
-    output_infos: Optional[_DispatchCacheEntryOutputInfo]
+    output_infos: Tuple[_DispatchCacheEntryOutputInfo]
     is_output_tuple: bool = False
 
 
@@ -1498,7 +1498,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
-    ):
+    ) -> None:
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
         if not isinstance(output, FakeTensor):
@@ -1529,8 +1529,8 @@ class FakeTensorMode(TorchDispatchMode):
         func: OpOverload,
         args: Sequence[object],
         kwargs: Mapping[str, object],
-        output: Optional[FakeTensor],
-    ):
+        output: FakeTensor,
+    ) -> _DispatchCacheEntryOutputInfo:
         # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
@@ -1641,7 +1641,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
-    ):
+    ) -> Optional[FakeTensor]:
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
@@ -1710,7 +1710,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
-    ) -> Optional[FakeTensor]:
+    ) -> Union[Optional[FakeTensor], Tuple[Optional[FakeTensor], ...]]:
         """
         Create a new FakeTensor from the cache entry.
         """
@@ -1735,7 +1735,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _crosscheck_cache_output(
         self,
-        output: Optional[FakeTensor],
+        output: Union[Optional[FakeTensor], Tuple[Optional[FakeTensor], ...]],
         func: OpOverload,
         types: Sequence[Type],
         args: Sequence[object],
@@ -1759,6 +1759,7 @@ class FakeTensorMode(TorchDispatchMode):
                     for a, b in zip(true_output, output):
                         assert_metadata_eq(assert_eq, a, b)
                 else:
+                    assert not isinstance(output, tuple)
                     assert_metadata_eq(assert_eq, true_output, output)
             else:
                 assert true_output is None
