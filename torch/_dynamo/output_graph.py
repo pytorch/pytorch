@@ -909,9 +909,7 @@ class OutputGraph:
             return []
 
         alias_insts = []
-        needs_alias: Dict[
-            str, List[Union[VariableTracker, AttributeMutationExisting]]
-        ] = {}
+        needs_alias: Dict[str, List[VariableTracker]] = {}
 
         queue = [
             *tx.stack,
@@ -927,7 +925,10 @@ class OutputGraph:
                 continue
 
             if not (
-                isinstance(x, (VariableTracker, AttributeMutationExisting))
+                (
+                    x not in self.side_effects.store_attr_mutations
+                    or isinstance(x.mutable_local, AttributeMutationExisting)
+                )
                 and isinstance(x.source, GetItemSource)
                 and isinstance(x.source.base, LocalSource)
                 and x.source.base.local_name in stolen_list_names
