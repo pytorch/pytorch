@@ -249,7 +249,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
 
-        def all_reduce_eager(x):
+        def all_reduce_non_functional_eager(x):
             y = x * x
             work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
             assert isinstance(work, torch.distributed.Work)
@@ -278,7 +278,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # Test: pure-eager
             all_reduce_wait_eager = all_reduce_wait
             for _ in range(10):
-                work, y = all_reduce_eager(x)
+                work, y = all_reduce_non_functional_eager(x)
                 out_ref = all_reduce_wait_eager(work, y)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 10)
             # Trigger _unregister_completed_works() without program exit
@@ -292,7 +292,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 fullgraph=True,
             )
             for _ in range(10):
-                work, y = all_reduce_eager(x)
+                work, y = all_reduce_non_functional_eager(x)
                 self.assertEqual(
                     torch._C._distributed_c10d._get_work_registry_size(), 1
                 )
