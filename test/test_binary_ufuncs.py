@@ -159,6 +159,15 @@ class TestBinaryUfuncs(TestCase):
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
 
+            # Dtype promo rules have changed since NumPy 2.
+            # Specialize the backward-incompatible cases.
+            if (
+                np.__version__ > "2"
+                and op.name in ("sub", "_refs.sub")
+                and isinstance(l_numpy, np.ndarray)
+            ):
+                expected = expected.astype(l_numpy.dtype)
+
             # Crafts a custom error message for smaller, printable tensors
             def _numel(x):
                 if isinstance(x, torch.Tensor):
