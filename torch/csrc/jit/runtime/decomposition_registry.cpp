@@ -189,7 +189,7 @@ void run_jit_decomposition(
   auto* trace_exec = torch::jit::GetDecompositionExecutor(schema);
   trace_exec->run((*stack));
   if (stack->back().isTuple()) {
-    at::IValue tup = stack->back();
+    at::IValue tup = std::move(stack->back());
     stack->pop_back();
     for (const auto& elem : tup.toTuple()->elements()) {
       stack->push_back(elem);
