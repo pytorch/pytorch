@@ -378,8 +378,7 @@ class LazyIrSchema:
                             self.generator_arg is None
                         ), "We expect there is only one generator arg"
                         self.generator_arg = NamedCType(
-                            arg.name,
-                            arg.type,  # type:ignore[arg-type]
+                            arg.name, arg.type  # type:ignore[arg-type]
                         )
                 keyword_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)

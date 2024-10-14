@@ -2,8 +2,12 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch::distributed::c10d {
+namespace torch {
+namespace distributed {
+namespace c10d {
 
 PyMethodDef* python_functions();
 
-} // namespace torch::distributed::c10d
+} // namespace c10d
+} // namespace distributed
+} // namespace torch

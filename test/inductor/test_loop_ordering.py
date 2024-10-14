@@ -76,13 +76,7 @@ class ImplDetailTest(TestCase):
 
         box_a = ir.TensorBox.create(
             ir.Buffer(
-                name="a",
-                layout=ir.FixedLayout(
-                    torch.device("cuda"),
-                    dtype=torch.float32,
-                    size=sizes,
-                    stride=strides,
-                ),
+                "a", ir.FixedLayout(torch.device("cuda"), torch.float32, sizes, strides)
             )
         )
         box_a_loader = box_a.make_loader()

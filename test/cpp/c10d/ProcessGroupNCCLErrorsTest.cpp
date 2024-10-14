@@ -8,7 +8,6 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <utility>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 
@@ -25,9 +24,8 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       bool simulate_error,
       int rank,
       c10d::OpType opType,
-      uint64_t seq,
-      bool isP2P)
-      : WorkNCCL("0", "default_pg", device, rank, opType, seq, isP2P),
+      uint64_t seq)
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
         simulateError_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors() override {
@@ -48,7 +46,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCL(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCL(store, rank, size, opts), simulateError_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<c10d::NCCLComm>& ncclComm) override {
@@ -67,18 +65,12 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       at::Device& device,
       int rank,
       c10d::OpType opType,
-      bool isP2P,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        device,
-        simulateError_,
-        rank,
-        opType,
-        isP2P ? seqP2P_ : seqCollective_,
-        isP2P);
+        device, simulateError_, rank, opType, seqCollective_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -94,7 +86,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   }
 
  private:
-  bool simulateError_{false};
+  bool simulateError_;
 };
 
 class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
@@ -104,9 +96,8 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       bool set_timedout_error,
       int rank,
       c10d::OpType opType,
-      uint64_t seq,
-      bool isP2P)
-      : WorkNCCL("0", "default_pg", device, rank, opType, seq, isP2P),
+      uint64_t seq)
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
         setTimedoutError_(set_timedout_error) {}
 
  private:
@@ -128,24 +119,20 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLSimulateErrors(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
+        watchDogDebugInfoFinished_(false),
+        setTimedoutError_(false) {}
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,
       c10d::OpType opType,
-      bool isP2P,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        device,
-        setTimedoutError_,
-        rank,
-        opType,
-        isP2P ? seqP2P_ : seqCollective_,
-        isP2P);
+        device, setTimedoutError_, rank, opType, seqCollective_);
   }
 
   void setTimedoutError() {
@@ -176,10 +163,10 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
     watchDogDebugInfoFinished_ = true;
     return "";
   }
-  bool watchDogDebugInfoFinished_{false};
+  bool watchDogDebugInfoFinished_;
 
  private:
-  bool setTimedoutError_{false};
+  bool setTimedoutError_;
 };
 
 class ProcessGroupNCCLNoHeartbeatCaught
@@ -190,7 +177,8 @@ class ProcessGroupNCCLNoHeartbeatCaught
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCLTimedOutErrors(store, rank, size, opts),
+        hasMonitorThreadCaughtError_(false) {}
 
   std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
@@ -221,11 +209,11 @@ class ProcessGroupNCCLNoHeartbeatCaught
   // It's really hard to unit test std::abort. So we override it instead.
   // Commented this override, we do see process aborted with core dump without
   // this override.
-  void terminateProcess(const std::string& errMsg) override {
+  void terminateProcess(std::string errMsg) override {
     throw std::runtime_error(errMsg);
   }
 
-  bool hasMonitorThreadCaughtError_{false};
+  bool hasMonitorThreadCaughtError_;
 };
 
 class ProcessGroupNCCLDebugInfoStuck
@@ -236,7 +224,7 @@ class ProcessGroupNCCLDebugInfoStuck
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLNoHeartbeatCaught(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCLNoHeartbeatCaught(store, rank, size, opts) {}
 
  protected:
   // Override the heartbeat monitor function to set a long timeout to mimic the
@@ -304,8 +292,13 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   // Now run all reduce with errors.
   pg.simulateError();
   work = pg.allreduce(tensors_);
-  // Verify the work item failed.
   EXPECT_THROW(work->wait(), std::runtime_error);
+
+  // Verify the work item failed.
+  EXPECT_TRUE(work->isCompleted());
+  EXPECT_THROW(work->wait(), std::runtime_error);
+
+  // Communicators might be aborted here, further operations would fail.
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
@@ -327,10 +320,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  // Avoid watchdog thread to throw the exception first to test the barrier
-  // throw behavior.
-  ASSERT_TRUE(
-      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "0", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
@@ -343,10 +332,12 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   pg.simulateError();
   work = pg.allreduce(tensors_);
 
+  // Should not throw exceptions.
   work->wait();
-  // a NCCL ERROR happened before should stop the thread from passing the
-  // barrier.
-  EXPECT_THROW(pg.barrier()->wait(), std::runtime_error);
+  pg.barrier()->wait();
+
+  EXPECT_TRUE(work->isCompleted());
+  // Communicators might be aborted here, further operations would fail.
 }
 
 // Function to read what we wrote to the local disk for validation.
@@ -355,7 +346,7 @@ std::string readTraceFromFile(const std::string& filename, size_t size) {
   // Read the strings from the file
   if (file) { // While the file stream is in good state
     std::string str(size, '\0');
-    file.read(&str[0], static_cast<std::streamsize>(size));
+    file.read(&str[0], size);
     if (file) {
       return str;
     }
@@ -366,7 +357,7 @@ std::string readTraceFromFile(const std::string& filename, size_t size) {
 // Extend the nested class outside the parent class
 class TestDebugInfoWriter : public c10d::DebugInfoWriter {
  public:
-  TestDebugInfoWriter(const std::string& namePrefix)
+  TestDebugInfoWriter(std::string namePrefix)
       : DebugInfoWriter(namePrefix, 0) {}
 
   void write(const std::string& ncclTrace) override {
@@ -431,7 +422,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
     EXPECT_TRUE(pg.getErrorCaughtFlag());
   }
   work->wait();
-  EXPECT_TRUE(!traces.empty());
+  EXPECT_TRUE(traces.size() > 0);
   auto filename = c10::str(tempFilename, 0);
   auto traceFromStorage = readTraceFromFile(filename, traces.size());
   // Check the traces read from storage match with the original nccl trace.

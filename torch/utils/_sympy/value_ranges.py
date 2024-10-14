@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import dataclasses
-import functools
 import itertools
 import logging
 import math
@@ -225,8 +224,6 @@ class ValueRanges(Generic[_T]):
         return ValueRanges.wrap(x).issubset(self)
 
     def issubset(self, other):
-        if other is self.unknown_int():
-            return True
         return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(
             self.upper, other.upper
         )
@@ -251,9 +248,9 @@ class ValueRanges(Generic[_T]):
         ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
-        if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        if other == ValueRanges.unknown():
             return self
-        if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
+        if self == ValueRanges.unknown():
             return other
         assert self.is_bool == other.is_bool, (self, other)
         assert self.is_int == other.is_int, (self, other)
@@ -301,17 +298,14 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -451,7 +445,7 @@ class SymPyValueRangeAnalysis:
             elif dtype.is_floating_point:
                 return ValueRanges.unknown()
             else:
-                return ValueRanges.unknown_int()
+                return ValueRanges(-int_oo, int_oo)
 
         if is_python:
             type_ = dtype_to_type(dtype)

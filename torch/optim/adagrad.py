@@ -12,7 +12,6 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
-    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -217,7 +216,8 @@ Adagrad.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
         lr (float, Tensor, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)

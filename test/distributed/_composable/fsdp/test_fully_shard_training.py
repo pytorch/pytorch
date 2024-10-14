@@ -906,13 +906,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         meshes = [init_device_mesh("cuda", (self.world_size,))]  # always test FSDP
         if self.world_size == 4:  # test HSDP too if enough GPUs
             shard_size, replicate_size = 2, 2
-            meshes.append(
-                init_device_mesh(
-                    "cuda",
-                    (replicate_size, shard_size),
-                    mesh_dim_names=("dp_replicate", "dp_shard"),
-                )
-            )
+            meshes.append(init_device_mesh("cuda", (replicate_size, shard_size)))
         self.run_subtests(
             {
                 "mesh": meshes,
@@ -1305,9 +1299,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         shard_size = 2 if self.world_size > 2 else 1
         replicate_size = self.world_size // shard_size
         global_mesh = init_device_mesh(
-            "cuda",
-            (replicate_size, shard_size),
-            mesh_dim_names=("dp_replicate", "dp_shard"),
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
         )
         self.run_subtests(
             {

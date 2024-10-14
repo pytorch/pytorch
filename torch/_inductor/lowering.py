@@ -296,7 +296,7 @@ def transform_args(
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(value=arg.value, dtype=dtype, device=device)
+                return ir.Constant(arg.value, dtype, device)
             else:
                 return arg
 
@@ -469,11 +469,9 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         def const_func(x):
             if isinstance(x, sympy.Basic):
-                return ir.IndexingConstant(
-                    index=x, dtype=dtype, device=decode_device(None)
-                )
+                return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
-                return ir.Constant(value=x, dtype=dtype, device=decode_device(None))
+                return ir.Constant(x, dtype, decode_device(None))
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
@@ -482,16 +480,13 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
-                    list(ex.get_size()),
+                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
                 )
             )
         elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
-                    IndexingConstant(
-                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
-                    ),
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
                     list(ex.get_size()),
                 )
             )
@@ -1099,7 +1094,7 @@ def as_strided(x, size, stride, storage_offset=None):
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
     )
-    return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
+    return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
 @register_lowering(aten.as_strided_, type_promotion_kind=None)
@@ -2578,7 +2573,7 @@ def clone_preserve_reinterpret_view(x):
     if reinterpret_view_layouts:
         x = x.data  # unwrap TensorBox
         for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(data=x, layout=layout)
+            x = ir.ReinterpretView(x, layout)
         x = TensorBox(x)
 
     return x
@@ -3396,9 +3391,9 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
-        name=None,
-        layout=ir.MutationLayoutSHOULDREMOVE(self),
-        data=scatter,
+        None,
+        ir.MutationLayoutSHOULDREMOVE(self),
+        scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -3617,9 +3612,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             scatter_mode=None,
         )
         buffer = ir.ComputedBuffer(
-            name=None,
-            layout=ir.MutationLayoutSHOULDREMOVE(self),
-            data=zero_out,
+            None,
+            ir.MutationLayoutSHOULDREMOVE(self),
+            zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
         V.graph.register_operation(buffer)
@@ -3636,9 +3631,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
-        name=None,
-        layout=ir.MutationLayoutSHOULDREMOVE(self),
-        data=scatter,
+        None,
+        ir.MutationLayoutSHOULDREMOVE(self),
+        scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -5281,7 +5276,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
         x = to_dtype(x, torch.float)
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
-    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
+    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     return to_dtype(div(sum_result, denom), output_dtype)
 
@@ -5302,7 +5297,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = sympy_product(size[i] for i in axis)
     if correction:
         denom = sympy.Max(denom - correction, 0)
-    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
+    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
@@ -6355,6 +6350,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
     return list(map(TensorBox.create, result))
 
 

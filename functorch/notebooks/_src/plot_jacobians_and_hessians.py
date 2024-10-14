@@ -8,7 +8,6 @@ deep learning models. It is difficult (or annoying) to compute these quantities
 efficiently using a standard autodiff system like PyTorch Autograd; functorch
 provides ways of computing various higher-order autodiff quantities efficiently.
 """
-
 from functools import partial
 
 import torch

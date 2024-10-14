@@ -418,6 +418,7 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: Set[str] = set()
+        self.seen_invoke_subgraphs: Dict[str, str] = {}
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -1995,11 +1996,7 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                 (
                     rv.node.name,
-                    next(
-                        ty
-                        for k, (_, ty) in rv.node.meta["nn_module_stack"].items()
-                        if k.split("@")[0] == target
-                    ),
+                    rv.node.meta["nn_module_stack"][target][1],
                 )
             ]
 

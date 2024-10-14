@@ -22,7 +22,6 @@
 #include <ATen/ops/allclose.h>
 #include <ATen/ops/from_blob.h>
 #endif
-#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -31,15 +30,15 @@ enum class BlasOp {
   T = 1
 };
 
-inline char BlasOpToString(BlasOp op) {
+inline std::string BlasOpToString(BlasOp op) {
   switch (op) {
     case BlasOp::N:
-      return 'N';
+      return "N";
     case BlasOp::T:
-      return 'T';
+      return "T";
   }
   TORCH_CHECK(false, "unrecognized BlasOp");
-  return 'N';
+  return "N";
 }
 
 namespace detail {
@@ -82,7 +81,7 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
   size_t GetSizeA() const {
@@ -159,7 +158,7 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -229,7 +228,7 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
   }
 
   size_t GetSizeA() const {
@@ -314,7 +313,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
   size_t GetSizeA() const {

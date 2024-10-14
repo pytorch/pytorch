@@ -21,12 +21,15 @@ using at::cuda::CUDAStream;
 class NCCLTestBase {
  public:
   NCCLTestBase(
-      std::string path,
+      const std::string& path,
       const std::chrono::milliseconds pgTimeout =
           c10d::kProcessGroupNCCLDefaultTimeout)
-      : path_(std::move(path)), pgTimeout_(pgTimeout) {}
+      : path_(path), pgTimeout_(pgTimeout) {}
 
-  NCCLTestBase(NCCLTestBase&& other) noexcept = default;
+  NCCLTestBase(NCCLTestBase&& other) {
+    path_ = std::move(other.path_);
+    pg_ = std::move(other.pg_);
+  }
 
   std::shared_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
     return pg_;
@@ -38,7 +41,7 @@ class NCCLTestBase {
 
   void initialize(
       int rank,
-      size_t size,
+      int size,
       std::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
           std::nullopt) {
     store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
@@ -52,8 +55,8 @@ class NCCLTestBase {
       opts->split_color = ++color_;
     }
 #endif
-    pg_ = std::make_unique<::c10d::ProcessGroupNCCL>(
-        store_, rank, size, std::move(opts));
+    pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
+        new ::c10d::ProcessGroupNCCL(store_, rank, size, std::move(opts)));
   }
 
  protected:
@@ -73,7 +76,10 @@ class NCCLTest : public NCCLTestBase {
       std::chrono::milliseconds pgTimeout =
           c10d::kProcessGroupNCCLDefaultTimeout,
       int inputDim = 3)
-      : NCCLTestBase(path, pgTimeout), rank_(rank), worldSize_(worldSize) {
+      : NCCLTestBase(path, pgTimeout),
+        numDevices_(1), // one device per rank (thread)
+        rank_(rank),
+        worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
     ::at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     tensors_.resize(numDevices_);
@@ -82,10 +88,10 @@ class NCCLTest : public NCCLTestBase {
     at::cuda::OptionalCUDAGuard deviceGuard;
     assert(numDevices_ == 1);
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
+      deviceGuard.set_index(rank_);
       tensors_[i] = at::empty({inputDim, inputDim}, at::kCUDA);
-      inputs_[i].resize(static_cast<size_t>(worldSize_) * numDevices_);
-      outputs_[i].resize(static_cast<size_t>(worldSize_) * numDevices_);
+      inputs_[i].resize(worldSize_ * numDevices_);
+      outputs_[i].resize(worldSize_ * numDevices_);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         inputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
         outputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
@@ -100,7 +106,7 @@ class NCCLTest : public NCCLTestBase {
     // getters to retrieve the current stream).
     //
     // 1 device only, hence 1 stream only
-    deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
+    deviceGuard.set_index(rank_);
     streams_.push_back(at::cuda::getStreamFromPool());
   }
 
@@ -142,8 +148,7 @@ class NCCLTest : public NCCLTestBase {
       std::vector<std::vector<at::Tensor>>& tensor_lists) {
     std::vector<std::vector<at::Tensor>> outputs(numDevices_);
     for (auto& output : outputs) {
-      output = std::vector<at::Tensor>(
-          static_cast<size_t>(worldSize_ * numDevices_));
+      output = std::vector<at::Tensor>(worldSize_ * numDevices_);
     }
 
     // For the duration of this function, make THC use our streams
@@ -164,8 +169,8 @@ class NCCLTest : public NCCLTestBase {
   void launchDeviceSleep() {
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
-      cudaSleep(streams_[i], 2000ull * 1000 * 1000);
+      deviceGuard.set_index(rank_);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
     }
   }
 
@@ -173,7 +178,7 @@ class NCCLTest : public NCCLTestBase {
   void valueInitialization() {
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
+      deviceGuard.set_index(rank_);
       tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
     }
   }
@@ -194,15 +199,14 @@ class NCCLTest : public NCCLTestBase {
   void valueInitializationForSparse() {
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
+      deviceGuard.set_index(rank_);
       tensors_[i].fill_(pg_->getRank() * numDevices_ + i + 1);
       // Convert the dense tensor to a sparse tensor in COO row format
       tensors_[i] = to_sparse_row_indices_format(tensors_[i]);
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int numDevices_{1}; // one device per rank (thread)
+  const int numDevices_;
   int rank_;
   int worldSize_;
   std::vector<at::Tensor> tensors_;
@@ -370,7 +374,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
   ReduceScatterBaseNCCLTest(const std::string& path, int rank, int worldSize)
       : NCCLTest(path, rank, worldSize) {
     at::cuda::OptionalCUDAGuard deviceGuard;
-    deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
+    deviceGuard.set_index(rank_);
     output_tensor_ = at::empty({1}, at::kCUDA);
     input_tensor_ = at::empty({worldSize}, at::kCUDA);
     for (const auto i : c10::irange(worldSize)) {
@@ -751,7 +755,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
     std::vector<std::thread> threads;
     threads.reserve(size_);
     for (const auto rank : c10::irange(size_)) {
-      threads.emplace_back(testFunc, file.path, rank, size_);
+      threads.emplace_back(std::thread(testFunc, file.path, rank, size_));
     }
     for (const auto rank : c10::irange(size_)) {
       threads[rank].join();
@@ -823,7 +827,7 @@ TEST_F(ProcessGroupNCCLTest, testBackendName) {
   }
   TemporaryFile file;
   auto test = NCCLTestBase(file.path);
-  test.initialize(/*rank=*/0, /*size=*/1);
+  test.initialize(/*rank=*/0, /*world_size=*/1);
   EXPECT_EQ(
       test.getProcessGroup()->getBackendName(),
       std::string(c10d::NCCL_BACKEND_NAME));

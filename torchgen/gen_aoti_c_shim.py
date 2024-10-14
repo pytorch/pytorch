@@ -71,10 +71,7 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-def convert_arg_type_and_name(  # type: ignore[return]
-    typ: Type,
-    name: str,
-) -> tuple[list[str], list[str], list[str], list[str]]:
+def convert_arg_type_and_name(typ: Type, name: str) -> tuple[list[str], list[str], list[str], list[str]]:  # type: ignore[return]
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
             return (

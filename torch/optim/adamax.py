@@ -15,7 +15,6 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
-    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -204,7 +203,8 @@ Adamax.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
         lr (float, Tensor, optional): learning rate (default: 2e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square

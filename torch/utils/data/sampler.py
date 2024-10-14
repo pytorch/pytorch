@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import itertools
 from typing import (
     Generic,
     Iterable,
@@ -334,17 +333,26 @@ class BatchSampler(Sampler[List[int]]):
 
     def __iter__(self) -> Iterator[List[int]]:
         # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
-        sampler_iter = iter(self.sampler)
         if self.drop_last:
-            # Create multiple references to the same iterator
-            args = [sampler_iter] * self.batch_size
-            for batch_droplast in zip(*args):
-                yield [*batch_droplast]
+            sampler_iter = iter(self.sampler)
+            while True:
+                try:
+                    batch = [next(sampler_iter) for _ in range(self.batch_size)]
+                    yield batch
+                except StopIteration:
+                    break
         else:
-            batch = [*itertools.islice(sampler_iter, self.batch_size)]
-            while batch:
-                yield batch
-                batch = [*itertools.islice(sampler_iter, self.batch_size)]
+            batch = [0] * self.batch_size
+            idx_in_batch = 0
+            for idx in self.sampler:
+                batch[idx_in_batch] = idx
+                idx_in_batch += 1
+                if idx_in_batch == self.batch_size:
+                    yield batch
+                    idx_in_batch = 0
+                    batch = [0] * self.batch_size
+            if idx_in_batch > 0:
+                yield batch[:idx_in_batch]
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented

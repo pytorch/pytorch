@@ -16,7 +16,8 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/exception.h>
 
-namespace c10d::detail {
+namespace c10d {
+namespace detail {
 
 class SocketOptions {
  public:
@@ -102,4 +103,5 @@ class Socket {
 
   std::unique_ptr<SocketImpl> impl_;
 };
-} // namespace c10d::detail
+} // namespace detail
+} // namespace c10d

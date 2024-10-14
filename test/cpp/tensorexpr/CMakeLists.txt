@@ -58,14 +58,14 @@ if(USE_CUDA)
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_tensorexpr PRIVATE
-    hiprtc::hiprtc
-    hip::amdhip64
+    ${ROCM_HIPRTC_LIB}
+    ${PYTORCH_HIP_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_tensorexpr PRIVATE USE_ROCM)
 
   target_link_libraries(tutorial_tensorexpr PRIVATE
-    hiprtc::hiprtc
-    hip::amdhip64
+    ${ROCM_HIPRTC_LIB}
+    ${PYTORCH_HIP_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_ROCM)
 endif()
