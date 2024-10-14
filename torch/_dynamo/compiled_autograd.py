@@ -2,7 +2,6 @@
 import contextlib
 import functools
 import threading
-from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -39,28 +38,48 @@ if TYPE_CHECKING:
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
+
 class TLSWrapper:
     def __init__(self) -> None:
+        print(f"ca init from {threading.get_ident()}")
         _local = threading.local()
-        _local.next_ctx_id = 0
-        _local.in_compiled_autograd_region = False
-        _local.compiled_autograd_state = defaultdict(None)
+        _local.compiled_autograd_state = {
+            "next_ctx_id": 0,
+            "in_compiled_autograd_region": False,
+        }
         # for threads created by autograd
-        torch._C._stash_obj_in_tls("compiled_autograd_state", _local.compiled_autograd_state)
+        torch._C._stash_obj_in_tls(
+            "compiled_autograd_state", _local.compiled_autograd_state
+        )
         self._local = _local
 
-    def __getattr__(self, attr_name: str) -> Any:
-        if hasattr(self._local, attr_name):
-            return getattr(self._local, attr_name)
+    def __getattr__(self, name: str) -> Any:
+        print(f"ca getattr from {threading.get_ident()}")
+        if hasattr(self._local, name):
+            return getattr(self._local, name)
         else:
-            assert torch._C._is_key_in_tls(attr_name), f"TLS missing key: {attr_name}"
-            return torch._C._get_obj_in_tls(attr_name)
+            assert torch._C._is_key_in_tls(name), f"TLS missing key: {name}"
+            return torch._C._get_obj_in_tls(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "_local":
+            super().__setattr__(name, value)
+            return
+
+        obj = getattr(self, name)
+        setattr(obj, name, value)
 
     @property
-    def enabled(self):
-        return getattr(self, "compiled_autograd_state").get("compiler") is not None
+    def enabled(self) -> bool:
+        name = "enabled"
+        if hasattr(self._local, name) or torch._C._is_key_in_tls(name):
+            return self.compiled_autograd_state.get("compiler") is not None
+        else:
+            return False
+
 
 local = TLSWrapper()
+
 
 def set_tls(**kwargs):
     priors: Dict[str, Any] = {}
