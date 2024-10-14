@@ -51,7 +51,10 @@ if _is_triton_available():
             }
 
             # Instantiate AttrsDescriptor with the prepared arguments
-            return AttrsDescriptor.from_dict(kwargs)
+            res = AttrsDescriptor.from_dict(kwargs)
+            assert res.property_values["tt.divisibility"] == 16
+            assert res.property_values["tt.equal_to"] == 1
+            return res
 
     except ImportError:
         from triton.compiler.compiler import AttrsDescriptor
