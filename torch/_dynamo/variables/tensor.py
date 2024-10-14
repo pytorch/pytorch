@@ -1451,6 +1451,6 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
-        codegen(self.from_tensor)
+        codegen(self.from_tensor, allow_cache=False)
         codegen.load_method("data_ptr")
         codegen.call_method(0)
