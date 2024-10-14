@@ -39,10 +39,12 @@ def input_reshard(
     Return:
         A :class:`nn.Module` object registered with TP input resharding.
     """
+    if input_reshard_dim is None:
+        return module
+
     cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
     def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
-        assert input_reshard_dim is not None
         saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
             partial(_pack_hook_tp, tp_device_mesh, input_reshard_dim),
             partial(_unpack_hook_tp, tp_device_mesh, input_reshard_dim),
@@ -57,8 +59,6 @@ def input_reshard(
         nonlocal cx
         cx.__exit__()  # type: ignore[name-defined, union-attr]
 
-    if input_reshard_dim is None:
-        return module
     module.register_forward_pre_hook(input_reshard_forward_pre_hook)
     module.register_forward_hook(input_reshard_backward_hook)
     return module

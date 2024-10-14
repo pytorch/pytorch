@@ -90,7 +90,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         long_reduction = [
-            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048
+            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -298,7 +298,7 @@ class ComboKernel(Kernel):
             else:
                 code.splice(f"elif pid < num_xblocks_{num}:")
                 with code.indent():
-                    code.splice(f"pid_offset = pid - num_xblocks_{num-1}")
+                    code.splice(f"pid_offset = pid - num_xblocks_{num - 1}")
 
         @classmethod
         def _calculate_xblocks(
@@ -322,7 +322,7 @@ class ComboKernel(Kernel):
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
                 else:
-                    code.splice(f"num_xblocks_{i} = num_xblocks_{i-1} + {xblock_str}")
+                    code.splice(f"num_xblocks_{i} = num_xblocks_{i - 1} + {xblock_str}")
 
         @classmethod
         def grid(
