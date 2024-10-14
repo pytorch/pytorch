@@ -1359,11 +1359,7 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 cache = FakeTensorMode.cache
             entry = cache.get(key, None)
-            if func is torch._higher_order_ops.invoke_subgraph:
-                print("--->", id(self), func, key, entry)
-            # breakpoint()
             if entry is not None:
-                # breakpoint()
                 output = self._output_from_cache_entry(state, entry, key, func, args)
                 FakeTensorMode.cache_hits += 1
                 if self.cache_crosscheck_enabled:
@@ -1374,13 +1370,9 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
-                # if func is torch._higher_order_ops.invoke_subgraph:
-                #     breakpoint()
                 entry = self._make_cache_entry(state, key, func, args, kwargs, output)
                 key.strip_shape_env()
                 cache[key] = entry
-                if func is torch._higher_order_ops.invoke_subgraph:
-                    print("tukka", key.hashvalue, cache[key])
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
@@ -1417,19 +1409,20 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
-        # Translate any FakeTensor args to metadata.
         if func in self.supported_hops:
+            # For invoke_subgraph, ignore the subgraph arg. We rely on
+            # identifier as a hash for the subgraph. It is Dynamo responsibility
+            # to use same identifier for identical subgraphs. For non-Dynamo
+            # use cases, we will always generate unique identifiers (even if the
+            # subgraphs are identical).
             if func is torch._higher_order_ops.invoke_subgraph:
-                # breakpoint()
                 args = args[1:]
+
+        # Translate any FakeTensor args to metadata.
         if args:
             self._prep_args_for_hash(key_values, args, state)
         if kwargs:
             self._prep_args_for_hash(key_values, kwargs, state)
-
-        # if func in self.supported_hops:
-        #     if func is torch._higher_order_ops.invoke_subgraph:
-        #         breakpoint()
         return _DispatchCacheKey(tuple(key_values))
 
     def _validate_cache_key(
@@ -1936,8 +1929,12 @@ class FakeTensorMode(TorchDispatchMode):
         del args, kwargs  # Invalidated
 
         if func in self.supported_hops:
+            # For invoke_subgraph, we just call subgraph with the operands
             if func is torch._higher_order_ops.invoke_subgraph:
-                return flat_args[0](*flat_args[2:])
+                # Signature is (subgraph, identifier, operands)
+                subgraph = flat_args[0]
+                operands = flat_args[2:]
+                return subgraph(*operands)
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
