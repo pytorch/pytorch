@@ -781,6 +781,8 @@ def find_symbol_binding_fx_nodes(
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
 class ConvertIntKey(pytree.KeyEntry):
+    entry: None = None
+
     def __str__(self) -> str:
         return ".cast_symbool_to_symint_guardless()"
 
