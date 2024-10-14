@@ -11,6 +11,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -104,23 +105,24 @@ template <typename scalar_t>
 __global__ void fractional_max_pool2d_backward_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> gradInput,
   PackedTensorAccessor<const scalar_t, 4> gradOutput,
-  PackedTensorAccessor<const int64_t, 4> indices) {
+  PackedTensorAccessor<const int64_t, 4> indices,
+  TORCH_DSA_KERNEL_ARGS) {
   // Output (h, w) point that this thread is responsible for
-  int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  const int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
+  const int plane = blockIdx.y;
+  const int batch = blockIdx.z;
 
   // Each thread generates a specific output point
   if (ourOutputPoint < gradOutput.size(2) *
     gradOutput.size(3)) {
-    int outputW = ourOutputPoint % gradOutput.size(3);
-    int outputH = ourOutputPoint / gradOutput.size(3);
+    const int outputW = ourOutputPoint % gradOutput.size(3);
+    const int outputH = ourOutputPoint / gradOutput.size(3);
 
-    int index = indices[batch][plane][outputH][outputW];
-    CUDA_KERNEL_ASSERT(index >= 0);
-    int inputW = index % gradInput.size(3);
-    int inputH = index / gradInput.size(3);
-    CUDA_KERNEL_ASSERT(inputH < gradInput.size(2));
+    const int index = indices[batch][plane][outputH][outputW];
+    CUDA_KERNEL_ASSERT2(index >= 0);
+    const int inputW = index % gradInput.size(3);
+    const int inputH = index / gradInput.size(3);
+    CUDA_KERNEL_ASSERT2(inputH < gradInput.size(2));
 
     gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputH][inputW],
@@ -263,8 +265,9 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
     [&] {
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
       auto devGradOutput = gradOutput_.packed_accessor64<const scalar_t, 4>();
-      fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
-        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+      TORCH_DSA_KERNEL_LAUNCH(
+        fractional_max_pool2d_backward_out_cuda_frame<scalar_t>,
+        grid, block, 0, at::cuda::getCurrentCUDAStream(),
         devGradInput, devGradOutput, devIndices);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
