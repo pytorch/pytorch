@@ -125,8 +125,8 @@ def register_pytree_node(
             ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
             recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
             passed to the ``unflatten_func``.
-        unflatten_func (callable): A function taking two arguments: the auxiliary data that was
-            returned by ``flatten_func`` and stored in the treespec, and the unflattened children.
+        unflatten_func (callable): A function taking two arguments: the unflattened children, and
+            the auxiliary data that was returned by ``flatten_func`` and stored in the treespec.
             The function should return an instance of ``cls``.
         serialized_type_name (str, optional): A keyword argument used to specify the fully
             qualified name used when serializing the tree spec.
@@ -144,7 +144,7 @@ def register_pytree_node(
         >>> # Registry a Python type with lambda functions
         >>> register_pytree_node(
         ...     set,
-        ...     lambda s: (sorted(s), None, None),
+        ...     lambda s: (sorted(s), None),
         ...     lambda children, _: set(children),
         ... )
     """
@@ -172,6 +172,8 @@ def _reexport(func: _Callable[_P, _T]) -> _Callable[_P, _T]:
 
     @functools.wraps(func)
     def exported(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        # Dynamically get the implementation function from the module to allow changing the
+        # implementation at runtime.
         impl: _Callable[_P, _T] = getattr(implementation.module, name)
         return impl(*args, **kwargs)
 
