@@ -9,6 +9,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfMPS,
+    expectedFailureMPS,
+    expectedFailureMPSPre15,
     expectedFailureXLA,
     instantiate_device_type_tests,
 )
@@ -169,6 +173,7 @@ class TestDropoutNNDeviceType(NNTestCase):
                     else:
                         self.assertNotEqual(permuted_inp, out)
 
+    @expectedFailureMPSPre15
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -207,8 +212,11 @@ class TestDropoutNNDeviceType(NNTestCase):
             self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
-    def test_Dropout1d(self, device):
-        with set_default_dtype(torch.double):
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    @expectedFailureMPS
+    def test_Dropout1d(self, device, dtype):
+        with set_default_dtype(dtype):
             N, C, L = (
                 random.randint(10, 15),
                 random.randint(10, 15),
@@ -279,6 +287,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    @expectedFailureMPS  # Failing on current pytorch MPS
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -315,7 +324,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         self.assertEqual(out.size(), x.size())
 
 
-instantiate_device_type_tests(TestDropoutNNDeviceType, globals())
+instantiate_device_type_tests(TestDropoutNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestDropoutNN)
 
 if __name__ == "__main__":

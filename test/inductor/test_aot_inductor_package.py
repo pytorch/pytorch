@@ -140,6 +140,18 @@ class TestAOTInductorPackage(TestCase):
 
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
 
+    def test_bool_input(self):
+        # Specialize on whichever branch the example input for b is
+        class Model(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x * x
+                else:
+                    return x + x
+
+        example_inputs = (torch.randn(3, 3, device=self.device), True)
+        self.check_model(Model(), example_inputs)
+
     def test_multiple_methods(self):
         options = {
             "aot_inductor.package": True,
