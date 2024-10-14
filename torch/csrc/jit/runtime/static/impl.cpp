@@ -399,8 +399,6 @@ ManagedTensorRanges::ManagedTensorRanges(
     const AliasDb& alias_db,
     const c10::FastSet<const Value*>& managed_tensor_values) {
   const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
-  const c10::FastSet<const Value*> graph_inputs(
-      block.inputs().begin(), block.inputs().end());
 
   const auto num_nodes = static_cast<uint32_t>(nodes.size());
   for (const auto i : c10::irange(num_nodes)) {
@@ -457,8 +455,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   for (auto* managed_tensor : managed_tensor_values) {
     auto* lifetime = getLifetime(managed_tensor);
     DCHECK(lifetime && lifetime->end <= num_nodes);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Node* freeing_node;
+    Node* freeing_node = nullptr;
     if (lifetime->end == num_nodes) {
       freeing_node = block.return_node();
     } else {

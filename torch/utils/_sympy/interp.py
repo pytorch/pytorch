@@ -27,6 +27,8 @@ from .functions import (
     Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PowByNatural,
@@ -91,6 +93,8 @@ def handlers():
         sympy.exp: "exp",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
+        Min: "minimum",
+        Max: "maximum",
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
@@ -156,12 +160,16 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         raise
 
 
+_nil = object()
+
+
 def sympy_interp(
     analysis,
     env: Dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,
+    missing_handler=None,
 ):
     # Handle base cases
     dtype = None
@@ -175,12 +183,26 @@ def sympy_interp(
     if dtype is not None:
         return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
-        return env[expr]
+        if (r := env.get(expr, _nil)) is not _nil:
+            return r
+        elif missing_handler:
+            return missing_handler(expr)
+        else:
+            raise KeyError(expr)
 
     # Recursive case
     return _run_sympy_handler(
         analysis,
-        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
+        [
+            sympy_interp(
+                analysis,
+                env,
+                arg,
+                index_dtype=index_dtype,
+                missing_handler=missing_handler,
+            )
+            for arg in expr.args
+        ],  # type: ignore[arg-type]
         expr,
         index_dtype=index_dtype,
     )  # type: ignore[arg-type]
