@@ -1795,11 +1795,6 @@ def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
         return dec_fn(func)
     return dec_fn
 
-def xfailIfXpu(func):
-    if TEST_XPU:
-        func.__unittest_expecting_failure__ = True
-    return func
-
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

@@ -3,13 +3,14 @@
 import sys
 import unittest
 
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
-    xfailIfXpu,
+    skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 if IS_WINDOWS and IS_CI:
@@ -29,9 +30,11 @@ from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 
 
-@unittest.skipIf(not HAS_CUDA, "Inductor+gpu needs triton and CUDA")
+@requires_gpu()
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
+    device = GPU_TYPE
+
     def _generate(self, *, device):
         """
         Generate a simple test case that has multiple simultaneously-live intermediate tensors.
@@ -68,7 +71,7 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @xfailIfXpu
+    @expectedFailureXPU
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -89,7 +92,7 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
-    @xfailIfXpu
+    @skipIfXpu
     def test_abi_compatible(self):
         try:
             from .test_aot_inductor import AOTIRunnerUtil
