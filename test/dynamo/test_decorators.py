@@ -736,6 +736,35 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ):
             f(torch.ones(3))
 
+    def test_set_stance_force_backend(self):
+        @torch.compile
+        def a(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compiler.set_stance("default", force_backend=cnts)
+        def b(x):
+            return a(x)
+
+        b(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 1)
+
+        @torch.compiler.set_stance("default", force_backend="eager")
+        def c(x):
+            return a(x)
+
+        # just make sure this doesn't crash
+        c(torch.ones(3))
+
+        @torch.compiler.set_stance("force_eager", force_backend="eager")
+        def d(x):
+            return a(x)
+
+        with self.assertRaisesRegex(RuntimeError, "force_backend"):
+            d(torch.ones(3))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -11,7 +11,13 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import _set_stance, DisableContext, innermost_fn, RunOnlyContext
+from .eval_frame import (
+    _set_stance,
+    DisableContext,
+    DynamoStance,
+    innermost_fn,
+    RunOnlyContext,
+)
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import is_function
@@ -91,9 +97,9 @@ class set_stance(_DecoratorContextManager):
 
     _dynamo_forbidden = True
 
-    def __init__(self, stance: str) -> None:
-        self.stance = stance
-        self.prev = _set_stance(stance)
+    def __init__(self, stance: str, force_backend=None) -> None:
+        self.stance = DynamoStance(stance, force_backend)
+        self.prev = _set_stance(self.stance)
 
     def __call__(self, fn):
         _set_stance(self.prev)
@@ -109,7 +115,7 @@ class set_stance(_DecoratorContextManager):
         _set_stance(self.prev)
 
     def clone(self):
-        return self.__class__(self.stance)
+        return self.__class__(self.stance.stance, force_backend=self.stance.backend)
 
 
 def assume_constant_result(fn):

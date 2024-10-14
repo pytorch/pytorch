@@ -23,6 +23,7 @@ import traceback
 import types
 import warnings
 import weakref
+from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -114,10 +115,16 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return set_eval_frame(callback)
 
 
-_stance = "default"
+@dataclass
+class DynamoStance:
+    stance: str = "default"
+    backend: Union[str, Callable[..., Any], None] = None
 
 
-def _set_stance(stance: str):
+_stance = DynamoStance()
+
+
+def _set_stance(stance: DynamoStance) -> DynamoStance:
     global _stance
     prior = _stance
     _stance = stance
@@ -128,16 +135,30 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def _callback_from_stance(callback):
-    if _stance == "default":
-        # TODO force_backend here
+    if _stance.stance == "default":
+        # force_backend
+        if _stance.backend is not None:
+            hooks = Hooks()
+            callback = convert_frame.catch_errors_wrapper(
+                convert_frame.convert_frame(
+                    get_compiler_fn(_stance.backend),
+                    hooks,
+                ),
+                hooks,
+            )
+
         return callback
-    elif _stance == "force_eager":
+
+    if _stance.backend is not None:
+        raise RuntimeError("non-default stance cannot have force_backend set")
+
+    if _stance.stance == "force_eager":
         # disable
         return None
-    elif _stance == "eager_on_recompile":
+    elif _stance.stance == "eager_on_recompile":
         # run mode
         return False
-    elif _stance == "fail_on_recompile":
+    elif _stance.stance == "fail_on_recompile":
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(

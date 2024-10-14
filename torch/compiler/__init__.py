@@ -229,7 +229,7 @@ def disable(fn=None, recursive=True):
     return torch._dynamo.disable(fn, recursive)
 
 
-def set_stance(stance: str):
+def set_stance(stance: str, force_backend=None):
     """
     Set the current stance of the compiler.
     Can be used as a function, context manager, or decorator.
@@ -262,10 +262,12 @@ def set_stance(stance: str):
             - "eager_on_recompile": Run code eagerly when a recompile is necessary.
                 If there is cached compiled code valid for the input, it will still be used.
             - "fail_on_recompile": Raise an error when recompiling a function.
+        force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
+            to use a specific backend. Otherwise, an error is raised.
     """
     import torch._dynamo
 
-    return torch._dynamo.set_stance(stance)
+    return torch._dynamo.set_stance(stance, force_backend=force_backend)
 
 
 # forbid in graph
