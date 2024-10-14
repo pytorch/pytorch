@@ -280,7 +280,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             for _ in range(10):
                 work, y = all_reduce_non_functional_eager(x)
                 out_ref = all_reduce_wait_eager(work, y)
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 10)
+            # Only the last work is still in the registry, all previous works have been
+            # cleaned up by the subsequent register_work() call
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
             # Trigger _unregister_completed_works() without program exit
             torch._C._distributed_c10d._unregister_completed_works()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)

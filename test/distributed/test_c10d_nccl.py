@@ -3062,11 +3062,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         work2 = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(
             torch._C._distributed_c10d._get_work_registry_size(),
-            2,  # 1 completed + 1 uncompleted
+            1,  # 1 uncompleted (since register_work() will clean up any previously completed work)
         )
         work2.wait(timedelta(seconds=10))
         self.assertEqual(
-            torch._C._distributed_c10d._get_work_registry_size(), 2  # 2 completed
+            torch._C._distributed_c10d._get_work_registry_size(), 1  # 1 completed
         )
         # Trigger _unregister_completed_works() without program exit
         torch._C._distributed_c10d._unregister_completed_works()
@@ -3084,7 +3084,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         work2 = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(
             torch._C._distributed_c10d._get_work_registry_size(),
-            2,  # 1 completed + 1 uncompleted
+            1,  # 1 uncompleted (since register_work() will clean up any previously completed work)
         )
         torch._C._distributed_c10d._unregister_completed_works()
         self.assertEqual(
@@ -3101,7 +3101,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
-        input = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
         dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
         # Running another collective on the same tensor should still work
