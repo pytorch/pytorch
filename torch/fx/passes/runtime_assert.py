@@ -346,11 +346,12 @@ def insert_deferred_runtime_asserts(
                 # this guards against deleting calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
+                resolved_unbacked_bindings = resolve_unbacked_bindings(
+                    shape_env, node.meta.get("unbacked_bindings", {})
+                )
+                assert resolved_unbacked_bindings is not None
                 new_unbacked_bindings = (
-                    resolve_unbacked_bindings(
-                        shape_env, node.meta.get("unbacked_bindings", {})
-                    ).keys()
-                    - expr_to_proxy.keys()
+                    resolved_unbacked_bindings.keys() - expr_to_proxy.keys()
                 )
 
                 # maybe re-reify expression, replace current node

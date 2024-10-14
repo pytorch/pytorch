@@ -19,6 +19,7 @@
   } while (0)
 
 #define C10_LIBCUDA_DRIVER_API(_)   \
+  _(cuDeviceGetAttribute)           \
   _(cuMemAddressReserve)            \
   _(cuMemRelease)                   \
   _(cuMemMap)                       \
@@ -29,6 +30,7 @@
   _(cuMemGetAllocationGranularity)  \
   _(cuMemExportToShareableHandle)   \
   _(cuMemImportFromShareableHandle) \
+  _(cuStreamWriteValue32)           \
   _(cuGetErrorString)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)

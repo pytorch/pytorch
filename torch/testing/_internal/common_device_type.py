@@ -11,9 +11,21 @@ import unittest
 from collections import namedtuple
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
+from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -1201,7 +1213,14 @@ class skipIf:
     def __call__(self, fn):
         @wraps(fn)
         def dep_fn(slf, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
+            if (
+                self.device_type is None
+                or self.device_type == slf.device_type
+                or (
+                    isinstance(self.device_type, Iterable)
+                    and slf.device_type in self.device_type
+                )
+            ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
                     isinstance(self.dep, bool) and self.dep
                 ):
@@ -1228,6 +1247,12 @@ class skipCUDAIf(skipIf):
 class skipXPUIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="xpu")
+
+
+# Skips a test on XPU or CUDA if the condition is true.
+class skipGPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type=GPU_TYPES)
 
 
 # Skips a test on Lazy if the condition is true.
@@ -1646,16 +1671,38 @@ def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure("meta")(fn))
 
 
-def expectedFailureMPS(fn):
-    return expectedFailure("mps")(fn)
-
-
 def expectedFailureXLA(fn):
     return expectedFailure("xla")(fn)
 
 
 def expectedFailureHPU(fn):
     return expectedFailure("hpu")(fn)
+
+
+def expectedFailureMPS(fn):
+    return expectedFailure("mps")(fn)
+
+
+def expectedFailureMPSPre15(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 15.0:
+        return expectedFailure("mps")(fn)
+    return fn
+
+
+def expectedFailureMPSPre14(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 14.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 # Skips a test on CPU if LAPACK is not available.
