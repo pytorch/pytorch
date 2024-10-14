@@ -9,8 +9,8 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.logging
 import torch.nn as nn
-import torch.utils._pytree as pytree
 import torch.utils.dlpack
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
@@ -859,7 +859,7 @@ def aot_function(
     def returned_function(*args, **kwargs):
         nonlocal cached_res
         # Now flatten the tensor args
-        flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+        flat_args = pytree.tree_leaves((args, kwargs))
 
         # Compile the function and save it in the cache
         if cached_res is None:
@@ -1314,7 +1314,7 @@ https://github.com/pytorch/pytorch/issues/101192
 
         fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
-    user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
+    user_args_flat = pytree.tree_leaves((args, kwargs))
     return fx_g, create_graph_signature(
         fx_g,
         metadata,
@@ -1370,7 +1370,7 @@ def aot_export_joint_simple(
             args,
             decompositions=decompositions,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1397,7 +1397,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1405,7 +1405,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )

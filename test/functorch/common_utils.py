@@ -12,7 +12,7 @@ from collections import namedtuple
 from functorch_additional_op_db import additional_op_db
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from functorch import vmap
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
