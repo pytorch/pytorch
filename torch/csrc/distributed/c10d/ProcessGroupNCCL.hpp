@@ -272,8 +272,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
-        const std::string& pgUID,
-        const std::string& pgDesc,
+        std::string pgUID,
+        std::string pgDesc,
         at::Device& device,
         int rank,
         OpType opType,
@@ -373,7 +373,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool avoidRecordStreams_{false};
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
-    std::chrono::milliseconds opTimeout_;
+    std::chrono::milliseconds opTimeout_{};
 
     // Ephemeral timeouts are owned by exactly one work,
     // and reset after that work completes.
@@ -457,7 +457,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
    private:
     std::mutex cacheMutex_;
-    // NOTE: We intentionaly store raw pointers so that
+    // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
     std::vector<at::cuda::CUDAEvent*>
@@ -520,7 +520,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int size,
       const std::string& groupName,
       c10::intrusive_ptr<Options> options = Options::create())
-      : ProcessGroupNCCL(store, rank, size, options) {}
+      : ProcessGroupNCCL(store, rank, size, std::move(options)) {}
 
   ~ProcessGroupNCCL() override;
 
@@ -643,7 +643,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void groupEnd();
 
-  void groupEndNonblocking(std::shared_ptr<NCCLComm> comm);
+  void groupEndNonblocking(const std::shared_ptr<NCCLComm>& comm);
 
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -682,16 +682,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-      std::optional<std::string> abortReason);
+      const std::optional<std::string>& abortReason);
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
+  // Destroy (shutdown) this backend -- normal exit.
+  void shutdown();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  // return true if abort is successful, otherwise false
-  bool abort(std::optional<std::string> abortReason = std::nullopt);
-
-  void shutdown(std::optional<std::string> reason = std::nullopt);
+  void abort();
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -712,7 +712,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
   // timeout.
   bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work> work,
+      const c10::intrusive_ptr<Work>& work,
       const std::chrono::milliseconds& timeout);
 
  protected:
@@ -752,6 +752,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
   bool dumpDebuggingInfo();
+
+  // Abort all communicators on this rank.
+  bool abortComms(std::optional<std::string> abortReason = std::nullopt);
 
  private:
   int globalRankStart;
@@ -903,7 +906,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
-  virtual void terminateProcess(std::string errMsg);
+  virtual void terminateProcess(const std::string& errMsg);
 
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
@@ -1089,7 +1092,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
+  void workEnqueue(const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>&);
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
