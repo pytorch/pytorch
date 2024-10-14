@@ -1,7 +1,11 @@
 # mypy: allow-untyped-defs
+import contextlib
+import functools
 import inspect
 import warnings
-from typing import Any, Dict, List, Optional, Union
+import weakref
+from collections.abc import MutableMapping
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch.nn
 
@@ -15,13 +19,14 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
-from .utils import nn_module_new, object_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
 )
+from .variables.user_defined import FrozenDataClassVariable
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -76,6 +81,7 @@ class SideEffects:
 
     def __init__(
         self,
+        output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -83,6 +89,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -127,6 +134,7 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
+            output_graph=self.output_graph_weakref(),
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -142,12 +150,22 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def should_allow_side_effects_under_checkpoint(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if self.should_allow_side_effects_under_checkpoint():
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -258,7 +276,13 @@ class SideEffects:
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
-            obj = object_new(user_cls)
+            try:
+                obj = object_new(user_cls)
+            except TypeError:
+                # TODO(anijain2305/jansel) - Even though object.__new__ is same
+                # as user_cls.__new__, calling object.__new__(user_cls) fails
+                # with TypeError.
+                unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
@@ -267,6 +291,32 @@ class SideEffects:
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
+
+    def track_object_new_from_user_defined_class(
+        self,
+        cls_variable: "variables.UserDefinedClassVariable",
+    ):
+        cls_source = cls_variable.source
+        user_cls = cls_variable.value
+
+        # Find the variable class
+        variable_cls: Type[
+            variables.UserDefinedObjectVariable
+        ] = variables.UserDefinedObjectVariable
+        if issubclass(user_cls, torch.nn.Module):
+            variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, MutableMapping):
+            variable_cls = variables.MutableMappingVariable
+        elif is_frozen_dataclass(user_cls):
+            variable_cls = FrozenDataClassVariable
+        else:
+            variable_cls = variables.UserDefinedObjectVariable
+
+        assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+
+        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+
+        return self.track_object_new(cls_source, user_cls, variable_cls, {})
 
     def track_cell_new(
         self,
@@ -546,21 +596,50 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
+
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
+                if var.should_reconstruct_all:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.should_reconstruct_all:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
+            elif isinstance(
+                var, variables.torch_function.TorchFunctionModeStackVariable
+            ):
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "set_torch_function_mode_stack"
+                    )
+                )
+                cg.foreach(var.symbolic_stack)
+                cg.append_output(
+                    create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
+                )
+                cg.call_function(1, False)
+                cg.append_output(create_instruction("POP_TOP"))
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -623,6 +702,21 @@ class SideEffects:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.call_function(1, False)
                     cg.pop_top()
+            elif isinstance(var, variables.RandomVariable):
+                # set correct random seed state
+                def gen_fn():
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_attr("setstate")
+
+                cg.add_push_null(gen_fn)
+                cg(var.wrap_state(var.random.getstate()))
+
+                suffixes.append(
+                    [
+                        *create_call_function(1, False),  # setstate
+                        create_instruction("POP_TOP"),
+                    ]
+                )
             else:
                 raise AssertionError(type(var))
 
@@ -641,3 +735,14 @@ class SideEffects:
     def clear(self):
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@contextlib.contextmanager
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    assert tx.output.current_tracer.under_activation_checkpoint
+    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+    try:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        yield
+    finally:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val

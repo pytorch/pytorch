@@ -24,22 +24,6 @@ void throwNullDataPtrError() {
       "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html");
 }
 
-// NOTE: [FakeTensor.data_ptr deprecation]
-// Today:
-// - FakeTensor.data_ptr errors out in torch.compile.
-// - FakeTensor.data_ptr raises the following deprecation warning otherwise.
-// - the following deprecation warning is only for FakeTensor (for now).
-//   In the future we can consider extending to more wrapper Tensor subclasses.
-void warnDeprecatedDataPtr() {
-  TORCH_WARN_ONCE(
-      "Accessing the data pointer of FakeTensor is deprecated and will error in "
-      "PyTorch 2.5. This is almost definitely a bug in your code and will "
-      "cause undefined behavior with subsystems like torch.compile. "
-      "Please wrap calls to tensor.data_ptr() in an opaque custom op; "
-      "If all else fails, you can guard accesses to tensor.data_ptr() on "
-      "isinstance(tensor, FakeTensor).")
-}
-
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,

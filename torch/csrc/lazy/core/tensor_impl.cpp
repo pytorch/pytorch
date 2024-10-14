@@ -8,8 +8,7 @@
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 // LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to
@@ -55,10 +54,6 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
-  void setStream(c10::Stream s) const override {
-    TORCH_INTERNAL_ASSERT(s.device_type() == c10::DeviceType::Lazy);
-  }
-
   c10::DeviceIndex deviceCount() const noexcept override {
     // This will get called when autograd initializes its device pool
     // regardless whether we have a backend registered aforehand.
@@ -66,7 +61,8 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
       return 0;
     }
 
-    return getBackend()->GetBackendDevices().size();
+    return static_cast<c10::DeviceIndex>(
+        getBackend()->GetBackendDevices().size());
   }
 };
 
@@ -153,12 +149,11 @@ void LTCTensorImpl::setup_size_properties() {
     // implementation uses in its APIs.
     auto shape = tensor_->shape();
     // We can't call refresh_numel() given we override sizes() too.
-    numel_ = shape.Get().numel();
+    numel_ = static_cast<int64_t>(shape.Get().numel());
     sizes_and_strides_.set_sizes(shape.Get().sizes());
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given
     // we override sizes() too.
-    std::vector<int64_t> updated_strides;
-    updated_strides = ComputeArrayStrides(shape.Get().sizes());
+    auto updated_strides = ComputeArrayStrides(shape.Get().sizes());
     for (const auto i : c10::irange(updated_strides.size())) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
@@ -220,5 +215,4 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   return true;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -74,7 +74,6 @@ __all__ = [
     "ByteTensor",
     "CharStorage",
     "CharTensor",
-    "DeviceGuard",
     "DoubleStorage",
     "DoubleTensor",
     "FloatStorage",
@@ -86,7 +85,6 @@ __all__ = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
-    "StreamGuard",
     "SymBool",
     "SymFloat",
     "SymInt",
@@ -310,6 +308,7 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
+            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -477,6 +476,12 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __add__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __mod__(self, other: "IntLikeType") -> "SymInt":
@@ -945,15 +950,23 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = "", None
-    for __name in dir(_C):
-        __candidate = getattr(_C, __name)
-        if inspect.ismodule(__candidate):
-            # submodule
-            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
+    def _import_extension_to_sys_modules(module, memo=None):
+        if memo is None:
+            memo = set()
+        if module in memo:
+            return
+        memo.add(module)
+        module_name = module.__name__
+        for name in dir(module):
+            member = getattr(module, name)
+            member_name = getattr(member, "__name__", "")
+            if inspect.ismodule(member) and member_name.startswith(module_name):
+                sys.modules.setdefault(member_name, member)
+                # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
+                _import_extension_to_sys_modules(member, memo)
 
-    del __name, __candidate
-
+    _import_extension_to_sys_modules(_C)
+    del _import_extension_to_sys_modules
 
 ################################################################################
 # Define basic utilities
@@ -2054,6 +2067,7 @@ from torch import (
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
+    accelerator as acc,
     autograd as autograd,
     backends as backends,
     cpu as cpu,
@@ -2109,11 +2123,14 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
-from torch._classes import classes as classes
 
 
-# Import the ops "namespace"
+# Import the ops and classes "namespace"
 from torch._ops import ops as ops  # usort: skip
+from torch._classes import classes as classes  # usort: skip
+
+sys.modules.setdefault(f"{__name__}.ops", ops)
+sys.modules.setdefault(f"{__name__}.classes", classes)
 
 # quantization depends on torch.fx and torch.ops
 # Import quantization
@@ -2170,10 +2187,6 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
-        # Stash the compiler_fn to be used for backend match guard.
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -2372,8 +2385,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
@@ -2521,7 +2535,12 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
+    from torch import (
+        _dynamo as _dynamo,
+        _inductor as _inductor,
+        _subclasses as _subclasses,
+        onnx as onnx,
+    )
 
 else:
     _lazy_modules = {
@@ -2562,7 +2581,7 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
         device_module_name = torch.device(device).type
     elif device is None:
         # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        device_module_name = torch.acc.current_accelerator()
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"
@@ -2573,46 +2592,6 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
             f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
-
-
-class DeviceGuard:
-    def __init__(self, device_index: builtins.int, device_type: _Optional[str] = None):
-        self.idx = device_index
-        self.device_type = device_type
-        self.prev_idx = -1
-
-    def __enter__(self):
-        self.prev_idx = torch._C._exchange_device(self.idx, self.device_type)
-
-    def __exit__(self, type: _Any, value: _Any, traceback: _Any):
-        self.idx = torch._C._maybe_exchange_device(self.prev_idx, self.device_type)
-        return False
-
-
-class StreamGuard:
-    def __init__(self, stream: torch.Stream):
-        self.stream = stream
-        self.src_prev_stream = None
-        self.dst_prev_stream = None
-
-    def __enter__(self):
-        self.src_prev_stream = torch.current_stream(None, self.stream.device.type)  # type: ignore[assignment]
-
-        # If the stream is not on the current device, then
-        # set the current stream on the device
-        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            with DeviceGuard(self.stream.device.index, self.stream.device.type):
-                self.dst_prev_stream = torch.current_stream(  # type: ignore[assignment]
-                    None, self.stream.device.type
-                )
-        torch.set_stream(self.stream)
-
-    def __exit__(self, type: _Any, value: _Any, traceback: _Any):
-        # Reset the stream on the original device and destination device
-        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            torch.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
-        torch.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
-        return False
 
 
 def _constrain_as_size(
@@ -2692,3 +2671,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)

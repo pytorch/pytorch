@@ -1887,7 +1887,7 @@ class FlatParamHandle:
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
         views = self._get_unflat_views()
-        from torch.distributed._tensor import DTensor
+        from torch.distributed.tensor import DTensor
 
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, flat_param._param_infos)
@@ -2717,7 +2717,7 @@ def _warn_use_fake_reduce(log: logging.Logger, warning: str):
 def _same_storage(a, b):
     # Params are DTensors in backward
     # with SHARD_GRAD_OP + TP
-    from torch.distributed._tensor import DTensor
+    from torch.distributed.tensor import DTensor
 
     if isinstance(a, DTensor):
         a = a._local_tensor

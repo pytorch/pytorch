@@ -4,9 +4,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using rpc::Message;
 using rpc::MessageType;
@@ -95,6 +93,4 @@ bool PropagateGradientsReq::retainGraph() {
   return retainGraph_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd
