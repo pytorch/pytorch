@@ -489,6 +489,17 @@ def init_gpu_context() -> None:
 
 
 @contextlib.contextmanager
+def disable_fake_tensor_cache(fake_mode: FakeTensorMode):
+    old_value = fake_mode.cache_enabled
+
+    try:
+        fake_mode.cache_enabled = False
+        yield
+    finally:
+        fake_mode.cache_enabled = old_value
+
+
+@contextlib.contextmanager
 def in_kernel_invocation_manager(
     fake_mode: FakeTensorMode,
 ) -> Generator[None, None, None]:
@@ -1020,9 +1031,10 @@ class _DispatchCacheKey:
 
 @dataclass_slots
 @dataclass(frozen=True)
-class _DispatchCacheEntry:
+class _DispatchCacheEntryOutputInfo:
     """
-    Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
+    Entry type for the FakeTensor dispatch cache for an output. Accounts for two
+    possibilities:
     1) The op is inplace, and a hit means we need to alias the argument at a
        given index.
     2) We need to synthesize a new FakeTensor given tensor metadata. For view
@@ -1032,6 +1044,21 @@ class _DispatchCacheEntry:
     inplace_idx: Optional[int]
     metadata: Optional[TensorMetadata]
     view_idx: Optional[int]
+
+
+@dataclass_slots
+@dataclass(frozen=True)
+class _DispatchCacheEntry:
+    """
+    Entry type for the FakeTensor dispatch cache. It supports two types of outputs
+    1) tensor
+    2) tuple of tensors
+
+    is_output_tuple flag helps in differentiating the return type
+    """
+
+    output_infos: Optional[_DispatchCacheEntryOutputInfo]
+    is_output_tuple: bool = False
 
 
 @dataclass_slots
@@ -1332,19 +1359,28 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 cache = FakeTensorMode.cache
             entry = cache.get(key, None)
+            if func is torch._higher_order_ops.invoke_subgraph:
+                print("--->", id(self), func, key, entry)
+            # breakpoint()
             if entry is not None:
+                # breakpoint()
                 output = self._output_from_cache_entry(state, entry, key, func, args)
                 FakeTensorMode.cache_hits += 1
                 if self.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
-                    self._crosscheck_cache_output(output, func, types, args, kwargs)
+                    with disable_fake_tensor_cache(self):
+                        self._crosscheck_cache_output(output, func, types, args, kwargs)
             else:
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
+                # if func is torch._higher_order_ops.invoke_subgraph:
+                #     breakpoint()
                 entry = self._make_cache_entry(state, key, func, args, kwargs, output)
                 key.strip_shape_env()
                 cache[key] = entry
+                if func is torch._higher_order_ops.invoke_subgraph:
+                    print("tukka", key.hashvalue, cache[key])
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
@@ -1382,10 +1418,18 @@ class FakeTensorMode(TorchDispatchMode):
             self.shape_env.settings if self.shape_env else None,
         ]
         # Translate any FakeTensor args to metadata.
+        if func in self.supported_hops:
+            if func is torch._higher_order_ops.invoke_subgraph:
+                # breakpoint()
+                args = args[1:]
         if args:
             self._prep_args_for_hash(key_values, args, state)
         if kwargs:
             self._prep_args_for_hash(key_values, kwargs, state)
+
+        # if func in self.supported_hops:
+        #     if func is torch._higher_order_ops.invoke_subgraph:
+        #         breakpoint()
         return _DispatchCacheKey(tuple(key_values))
 
     def _validate_cache_key(
@@ -1401,6 +1445,10 @@ class FakeTensorMode(TorchDispatchMode):
         # Avoid caching for any ops that would require a more sophisticated
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
+
+        if func in self.supported_hops:
+            return
+
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")
 
@@ -1476,7 +1524,7 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(arg)
 
-    def _make_cache_entry(
+    def _validate_output_for_cache_entry(
         self,
         state: _CacheKeyState,
         key: _DispatchCacheKey,
@@ -1484,15 +1532,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
-    ) -> _DispatchCacheEntry:
-        """
-        Make a cache entry object for the given 'output' Tensor. Raises
-        _BypassDispatchCache if the output tensor has characteristics that
-        prevent caching it.
-        """
-        if output is None:
-            return _DispatchCacheEntry(inplace_idx=None, metadata=None, view_idx=None)
-
+    ):
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
         if not isinstance(output, FakeTensor):
@@ -1516,10 +1556,19 @@ class FakeTensorMode(TorchDispatchMode):
             if id(kval) == id(output):
                 raise _BypassDispatchCache("kwarg aliases output")
 
+    def _get_output_info_for_cache_entry(
+        self,
+        state: _CacheKeyState,
+        key: _DispatchCacheKey,
+        func: OpOverload,
+        args: Sequence[object],
+        kwargs: Mapping[str, object],
+        output: Optional[FakeTensor],
+    ):
         # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
-                return _DispatchCacheEntry(
+                return _DispatchCacheEntryOutputInfo(
                     inplace_idx=idx, metadata=None, view_idx=None
                 )
 
@@ -1540,7 +1589,7 @@ class FakeTensorMode(TorchDispatchMode):
             else state.convert_output(metadata.storage_bytes)
         )
 
-        entry = _DispatchCacheEntry(
+        entry = _DispatchCacheEntryOutputInfo(
             inplace_idx=None,
             metadata=metadata,
             view_idx=view_idx,
@@ -1551,7 +1600,12 @@ class FakeTensorMode(TorchDispatchMode):
         # we can synthesize a tensor here and do the checks on that instance.
         # This approach keeps the (more frequent) cache-hit path as lightweight
         # as possible.
-        synth_output = self._output_from_cache_entry(state, entry, key, func, args)
+        entry_for_synth_output = _DispatchCacheEntry(
+            output_infos=(entry,), is_output_tuple=False
+        )
+        synth_output = self._output_from_cache_entry(
+            state, entry_for_synth_output, key, func, args
+        )
 
         # Make sure the dispatch_key_set from the synthesized output tensor will
         # be the same.
@@ -1562,17 +1616,66 @@ class FakeTensorMode(TorchDispatchMode):
 
         return entry
 
-    def _output_from_cache_entry(
+    def _make_cache_entry(
         self,
         state: _CacheKeyState,
-        entry: _DispatchCacheEntry,
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
-    ) -> Optional[FakeTensor]:
+        kwargs: Mapping[str, object],
+        output: Optional[FakeTensor],
+    ) -> _DispatchCacheEntry:
         """
-        Create a new FakeTensor from the cache entry.
+        Make a cache entry object for the given 'output' Tensor. Raises
+        _BypassDispatchCache if the output tensor has characteristics that
+        prevent caching it.
         """
+        if output is None:
+            output_info = _DispatchCacheEntryOutputInfo(
+                inplace_idx=None, metadata=None, view_idx=None
+            )
+            return _DispatchCacheEntry(
+                output_infos=(output_info,), is_output_tuple=False
+            )
+
+        if isinstance(output, tuple):
+            for out_element in output:
+                self._validate_output_for_cache_entry(
+                    state, key, func, args, kwargs, out_element
+                )
+        else:
+            self._validate_output_for_cache_entry(
+                state, key, func, args, kwargs, output
+            )
+
+        if isinstance(output, tuple):
+            output_infos = []
+            for out_elem in output:
+                output_infos.append(
+                    self._get_output_info_for_cache_entry(
+                        state, key, func, args, kwargs, out_elem
+                    )
+                )
+            return _DispatchCacheEntry(
+                output_infos=tuple(output_infos), is_output_tuple=True
+            )
+
+        else:
+            output_info = self._get_output_info_for_cache_entry(
+                state, key, func, args, kwargs, output
+            )
+            return _DispatchCacheEntry(
+                output_infos=(output_info,), is_output_tuple=False
+            )
+
+    def _get_output_tensor_from_cache_entry(
+        self,
+        state: _CacheKeyState,
+        entry: _DispatchCacheEntryOutputInfo,
+        key: _DispatchCacheKey,
+        func: OpOverload,
+        args: Sequence[object],
+    ):
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
@@ -1634,6 +1737,36 @@ class FakeTensorMode(TorchDispatchMode):
 
         return FakeTensor(self, empty, metadata.device)
 
+    def _output_from_cache_entry(
+        self,
+        state: _CacheKeyState,
+        entry: _DispatchCacheEntry,
+        key: _DispatchCacheKey,
+        func: OpOverload,
+        args: Sequence[object],
+    ) -> Optional[FakeTensor]:
+        """
+        Create a new FakeTensor from the cache entry.
+        """
+
+        if entry.is_output_tuple:
+            outputs = []
+            for output_info in entry.output_infos:
+                outputs.append(
+                    self._get_output_tensor_from_cache_entry(
+                        state,
+                        output_info,
+                        key,
+                        func,
+                        args,
+                    )
+                )
+            return tuple(outputs)
+        else:
+            return self._get_output_tensor_from_cache_entry(
+                state, entry.output_infos[0], key, func, args
+            )
+
     def _crosscheck_cache_output(
         self,
         output: Optional[FakeTensor],
@@ -1655,7 +1788,12 @@ class FakeTensorMode(TorchDispatchMode):
             ) from e
         try:
             if (true_output is not None) and (output is not None):
-                assert_metadata_eq(assert_eq, true_output, output)
+                if isinstance(true_output, tuple):
+                    assert len(true_output) == len(output)
+                    for a, b in zip(true_output, output):
+                        assert_metadata_eq(assert_eq, a, b)
+                else:
+                    assert_metadata_eq(assert_eq, true_output, output)
             else:
                 assert true_output is None
                 assert output is None
@@ -1796,6 +1934,10 @@ class FakeTensorMode(TorchDispatchMode):
             func, converter, flat_args, args_spec
         )
         del args, kwargs  # Invalidated
+
+        if func in self.supported_hops:
+            if func is torch._higher_order_ops.invoke_subgraph:
+                return flat_args[0](*flat_args[2:])
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -2224,6 +2366,13 @@ class FakeTensorMode(TorchDispatchMode):
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
+    @property
+    def supported_hops(self):
+        # Delayed import to avoid circular dependency
+        return ordered_set(
+            torch._higher_order_ops.invoke_subgraph,
+        )
+
     def may_turn_const(self, t: Tensor) -> bool:
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
@@ -2279,12 +2428,6 @@ class FakeTensorMode(TorchDispatchMode):
             symbolic_context=symbolic_context,
             trace=trace,
         )
-
-    def has_traced_invoke_subgraph_before(self, identifier: str) -> object:
-        return self.traced_invoke_subgraphs.get(identifier, None)
-
-    def add_traced_invoke_subgraph(self, identifier: str, value: object) -> None:
-        self.traced_invoke_subgraphs[identifier] = value
 
 
 _StoragePointer = object

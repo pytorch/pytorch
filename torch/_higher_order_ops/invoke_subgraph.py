@@ -47,6 +47,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+invoke_subgraph.tags = ()
+invoke_subgraph.is_view = False
 
 
 def create_invoke_subgraph_op(subgraph, operands):
@@ -224,11 +226,11 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
 
 @invoke_subgraph.py_impl(FakeTensorMode)
 def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
-    outputs = mode.has_traced_invoke_subgraph_before(identifier)
-    if outputs is None:
-        outputs = subgraph(*operands)
-        mode.add_traced_invoke_subgraph(identifier, outputs)
-    return outputs
+    return mode.__torch_dispatch__(
+        invoke_subgraph, [], (subgraph, identifier, operands)
+    )
+    # outputs = subgraph(*operands)
+    # return outputs
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
