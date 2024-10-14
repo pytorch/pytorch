@@ -118,14 +118,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
   // CUDAGraph shares ownership of the mempool. Hence increment the ref-count.
-  c10::cuda::CUDACachingAllocator::maybeMakeNewPoolAndInc(capture_dev_, mempool_id_);
+  c10::cuda::CUDACachingAllocator::ensureExistsAndIncrefPool(capture_dev_, mempool_id_);
 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
       cudaStreamCaptureStatus status;
-      CaptureId_t stream_capture_id;
+      CaptureId_t stream_capture_id = 0;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
@@ -289,7 +289,7 @@ void CUDAGraph::reset() {
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
-    c10::cuda::CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(capture_dev_, mempool_id_);
+    c10::cuda::CUDACachingAllocator::decrefPoolAndMaybeMarkFree(capture_dev_, mempool_id_);
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));

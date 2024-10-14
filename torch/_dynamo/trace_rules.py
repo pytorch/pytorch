@@ -421,6 +421,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2445,6 +2446,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch.cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -2541,6 +2543,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory._snapshot",
         "torch.cuda.memory.caching_allocator_alloc",
         "torch.cuda.memory.caching_allocator_delete",
+        "torch.cuda.memory.caching_allocator_enable",
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
@@ -2911,6 +2914,9 @@ def get_tensor_method():
             method, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             s.add(method)
+
+    # mlazos: this is a function which we handle specially in TensorVariable
+    s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
     return frozenset(s)
 
 
@@ -3268,6 +3274,7 @@ MOD_INLINELIST = [
     "torch.nn",
     "torch.overrides",
     "torch.random",
+    "torch.return_types",
     "torch.sparse",
     "torch.testing",
     "torch.utils._content_store",

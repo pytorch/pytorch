@@ -30,8 +30,6 @@ struct InputBuffer {
       const std::optional<c10::Stream>& opt_producer_stream,
       const std::optional<c10::Stream>& opt_consumer_stream);
 
-  at::Device device() const;
-
   Variable operator[](size_t pos) {
     return buffer[pos];
   }

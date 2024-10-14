@@ -20,6 +20,7 @@ void disableJitRRefPickle() {
 }
 
 static_assert(
+    // NOLINTNEXTLINE(misc-redundant-expression)
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
     "The max value of local_id_t must be within the range of int64_t");
