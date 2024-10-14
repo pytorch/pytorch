@@ -145,7 +145,15 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    with functorch_config.patch(unlift_effect_tokens=True):
+    from torch._inductor.bisect_helper import BisectionManager
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := BisectionManager.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
             fw_compiler=boxed_nop,
