@@ -5,9 +5,8 @@ from typing import Callable
 
 import torch
 import torch.fx as fx
+import torch.utils.pytree as pytree
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import tree_flatten
 
 
 aten = torch.ops.aten
@@ -102,7 +101,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # substitute args and kwargs members to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
             def substitute(arg_list):
-                arg_list, spec = tree_flatten(arg_list)
+                arg_list, spec = pytree.tree_flatten(arg_list)
                 for i in range(len(arg_list)):
                     v = arg_list[i]
                     if isinstance(v, torch.fx.node.Node) and v in env:

@@ -1498,7 +1498,7 @@ def _export_to_aten_ir_make_fx(
             ),
             buffers_to_mutate={},
             user_inputs_to_mutate={},
-            in_spec=in_spec,
+            in_spec=in_spec,  # type: ignore[arg-type]
             out_spec=out_spec,  # type: ignore[arg-type]
             backward_signature=None,
             input_tokens=[],

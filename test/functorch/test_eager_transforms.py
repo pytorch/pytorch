@@ -79,7 +79,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils.pytree import tree_flatten, tree_map, tree_unflatten
 
 
 USE_TORCHVISION = False

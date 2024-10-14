@@ -11,7 +11,7 @@ from functools import wraps
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
@@ -138,19 +138,19 @@ def call_func_at_runtime_with_args(
 
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
-    spec: Optional[pytree.TreeSpec] = None
+    spec: Optional["pytree.PyTreeSpec"] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
     is_simple: Optional[
         bool
     ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
-    def set(self, spec: pytree.TreeSpec) -> None:
+    def set(self, spec: "pytree.PyTreeSpec") -> None:
         assert self.spec is None or self.spec == spec
         assert spec is not None
-        self.spec: pytree.TreeSpec = spec
+        self.spec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children_specs
+            child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
         if self.spec.is_leaf():
@@ -172,7 +172,7 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThu
     if kwargs is None:
         kwargs = {}
     # Save the args_spec for flat_tensor_args to unflatten while tracing
-    _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
+    tensor_args_spec = pytree.tree_structure((args, kwargs))
     out_spec = PytreeThunk()
 
     def flat_fn(*flat_args):
