@@ -5,18 +5,21 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..dependencies import Dep
 from ..loop_body import LoopBody
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -46,6 +49,8 @@ DTYPE_TO_CPP = {
     torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
+    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -650,7 +655,7 @@ class LocalBufferContext:
             new_loops = copy.copy(loops)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    node.get_name(), node.get_layout(), new_loops
+                    name=node.get_name(), layout=node.get_layout(), data=new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
@@ -914,3 +919,71 @@ def _get_dtype_from_loopbodies(loop_bodies):
                     continue
                 dtypes.add(node.meta[OptimizationContext.key].dtype)
     return dtypes
+
+
+def template_fusion_with_epilogues_supported(
+    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+) -> Tuple[bool, bool]:
+    def _get_indexes_of_template_buf_read(
+        epilogue_node: ir.Operation, template_buf_names: List[str]
+    ) -> List[sympy.Expr]:
+        return [
+            read.index
+            for read in epilogue_node.get_reads()
+            if read.name in template_buf_names
+        ]
+
+    def _check_supported_and_same_indexes(
+        index_of_template_buf_read: Sequence[sympy.Expr],
+        epilogue_writes: OrderedSet[Dep],
+    ) -> Tuple[bool, bool]:
+        num_indexes = len(set(index_of_template_buf_read))
+
+        if num_indexes > 1:
+            same_index = False
+            supported = False  # Different read indexes not supported
+        elif num_indexes == 0:
+            same_index = True
+            supported = True  # No reads, automatically supported
+        elif num_indexes == 1:
+            iotbr = index_of_template_buf_read[0]
+            same_index = all(write.index == iotbr for write in epilogue_writes)
+            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+            # in the epilogue node don't have the same index and change supported to True
+            supported = same_index
+        else:
+            raise AssertionError("Should not reach here")
+
+        return supported, same_index
+
+    def _template_fusion_supported(
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
+    ) -> Tuple[bool, bool]:
+        template_buf_names = [x.get_name() for x in template_outputs]
+        indexes_of_template_buf_reads = [
+            _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
+            for epilogue_node in epilogue_nodes
+        ]
+        epilogue_nodes_writes = [
+            epilogue_node.get_read_writes().writes for epilogue_node in epilogue_nodes
+        ]
+
+        results = [
+            _check_supported_and_same_indexes(reads, writes)
+            for reads, writes in zip(
+                indexes_of_template_buf_reads, epilogue_nodes_writes
+            )
+        ]
+        supported, same_indexes = zip(*results)
+        return all(supported), all(same_indexes)
+
+    assert template.is_template()
+    template_outputs = template.get_outputs()
+
+    epilogue_nodes = [
+        n.node
+        for epilogue in epilogues
+        for n in epilogue.get_nodes()
+        if n.node is not None
+    ]
+    return _template_fusion_supported(template_outputs, epilogue_nodes)
