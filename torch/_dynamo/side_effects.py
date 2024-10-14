@@ -5,7 +5,7 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
 
@@ -329,6 +329,7 @@ class SideEffects:
     def track_cell_existing(self, source: Source, item: Any):
         variable = variables.NewCellVariable(
             mutable_local=AttributeMutationExisting(),
+            source=source,
         )
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
