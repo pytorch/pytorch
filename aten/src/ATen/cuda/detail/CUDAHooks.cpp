@@ -14,6 +14,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
@@ -79,30 +80,19 @@ struct _Initializer {
 } initializer;
 } // anonymous namespace
 
-// Sets the CUDA_MODULE_LOADING environment variable
-// if it's not set by the user.
-void maybe_set_cuda_module_loading(const std::string &def_value) {
-  auto value = std::getenv("CUDA_MODULE_LOADING");
-  if (!value) {
-#ifdef _WIN32
-    auto env_var = "CUDA_MODULE_LOADING=" + def_value;
-    _putenv(env_var.c_str());
-#else
-    setenv("CUDA_MODULE_LOADING", def_value.c_str(), 1);
-#endif
-  }
-}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-void CUDAHooks::initCUDA() const {
+void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  maybe_set_cuda_module_loading("LAZY");
+  // Sets the CUDA_MODULE_LOADING environment variable
+  // if it's not set by the user.
+  c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
@@ -241,6 +231,9 @@ DeviceIndex current_device() {
   return -1;
 }
 
+/**
+ * DEPRECATED: use getCurrentDevice() instead
+ */
 DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
@@ -436,8 +429,19 @@ void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
+/**
+ * DEPRECATED: use deviceCount() instead
+ */
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::deviceCount() const {
+  return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return at::cuda::detail::current_device();
 }
 
 #ifdef USE_ROCM
