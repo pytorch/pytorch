@@ -18,7 +18,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDefaultGenerator`.");
   }
 
-  virtual at::Device getDeviceFromPtr(void* data) const {
+  at::Device getDeviceFromPtr(void* data) const override {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
@@ -40,7 +40,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
   }
 
-  virtual void initPrivateUse1() const {}
+  void init() const override {}
   virtual void resizePrivateUse1Bytes(
       const c10::Storage& storage,
       size_t newsize) const {

@@ -679,7 +679,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("register_hook", &register_hook, "register_hook for privateuse1");
     m.def("is_register_hook", &is_register_hook, "is_register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
-    m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
 
     // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
     m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);

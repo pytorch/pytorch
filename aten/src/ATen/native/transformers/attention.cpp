@@ -449,6 +449,7 @@ REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
+REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 
 int64_t _fused_sdp_choice_meta(
     const Tensor& query_,
@@ -803,22 +804,26 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
             value.is_contiguous(),
         "scaled_dot_product_attention: If inputs are nested tensors they must be contiguous");
   }
+  auto& ctx = at::globalContext();
   auto origin_dtype = query_.scalar_type();
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
-  auto query_acc = (query_.scalar_type() == at::kHalf ||
-                    query_.scalar_type() == at::kBFloat16) &&
+  auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (query_.scalar_type() == at::kHalf ||
+           query_.scalar_type() == at::kBFloat16) &&
           !query_.is_nested()
       ? query_.to(at::kFloat)
       : query_;
-  auto key_acc =
-      (key.scalar_type() == at::kHalf || key.scalar_type() == at::kBFloat16) &&
+  auto key_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (key.scalar_type() == at::kHalf ||
+           key.scalar_type() == at::kBFloat16) &&
           !key.is_nested()
       ? key.to(at::kFloat)
       : key;
-  auto value_acc = (value.scalar_type() == at::kHalf ||
-                    value.scalar_type() == at::kBFloat16) &&
+  auto value_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (value.scalar_type() == at::kHalf ||
+           value.scalar_type() == at::kBFloat16) &&
           !value.is_nested()
       ? value.to(at::kFloat)
       : value;
