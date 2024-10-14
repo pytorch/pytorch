@@ -26,7 +26,7 @@ def autotune_remote_cache_default() -> Optional[bool]:
 
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
-    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
+    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "0") == "1"
 )
 
 # add some debug printouts
