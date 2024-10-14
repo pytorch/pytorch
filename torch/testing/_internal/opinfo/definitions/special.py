@@ -130,7 +130,6 @@ op_db: List[OpInfo] = [
         ref=scipy.special.i0e if TEST_SCIPY else None,
         decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
         dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,

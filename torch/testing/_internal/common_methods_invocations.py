@@ -13559,7 +13559,6 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   backward_dtypes=floating_types(),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
