@@ -972,6 +972,19 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_sub(self):
+        def fn(x, y):
+            return x - y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        x = torch.arange(3)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
