@@ -113,8 +113,16 @@ REGISTER_I0(bfloat, bfloat);
 
 static void i0_kernel_mps(TensorIteratorBase& iter) {
   using namespace mps;
-  auto input = iter.input(0);
-  auto output = iter.output(0);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  auto input = iter.input();
+  auto output = iter.output();
+  bool needs_copy = !output.is_contiguous();
+  if (!input.is_contiguous()) {
+    input = input.contiguous();
+  }
+  if (needs_copy) {
+    output = output.contiguous();
+  }
   auto i0PSO = lib.getPipelineStateForFunc(
       fmt::format("i0_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
   auto stream = getCurrentMPSStream();
@@ -127,6 +135,9 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
       mtl_dispatch1DJob(computeEncoder, i0PSO, output.numel());
     }
   });
+  if (needs_copy) {
+    iter.output().copy_(output);
+  }
 }
 
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps);
