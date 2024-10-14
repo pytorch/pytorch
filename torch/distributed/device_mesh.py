@@ -250,14 +250,10 @@ else:
             return None
 
         @staticmethod
-        def num_devices_per_host(device_type: str) -> int:
-            return torch.device_count(device_type)
-
-        @staticmethod
         def num_hosts(device_type: str) -> int:
             # ProcessGroup can't tell us this info so we have to infer it, assume
             # homogeneous hardware for now
-            return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
+            return get_world_size() // torch.acc.device_count()
 
         def get_mesh_dim_by_name(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
@@ -478,7 +474,7 @@ else:
             if not default_initialized and device_handle:
                 # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogeneous hardware.
-                num_devices_per_host = torch.device_count(self.device_type)
+                num_devices_per_host = torch.acc.device_count()
                 if (
                     world_size > num_devices_per_host
                     and world_size % num_devices_per_host != 0
@@ -487,7 +483,7 @@ else:
                         f"DeviceMesh only support homogeneous hardware, but found "
                         f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
                     )
-                torch.set_device(self.device_type, get_rank() % num_devices_per_host)
+                torch.acc.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
