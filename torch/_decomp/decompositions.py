@@ -431,8 +431,15 @@ def safe_softmax(self, dim, dtype=None):
 
 
 @register_decomposition(aten.masked_select)
-def masked_select(self, mask: Tensor) -> torch.Tensor:
-    return torch.ops.aten.index(input, [torch.ops.aten.copy(torch.ops.aten.empty(input.shape, dtype=torch.bool), mask)])
+def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
+    return torch.ops.aten.index(
+        input,
+        [
+            torch.ops.aten.copy(
+                torch.ops.aten.empty(input.shape, dtype=torch.bool), mask
+            )
+        ],
+    )
 
 
 @register_decomposition(aten.smooth_l1_loss)

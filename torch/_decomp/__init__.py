@@ -450,7 +450,6 @@ def _core_aten_decompositions_post_autograd() -> (
     # TODO Delete all mutating or CIA ops from this list
     return get_decompositions(
         [
-            aten.masked_select,
             aten.addcdiv,
             aten.addcdiv_,
             aten.addcmul,
