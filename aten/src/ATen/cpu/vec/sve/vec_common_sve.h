@@ -89,19 +89,15 @@ DEFINE_FLOAT_INT_CAST(int16_t, 16, float, 32)
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex_) {
-    // Get the number of elements that fit in a vector (e.g., 4 for 256-bit vector with double)
-    const int64_t element_count = svcntd(); // Count of 64-bit elements in a vector
-    svint64_t vindex = svasr_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), log2(element_count));
-    return svld1_gather_s64index_f64(ptrue, base_addr, vindex);
+    svint64_t offsets = svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale));
+    return svld1_gather_s64offset_f64(ptrue, base_addr, offsets);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex_) {
-    // Get the number of elements that fit in a vector (e.g., 8 for 256-bit vector with float)
-    const int64_t element_count = svcntw(); // Count of 32-bit elements in a vector
-    svint32_t vindex = svasr_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), log2(element_count));
-    return svld1_gather_s32index_f32(ptrue, base_addr, vindex);
+    svint32_t offsets = svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale));
+    return svld1_gather_s32offset_f32(ptrue, base_addr, offsets);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -110,20 +106,20 @@ template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
                    const Vectorized<int64_t>& vindex_, const Vectorized<double>& mask_) {
-    const int64_t element_count = svcntd(); // Count of 64-bit elements in a vector
     svbool_t valid_mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
-    svint64_t vindex = svasr_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), log2(element_count));
-    return svsel_f64(valid_mask, svld1_gather_s64index_f64(valid_mask, base_addr, vindex), src);
+    svint64_t offsets = svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale));
+    svfloat64_t gathered = svld1_gather_s64offset_f64(valid_mask, base_addr, offsets);
+    return svsel_f64(valid_mask, gathered, src);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex_, const Vectorized<float>& mask_) {
-    const int64_t element_count = svcntw(); // Count of 32-bit elements in a vector
     svbool_t valid_mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
-    svint32_t vindex = svasr_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), log2(element_count));
-    return svsel_f32(valid_mask, svld1_gather_s32index_f32(valid_mask, base_addr, vindex), src);
+    svint32_t offsets = svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale));
+    svfloat32_t gathered = svld1_gather_s32offset_f32(valid_mask, base_addr, offsets);
+    return svsel_f32(valid_mask, gathered, src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -202,48 +198,17 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-template<>
-inline Vectorized<float> flip(const Vectorized<float> & v) {
-  svbool_t pg = svptrue_b32();
-  svuint32_t idx = svindex_u32(0, 1);
-  idx = svrevb_u32_x(pg, idx);
-  return Vectorized<float>(svtbl(v, idx));
+#define DEFINE_FLIP_FUNC(type, sve_func)        \
+inline Vectorized<type> flip(const Vectorized<type> & v) {  \
+    return Vectorized<type>(sve_func(v));      \
 }
-template<>
-inline Vectorized<double> flip(const Vectorized<double> & v) {
-  svbool_t pg = svptrue_b64();
-  svuint64_t idx = svindex_u64(0, 1);
-  idx = svrevb_u64_x(pg, idx);
-  return Vectorized<double>(svtbl(v, idx));
-}
-template<>
-inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
-  svbool_t pg = svptrue_b64();
-  svuint64_t idx = svindex_u64(0, 1);
-  idx = svrevb_u64_x(pg, idx);
-  return Vectorized<int64_t>(svtbl(v, idx));
-}
-template<>
-inline Vectorized<int32_t> flip(const Vectorized<int32_t> & v) {
-  svbool_t pg = svptrue_b32();
-  svuint32_t idx = svindex_u32(0, 1);
-  idx = svrevb_u32_x(pg, idx);
-  return Vectorized<int32_t>(svtbl(v, idx));
-}
-template<>
-inline Vectorized<int16_t> flip(const Vectorized<int16_t> & v) {
-  svbool_t pg = svptrue_b16();
-  svuint16_t idx = svindex_u16(0, 1);
-  idx = svrevb_u16_x(pg, idx);
-  return Vectorized<int16_t>(svtbl(v, idx));
-}
-template<>
-inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
-  svbool_t pg = svptrue_b8();
-  svuint8_t idx = svindex_u8(0, 1);
-  idx = svreinterpret_u8(svrevb_s32_x(pg, svreinterpret_s32_u8(idx)));
-  return Vectorized<int8_t>(svtbl(v, idx));
-}
+// Use the macro to define the flip functions
+DEFINE_FLIP_FUNC(float, svrev_f32)
+DEFINE_FLIP_FUNC(double, svrev_f64)
+DEFINE_FLIP_FUNC(int64_t, svrev_s64)
+DEFINE_FLIP_FUNC(int32_t, svrev_s32)
+DEFINE_FLIP_FUNC(int16_t, svrev_s16)
+DEFINE_FLIP_FUNC(int8_t, svrev_s8)
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
