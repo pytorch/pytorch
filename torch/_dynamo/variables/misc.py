@@ -713,7 +713,7 @@ class AutogradFunctionVariable(VariableTracker):
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             sig = inspect.signature(fn)
-            if len(args) == len(sig._parameters) - 1:
+            if len(args) - 1 == len(sig._parameters):
                 args = args[1:]  # Don't use context
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
