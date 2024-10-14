@@ -47,6 +47,9 @@ struct TORCH_API AcceleratorHooksInterface {
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CPU);
   }
 
+  // NB: Not all backends support getDefaultStream(), such as Intel XPU,
+  // because the stream may have an implicit synchronization semantic.
+  // Ignore it if your backend does not support this feature.
   virtual c10::Stream getDefaultStream(C10_UNUSED DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support getDefaultStream()");
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CPU);
