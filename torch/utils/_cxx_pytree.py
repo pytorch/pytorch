@@ -123,10 +123,14 @@ def _to_optree_func(
     if flatten_with_keys_func is not None:
         # OpTree flattens the PyTree with extra entries. Use the flatten_with_keys_func to
         # have these extra custom information.
-        def optree_flatten_func(tree: PyTree) -> Tuple[Tuple[Any], Context, List[Any]]:
+        def optree_flatten_func(
+            tree: PyTree,
+        ) -> Tuple[Tuple[Any, ...], Context, Tuple[Any, ...]]:
             key_entries_with_children, context = flatten_with_keys_func(tree)
+            if len(key_entries_with_children) == 0:
+                return (), context, ()
             key_entries, children = tuple(zip(*key_entries_with_children))
-            entries = [key_entry.entry for key_entry in key_entries]
+            entries = tuple(key_entry.entry for key_entry in key_entries)
             return children, context, entries
 
     else:
@@ -300,7 +304,7 @@ def tree_flatten(
     The flattening order (i.e., the order of elements in the output list) is deterministic,
     corresponding to a left-to-right depth-first tree traversal.
 
-    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(1)
@@ -308,7 +312,7 @@ def tree_flatten(
     >>> tree_flatten(None)
     ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> from collections import OrderedDict
-    >>> tree = OrderedDict([("b", (2, [3, 4])), ("a", 1), ("c", None), ("d", 5)])
+    >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
 
@@ -337,7 +341,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
 
     The inverse of :func:`tree_flatten`.
 
-    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> leaves, treespec = tree_flatten(tree)
     >>> tree == tree_unflatten(leaves, treespec)
     True
@@ -362,7 +366,7 @@ def tree_iter(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> list(tree_iter(tree))
     [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
@@ -397,7 +401,7 @@ def tree_leaves(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_leaves(tree)
     [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
@@ -432,7 +436,7 @@ def tree_structure(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
+    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_structure(tree)
     PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
     >>> tree_structure(1)
@@ -469,9 +473,9 @@ def tree_map(
 
     See also :func:`tree_map_`.
 
-    >>> tree_map(lambda x: x + 1, {"x": 7, "y": (42, 64)})
+    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64)})
     {'x': 8, 'y': (43, 65)}
-    >>> tree_map(lambda x: x is None, {"x": 7, "y": (42, 64), "z": None})
+    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
     {'x': False, 'y': (False, False), 'z': True}
 
     If multiple inputs are given, the structure of the tree is taken from the first input;
@@ -569,9 +573,7 @@ def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
 
 
 @overload
-def map_only(
-    __type_or_types_or_pred: Type3[T, S, U],
-) -> MapOnlyFn[Fn3[T, S, U, Any]]:
+def map_only(__type_or_types_or_pred: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
     ...
 
 
@@ -587,14 +589,12 @@ def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
 
 @overload
-def map_only(
-    __type_or_types_or_pred: Callable[[Any], bool],
-) -> MapOnlyFn[FnAny[Any]]:
+def map_only(__type_or_types_or_pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
     ...
 
 
 def map_only(
-    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
 ) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
@@ -859,7 +859,7 @@ def broadcast_prefix(
     ValueError: list arity mismatch; expected: 3, got: 4; list: [1, 2, 3, 4].
     >>> broadcast_prefix([1, 2, 3], [1, 2, (3, 4)])
     [1, 2, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {"a": 3, "b": 4, "c": (None, 5)}])
+    >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
     [1, 2, 3, 3, 3, 3]
 
     Args:
