@@ -659,8 +659,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             {
                 "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
-                # "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
-                "module_grouping": ["mem_eff"],
+                "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
