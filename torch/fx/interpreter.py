@@ -272,7 +272,11 @@ class Interpreter:
         assert not isinstance(target, str)
 
         # Execute the function and return the result
-        return target(*args, **kwargs)
+        try:
+            return target(*args, **kwargs)
+        except IndexError as e:
+            breakpoint()
+            raise RuntimeError(f'Not enough arguments to call {target}!') from e
 
     @compatibility(is_backward_compatible=True)
     def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:

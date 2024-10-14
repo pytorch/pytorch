@@ -3,6 +3,7 @@
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
 #endif
@@ -12,7 +13,6 @@
 #endif
 
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -122,13 +122,13 @@ using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
-  const char* val = getenv("PYTORCH_API_USAGE_STDERR");
-  return val && *val; // any non-empty value
+  auto val = c10::utils::get_env("PYTORCH_API_USAGE_STDERR");
+  return val.has_value() && !val.value().empty(); // any non-empty value
 }
 
 void APIUsageDebug(const string& event) {
   // use stderr to avoid messing with glog
-  std::cerr << "PYTORCH_API_USAGE " << event << std::endl;
+  std::cerr << "PYTORCH_API_USAGE " << event << '\n';
 }
 
 APIUsageLoggerType* GetAPIUsageLogger() {
@@ -393,12 +393,12 @@ bool InitCaffeLogging(int* argc, char** argv) {
     std::cerr << "InitCaffeLogging() has to be called after "
                  "c10::ParseCommandLineFlags. Modify your program to make sure "
                  "of this."
-              << std::endl;
+              << '\n';
     return false;
   }
   if (FLAGS_caffe2_log_level > GLOG_FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
-              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << std::endl;
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << '\n';
     FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
@@ -504,10 +504,10 @@ namespace c10::detail {
 namespace {
 
 void setLogLevelFlagFromEnv() {
-  const char* level_str = std::getenv("TORCH_CPP_LOG_LEVEL");
+  auto level_env = c10::utils::get_env("TORCH_CPP_LOG_LEVEL");
 
   // Not set, fallback to the default level (i.e. WARNING).
-  std::string level{level_str != nullptr ? level_str : ""};
+  std::string level{level_env.has_value() ? level_env.value() : ""};
   if (level.empty()) {
     return;
   }
@@ -542,7 +542,7 @@ void setLogLevelFlagFromEnv() {
       << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
          "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
          "`2`, and `3`."
-      << std::endl;
+      << '\n';
 }
 
 } // namespace

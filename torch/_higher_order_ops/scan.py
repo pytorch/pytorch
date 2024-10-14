@@ -62,6 +62,16 @@ def _(t, dim, idx):
     return t.select(dim, 0)
 
 
+@torch.library.custom_op("_scan_helper::get_size", mutates_args=())
+def _get_size(t: torch.Tensor, dim: int) -> int:
+    return t.size(dim)
+
+
+@torch.library.register_fake("_scan_helper::get_size")
+def _(t: torch.Tensor, dim: int) -> int:
+    return t.size(dim)
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
@@ -146,7 +156,7 @@ def scan(
                 )
 
     # TODO: Support cpp warpper and abi compitatible mode
-    if torch._inductor.config.cpp_wrapper or torch._inductor.config.abi_compatible:
+    if torch._inductor.config.cpp_wrapper:
         raise RuntimeError(
             "scan is not supported in cpp_wrapper and abi_compatible mode yet."
         )

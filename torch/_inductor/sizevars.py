@@ -415,7 +415,7 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right)), breakpoint()
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -622,6 +622,24 @@ class SizeVarAllocator:
                     - sympy_subs(index_dim, {v: sympy.Integer(0)})
                 )
         return strides
+
+    def atomically_apply_size_hint(
+        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+    ) -> Union[Expr, int]:
+        if isinstance(expr, int):
+            return int(expr)
+
+        # For multiple expressions that depend on an unbacked symint,
+        # we want to compute them consistently for a size hint we have chosen.
+        # So, recursively compute expressions via size hints of contained symbols.
+        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
+        assert isinstance(expr, Expr), type(expr)
+        free_symbols = expr.free_symbols
+        size_dict = {
+            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
+            for symbol in free_symbols
+        }
+        return expr.subs(size_dict)
 
     def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""

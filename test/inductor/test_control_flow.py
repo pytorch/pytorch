@@ -338,6 +338,98 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_outer_to_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                nz = torch.nonzero(a)
+                b = torch.ones([nz.size(0), 8], device=nz.device)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner_to_outer(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                y = torch.cond(p, true_fn, false_fn, [b])
+                return torch.sin(y)
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
@@ -961,6 +1053,19 @@ class ScanModels:
                 dim=self.dim,
                 reverse=self.reverse,
             )
+    
+    class ScanWithScatter(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+        
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                full = torch.full_like(x, 1)
+                return carry + torch.scatter(full, 0, torch.tensor([0]), 1), x_view.clone()
+
+            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
 
     class SimpleWithPytreeInOuts(torch.nn.Module):
         def __init__(self, reverse, dim):
@@ -1123,7 +1228,7 @@ class ScanTests(TestCase):
             result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
 
         self.assertEqual(result, result_exp)
-        self.assertEqual(result, result_compiled)
+        self.assertEqual(result_exp, result_compiled)
         self.assertEqual(result_compiled, result_compiled_exp)
 
     def _compare_result(

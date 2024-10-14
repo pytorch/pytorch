@@ -18,7 +18,6 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
-from torch._higher_order_ops.scan import scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
@@ -259,41 +258,75 @@ def in_namespace(op, namespace):
     return False
 
 
-def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
-    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-    if (type_promotion_kind or convert_input_to_bool) and indices:
+def transform_args(
+    args: List[Any],
+    kwargs: Dict[str, Any],
+    broadcast: bool,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool: bool,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
+    # check that there's something to transform
+    if not args_indices and not kwargs_indices:
+        return args, kwargs
+
+    if type_promotion_kind or convert_input_to_bool:
         if convert_input_to_bool:
             dtype = torch.bool
         else:
-            # FIXME that's a crude approximation for promoting args
+            # FIXME this is a crude approximation for promoting args
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Basic))
-                or getattr(a, "dtype", None) is not None
+                if isinstance(a, (Number, sympy.Basic)) or hasattr(a, "dtype")
             ]
+            # only consider tensor kwargs for promotion, for now
+            promoting_args.extend(a for a in kwargs.values() if hasattr(a, "dtype"))
             dtype = get_promoted_dtype(
-                *promoting_args, type_promotion_kind=type_promotion_kind
+                *promoting_args, type_promotion_kind=type_promotion_kind  # type: ignore[arg-type]
             )
+
+        device = (
+            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
+        ).get_device()
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
+                return ir.Constant(value=arg.value, dtype=dtype, device=device)
             else:
                 return arg
 
         args = [promote(a) for a in args]
-    if broadcast and indices:
-        for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+        kwargs = {k: promote(v) for k, v in kwargs.items()}
+
+    if broadcast:
+        broadcasted = broadcast_tensors(
+            *list(
+                itertools.chain(
+                    (args[i] for i in args_indices),
+                    (kwargs[k] for k in kwargs_indices),
+                )
+            )
+        )
+        size = list(broadcasted[0].get_size())
+
+        for i, x in zip(args_indices, broadcasted[: len(args_indices)]):
             args[i] = x
+        for k, x in zip(kwargs_indices, broadcasted[len(args_indices) :]):
+            kwargs[k] = x
+
         for i in range(len(args)):
             if isinstance(args[i], ir.Constant):
-                args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
+                args[i] = ExpandView.create(args[i], size)
+        for k in kwargs:
+            if isinstance(kwargs[k], ir.Constant):
+                kwargs[k] = ExpandView.create(kwargs[k], size)
 
-    return args
+    return args, kwargs
 
 
 def _register_foreach_lowering(aten_fn, decomp_fn):
@@ -322,7 +355,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool,
 ):
     """
     Add a lowering to lowerings dict
@@ -337,25 +374,24 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
+        args: List[Any] = list(args)
+        kwargs: Dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
-            args = args[0]
+            args = list(args[0])
 
-        # kwargs tensors not supported yet unless it's a fallback op
         if not all(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
-            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
                 x == "out" for x in kwargs.keys()
             ), "out= ops aren't yet supported"
 
-        args = transform_args(
-            args, broadcast, type_promotion_kind, convert_input_to_bool
+        args, kwargs = transform_args(
+            args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
         )
 
         if unpacked:
@@ -375,7 +411,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: Optional[
+        ELEMENTWISE_TYPE_PROMOTION_KIND
+    ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
 ):
     """
@@ -431,9 +469,11 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         def const_func(x):
             if isinstance(x, sympy.Basic):
-                return ir.IndexingConstant(x, dtype, decode_device(None))
+                return ir.IndexingConstant(
+                    index=x, dtype=dtype, device=decode_device(None)
+                )
             else:
-                return ir.Constant(x, dtype, decode_device(None))
+                return ir.Constant(value=x, dtype=dtype, device=decode_device(None))
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
@@ -442,13 +482,16 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    list(ex.get_size()),
                 )
             )
         elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
-                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    IndexingConstant(
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
+                    ),
                     list(ex.get_size()),
                 )
             )
@@ -684,16 +727,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device))
+    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device):
-    return to_device(x, device, copy=True)
+def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 
 def register_pointwise(
@@ -1056,7 +1099,7 @@ def as_strided(x, size, stride, storage_offset=None):
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
     )
-    return TensorBox(ir.ReinterpretView(storage, new_layout))
+    return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
 @register_lowering(aten.as_strided_, type_promotion_kind=None)
@@ -2040,6 +2083,113 @@ def inductor_randint(
     )
 
 
+def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    return (
+        tb.get_name(),
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
+    )
+
+
+def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+    return tb.get_name(), tb.get_stride()[-1]
+
+
+@register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
+def searchsorted(
+    sorted_sequence: TensorBox,
+    self: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[TensorBox] = None,
+) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    if (
+        not validate_bucketize(sorted_sequence)
+        or not validate_bucketize(self)
+        or (sorter is not None and not validate_bucketize(sorter))
+    ):
+        return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
+            sorted_sequence,
+            self,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            sorter=sorter,
+        )
+
+    # If side is present, override the value of right if needed.  This assumes that
+    # validation of the two options being non-contradictory is already done by the
+    # searchsorted meta-function.
+    if side is not None and side == "right":
+        right = True
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    values_loader = self.make_loader()
+
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
+
+    if sorter is not None:
+        sorter.realize()
+
+    if len(sorted_sequence.get_size()) == 1:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                0,
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else 0,
+            )
+
+    else:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+
+            # Get index to the beginning of the sorted sequence within a flattened
+            # version of the array.
+            def get_flattened_index(tb: TensorBox):
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
+
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                get_flattened_index(sorted_sequence),
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else get_flattened_index(sorter),
+            )
+
+    device = self.get_device()
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=self.shape,
+    )
+
+
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
     input: TensorBox,
@@ -2063,7 +2213,6 @@ def bucketize(
     # guarantee that boundaries.get_name() (used below) will exist unless
     # we call boundaries.realize().
     boundaries.realize()
-    boundaries_size = boundaries.get_size()[0]
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2073,8 +2222,8 @@ def bucketize(
         val = input_loader(index)
         indices = ops.bucketize(
             val,
-            boundaries.get_name(),
-            boundaries_size,
+            _boundaries_helper(boundaries),
+            0,
             index_dtype,
             right,
         )
@@ -2208,7 +2357,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible
@@ -2216,8 +2364,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 
@@ -2432,7 +2578,7 @@ def clone_preserve_reinterpret_view(x):
     if reinterpret_view_layouts:
         x = x.data  # unwrap TensorBox
         for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(x, layout)
+            x = ir.ReinterpretView(data=x, layout=layout)
         x = TensorBox(x)
 
     return x
@@ -2657,6 +2803,7 @@ def _local_scalar_dense(data):
     unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
     )
+    assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
@@ -3249,9 +3396,9 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -3470,9 +3617,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             scatter_mode=None,
         )
         buffer = ir.ComputedBuffer(
-            None,
-            ir.MutationLayoutSHOULDREMOVE(self),
-            zero_out,
+            name=None,
+            layout=ir.MutationLayoutSHOULDREMOVE(self),
+            data=zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
         V.graph.register_operation(buffer)
@@ -3489,9 +3636,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -4277,23 +4424,10 @@ def adaptive_max_pool2d(x, output_size):
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
             o_size, dtype=torch.int64, device=x.get_device()
         )
+
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
-            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
-        else:
-            v, offsets = _low_memory_max_pool2d_with_offsets(
-                x,
-                kernel_size,
-                stride=kernel_size,
-                padding=[0, 0],
-                dilation=[1, 1],
-                ceil_mode=False,
-            )
-            indices = _low_memory_max_pool2d_offsets_to_indices(
-                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
-            )
-            return v, indices
+        # This is handled by a decomposition
+        raise ValueError
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -5147,7 +5281,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
         x = to_dtype(x, torch.float)
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     return to_dtype(div(sum_result, denom), output_dtype)
 
@@ -5168,7 +5302,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = sympy_product(size[i] for i in axis)
     if correction:
         denom = sympy.Max(denom - correction, 0)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
@@ -6212,13 +6346,6 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
-# 1. best way of bind a new symint inside decomposing pass
-#   and 1.1 create_new_symint the right thing to do?
-# 2. mutation outputs downs to lowering of while_loop.
-#  a. we could probalby identify subgraph input mutation in inductor
-#  b. schemas for hops. We could use this infra. Fearsible.
-
-
 @register_lowering(torch.ops.higher_order.while_loop)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     if any(map(is_triton, carried_inputs + additional_inputs)):
@@ -6228,7 +6355,17 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-    fake_all_inputs = [x.meta["val"] if isinstance(x, torch.fx.Node) else x for x in fx_all_inputs]  # type: ignore[union-attr]
+
+    new_carried_inputs = []
+    for fx_init, tb_init in zip(V.graph.current_node.args[-2], carried_inputs):
+        if not isinstance(tb_init, int):
+            new_carried_inputs.append(
+                ir.ExternKernel.require_exact_strides(
+                    tb_init, fx_init.meta["val"].stride(), allow_padding=False
+                )
+            )
+        else:
+            new_carried_inputs.append(tb_init)
 
     for subgraph in (cond_fn, body_fn):
         if subgraph.graph is None:
@@ -6238,173 +6375,53 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
                 example_inputs=fx_all_inputs,  # type: ignore[arg-type]
                 subgraph_name=subgraph.name,
             )
+            fake_all_inputs = [
+                node.meta["val"]
+                for node in subgraph.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ]
             with V.set_graph_handler(subgraph.graph):
                 subgraph.graph.run(*fake_all_inputs)
+                if subgraph is body_fn:
+                    new_subgraph_outputs = []
+                    for fake_carry, carry in zip(
+                        fake_all_inputs, subgraph.graph.graph_outputs
+                    ):
+                        if isinstance(carry, ir.ShapeAsConstantBuffer):
+                            new_subgraph_outputs.append(carry)
+                        else:
+                            new_subgraph_outputs.append(
+                                ir.ExternKernel.require_exact_strides(
+                                    carry, fake_carry.stride(), allow_padding=False
+                                )
+                            )
+                    subgraph.graph.graph_outputs = new_subgraph_outputs
 
-    symint_exprs = [
-        inp.node.expr for inp in carried_inputs if isinstance(inp, torch.SymInt)
-    ]
-    assert len(symint_exprs) <= 1, "while_loop only supports one symint"
-    idx_iter_expr = symint_exprs[0] if len(symint_exprs) == 1 else None
-    # TODO: using HOP schema to pass the mutated_inputs info here.
-    result = ir.WhileLoop.create(
+    result, mutated_inputs = ir.WhileLoop.create(
         cond_fn,
         body_fn,
-        [inp for inp in carried_inputs if not isinstance(inp, torch.SymInt)],
-        [inp for inp in additional_inputs if not isinstance(inp, torch.SymInt)],
-        iter_idx_expr=idx_iter_expr,
+        new_carried_inputs,
+        additional_inputs,
     )
-    return list(map(TensorBox.create, result))
+
+    def _map_output(x):
+        if isinstance(x, ir.ShapeAsConstantBuffer):
+            return x._shape
+        # test scan_downstream_scan_matmul
+        # where carried_inputs is a StorageBox instead of a computed buffer
+        # maybe we could instead only wrap MultiOutput
+        elif isinstance(x, ir.StorageBox):
+            return TensorBox(x)
+        else:
+            return TensorBox.create(x)
+
+    return list(map(_map_output, result + mutated_inputs))
 
 
 # This is a spcialized version of select because we're certain that the idx is valid
 @register_lowering(torch.ops._scan_helper.unsafe_select, type_promotion_kind=None)
 def _(dst, dim, idx):
     return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
-
-
-@register_lowering(scan_op)
-def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
-    from torch._dynamo.source import GlobalSource
-    from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
-    from torch._inductor.pattern_matcher import fwd_only
-    from torch.fx.experimental.symbolic_shapes import DimDynamic
-
-    if torch._inductor.config.cpp_wrapper:
-        raise NotImplementedError("scan is not supported with cpp_wrapper yet.")
-
-    num_init_leaves = len(init)
-    specialized_dim = int(dim)
-
-    with V.graph.fake_mode:
-        _, fx_init, fx_xs, _, _, fx_additional_inputs = V.graph.current_node.args
-        fake_init, fake_xs, fake_additional_inputs = pytree.tree_map(
-            lambda node: node.meta["val"], (fx_init, fx_xs, fx_additional_inputs)
-        )
-        fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
-        fake_scan_length = fake_xs[0].size()[specialized_dim]
-        fake_carry_subgraph, fake_ys_subgraph = _extract_carry_and_out(
-            combine_subgraph.graph_module(
-                *(fake_init + fake_xs_subgraph + fake_additional_inputs)
-            ),
-            num_init_leaves,
-        )
-        fake_ys_outs = [stack_y(y, fake_scan_length) for y in fake_ys_subgraph]
-        fake_idx = V.graph.fake_mode.shape_env.create_symintnode(  # type: ignore[union-attr]
-            V.graph.fake_mode.shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
-                0, source=GlobalSource("scan_idx"), dynamic_dim=DimDynamic.DYNAMIC
-            ),
-            hint=0,
-            source=GlobalSource("scan_idx"),
-        )
-        fake_args, tree_spec = pytree.tree_flatten(
-            [fake_init, fake_xs, fake_additional_inputs, fake_ys_outs, fake_idx]
-        )
-
-        # Note: we lower scan into while_loop by constructing cond_fn and body_fn.
-        # We need the out variant graph because, for ys_outs, if we append them to a list then
-        # stack them together after the loop, we'll waste a lot of memory and it's also time
-        # consuming. We could optimize the overhead away by pre-allocating the memory.
-        # The cond_fn and body_fn are out variants, where ys_outs is passed in as a pre-allocated
-        # buffer and we pass in an additional SymInt to represent the current iteration idx.
-        # Tracing the graph produces a new graph, where the nodes depends on the value of symint
-        # to select from xs of input and copy into a slice of ys_outs.
-        def cond_fn_out(*flat_args):
-            init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
-                flat_args, tree_spec
-            )
-            return idx < xs[0].size()[specialized_dim]
-
-        def body_fn_out(*flat_args):
-            init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
-                flat_args, tree_spec
-            )
-            scan_idx = idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
-            sub_xs = []
-            for x in xs:
-                sub_xs.append(torch.ops._scan_helper.unsafe_select(x, dim, scan_idx))
-
-            new_carry, ys = _extract_carry_and_out(
-                combine_subgraph.graph_module(
-                    *(list(init) + sub_xs + list(additional_inputs))
-                ),
-                num_init_leaves,
-            )
-            for y, y_out in zip(ys, ys_outs):
-                y_out_slice = torch.ops._scan_helper.unsafe_select(y_out, 0, scan_idx)
-                y_out_slice.copy_(y)
-            return *new_carry, *xs, *additional_inputs, *ys_outs
-
-        # Note:
-        # 1. fwd_only trace with real mode, we need to trace under current fake_mode otherwise
-        # factory functions will create real tensors instead of fake tensors.
-        # 2. We set run_functional_passes = False because body_fn_out is not functional
-        # due to the inplace writes.
-        cond_gm = fwd_only(cond_fn_out, fake_args, run_functional_passes=False)
-        body_gm = fwd_only(body_fn_out, fake_args, run_functional_passes=False)
-
-    cond_subgraph = ir.Subgraph(
-        name=combine_subgraph.name + "_loop_cond", graph_module=cond_gm
-    )
-    body_subgraph = ir.Subgraph(
-        name=combine_subgraph.name + "_loop_body", graph_module=body_gm
-    )
-
-    for subgraph in (cond_subgraph, body_subgraph):
-        # create and lower subgraphs
-        subgraph.graph = V.graph.make_subgraph(
-            gm=subgraph.graph_module,
-            example_inputs=fake_args,  # type: ignore[arg-type]
-            subgraph_name=subgraph.name,
-        )
-        with V.set_graph_handler(subgraph.graph):
-            subgraph.graph.run(*fake_args)
-            new_subgraph_outputs = []
-            if subgraph is body_subgraph:
-                for fake_carry, carry in zip(
-                    fake_args[:-1], subgraph.graph.graph_outputs
-                ):
-                    new_subgraph_outputs.append(
-                        ir.ExternKernel.require_exact_strides(
-                            carry, fake_carry.stride(), allow_padding=False
-                        )
-                    )
-                subgraph.graph.graph_outputs = new_subgraph_outputs
-
-    subgraph_ys_outs = pytree.tree_unflatten(
-        body_subgraph.graph.graph_outputs + [fake_idx], tree_spec  # type: ignore[union-attr]
-    )[3]
-    # Pre-allocate an out buffer to store the ys_outs
-    ys_out_buffer = [
-        empty_strided(
-            size=y.get_size(),
-            stride=y.get_stride(),
-            device=y.get_device(),
-            dtype=y.get_dtype(),
-        )
-        for y in subgraph_ys_outs
-    ]
-
-    carried_inputs = [*init, *xs, *additional_inputs, *ys_out_buffer]
-    output = ir.WhileLoop.create(
-        cond_fn=cond_subgraph,
-        body_fn=body_subgraph,
-        carried_inputs=carried_inputs,
-        additional_inputs=[],
-        mutated_inputs=ys_out_buffer,
-        iter_idx_expr=fake_idx.node.expr,
-    )
-
-    for out_buffer in ys_out_buffer:
-        V.graph.mark_buffer_mutated(out_buffer.get_name())
-
-    last_carry, _, _, ys_outs, _ = pytree.tree_unflatten(
-        output + ys_out_buffer + [fake_idx], tree_spec
-    )
-    return [
-        TensorBox.create(t) if not isinstance(t, TensorBox) else t
-        for t in last_carry + ys_outs
-    ]
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
@@ -6441,7 +6458,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
@@ -6477,6 +6494,7 @@ try:
             # in-place reuse. Therefore, we tell the scheduler to not fuse it.
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
