@@ -5,7 +5,6 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/Storage.h>
 #include <libshm.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -317,19 +316,21 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
         [ipc_memory_handle_size,
          ipc_event_handle_size,
          offset_bytes,
+         memory_handle,
+         event_handle,
+         ref_counter,
          ref_counter_offset,
-         event_sync_required,
-         ipc_handles] = at::globalContext()
-                            .getAcceleratorHooksInterface()
-                            .StorageShareDevice(storage);
+         event_sync_required] = at::globalContext()
+                                    .getAcceleratorHooksInterface()
+                                    .StorageShareDevice(storage);
 
     _handle = PyBytes_FromStringAndSize(
-        ipc_handles.memory_handle.c_str(), ipc_memory_handle_size);
+        memory_handle.c_str(), ipc_memory_handle_size);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
-    _ref_counter = PyBytes_FromString(ipc_handles.ref_counter_handle.c_str());
+    _ref_counter = PyBytes_FromString(ref_counter.c_str());
     _ref_counter_offset = THPUtils_packUInt64(ref_counter_offset);
-    _event_handle = PyBytes_FromStringAndSize(
-        ipc_handles.event_handle.c_str(), ipc_event_handle_size);
+    _event_handle =
+        PyBytes_FromStringAndSize(event_handle.c_str(), ipc_event_handle_size);
     _event_sync_required = PyBool_FromLong(event_sync_required);
   }
 
