@@ -244,7 +244,7 @@ class TensorVariable(VariableTracker):
         if not (self.source and self.source.subguards_allowed()):
             return
 
-        from ..guards import CLOSURE_VARS, GuardBuilder
+        from ..guards import get_closure_vars, GuardBuilder
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
@@ -253,7 +253,7 @@ class TensorVariable(VariableTracker):
         scope = {
             "L": tx.output.local_scope,
             "G": tx.output.global_scope,
-            **CLOSURE_VARS,
+            **get_closure_vars(),
         }
         try:
             # We raise in case we get a typerror bug w/ SuperSource.
