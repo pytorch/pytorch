@@ -3645,8 +3645,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->resetPeakStats();
   }
 
-  void ensureExistsAndIncrefPool(c10::DeviceIndex device, MempoolId_t mempool_id)
-      override {
+  void ensureExistsAndIncrefPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->ensureExistsAndIncrefPool(std::move(mempool_id));
   }
@@ -3682,8 +3683,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->decrefPoolAndMaybeMarkFree(
-        std::move(mempool_id));
+    device_allocator[device]->decrefPoolAndMaybeMarkFree(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {
