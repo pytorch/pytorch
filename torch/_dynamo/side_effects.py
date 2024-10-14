@@ -378,7 +378,9 @@ class SideEffects:
             # to be another one. The new value is in store_attr_mutations.
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
-                VariableTracker.visit(visit, self.store_attr_mutations[var])
+                VariableTracker.visit(
+                    visit, self.store_attr_mutations[var]
+                )  # noqa: F821
 
         def is_live(var: VariableTracker):
             if isinstance(var.mutable_local, AttributeMutationNew):
@@ -395,6 +397,10 @@ class SideEffects:
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
         VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+        # Manually release the self-referential function, which indirectly
+        # captures certain `VariableTracker` and affects parts of PT test/logic
+        # that are sensitive to when certain objects get released.
+        del visit
 
         # NB: cell variable handling.is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
