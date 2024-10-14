@@ -14,10 +14,8 @@ namespace at {
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
 
-  virtual void initXPU() const {
-    TORCH_CHECK(
-        false,
-        "Cannot initialize XPU without ATen_xpu library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
   }
 
   virtual bool hasXPU() const {
@@ -50,7 +48,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 

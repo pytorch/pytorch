@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
+    skipIfXpu,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -5533,6 +5534,7 @@ graph():
             export_res = decomposed_ep.module()(x)
             self.assertTrue(export_res.size() == exp_res.size())
 
+    @skipIfXpu
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -6073,6 +6075,62 @@ graph():
         gm_flat_strict = ep_strict.module()
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_unflatten_no_unroll(self):
+        inp = (torch.ones(1),)
+
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.n(x0, True)
+                x2 = self.n(x0, False)
+                return x1 + x2
+
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot unflatten multiple calls to module n while preserving its signature",
+            ):
+                torch.export.unflatten(ep)
+
+        ep = export(M(), inp)
+        print(ep)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+        class _N(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class _N_1(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        ufm.set_submodule("n", _N())
+        ufm.set_submodule("n@1", _N_1())
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
     def test_preserve_module_call_signature_unflatten_specialization(self):
         class N(torch.nn.Module):
