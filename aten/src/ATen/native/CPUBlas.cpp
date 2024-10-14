@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 
 #include <climits>
+#include <cpuinfo.h>
 
 #if AT_BUILD_WITH_BLAS()
 #if C10_IOS
@@ -351,7 +352,15 @@ void gemm(
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   // The documented MKL behavior when FP16 support is not available
+   // is to upconvert to fp32 and call sgemm. We can do better by
+   // fusing the conversion.
+   const bool fp16_gemv_trans_fast_path_would_be_beneficial =
+     cpuinfo_initialize() && cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
+   const bool use_fp16_gemv_trans =
+     fp16_gemv_trans_fast_path_would_be_beneficial && transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && beta == 0.0 && alpha == 1.0;
+   if (!use_fp16_gemv_trans && mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
