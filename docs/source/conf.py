@@ -3326,6 +3326,8 @@ coverage_ignore_classes = [
     "MkldnnPrelu",
     # torch.utils.mobile_optimizer
     "LintCode",
+    # torch.utils.pytree
+    "register_pytree_node",
     # torch.utils.show_pickle
     "DumpUnpickler",
     "FakeClass",
