@@ -36,6 +36,7 @@ if not is_available():
 
 
 else:
+    from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _find_pg_by_ranks_and_tag,
         _get_default_group,
@@ -66,7 +67,7 @@ else:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
-                int, Tuple[str, Optional[ProcessGroup.Options]]
+                int, Tuple[str, Optional[C10dBackend.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
@@ -279,7 +280,7 @@ else:
             self,
             dim: int,
             backend: str,
-            pg_options: Optional[ProcessGroup.Options] = None,
+            pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
@@ -505,7 +506,11 @@ else:
                 default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
-                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
                     if torch.cuda.is_available()
                     and get_backend(default_group) == "gloo"
                     else default_group
@@ -543,10 +548,16 @@ else:
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        group_desc = (
+                            f"mesh_{self.mesh_dim_names[dim]}"
+                            if self.mesh_dim_names
+                            else f"mesh_dim_{dim}"
+                        )
                         dim_group = new_group(
                             ranks=subgroup_ranks,
                             backend=backend,
                             pg_options=pg_options,
+                            group_desc=group_desc,
                         )
 
                         # only add to dim_groups if the current rank in the subgroup
@@ -750,7 +761,11 @@ else:
                 group_ranks = get_process_group_ranks(group)
                 if (
                     isinstance(mesh, torch.Tensor) and mesh.tolist() != group_ranks
-                ) or (mesh is not None and mesh != group_ranks):
+                ) or (
+                    mesh is not None
+                    and not isinstance(mesh, torch.Tensor)
+                    and mesh != group_ranks
+                ):
                     raise ValueError(
                         f"Invalid mesh {str(mesh)} for ProcessGroup with ranks {group_ranks}"
                     )

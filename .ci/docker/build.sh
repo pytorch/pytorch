@@ -286,23 +286,23 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=6.0
-    NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
     ROCM_VERSION=6.1
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=6.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -352,6 +352,12 @@ case "$image" in
   pytorch-linux-jammy-py3-clang15-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=15
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-py3-clang18-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=18
     CONDA_CMAKE=yes
     VISION=yes
     ;;
