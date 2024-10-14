@@ -30,7 +30,7 @@ if _TYPE_CHECKING:
     from types import ModuleType
 
     import torch.utils._cxx_pytree as cxx
-    from torch.utils._cxx_pytree import (  # noqa: TCH004; noqa: F401
+    from torch.utils._cxx_pytree import (  # noqa: TCH004
         _broadcast_to_and_flatten as _broadcast_to_and_flatten,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as register_pytree_node,

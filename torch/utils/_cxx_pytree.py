@@ -309,11 +309,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"tree_unflatten(values, spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
-        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
