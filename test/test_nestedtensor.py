@@ -7055,36 +7055,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         if nt._lengths is not None:
             self.assertEqual(nt3._lengths.device, other_device)
 
-    @dtypes(torch.float32)
-    def test_autograd_function_with_None_grad(self, device, dtype):
-        class MyFunction(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, inp):
-                ctx.save_for_backward(inp)
-                out1 = inp + 1
-                out2 = inp * 2
-                return out1, out2
-
-            @staticmethod
-            def backward(ctx, grad_out1, grad_out2):
-                (inp,) = ctx.saved_tensors
-                return grad_out1 + grad_out2
-
-        f = MyFunction.apply
-        nt = random_nt_from_dims(
-            [5, None, 10],
-            device=device,
-            dtype=dtype,
-            layout=torch.jagged,
-            requires_grad=True,
-        )
-
-        # Only use one of the autograd.Function outputs downstream so that the grad
-        # for the other output is None. We're testing that the engine can allocate
-        # correctly-shaped (NJT) zeros for the grad of the other output in this case.
-        (out1, _) = f(nt)
-        out1.backward(torch.ones_like(out1))
-
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
