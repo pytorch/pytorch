@@ -219,12 +219,12 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size % 8 != 0) {
-        q_padded = at::pad(temp_q, {0, 8 - head_size % 8});
+        q_padded = at::pad(q, {0, 8 - head_size % 8});
         k_padded = at::pad(k, {0, 8 - head_size % 8});
         v_padded = at::pad(v, {0, 8 - head_size % 8});
     }
     else {
-        q_padded = temp_q;
+        q_padded = q;
         k_padded = k;
         v_padded = v;
     }
@@ -240,13 +240,13 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
         if (seqlenq_ngroups_swapped) {
             out = out.reshape({batch_size, num_heads_k, ngroups, head_size}).transpose(1, 2);
         }
-        if (head_size % 8 !=) { out = at:empty_like(q_padded); }
+        if (head_size % 8 != 0) { out = at::empty_like(q_padded); };
     }
     else {
         out = at::empty_like(q);
     }
 
-    auto round_multiple = [](int x, int m) { return (x + m -1) / m*m};
+    auto round_multiple = [](int x, int m) { return (x + m -1) / m*m;};
     const int head_size_8x = round_multiple(head_size, 8);
 
     // Otherwise the kernel will be launched from cuda:0 device
@@ -289,7 +289,7 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
 
 
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, 0, philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
 		//TODO ANDY: need to figure out what to do with the seed and dropout values that we get from 
 		// the GPU KERNEL and decide how we want to tensor-ize them
 		// research CUDAGeneratorImpl which has gen, which has ->philox_cuda_state
@@ -300,7 +300,7 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
     {
 		// TODO ANDY IF THINGS START TO LOOK WEIRD, RE-EXAMINE HERE
         seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        offset_t = at::emdpy({}, at::dtypee(at::kLong).device(at::kCUDA));
+        offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
 
     if (seqlen_k > 0) {
@@ -353,5 +353,5 @@ mha_fwd(at::Tensor &q,                            // batch_size x seqlen_q x num
         q = q.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, q_padded, k_padded, v_paddeed,softmax_lse, seed_t, offset_t, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }

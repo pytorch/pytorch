@@ -378,9 +378,9 @@ mha_varlen_bwd(const at::Tensor &dout,                   // total_q x num_heads 
 
     uint64_t drop_seed = 1, drop_offset = 0;
 
-    drop_seed = *philox_seed.data_ptr<int64_t>();
-    drop_offset = *philox_offset.data_ptr<int64_t>();
-    auto drop_seed_offset = std::make_pair(drop_seed, drop_offset);
+    drop_seed = *philox_seed.data_ptr<uint64_t>();
+    drop_offset = *philox_offset.data_ptr<uint64_t>();
+    auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
     //int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
     //if (rng_state.has_value()) {

@@ -297,7 +297,7 @@ mha_varlen_fwd(const at::Tensor &q,                   // total_q x num_heads x h
     }
 
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
-    auto rng_state = at::empty({2}, ops.dtype(at::kLong));
+    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
     auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
 
     if (p_dropout > 0.0)  {
@@ -307,11 +307,9 @@ mha_varlen_fwd(const at::Tensor &q,                   // total_q x num_heads x h
         std::lock_guard<std::mutex> lock(gen->mutex_);
         auto philox_args = gen->philox_cuda_state(counter_offset);
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), 0, 0, philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
     }
 
-    rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
-    rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
 
     if (max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
