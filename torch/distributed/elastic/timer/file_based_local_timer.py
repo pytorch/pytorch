@@ -269,7 +269,7 @@ class FileTimerServer:
         log_debug_info_for_expired_timers(
             self._run_id,
             {
-                pid: self._get_scopes(expired_timers)
+                pid: [expired_timer.to_json() for expired_timer in expired_timers]
                 for pid, expired_timers in all_expired_timers.items()
             },
         )
