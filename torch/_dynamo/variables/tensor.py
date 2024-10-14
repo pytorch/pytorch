@@ -663,6 +663,8 @@ class TensorVariable(VariableTracker):
             )
             if self.device.type == "cuda":
                 return ConstantVariable.create(f"torch.cuda.{tensortype.__name__}")
+            elif self.device.type == "hpu":
+                return ConstantVariable.create(f"torch.hpu.{tensortype.__name__}")
             else:
                 return ConstantVariable.create(f"torch.{tensortype.__name__}")
         elif (
