@@ -182,7 +182,9 @@ class CppTemplateKernel(CppKernel):
     def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"

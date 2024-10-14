@@ -1319,7 +1319,6 @@ class OutputGraph:
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
                     name,
-                    export=self.export,
                 )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
@@ -1996,7 +1995,11 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                 (
                     rv.node.name,
-                    rv.node.meta["nn_module_stack"][target][1],
+                    next(
+                        ty
+                        for k, (_, ty) in rv.node.meta["nn_module_stack"].items()
+                        if k.split("@")[0] == target
+                    ),
                 )
             ]
 
