@@ -3,7 +3,6 @@ import copy
 from typing import Any, Dict, Tuple
 
 import torch
-from torch._export import capture_pre_autograd_graph
 from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import Quantizer
@@ -11,6 +10,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.export import export_for_training
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -33,10 +33,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
     ) -> torch.nn.Module:
         # resetting dynamo cache
         torch._dynamo.reset()
-        model = capture_pre_autograd_graph(
+        model = export_for_training(
             model,
             example_inputs,
-        )
+        ).module()
         model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
