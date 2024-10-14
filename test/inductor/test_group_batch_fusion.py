@@ -287,7 +287,7 @@ class TestMathOps(torch.nn.Module):
         return torch.stack((stack_input, stack_other), dim=0)
 
 
-@requires_gpu
+@requires_gpu()
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
         "batch_linear": {},
@@ -534,7 +534,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -548,10 +548,10 @@ class TestGroupBatchFusion(TestCase):
     )
     def test_math_op_fusion(self):
         counters.clear()
-        module = TestMathOps("cuda")
+        module = TestMathOps(GPU_TYPE)
         input = [
             torch.tensor(
-                [float("nan"), float("inf"), -float("inf"), 3.14], device="cuda"
+                [float("nan"), float("inf"), -float("inf"), 3.14], device=GPU_TYPE
             )
         ]
         traced = torch.compile(module)
