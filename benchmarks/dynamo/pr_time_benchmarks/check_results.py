@@ -37,8 +37,7 @@ def main():
     result_file_path = sys.argv[2]
 
     # A path where a new expected results file will be written that can be used to replace expected_results.csv
-    # in case of failure. In case of no failure the content of this file will match expected_file_path, values
-    # will be changed for benchmarks that failed only.
+    # in case of failure. In case of no failure the content of this file will match expected_file_path.
     reference_expected_results_path = sys.argv[3]
 
     # Read expected data file.
@@ -83,6 +82,7 @@ def main():
         low = entry.expected_value - entry.expected_value * entry.noise_margin
         high = entry.expected_value + entry.expected_value * entry.noise_margin
         result = result_data[key].actual_value
+        ratio = float(result - entry.expected_value) * 100 / entry.expected_value
 
         def log(event_name):
             scribe.open_source_signpost(
@@ -95,37 +95,38 @@ def main():
                         "actual_value": result,
                         "expected_value": entry.expected_value,
                         "noise_margin": entry.noise_margin,
+                        "change_ratio": ratio,
                     }
                 ),
             )
 
-        ratio = float(result - entry.expected_value) * 100 / entry.expected_value
+        new_entry = copy.deepcopy(entry)
+        new_entry.expected_value = result
+        new_expected[key] = new_entry
 
         if result > high:
-            new_entry = copy.deepcopy(entry)
-            new_entry.expected_value = result
-            new_expected[key] = new_entry
-
             fail = True
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
                 f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:+.2f}% "
                 f"if this is an expected regression, please update the expected results.\n"
             )
+            print(
+                "please update all results that changed significantly, and not only the failed ones"
+            )
 
             log("fail_regression")
 
         elif result < low:
-            new_entry = copy.deepcopy(entry)
-            new_entry.expected_value = result
-            new_expected[key] = new_entry
-
             fail = True
 
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
-                f"please update the expected results.\n"
+                f"please update the expected results. \n"
+            )
+            print(
+                "please update all results that changed significantly, and not only the failed ones"
             )
 
             log("fail_win")
@@ -157,27 +158,29 @@ def main():
 
     if fail:
         print(
-            f"You can use the new reference expected result stored at path: {reference_expected_results_path}.\n"
+            f"There was some failures you can use the new reference expected result stored at path:"
+            f"{reference_expected_results_path}.\n"
         )
 
-        with open(reference_expected_results_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for entry in new_expected.values():
-                # Write the data to the CSV file
-                writer.writerow(
-                    [
-                        entry.benchmark_name,
-                        entry.metric_name,
-                        round(entry.expected_value),
-                        entry.noise_margin,
-                    ]
-                )
-
-        with open(reference_expected_results_path) as f:
-            print(f.read())
         sys.exit(1)
     else:
         print("All benchmarks passed")
+
+    with open(reference_expected_results_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        for entry in new_expected.values():
+            # Write the data to the CSV file
+            writer.writerow(
+                [
+                    entry.benchmark_name,
+                    entry.metric_name,
+                    round(entry.expected_value),
+                    entry.noise_margin,
+                ]
+            )
+
+    with open(reference_expected_results_path) as f:
+        print(f.read())
 
 
 if __name__ == "__main__":
