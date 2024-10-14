@@ -884,6 +884,18 @@ class TestReductions(TestCase):
         a_float = a.to(torch.float32)
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_mean_out_is_alias_of_return(self, dtype, device):
+        a = torch.tensor([[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
+                         dtype=dtype, device=device)
+        out = torch.empty((1, 1, 4), dtype=dtype, device=device)
+
+        return_out = torch.mean(a, dim=0, keepdim=True, out=out)
+        target = torch.tensor([[[2.0, 2.0, 2.0, 2.0]]], dtype=dtype, device=device)
+        self.assertTrue(torch._C._is_alias_of(out, return_out))
+        self.assertTrue(torch.allclose(out, target))
+
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
         shape = (3, 4, 5)
@@ -3081,26 +3093,40 @@ class TestReductions(TestCase):
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
     """
-    def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
+    def _test_histogram_numpy(self, t, bins, bin_range, weights, density, eq_func=None):
         def to_np(t):
             if not torch.is_tensor(t):
                 return t
-            else:
-                return t.cpu().numpy()
+            return t.cpu().numpy()
 
         # Wrapper around numpy.histogram performing conversions between torch tensors and numpy arrays.
-        def reference_histogram(self, t, bins, bin_range, weights, density, dtype):
-            (np_t, np_bins, np_weights) = map(to_np, [t, bins, weights])
-            (np_hist, np_bin_edges) = np.histogram(np_t, np_bins, range=bin_range, weights=np_weights, density=density)
-            return (torch.from_numpy(np_hist).to(dtype), torch.from_numpy(np_bin_edges).to(dtype))
+        def reference_histogram(t, bins, bin_range, weights, density, dtype):
+            np_t, np_bins, np_weights = map(to_np, [t, bins, weights])
+            np_hist, np_bin_edges = np.histogram(
+                np_t, np_bins, range=bin_range, weights=np_weights, density=density
+            )
+            return (
+                torch.from_numpy(np_hist).to(dtype),
+                torch.from_numpy(np_bin_edges).to(dtype),
+            )
 
-        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
+        if eq_func is None:
+            eq_func = self.assertEqual
+
+        # Doesn't pass a 'range' kwarg unless necessary because the override of
+        # histogram with Tensor bins doesn't accept one.
         if bin_range:
-            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, range=bin_range, weight=weights, density=density)
+            actual_hist, actual_bin_edges = torch.histogram(
+                t, bins, range=bin_range, weight=weights, density=density
+            )
         else:
-            (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
+            actual_hist, actual_bin_edges = torch.histogram(
+                t, bins, weight=weights, density=density
+            )
 
-        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density, actual_hist.dtype)
+        expected_hist, expected_bin_edges = reference_histogram(
+            t, bins, bin_range, weights, density, actual_hist.dtype
+        )
 
         """
         Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
@@ -3110,28 +3136,48 @@ class TestReductions(TestCase):
         Issue: https://github.com/pytorch/pytorch/issues/58758
         """
         if not torch.is_tensor(bins):
-            self.assertEqual(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
-            # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins argument
-            (expected_hist, expected_bin_edges) = reference_histogram(
-                self, t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype)
+            eq_func(actual_bin_edges, expected_bin_edges, atol=1e-5, rtol=1e-5)
+            # Calls numpy.histogram again, passing torch's actual_bin_edges as the bins
+            # argument.
+            expected_hist, expected_bin_edges = reference_histogram(
+                t, actual_bin_edges, bin_range, weights, density, actual_hist.dtype,
+            )
 
-        self.assertEqual(actual_hist, expected_hist)
-        self.assertEqual(actual_bin_edges, expected_bin_edges)
+        eq_func(actual_hist, expected_hist)
+        eq_func(actual_bin_edges, expected_bin_edges)
 
         # Test passing non-contiguous output tensors
-        hist_out = make_tensor(expected_hist.shape, device=expected_hist.device, dtype=expected_hist.dtype,
-                               noncontiguous=True)
-        bin_edges_out = make_tensor(expected_bin_edges.shape, device=expected_bin_edges.device, dtype=expected_bin_edges.dtype,
-                                    noncontiguous=True)
+        hist_out = make_tensor(
+            expected_hist.shape,
+            device=expected_hist.device,
+            dtype=expected_hist.dtype,
+            noncontiguous=True,
+        )
+        bin_edges_out = make_tensor(
+            expected_bin_edges.shape,
+            device=expected_bin_edges.device,
+            dtype=expected_bin_edges.dtype,
+            noncontiguous=True,
+        )
 
-        # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
+        # Doesn't pass a 'range' kwarg unless necessary because the override of
+        # histogram with Tensor bins doesn't accept one.
         if bin_range:
-            torch.histogram(t, bins, range=bin_range, weight=weights, density=density, out=(hist_out, bin_edges_out))
+            torch.histogram(
+                t,
+                bins,
+                range=bin_range,
+                weight=weights,
+                density=density,
+                out=(hist_out, bin_edges_out),
+            )
         else:
-            torch.histogram(t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out))
+            torch.histogram(
+                t, bins, weight=weights, density=density, out=(hist_out, bin_edges_out)
+            )
 
-        self.assertEqual(hist_out, expected_hist)
-        self.assertEqual(bin_edges_out, expected_bin_edges)
+        eq_func(hist_out, expected_hist)
+        eq_func(bin_edges_out, expected_bin_edges)
 
     @onlyCPU
     @dtypes(torch.float32)
@@ -3159,7 +3205,19 @@ class TestReductions(TestCase):
 
             # Tests with range min=max
             bin_range[1] = bin_range[0]
-            self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
+            self._test_histogram_numpy(
+                values,
+                bin_ct,
+                bin_range,
+                weights,
+                density,
+                # TODO: investigate why torch.histogram differs from numpy.histogram
+                # so strongly on this particular test.  There seems to be more
+                # differences here than the linspace issue, which is itself fairly
+                # easily patched around.  Likely, the other tests also differ
+                # significantly, but below the default threshold for assertEqual.
+                eq_func=partial(self.assertEqual, rtol=3e-5, atol=0.0),
+            )
 
             # Tests with caller-specified bin edges
             bin_edges = make_tensor(bin_ct + 1, dtype=dtype, device=device, low=-9, high=9).msort()

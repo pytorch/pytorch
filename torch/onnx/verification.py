@@ -21,11 +21,12 @@ import warnings
 from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, _exporter_states, utils
+from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
@@ -98,7 +99,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> list | np.ndarray:
+def _to_numpy(elem) -> list | npt.NDArray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -892,8 +893,7 @@ def verify_aten_graph(
         graph, export_options, onnx_params_dict
     )
     model_f: str | io.BytesIO = io.BytesIO()
-    export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
-    onnx_proto_utils._export_file(proto, model_f, export_type, export_map)
+    onnx_proto_utils._export_file(proto, model_f, export_map)
 
     # NOTE: Verification is unstable. Try catch to emit information for debugging.
     try:
