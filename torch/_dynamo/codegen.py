@@ -50,7 +50,7 @@ class PyCodegen:
         tx=None,
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
-        tempvars: Dict[VariableTracker, str] = None,
+        tempvars=None,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
