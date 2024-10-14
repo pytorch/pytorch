@@ -2,7 +2,6 @@
 from typing import cast, List, NamedTuple, Optional, Tuple, Union
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
@@ -14,6 +13,13 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam, ShardedState
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 class AllGatherResult(NamedTuple):
