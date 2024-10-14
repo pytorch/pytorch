@@ -2,8 +2,9 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
-#include <fstream>
+#include <algorithm>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
@@ -46,7 +47,7 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
   auto startTimepoint = std::chrono::steady_clock::now();
   while (!initialized_) {
     if (ncclComm_) {
-      ncclResult_t result{};
+      ncclResult_t result;
       ncclCommGetAsyncError(ncclComm_, &result);
       if (result == ncclSuccess) {
         LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
@@ -67,7 +68,6 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
   }
 }
 
-// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
 #if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
 // last argument to split() API is not used to support
 // multiple implementations
@@ -78,10 +78,9 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
   auto comm = std::make_shared<NCCLComm>();
-  // This call will block until the source communicator is initialized
-  auto sourceComm = source->getNcclComm();
   C10D_NCCL_CHECK(
-      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
+      ncclCommSplit(
+          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
       std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
@@ -97,7 +96,7 @@ std::string getNcclVersion() {
   static std::string versionString;
 
   c10::call_once(ncclGetVersionFlag, []() {
-    int version = 0;
+    int version;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -115,7 +114,7 @@ std::string getNcclVersion() {
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
 #ifdef NCCL_SUFFIX
       const auto ncclSuffix = std::string(NCCL_SUFFIX);
-      if (!ncclSuffix.empty()) {
+      if (ncclSuffix.length()) {
         versionString += "." + ncclSuffix;
       }
 #endif
@@ -133,14 +132,16 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
       size_t data_size = tensor.storage().nbytes();
       if (data_size > 0 && tensor.storage().data_ptr()) {
         auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
-        std::vector<char> dst(data_size);
+        char* dst = (char*)std::calloc(data_size, sizeof(char));
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
+        cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
-          hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
+          hash = c10::hash_combine(
+              hash, c10::get_hash(((char*)dst)[i], data_size));
         }
+        free(dst);
       }
     }
   }
@@ -196,7 +197,7 @@ std::string getNcclErrorDetailStr(
   std::string interpret;
   std::string err;
 #ifdef ENABLE_NCCL_GET_LAST_ERROR
-  auto ret = ncclGetLastError(nullptr);
+  auto ret = ncclGetLastError(NULL);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
   } else {
@@ -241,7 +242,7 @@ std::string getNcclErrorDetailStr(
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      const auto& params = req.params();
+      const auto params = req.params();
       size_t validParamCount = 0;
 
       // valid params
@@ -289,7 +290,7 @@ control_plane::RegisterHandler dumpHandler{
 control_plane::RegisterHandler jsonDumpHandler{
     "dump_nccl_trace_json",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      const auto& params = req.params();
+      const auto params = req.params();
       size_t validParamCount = 0;
 
       // valid params
@@ -344,11 +345,6 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
-  if (!file) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
-    return;
-  }
   LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
 
@@ -393,7 +389,7 @@ std::optional<size_t> NCCLTraceBuffer::record(
   }
   if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
     // Current pg_status is not in FR.
-    all_pg_status_[pg_id] = std::move(pg_status);
+    all_pg_status_[pg_id] = pg_status;
   }
   auto traceback =
       torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
@@ -408,8 +404,8 @@ std::optional<size_t> NCCLTraceBuffer::record(
       op_id,
       std::move(profiling_name),
       std::move(traceback),
-      start,
-      end,
+      std::move(start),
+      std::move(end),
       c10::getTime(),
       timeout_ms.count(),
       isP2P,
@@ -426,14 +422,14 @@ std::optional<size_t> NCCLTraceBuffer::record(
   for (const auto& input : inputs) {
     c10::IntArrayRef sizes = input.sizes();
     te.input_dtypes_.push_back(input.dtype().toScalarType());
-    te.input_dims_.push_back(static_cast<int64_t>(sizes.size()));
+    te.input_dims_.push_back(sizes.size());
     te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
   }
 
   for (const auto& output : outputs) {
     c10::IntArrayRef sizes = output.sizes();
     te.output_dtypes_.push_back(output.dtype().toScalarType());
-    te.output_dims_.push_back(static_cast<int64_t>(sizes.size()));
+    te.output_dims_.push_back(sizes.size());
     te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
   }
 
@@ -455,7 +451,7 @@ void NCCLTraceBuffer::record_pg_ranks(
     return;
   }
   std::lock_guard<std::mutex> guard(mutex_);
-  pg_name_to_ranks_[pg_name] = std::move(ranks);
+  pg_name_to_ranks_[pg_name] = ranks;
 }
 
 void NCCLTraceBuffer::update_state(Entry& r) {
@@ -477,14 +473,8 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
-  result.insert(
-      result.end(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_),
-      entries_.end());
-  result.insert(
-      result.end(),
-      entries_.begin(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_));
+  result.insert(result.end(), entries_.begin() + next_, entries_.end());
+  result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
   // query any remaining events
   for (auto& r : result) {
     update_state(r);
@@ -574,7 +564,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     if (includeStacktraces) {
       auto& tb = stracebacks.tracebacks.at(i);
       auto frames = new_list();
-      for (auto frame : tb) {
+      for (int64_t frame : tb) {
         frames.push_back(all_frames.at(frame));
       }
       dict.insert(frames_key, frames);
@@ -593,7 +583,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     }
 
     auto it = e.sizes_.begin();
-    auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
+    auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
       auto sizes = new_list();
       for (auto dim : dims) {
         auto arg_sizes = new_list();
@@ -609,14 +599,14 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     std::vector<std::string> input_dtypes_strs;
     input_dtypes_strs.reserve(e.input_dtypes_.size());
     for (const auto& input_dtype : e.input_dtypes_) {
-      input_dtypes_strs.emplace_back(c10::toString(input_dtype));
+      input_dtypes_strs.push_back(c10::toString(input_dtype));
     }
     dict.insert(input_dtypes_key, input_dtypes_strs);
     dict.insert(output_sizes_key, read_sizes(e.output_dims_));
     std::vector<std::string> output_dtypes_strs;
     output_dtypes_strs.reserve(e.output_dtypes_.size());
     for (const auto& output_dtype : e.output_dtypes_) {
-      output_dtypes_strs.emplace_back(c10::toString(output_dtype));
+      output_dtypes_strs.push_back(c10::toString(output_dtype));
     }
     dict.insert(output_dtypes_key, output_dtypes_strs);
     if (e.time_discovered_completed_.has_value()) {
@@ -731,10 +721,10 @@ std::string NCCLTraceBuffer::dump_json(
         j[duration_key_str] = *e.duration_;
       }
       auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
-        auto sizes = std::list<std::list<int64_t>>();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = std::list<std::list<int>>();
         for (auto dim : dims) {
-          auto arg_sizes = std::list<int64_t>();
+          auto arg_sizes = std::list<int>();
           for (auto i : c10::irange(dim)) {
             (void)i;
             arg_sizes.push_back(*it++);
@@ -747,14 +737,14 @@ std::string NCCLTraceBuffer::dump_json(
       std::vector<std::string> input_dtypes_strs;
       input_dtypes_strs.reserve(e.input_dtypes_.size());
       for (const auto& input_dtype : e.input_dtypes_) {
-        input_dtypes_strs.emplace_back(c10::toString(input_dtype));
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
       }
       j[input_dtypes_key_str] = input_dtypes_strs;
       j[output_sizes_key_str] = read_sizes(e.output_dims_);
       std::vector<std::string> output_dtypes_strs;
       output_dtypes_strs.reserve(e.output_dtypes_.size());
       for (const auto& output_dtype : e.output_dtypes_) {
-        output_dtypes_strs.emplace_back(c10::toString(output_dtype));
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
       }
       j[output_dtypes_key_str] = output_dtypes_strs;
       if (e.time_discovered_completed_.has_value()) {
@@ -778,7 +768,7 @@ std::string NCCLTraceBuffer::dump_json(
       entries.emplace_back(j);
     }
 
-    if (!entries.empty()) {
+    if (entries.size() > 0) {
       result[entries_key_str] = entries;
     }
   }
@@ -819,7 +809,7 @@ std::string NCCLTraceBuffer::dump(
       per_comm_dict.insert(ncclId, inner_dict);
     }
   }
-  if (!per_comm_dict.empty()) {
+  if (per_comm_dict.size() > 0) {
     result.insert(nccl_comm_key, per_comm_dict);
   }
   return pickle_str(result);

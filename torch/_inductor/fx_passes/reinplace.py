@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
-from torch._dispatch.python import enable_python_dispatcher
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -709,7 +708,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
 
 def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
-    with enable_python_dispatcher():
-        canonicalize_view_scatter_ops(graph)
-        reinplace_inplaceable_ops_core(graph)
-        decompose_generalized_scatter(graph)
+    canonicalize_view_scatter_ops(graph)
+    reinplace_inplaceable_ops_core(graph)
+    decompose_generalized_scatter(graph)

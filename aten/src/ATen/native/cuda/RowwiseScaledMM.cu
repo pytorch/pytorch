@@ -141,8 +141,7 @@ void f8f8bf16_rowwise_impl(
     at::Tensor x_scale,
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
-    at::Tensor out,
-    const int swizzle) {
+    at::Tensor out) {
   int M = XQ.size(0);
   int N = WQ.size(1);
   int K = XQ.size(1);
@@ -277,9 +276,6 @@ void f8f8bf16_rowwise_impl(
   // multiplication computation
   size_t workspace_size = Gemm::get_workspace_size(arguments);
 
-  // Set the swizzle size
-  arguments.scheduler.max_swizzle_size = swizzle;
-
   // Allocate workspace memory
   auto workspace = XQ.new_empty(
       {static_cast<int64_t>(workspace_size)},
@@ -313,8 +309,7 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor x_scale,
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
-    at::Tensor out,
-    const int swizzle) {
+    at::Tensor out) {
   int M = XQ.size(0);
   int N = WQ.size(1);
 
@@ -328,13 +323,13 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
         /*PingPong=*/std::false_type,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         /*PingPong=*/std::true_type,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
 
@@ -351,8 +346,7 @@ void handle_transposition(
     at::Tensor x_scale,
     at::Tensor w_scale,
     std::optional<at::Tensor> bias,
-    at::Tensor out,
-    const int swizzle=1) {
+    at::Tensor out) {
   if constexpr (!Transposed::value) {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
@@ -360,7 +354,7 @@ void handle_transposition(
         FastAccum,
         DtypeA,
         DtypeB,
-        DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+        DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
@@ -368,7 +362,7 @@ void handle_transposition(
         FastAccum,
         DtypeB,
         DtypeA,
-        DtypeBias>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle);
+        DtypeBias>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t());
   }
 }
 
@@ -444,20 +438,6 @@ void dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose(
   }
 
   // General case for large tensors.
-
-  // Large M, N, k
-  if (M >= 4096 && N >= 4096) {
-    if (M >= N){
-          return handle_transposition<
-          /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-          /*Transposed=*/std::false_type,
-          Types...>(XQ, WQ, x_scale, w_scale, bias, out, 8);
-    }
-    return handle_transposition<
-        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
-        /*Transposed=*/std::true_type,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, 8);
-  }
   if ((M <= N) ^ (M >= 2048 && N >= 2048)) {
     return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,

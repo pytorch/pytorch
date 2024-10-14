@@ -22,7 +22,6 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
-#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -136,57 +135,57 @@ inline bool IsZero(c10::complex<float> v) {
 }
 
 template <typename T>
-inline const char* TypeName(T v) {
+inline std::string TypeName(T v) {
   return "unknown";
 }
 
 template <>
-inline const char* TypeName(float v) {
+inline std::string TypeName(float v) {
   return "float";
 }
 
 template <>
-inline const char* TypeName(double v) {
+inline std::string TypeName(double v) {
   return "double";
 }
 
 template <>
-inline const char* TypeName(BFloat16 v) {
+inline std::string TypeName(BFloat16 v) {
   return "BFloat16";
 }
 
 template <>
-inline const char* TypeName(Half v) {
+inline std::string TypeName(Half v) {
   return "Half";
 }
 
 template <>
-inline const char* TypeName(Float8_e4m3fn v) {
+inline std::string TypeName(Float8_e4m3fn v) {
   return "Float8_e4m3fn";
 }
 
 template <>
-inline const char* TypeName(Float8_e5m2 v) {
+inline std::string TypeName(Float8_e5m2 v) {
   return "Float8_e5m2";
 }
 
 template <>
-inline const char* TypeName(Float8_e4m3fnuz v) {
+inline std::string TypeName(Float8_e4m3fnuz v) {
   return "Float8_e4m3fnuz";
 }
 
 template <>
-inline const char* TypeName(Float8_e5m2fnuz v) {
+inline std::string TypeName(Float8_e5m2fnuz v) {
   return "Float8_e5m2fnuz";
 }
 
 template <>
-inline const char* TypeName(c10::complex<double> v) {
+inline std::string TypeName(c10::complex<double> v) {
   return "c10::complex<double>";
 }
 
 template <>
-inline const char* TypeName(c10::complex<float> v) {
+inline std::string TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
@@ -219,7 +218,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
   }
 
   std::string Signature() override {
-    return fmt::sprintf("GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -245,7 +244,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   }
 
   std::string Signature() override {
-    return fmt::sprintf("GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -278,7 +277,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
   }
 
   std::string Signature() override {
-    return fmt::sprintf("GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -296,11 +295,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    return fmt::sprintf("ScaledGemmTunableOp_%s_%s_%s_%c%c",
-      TypeName<AT>(AT{}),
-      TypeName<BT>(BT{}),
-      TypeName<CT>(CT{}),
-      BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return c10::str("ScaledGemmTunableOp",
+            "_", TypeName<AT>(AT{}),
+            "_", TypeName<BT>(BT{}),
+            "_", TypeName<CT>(CT{}),
+            "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 

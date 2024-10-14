@@ -3400,10 +3400,12 @@ class ShapeEnv:
         return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
 
     @record_shapeenv_event()
-    def _ignore_fresh_unbacked_symbols_set(self, b: bool) -> bool:
-        prev = self._ignore_fresh_unbacked_symbols_tls()
-        TLS.ignore_fresh_unbacked_symbols = b
-        return prev
+    def _ignore_fresh_unbacked_symbols_enter(self) -> None:
+        TLS.ignore_fresh_unbacked_symbols = True
+
+    @record_shapeenv_event()
+    def _ignore_fresh_unbacked_symbols_exit(self) -> None:
+        TLS.ignore_fresh_unbacked_symbols = False
 
     @contextmanager
     def ignore_fresh_unbacked_symbols(self) -> Iterator[None]:
@@ -3411,11 +3413,11 @@ class ShapeEnv:
         Indicates that the newly allocated unbacked SymInts are being
         discarded
         """
-        prev = self._ignore_fresh_unbacked_symbols_set(True)
+        self._ignore_fresh_unbacked_symbols_enter()
         try:
             yield
         finally:
-            self._ignore_fresh_unbacked_symbols_set(prev)
+            self._ignore_fresh_unbacked_symbols_exit()
 
     @record_shapeenv_event()
     def freeze(self) -> None:
@@ -5563,19 +5565,20 @@ class ShapeEnv:
         # because we would now give inconsistent results for all size
         # oblivous tests!
         if upper < 2 and symbol in self.size_like:
-            vr = ValueRanges(lower, 2)
+            upper = 2
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
-            self.log.debug("_update_var_to_range %s = %s (new)", symbol, vr)
-            self.var_to_range[symbol] = vr
+            r = ValueRanges(lower, upper)
+            self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
+            self.var_to_range[symbol] = r
             if vr_sloc is None:
                 sloc = self._get_sloc()
                 vr_sloc = ValueRangesSLoc(sloc, sloc)
             self.var_to_range_sloc[symbol] = vr_sloc
         else:
             old = self.var_to_range[symbol]
-            new = old & vr
+            new = old & ValueRanges(lower, upper)
             if new != old:
                 if vr_sloc is None:
                     sloc = self._get_sloc()
@@ -5931,7 +5934,7 @@ class ShapeEnv:
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
-        return ValueRanges.unknown_int()
+        return ValueRanges(-int_oo, int_oo)
 
     @_lru_cache
     def _simplify_floor_div(self, expr: sympy.Expr) -> sympy.Expr:

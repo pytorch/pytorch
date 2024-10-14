@@ -5,8 +5,8 @@
 
 API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNFullyConnectedOp : NSObject<MPSCNNOp>
-+ (MPSCNNFullyConnectedOp*)linear:(const at::native::metal::Conv2DParams&)params
++ (MPSCNNFullyConnectedOp*)linear:(const Conv2DParams&)params
                           weights:(float*)w
                              bias:(float*)b
-                     neuronFilter:(at::native::metal::NeuronType)t;
+                     neuronFilter:(NeuronType)t;
 @end

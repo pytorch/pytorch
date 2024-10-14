@@ -41,12 +41,7 @@ class TestCppWrapperHipify(TestCase):
             do {                                               \\
                 hipError_t code = EXPR;                          \\
                 const char *msg;                               \\
-                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \\
-                if (code_get_error != hipSuccess) {          \\
-                    throw std::runtime_error(                  \\
-                        std::string("CUDA driver error: ") +   \\
-                        std::string("invalid error code!"));   \\
-                }                                              \\
+                hipDrvGetErrorString(code, &msg);                  \\
                 if (code != hipSuccess) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\

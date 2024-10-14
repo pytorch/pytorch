@@ -226,8 +226,7 @@ struct LiftedIValueArgs {
 
 struct AutogradCompilerCall {
   AutogradCompilerCall()
-      : active_node_call_idx(std::nullopt),
-        tensor_args(active_node_call_idx),
+      : tensor_args(active_node_call_idx),
         lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
@@ -246,7 +245,6 @@ struct AutogradCompilerCall {
     active_node_call_idx = node_call_idx;
   }
 
-  std::optional<size_t> active_node_call_idx;
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   LiftedIValueArgs lifted_ivalue_args;
@@ -256,6 +254,7 @@ struct AutogradCompilerCall {
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
+  std::optional<size_t> active_node_call_idx;
 };
 
 class CompiledNodeArgs {

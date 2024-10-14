@@ -259,11 +259,11 @@ class TORCH_API DebugInfoWriter {
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : aborted_(false),
+      : ncclComm_(ncclComm),
+        aborted_(false),
         ncclAsyncErr_(ncclSuccess),
         commFailureReason_(std::nullopt),
-        initialized_(false),
-        ncclComm_(ncclComm) {}
+        initialized_(false) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -464,17 +464,15 @@ class NCCLComm {
         ncclComm_);
 
     void* handle;
-    // Use getNcclComm to make sure comm is ready before calling nccl APIs
-    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(comm, ptr, size, &handle),
+        ncclCommRegister(ncclComm_, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            comm));
+            ncclComm_));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -493,17 +491,15 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
-    // Use getNcclComm to make sure comm is ready before calling nccl APIs
-    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(comm, handle),
+        ncclCommDeregister(ncclComm_, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            comm));
+            ncclComm_));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -511,15 +507,12 @@ class NCCLComm {
 #endif
   }
 
-  std::string repr() const {
-    return c10::str((void*)ncclComm_);
-  }
-
   friend class ProcessGroupNCCL;
 
  protected:
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized(int timeoutSecs);
+  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
@@ -536,9 +529,6 @@ class NCCLComm {
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
-
- private:
-  ncclComm_t ncclComm_;
 };
 
 // Helper that automatically cleans up premul sums.
@@ -636,9 +626,9 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int64_t, 4> input_dims_;
+    c10::SmallVector<int, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int64_t, 4> output_dims_;
+    c10::SmallVector<int, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?

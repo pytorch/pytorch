@@ -6,13 +6,14 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "CUDATest.hpp"
+#include "TestUtils.hpp"
 
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
 
 template <typename T, typename... Args>
-std::vector<T> initialize(const std::string& path, size_t N, Args&&... args) {
+std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<T> tests;
   for (C10_UNUSED const auto i : c10::irange(N)) {
     tests.push_back(std::move(T(path, std::forward<Args>(args)...)));
@@ -34,7 +35,10 @@ class AsyncTest {
  public:
   AsyncTest(std::string path) : path_(std::move(path)) {}
 
-  AsyncTest(AsyncTest&& other) noexcept = default;
+  AsyncTest(AsyncTest&& other) {
+    path_ = std::move(other.path_);
+    pg_ = std::move(other.pg_);
+  }
 
   ::c10d::ProcessGroupGloo& getProcessGroup() {
     return *pg_;
@@ -49,8 +53,8 @@ class AsyncTest {
     options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
-    pg_ =
-        std::make_unique<::c10d::ProcessGroupGloo>(store, rank, size, options);
+    pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
+        new ::c10d::ProcessGroupGloo(store, rank, size, options));
   }
 
  protected:
@@ -84,7 +88,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     at::cuda::OptionalCUDAGuard deviceGuard;
     streams_.reserve(numDevices_);
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(i));
+      deviceGuard.set_index(i);
       streams_.push_back(at::cuda::getStreamFromPool());
     }
   }
@@ -114,9 +118,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   }
 
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int numTensors_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int numDevices_;
   std::vector<at::Tensor> inputs_;
   std::vector<CUDAStream> streams_;
@@ -134,13 +136,13 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(i));
-      cudaSleep(streams_[i], 10ull * 1000 * 1000);
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (const auto i : c10::irange(numTensors_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(i % numDevices_));
+      deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
 
@@ -153,26 +155,26 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
   AsyncBroadcastTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  c10::intrusive_ptr<c10d::Work> run(size_t rootRank, size_t rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(i));
-      cudaSleep(streams_[i], 10ull * 1000 * 1000);
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 10 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (const auto i : c10::irange(numTensors_)) {
-      deviceGuard.set_index(static_cast<c10::DeviceIndex>(i % numDevices_));
+      deviceGuard.set_index(i % numDevices_);
       inputs_[i].fill_(pg_->getRank() * numTensors_ + i);
     }
 
     ::c10d::BroadcastOptions options;
-    options.rootRank = static_cast<int64_t>(rootRank);
-    options.rootTensor = static_cast<int64_t>(rootTensor);
+    options.rootRank = rootRank;
+    options.rootTensor = rootTensor;
     return pg_->broadcast(inputs_, options);
   }
 };

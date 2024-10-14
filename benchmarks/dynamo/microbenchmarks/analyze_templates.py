@@ -4,7 +4,6 @@ To generate output that can be fed into this script set the env varTORCHINDUCTOR
 
 That file can be fed into this script to generate the minimizes total, weighted matmul time as a function of allowed templates.
 """
-
 import json
 
 import click

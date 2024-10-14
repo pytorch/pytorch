@@ -1,4 +1,3 @@
-#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
@@ -122,8 +121,8 @@ static const char* process_name() {
 }
 
 struct Version {
-  uint64_t adds_ = LLONG_MAX;
-  uint64_t subs_ = LLONG_MAX;
+  uint64_t adds_ = LONG_LONG_MAX;
+  uint64_t subs_ = LONG_LONG_MAX;
 };
 
 struct UnwindCache {
@@ -499,10 +498,7 @@ Stats stats() {
 
 } // namespace torch::unwind
 
-extern "C" C10_USED void unwind_c(
-    std::vector<void*>* result,
-    int64_t rsp,
-    int64_t rbp) {
+extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)

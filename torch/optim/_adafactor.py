@@ -9,7 +9,6 @@ from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
     _maximize_doc,
-    _params_doc,
     Optimizer,
     ParamsT,
     TensorListList,
@@ -224,7 +223,8 @@ Adafactor.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
         lr (float, Tensor, optional): unlike other optimizers, Adafactor does not require a
             learning rate, and Shazeer, Noam, and Mitchell Stern do not use lr at all.
             Deviating from the paper, this implementation uses lr for applying weight

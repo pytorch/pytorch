@@ -628,6 +628,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             or value.__name__ == "auto_functionalized_v2"
         ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "invoke_subgraph":
+            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1502,10 +1504,20 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def install_subgraph_in_output_graph(
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+    ):
+        return add_subgraph(
+            tx,
+            f"{attr_name}",
+            body_gmod,
+        )
+
     def create_wrapped_node(
         self,
         tx: "InstructionTranslator",
-        args,
+        fn_vt,
+        fn_args_vt,
         kwargs,
         description,
         under_activation_checkpoint=False,
@@ -1518,8 +1530,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[0],  # function
-            [*args[1:]],
+            fn_vt,
+            fn_args_vt,
             kwargs,
             description,
             source_target=self.value,
@@ -1528,12 +1540,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
-            "wrap_body",
-            body_gmod,
+        body_name = self.install_subgraph_in_output_graph(
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod
         )
-
         body_node = make_attr(tx, body_name)
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
@@ -1547,7 +1556,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod, body_name
 
     def call_function(
         self,
@@ -1556,9 +1565,15 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
-            tx, args, kwargs, "wrap"
-        )
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            _,
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "wrap")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -1860,9 +1875,11 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             body_r,
             treespec,
             checkpointed_gmod,
+            _,
         ) = self.create_wrapped_node(
             tx,
-            args,
+            args[0],
+            args[1:],
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
             under_activation_checkpoint=True,
@@ -2217,6 +2234,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
@@ -2455,3 +2473,127 @@ def maybe_positional_arg_names(func):
             else:
                 result.append(name)
     return result
+
+
+def canonicalize(gmod, root_gmod):
+    # autograd_cache_key is sensitive to the name of the placeholder nodes.
+    # So, we first canonicalize it.
+    new_graph = torch.fx.Graph()
+    env = {}
+
+    index = 0
+
+    def next_placeholder_name():
+        nonlocal index
+        index += 1
+        return f"placeholder_{index}"
+
+    for node in gmod.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = new_graph.placeholder(next_placeholder_name())
+        else:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+        env[node].meta = node.meta
+
+    new_graph.lint()
+    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
+    return new_gmod
+
+
+@functools.lru_cache(None)
+def get_dummy_aot_autograd_config():
+    from torch._functorch._aot_autograd.schemas import AOTConfig
+
+    return AOTConfig(
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+        dynamic_shapes=True,
+        aot_autograd_arg_pos_to_source=None,
+        is_export=False,
+        no_tangents=False,
+        enable_log=False,
+    )
+
+
+def hash_graph_and_inputs(tx, gmod, fake_inputs):
+    # Here, we use the existing autograd_cache_key infrastructure to hash the
+    # graph and fake inputs.
+
+    # TODO(anijain2305) - Consider reorganizing autograd_cache_key such that the
+    # namespaces seem more intuitive. It seems somewhat confusing that we are
+    # calling an API from aot_autograd here.
+    from torch._functorch._aot_autograd.autograd_cache import autograd_cache_key
+
+    # autograd_cache_key is sensitive to the name of the placeholder nodes.
+    # So, we first canonicalize it.
+    canonicalized_gmod = canonicalize(gmod, tx.output.nn_modules)
+    config = get_dummy_aot_autograd_config()
+
+    key, _ = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
+    return key
+
+
+class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    def install_subgraph_in_output_graph(
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
+    ):
+        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
+        # inputs have already been seen before. If yes, the subgraph is already
+        # installed in the output graph and we can just access the subgraph
+        # using the saved attr name.
+
+        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
+
+        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
+
+        if key in tx.output.seen_invoke_subgraphs:
+            return tx.output.seen_invoke_subgraphs[key]
+
+        body_name = super().install_subgraph_in_output_graph(
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
+        )
+        tx.output.seen_invoke_subgraphs[key] = body_name
+        return body_name
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
+        )
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_args = (
+            p_args[0],
+            body_name,
+            p_args[1:],
+        )
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
