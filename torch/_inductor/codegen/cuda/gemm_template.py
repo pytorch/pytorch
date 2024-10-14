@@ -33,7 +33,7 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel_call_signature}} {
+PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
@@ -154,7 +154,7 @@ GEMM_TEMPLATE_CUTLASS_2X = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel_call_signature}} {
+PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
@@ -1277,7 +1277,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                     new_stride,
                     old_layout.offset,
                 )
-                return Buffer(node.get_name(), new_layout)
+                return Buffer(name=node.get_name(), layout=new_layout)
 
             new_X = clone_with_transposed_stride(X)
             new_W = clone_with_transposed_stride(W)

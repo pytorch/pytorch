@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import torch
-from torch._utils_internal import enable_compiletime_strobelight
+from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 
 if __name__ == "__main__":
-    enable_compiletime_strobelight()
+    # You can pass TORCH_COMPILE_STROBELIGHT=True instead.
+    StrobelightCompileTimeProfiler.enable()
 
     def fn(x, y, z):
         return x * y + z
