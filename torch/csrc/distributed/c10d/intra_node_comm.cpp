@@ -35,7 +35,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   return nvlMesh;
 #else
   NvlMesh nvlMesh = {};
-  const auto worldSize = rankToBusId.size();
+  const auto worldSize = rankToDeviceIdx.size();
   // For each device, loop over devices connected to it
   for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxDevices; ++link) {
