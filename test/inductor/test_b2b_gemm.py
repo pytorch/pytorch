@@ -6,12 +6,15 @@ import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class B2BGEMMTest(TestCase):
-    @skipIfXpu
+    device = GPU_TYPE
+
+    # fail on CI machine
+    @expectedFailureXPU
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_left_assoc_good_shape(self):
