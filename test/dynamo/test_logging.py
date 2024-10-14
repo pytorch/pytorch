@@ -534,6 +534,24 @@ print("arf")
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
+    def test_trace_call_prefix(self, records):
+        def fn(x, y):
+            return (x * 2) @ (y * 3)
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        msg0 = munge_exc(records[0].getMessage())
+        self.assertExpectedInline(
+            msg0,
+            """\
+TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_prefix.fn)
+            return (x * 2) @ (y * 3)
+                    ~~^~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
     def test_trace_call_inline_call(self, records):
         def g(x):
             return x * 2
@@ -560,12 +578,14 @@ print("arf")
             return x * 2
                    ~~^~~""",
         )
-        self.assertExpectedInline(
-            messages[2],
-            """\
-            return g(g(x))
-                   ~^^^^^^""",
-        )
+        # skip this check since 3.13 removed carets for this case
+        # see https://github.com/python/cpython/issues/99180
+        # self.assertExpectedInline(
+        #     messages[2],
+        #     """\
+        #     return g(g(x))
+        #            ~^^^^^^""",
+        # )
         self.assertExpectedInline(
             messages[3],
             """\
@@ -683,6 +703,18 @@ print("arf")
         fn(x)
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
+
+    @make_logging_test(perf_hints=True)
+    @requires_cuda
+    def test_optimizer_non_static_param(self, records):
+        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        for param in params:
+            param.grad = torch.zeros_like(param)
+        opt = torch.optim.Adam(params)
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")
+        compiled_opt_step()
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 3)
 
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
