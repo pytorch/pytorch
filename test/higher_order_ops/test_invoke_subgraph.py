@@ -8,7 +8,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
-from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._higher_order_ops import create_invoke_subgraph_op
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -158,6 +158,13 @@ class TestInvokeSubgraph(TestCase):
 
 
 class TestInvokeSubgraphCompile(TestCase):
+    def count_unique_get_attr_nodes(self, gm, args, expected):
+        subgraph_attr_names = set()
+        for node in gm.graph.nodes:
+            if node.op == "get_attr":
+                subgraph_attr_names.add(node.target)
+        self.assertEqual(len(subgraph_attr_names), expected)
+
     def test_simple(self):
         def gn(x, y):
             return (torch.mul(x, y),)
@@ -181,7 +188,7 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-    def test_multiple(self):
+    def test_dedupe(self):
         def gn(x, y):
             return (torch.mul(x, y),)
 
@@ -195,7 +202,7 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        backend = EagerAndRecordGraphs()
+        backend = AotEagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
 
         # Run backward
@@ -206,13 +213,13 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-        # Check that the Dynamo graph has just one subgraph module
+        # Check that the Dynamo and AOT graphs have just one subgraph module
         self.assertEqual(len(backend.graphs), 1)
-        subgraph_attr_names = set()
-        for node in backend.graphs[0].graph.nodes:
-            if node.op == "get_attr":
-                subgraph_attr_names.add(node.target)
-        self.assertEqual(len(subgraph_attr_names), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.count_unique_get_attr_nodes(backend.graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 1)
 
     def test_nonlocal_update(self):
         counter = 2
