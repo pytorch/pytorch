@@ -70,13 +70,17 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
+// see https://github.com/pytorch/pytorch/pull/34845
+void throw_python_error() {
+  python_error err;
+  err.persist();
+  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+  throw err;
+}
+
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
-    // see https://github.com/pytorch/pytorch/pull/34845
-    python_error err;
-    err.persist();
-    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-    throw err;
+    throw_python_error();
   }
   return pyresult;
 }
@@ -90,7 +94,7 @@ static void check(bool result) {
 static PyObject* python_verbose_logger = nullptr;
 struct VerboseLogger : public PythonLogger {
   static std::optional<VerboseLogger> maybe_create() {
-    if (python_verbose_logger != nullptr) {
+    if (python_verbose_logger == nullptr) {
       return std::nullopt;
     }
     return VerboseLogger(python_verbose_logger);
@@ -345,7 +349,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* logger = nullptr;
   if (!PyArg_ParseTuple(args, "O", &logger)) {
-    Py_RETURN_FALSE;
+    throw_python_error();
   }
 
   if (logger == Py_None) {
@@ -538,9 +542,6 @@ CacheNode* _compiled_autograd_impl(
 
   int i = 0;
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
-  if (vlogger.has_value()) {
-    vlogger->log(PythonLogger::CRITICAL, "Compiled Autograd Tracing");
-  }
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();

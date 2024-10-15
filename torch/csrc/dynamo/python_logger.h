@@ -7,7 +7,6 @@ namespace torch::dynamo {
 struct PythonLogger {
   PythonLogger() = delete;
   explicit PythonLogger(PyObject* logger);
-  virtual ~PythonLogger();
 
   enum Level : unsigned int {
     DEBUG = 0,
@@ -19,7 +18,7 @@ struct PythonLogger {
   };
 
   // must be called while GIL is held
-  virtual void log(Level level, std::string_view msg) const;
+  void log(Level level, std::string_view msg) const;
 
  private:
   static constexpr std::array<std::string_view, COUNT> levelNames_ = {
