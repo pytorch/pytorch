@@ -66,6 +66,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -77,6 +78,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.graph_module import _get_attr
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
@@ -699,21 +701,12 @@ def _export_to_aten_ir(
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)
 
-    # NOTE: aot_export adds symint metadata for placeholders with int values;
-    # since these become specialized, we replace such metadata with the original values
-    index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
         + len(graph_signature.buffers)
         + len(graph_signature.input_tokens)
     )
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= total_non_user_inputs:
-                user_arg = flat_fake_args[index - total_non_user_inputs]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs, constant_attrs)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1047,7 +1040,15 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
 
 
 def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
-    original_state_dict = mod.state_dict(keep_vars=True)
+    # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
+    # but the running module state so we can always match by id() the entries here with the graph inputs
+    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+    original_state_dict = named_parameters | named_buffers
+
+    non_persistent_buffers = _get_non_persistent_buffers(mod)
+    for k in non_persistent_buffers:
+        original_state_dict.pop(k, None)
 
     if not isinstance(args, tuple):
         raise UserError(
@@ -1530,14 +1531,7 @@ def _export_to_aten_ir_make_fx(
             gm.meta.update(mod.meta)
 
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    index = 0
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= params_len:
-                user_arg = flat_args[index - params_len]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+    set_missing_meta_vals(gm, flat_args, params_len, constant_attrs)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1601,6 +1595,27 @@ def _export_to_aten_ir_make_fx(
     )
 
 
+def set_missing_meta_vals(gm, flat_args, num_params_buffers, constant_attrs):
+    # Sets missing metadata to address two problems:
+    # 1. aot_export adds symint metadata for placeholders with int values; since
+    #    these become specialized, we replace such metadata with the original values.
+    # 2. constant attributes need to have metadata set before lifting them because
+    #    computing the graph signature depends on it.
+    index = 0
+    fake_mode = detect_fake_mode(flat_args)
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if index >= num_params_buffers:
+                user_arg = flat_args[index - num_params_buffers]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
+        if node.op == "get_attr" and "val" not in node.meta:
+            val = _get_attr(gm, node.target)
+            if val in constant_attrs and isinstance(val, torch.Tensor):
+                node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
+
+
 def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
@@ -1638,13 +1653,22 @@ def _non_strict_export(
 
                 def forward(self, *args, **kwargs):
                     nonlocal out_spec
-                    if isinstance(self._export_root, torch.fx.GraphModule):
+                    mod = self._export_root
+                    if isinstance(mod, torch.fx.GraphModule):
+                        # NOTE: We're going to run this graph module with an fx interpreter,
+                        # which will not run any forward hooks. Thus, ideally, we should run
+                        # all forward hooks here. But the general logic for running them is
+                        # complicated (see nn/module.py), and probably not worth duplicating.
+                        # Instead we only look for, and run, an export-specific forward hook.
+                        if (
+                            _check_input_constraints_pre_hook
+                            in mod._forward_pre_hooks.values()
+                        ):
+                            _check_input_constraints_pre_hook(mod, args, kwargs)
                         with torch.fx.traceback.preserve_node_meta():
-                            tree_out = torch.fx.Interpreter(self._export_root).run(
-                                *args, **kwargs
-                            )
+                            tree_out = torch.fx.Interpreter(mod).run(*args, **kwargs)
                     else:
-                        tree_out = self._export_root(*args, **kwargs)
+                        tree_out = mod(*args, **kwargs)
                     flat_outs, out_spec = pytree.tree_flatten(tree_out)
                     return tuple(flat_outs)
 

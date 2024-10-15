@@ -942,7 +942,7 @@ class TestInductorDynamic(TestCase):
         def f(x):
             return x.sum()
 
-        x = torch.empty_strided((1, 4), (5, 1), device="cuda")
+        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
 
@@ -950,6 +950,32 @@ class TestInductorDynamic(TestCase):
     def test_unspecialized_float_multiply(self):
         def fn(x, y):
             return x * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        x = torch.arange(3)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_add(self):
+        def fn(x, y):
+            return x + y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        x = torch.arange(3)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_sub(self):
+        def fn(x, y):
+            return x - y
 
         cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
