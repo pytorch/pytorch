@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
+#include <torch/csrc/dynamo/python_logger.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -87,18 +88,15 @@ static void check(bool result) {
 
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
-struct VerboseLogger {
+struct VerboseLogger : public PythonLogger {
   static std::optional<VerboseLogger> maybe_create() {
-    if (python_verbose_logger == nullptr) {
+    if (python_verbose_logger != nullptr) {
       return std::nullopt;
     }
-    return VerboseLogger();
+    return VerboseLogger(python_verbose_logger);
   }
 
-  void verbose_log_fn(std::string_view msg) const {
-    TORCH_CHECK(python_verbose_logger != nullptr);
-    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
-  }
+  VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
 
   void log_node_check(
       const Node& fn,
@@ -137,7 +135,7 @@ struct VerboseLogger {
       }
     }
     oss << "]";
-    verbose_log_fn(oss.str());
+    log(PythonLogger::DEBUG, oss.str());
   }
 
   void log_dynamic_shapes_check(size_t size_idx) const {
@@ -149,10 +147,10 @@ struct VerboseLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    verbose_log_fn(
+    log(PythonLogger::DEBUG,
         "Cache miss due to changed shapes: marking size idx " +
-        std::to_string(size_idx - start_idx) + " of " + it->second +
-        " as dynamic");
+            std::to_string(size_idx - start_idx) + " of " + it->second +
+            " as dynamic");
   }
 
   // track which size index belongs to which node
@@ -540,6 +538,9 @@ CacheNode* _compiled_autograd_impl(
 
   int i = 0;
   std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
+  if (vlogger.has_value()) {
+    vlogger->log(PythonLogger::CRITICAL, "Compiled Autograd Tracing");
+  }
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();

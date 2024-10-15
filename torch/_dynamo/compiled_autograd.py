@@ -326,7 +326,7 @@ class AutogradCompilerInstance:
             colored=True,
         )
         compiled_autograd_log.info("%s", lazy_graph_code)
-        verbose_log.debug("%s", lazy_graph_code)
+        # verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -531,7 +531,7 @@ def enable(compiler_fn):
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
     if snapshot_verbose_logging_enabled():
-        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
+        torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
     global compiled_autograd_enabled
     compiled_autograd_enabled = True
     try:
