@@ -507,7 +507,7 @@ inline void validate_sdpa_input(
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
   if (attn_mask_.has_value()){
     auto mask_dtype = attn_mask_->dtype();
-    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == at::kFloat || mask_dtype == query_.dtype(),
+    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == at::kFloat || mask_dtype == at::kBFloat16 || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or float or to match query dtype, but got attn_mask.dtype: ",
       mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
     TORCH_CHECK(
@@ -779,6 +779,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       v = (value.to(at::kFloat) - v_zp) * v_scale;
     }
     auto attn_mask = attn_mask_;
+    if (attn_mask.has_value()) {
+      *attn_mask = (*attn_mask).to(at::kFloat);
+    }
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math

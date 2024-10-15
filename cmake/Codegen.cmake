@@ -273,7 +273,7 @@ if(INTERN_BUILD_ATEN_OPS)
     if(MSVC)
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
     else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma")# -mavx512bf16")
     endif(MSVC)
   endif(CXX_AVX512_FOUND)
 

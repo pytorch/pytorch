@@ -566,19 +566,17 @@ def _sfdp_pattern_20(
     o_scale,
     dropout,
 ):
-    # UINT8 QUANTIZED SDPA
+    # int8-mix-fp32 QUANTIZED SDPA
     q = query.permute([0, 2, 1, 3])
     # q = (q.float() - q_zp) * q_scale
     q = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
         q, float(q_scale), int(q_zp), 0, 255, torch.uint8
     )
     k = key.permute([0, 2, 1, 3]).transpose(-2, -1)
-    # k = (k.float() - k_zp) * k_scale
     k = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
         k, float(k_scale), int(k_zp), 0, 255, torch.uint8
     )
     v = value.permute([0, 2, 1, 3])
-    # v = (v.float() - v_zp) * v_scale
     v = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
         v, float(v_scale), int(v_zp), 0, 255, torch.uint8
     )
@@ -586,25 +584,14 @@ def _sfdp_pattern_20(
         (torch.matmul(q, k).div(inv_scale) + attn_mask).softmax(dim=-1),
         dropout,
     )
-    # a = torch.nn.functional.dropout(
-    #     torch.matmul(q, k).div(inv_scale).softmax(dim=-1),
-    #     dropout_p,
-    # )
-    # qa = torch.clamp_max(
-    #     torch.clamp_min(torch.round(a * a_inv_scale) + a_zp, 0), 255
-    # ).to(torch.uint8)
     qa = torch.ops.quantized_decomposed.quantize_per_tensor.default(
         a, float(a_scale), int(a_zp), 0, 255, torch.uint8
     )
-    # a = (qa.float() - a_zp) * a_scale
     a = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
         qa, float(a_scale), int(a_zp), 0, 255, torch.uint8
     )
     o = a.matmul(v)
     o = o.permute(0, 2, 1, 3).contiguous()
-    # return torch.clamp_max(
-    #     torch.clamp_min(torch.round(o * o_inv_scale) + o_zp, 0), 255
-    # ).to(torch.uint8)
     return torch.ops.quantized_decomposed.quantize_per_tensor.default(
         o, float(o_scale), int(o_zp), 0, 255, torch.uint8
     )
@@ -630,20 +617,6 @@ def _sfdp_replacement_20(
 ):
     counters["inductor"]["fuse_attention"] += 1
     print("hit sdpa pattern 20")
-    print(
-        inv_scale,
-        dropout,
-        q_zp,
-        q_scale,
-        k_zp,
-        k_scale,
-        v_zp,
-        v_scale,
-        a_zp,
-        a_scale,
-        o_zp,
-        o_scale,
-    )
     res = _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
@@ -664,20 +637,96 @@ def _sfdp_replacement_20(
         o_scale=o_scale,
     )
     return res.permute(0, 2, 1, 3).contiguous()
-    # # TODO: support UINT8 SDPA kernel
-    # output = aten.scaled_dot_product_attention(
-    #     (query.transpose(1, 2).float() - q_zp) * q_scale,
-    #     (key.transpose(1, 2).float() - k_zp) * k_scale,
-    #     (value.transpose(1, 2).float() - v_zp) * v_scale,
-    #     attn_mask=attn_mask,
-    #     dropout_p=dropout_p,
-    #     is_causal=False,
-    #     scale=1.0 / inv_scale,
-    # )
-    # output = torch.clamp_max(
-    #     torch.clamp_min(torch.round(output * o_inv_scale) + o_zp, 0), 255
-    # ).to(torch.uint8)
-    # return output.transpose(1, 2).contiguous()
+
+
+def _sfdp_pattern_21(
+    query,
+    key,
+    value,
+    attn_mask,
+    inv_scale,
+    q_zp,
+    q_scale,
+    k_zp,
+    k_scale,
+    v_zp,
+    v_scale,
+    a_zp,
+    a_scale,
+    o_zp,
+    o_scale,
+    dropout,
+):
+    # int8-mix-reduce QUANTIZED SDPA
+    q = query.permute([0, 2, 1, 3])
+    q = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+        q, float(q_scale), int(q_zp), 0, 255, torch.uint8
+    ).to(torch.float16)
+    k = key.permute([0, 2, 1, 3]).transpose(-2, -1)
+    k = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+        k, float(k_scale), int(k_zp), 0, 255, torch.uint8
+    ).to(torch.float16)
+    v = value.permute([0, 2, 1, 3])
+    v = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+        v, float(v_scale), int(v_zp), 0, 255, torch.uint8
+    ).to(torch.float16)
+    a = torch.nn.functional.dropout(
+        (torch.matmul(q, k).div(inv_scale) + attn_mask).softmax(dim=-1),
+        dropout,
+    )
+    qa = torch.ops.quantized_decomposed.quantize_per_tensor.default(
+        a, float(a_scale), int(a_zp), 0, 255, torch.uint8
+    )
+    a = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+        qa, float(a_scale), int(a_zp), 0, 255, torch.uint8
+    ).to(torch.float16)
+    o = a.matmul(v)
+    o = o.permute(0, 2, 1, 3).contiguous()
+    return torch.ops.quantized_decomposed.quantize_per_tensor.default(
+        o, float(o_scale), int(o_zp), 0, 255, torch.uint8
+    )
+
+
+def _sfdp_replacement_21(
+    query,
+    key,
+    value,
+    attn_mask,
+    inv_scale,
+    q_zp,
+    q_scale,
+    k_zp,
+    k_scale,
+    v_zp,
+    v_scale,
+    a_zp,
+    a_scale,
+    o_zp,
+    o_scale,
+    dropout,
+):
+    counters["inductor"]["fuse_attention"] += 1
+    print("hit sdpa pattern 21")
+    res = _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask,
+        dropout_p=dropout,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+        q_zp=q_zp,
+        q_scale=q_scale,
+        k_zp=k_zp,
+        k_scale=k_scale,
+        v_zp=v_zp,
+        v_scale=v_scale,
+        a_zp=a_zp,
+        a_scale=a_scale,
+        o_zp=o_zp,
+        o_scale=o_scale,
+    )
+    return res.permute(0, 2, 1, 3).contiguous()
 
 
 def _sfdp_params_check(match):
@@ -1028,6 +1077,31 @@ def _get_sfdp_patterns():
                     _sfdp_extra_check(aten.div.Tensor),
                 ),
             )
+            candidates.append(
+                (
+                    _sfdp_pattern_21,
+                    _sfdp_replacement_21,
+                    [
+                        g_u8(),
+                        g_u8(),
+                        g_u8(),
+                        m(),
+                        c(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                    ],
+                    d_u8,
+                    _sfdp_extra_check(aten.div.Tensor),
+                ),
+            )
 
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
@@ -1075,7 +1149,8 @@ def _get_sfdp_patterns():
                     replacement = partialize_and_update_signature(
                         replacement, dropout=0.0
                     )
-                    del workaround["dropout"]
+                    if "dropout" in workaround:
+                        del workaround["dropout"] 
 
             inference_name = name + "_inference"
             yield inference_name, {
