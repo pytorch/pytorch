@@ -54,7 +54,7 @@ env:
 jobs:
   get-label-type:
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -68,6 +68,7 @@ jobs:
     needs: get-label-type
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
@@ -102,6 +103,7 @@ jobs:
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}

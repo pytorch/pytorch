@@ -445,6 +445,7 @@ aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_from_padded_tensor
 aten::_nested_get_jagged_dummy
 aten::_nested_get_lengths
 aten::_nested_get_max_seqlen
@@ -924,10 +925,6 @@ aten::max_pool3d_with_indices
 aten::max_pool3d_with_indices.out
 aten::max_pool3d_with_indices_backward
 aten::max_pool3d_with_indices_backward.grad_input
-aten::max_unpool2d
-aten::max_unpool2d.out
-aten::max_unpool3d
-aten::max_unpool3d.out
 aten::median
 aten::median.dim
 aten::median.dim_values
@@ -1286,12 +1283,6 @@ aten::split_copy.Tensor_out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
-aten::squeeze_copy
-aten::squeeze_copy.dim
-aten::squeeze_copy.dim_out
-aten::squeeze_copy.dims
-aten::squeeze_copy.dims_out
-aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
 aten::to_mkldnn
@@ -1301,8 +1292,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int

@@ -11,10 +11,8 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
-from torch._streambase import _StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
@@ -89,13 +87,14 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.nn.attention.sdpa_kernel,
+        torch.nn.attention._sdpa_kernel_variadic,
     ]
 )
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
-        torch.onnx.operators.shape_as_tensor,
         torch._shape_as_tensor,
     ]
 )
@@ -152,6 +151,25 @@ tracing_state_functions = {
 }
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
+
+
+@functools.lru_cache(None)
+def get_overridable_functions():
+    from itertools import chain
+
+    from torch.overrides import get_overridable_functions as get_overridable_functions_
+
+    funcs = set(chain(*get_overridable_functions_().values()))
+    more = {
+        torch.ones,
+        torch.ones_like,
+        torch.zeros,
+        torch.zeros_like,
+        torch.empty,
+        torch.full,
+    }
+    funcs.update(more)
+    return funcs
 
 
 class BaseTorchVariable(VariableTracker):
@@ -229,6 +247,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -257,7 +276,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
             return wrap_fx_proxy_cls(
@@ -291,7 +310,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [guard_if_dyn(x) for x in args],
+                args,
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
@@ -328,6 +347,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return FSDPParamGroupUseTrainingStateVariable.create(
                 tx, args[0], args[1].as_python_constant()
+            )
+        elif self.value is torch.nn.attention.sdpa_kernel:
+            assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
+            backends = args[0] if len(args) == 1 else kwargs["backends"]
+            return SDPAKernelVariable.create(tx, backends.as_python_constant())
+        elif self.value is torch.nn.attention._sdpa_kernel_variadic:
+            return SDPAKernelVariable.create(
+                tx, [arg.as_python_constant() for arg in args]
             )
 
         return super().call_function(tx, args, kwargs)
@@ -445,6 +472,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
+
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) == 1:
+                # torch.compile is a no-op in dynamo
+                return args[0]
+
+            unimplemented("torch.compile is used as a decorator in the compiled frame")
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
@@ -787,10 +822,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not args and not kwargs
-            if not tx.symbolic_torch_function_mode_stack:
+            if not tx.symbolic_torch_function_state.mode_stack:
                 raise unimplemented("Popping from an empty torch function mode stack")
             TorchFunctionModeStackVariable.register_mutation(tx)
-            return tx.symbolic_torch_function_mode_stack.pop()
+            return tx.symbolic_torch_function_state.pop_torch_function_mode()
 
         @register(torch._C._push_on_torch_function_stack)
         def handle_push_torch_function(
@@ -798,7 +833,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
-            tx.symbolic_torch_function_mode_stack.append(args[0])
+            tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
             return ConstantVariable.create(None)
 
         @register(torch._C._len_torch_function_stack)
@@ -806,7 +841,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not args and not kwargs
-            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
+            return ConstantVariable.create(
+                len(tx.symbolic_torch_function_state.mode_stack)
+            )
+
+        @register(torch._C._get_function_stack_at)
+        def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
+            assert len(args) == 1 and not kwargs
+            ind = args[0].as_python_constant()
+            assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
+            return tx.symbolic_torch_function_state.mode_stack[ind]
 
         @register(torch.set_default_device)
         def handle_set_default_device(
@@ -825,7 +869,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return None
+            return ConstantVariable.create(None)
 
         return handlers
 
@@ -837,6 +881,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
+
+        if self.torch_function_override_enabled(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
@@ -853,153 +900,153 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        if self.is_tensor_method():
+            return self.call_tensor_method(tx, args, kwargs)
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
             if result:
                 return result
 
-        if can_dispatch_torch_function(tx, args, kwargs):
-            return dispatch_torch_function(tx, self, args, kwargs)
-        else:
-            any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
+        any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 
-            all_ints_or_floats = all(
-                isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
-                for x in args
-            )
-            if (
-                getattr(self.value, "__module__", "") == "torch"
-                and self.value.__name__ in bin_ops
-                and any_symints_or_symfloats
-                and all_ints_or_floats
-            ):
-                msg = f"""\
+        all_ints_or_floats = all(
+            isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
+            for x in args
+        )
+        if (
+            getattr(self.value, "__module__", "") == "torch"
+            and self.value.__name__ in bin_ops
+            and any_symints_or_symfloats
+            and all_ints_or_floats
+        ):
+            msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
 To support this behavior, we need to allow const-propping tensors that store symint data.
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
-                log.warning(msg)
-                unimplemented(msg)
+            log.warning(msg)
+            unimplemented(msg)
 
-            # TODO(voz): Replace w/ dynamic shape rewrite table.
-            # Ideally, we would be able to do this at ctor time, but alas we need a combination
-            # of value + args to determine this.
-            fn_ = self.value
-            if any_symints_or_symfloats:
-                torch_sym_op = f"_sym_{self.value.__name__}"
-                if getattr(self.value, "__module__", None) == "math" and hasattr(
-                    torch, torch_sym_op
-                ):
-                    fn_ = getattr(torch, torch_sym_op)
+        # TODO(voz): Replace w/ dynamic shape rewrite table.
+        # Ideally, we would be able to do this at ctor time, but alas we need a combination
+        # of value + args to determine this.
+        fn_ = self.value
+        if any_symints_or_symfloats:
+            torch_sym_op = f"_sym_{self.value.__name__}"
+            if getattr(self.value, "__module__", None) == "math" and hasattr(
+                torch, torch_sym_op
+            ):
+                fn_ = getattr(torch, torch_sym_op)
 
-            fake_out_shape = None
-            if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
-                # Calling fake tensor propagation can mutate the out= tensor in
-                # tx.output.tracked_fakes. tracked_fakes are used to apply
-                # symbolic_shape guards. Mutating them destroys the information
-                # prior to tracing, which is essential for creating right
-                # guards. So save the shape now, and check later if it has
-                # changed. If it has, graph break.
-                fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
+        fake_out_shape = None
+        if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
+            # Calling fake tensor propagation can mutate the out= tensor in
+            # tx.output.tracked_fakes. tracked_fakes are used to apply
+            # symbolic_shape guards. Mutating them destroys the information
+            # prior to tracing, which is essential for creating right
+            # guards. So save the shape now, and check later if it has
+            # changed. If it has, graph break.
+            fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+        tensor_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                fn_,
+                *proxy_args_kwargs(args, kwargs),
+            ),
+        )
+
+        if (
+            isinstance(tensor_variable, TensorVariable)
+            and "requires_grad" in kwargs
+            and kwargs["requires_grad"].as_python_constant()
+        ):
+            unimplemented(
+                """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
             )
 
-            if (
-                isinstance(tensor_variable, TensorVariable)
-                and "requires_grad" in kwargs
-                and kwargs["requires_grad"].as_python_constant()
-            ):
-                unimplemented(
-                    """factory functions that return tensors that require grad are not supported.
-Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
-                )
-
-            if "out" in kwargs and not (
-                isinstance(kwargs["out"], variables.ConstantVariable)
-                and kwargs["out"].as_python_constant() is None
-            ):
-                # out variants of torch operators like torch.sort and
-                # torch.sigmoid mutate the tensors in the out field. Track such
-                # tensors and rewrite the symbolic locals.
-                if isinstance(tensor_variable, TupleVariable):
-                    assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
-                    output_tensor_names = [
-                        tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
-                    ]
-                    for idx, name in enumerate(output_tensor_names):
-                        if name in tx.symbolic_locals:
-                            tx.symbolic_locals[name] = tensor_variable.items[idx]
-                    for out_tensor, result_tensor in zip(
-                        kwargs["out"].items, tensor_variable.items
-                    ):
-                        if (
-                            out_tensor.source
-                            and out_tensor in tx.output.graphargs
-                            and isinstance(out_tensor, variables.TensorVariable)
-                            and isinstance(result_tensor, variables.TensorVariable)
-                            and out_tensor.size != result_tensor.size
-                        ):
-                            # It's hard to get out variants with resizing on graph inputs work
-                            # properly across dynamo/aot/inductor, just fall back.
-                            unimplemented("out variants with resizing on graph inputs")
-                elif isinstance(tensor_variable, TensorVariable):
-                    assert isinstance(kwargs["out"], TensorVariable)
-                    assert "example_value" in kwargs["out"].proxy.node.meta
-                    fake_tensor = tensor_variable.proxy.node.meta["example_value"]
-                    fake_out = kwargs["out"].proxy.node.meta["example_value"]
+        if "out" in kwargs and not (
+            isinstance(kwargs["out"], variables.ConstantVariable)
+            and kwargs["out"].as_python_constant() is None
+        ):
+            # out variants of torch operators like torch.sort and
+            # torch.sigmoid mutate the tensors in the out field. Track such
+            # tensors and rewrite the symbolic locals.
+            if isinstance(tensor_variable, TupleVariable):
+                assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
+                output_tensor_names = [
+                    tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
+                ]
+                for idx, name in enumerate(output_tensor_names):
+                    if name in tx.symbolic_locals:
+                        tx.symbolic_locals[name] = tensor_variable.items[idx]
+                for out_tensor, result_tensor in zip(
+                    kwargs["out"].items, tensor_variable.items
+                ):
                     if (
-                        kwargs["out"].source
-                        and kwargs["out"] in tx.output.graphargs
-                        and fake_out_shape != fake_tensor.shape
+                        out_tensor.source
+                        and out_tensor in tx.output.graphargs
+                        and isinstance(out_tensor, variables.TensorVariable)
+                        and isinstance(result_tensor, variables.TensorVariable)
+                        and out_tensor.size != result_tensor.size
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
+            elif isinstance(tensor_variable, TensorVariable):
+                assert isinstance(kwargs["out"], TensorVariable)
+                assert "example_value" in kwargs["out"].proxy.node.meta
+                fake_tensor = tensor_variable.proxy.node.meta["example_value"]
+                fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                if (
+                    kwargs["out"].source
+                    and kwargs["out"] in tx.output.graphargs
+                    and fake_out_shape != fake_tensor.shape
+                ):
+                    # It's hard to get out variants with resizing on graph inputs work
+                    # properly across dynamo/aot/inductor, just fall back.
+                    unimplemented("out variants with resizing on graph inputs")
+                if not torch._prims_common.is_contiguous(fake_out):
+                    # It's difficult to handle strides correctly in functionalization
+                    # when calling an out= op with a non-contiguous out argument
+                    unimplemented(
+                        "out= op was called where output tensor was non-contiguous"
+                    )
+                name = tx.find_symbolic_locals_name(kwargs["out"])
+                if name in tx.symbolic_locals:
+                    tx.symbolic_locals[name] = tensor_variable
+            elif (
+                isinstance(tensor_variable, ConstantVariable)
+                and tensor_variable.value is None
+            ):
+                # Handle out-variant custom ops that return None.
+                if isinstance(kwargs["out"], TensorVariable):
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    fake_out = kwargs["out"].proxy.node.meta["example_value"]
                     if not torch._prims_common.is_contiguous(fake_out):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
                             "out= op was called where output tensor was non-contiguous"
                         )
-                    name = tx.find_symbolic_locals_name(kwargs["out"])
-                    if name in tx.symbolic_locals:
-                        tx.symbolic_locals[name] = tensor_variable
-                elif (
-                    isinstance(tensor_variable, ConstantVariable)
-                    and tensor_variable.value is None
-                ):
-                    # Handle out-variant custom ops that return None.
-                    if isinstance(kwargs["out"], TensorVariable):
-                        assert "example_value" in kwargs["out"].proxy.node.meta
-                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                elif isinstance(kwargs["out"], ListVariable):
+                    for idx, x in enumerate(kwargs["out"].items):
+                        assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
+                        fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
                         if not torch._prims_common.is_contiguous(fake_out):
                             # It's difficult to handle strides correctly in functionalization
                             # when calling an out= op with a non-contiguous out argument
                             unimplemented(
-                                "out= op was called where output tensor was non-contiguous"
+                                "out= op was called where some of the output tensors were non-contiguous"
                             )
-                    elif isinstance(kwargs["out"], ListVariable):
-                        for idx, x in enumerate(kwargs["out"].items):
-                            assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
-                            fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
-                            if not torch._prims_common.is_contiguous(fake_out):
-                                # It's difficult to handle strides correctly in functionalization
-                                # when calling an out= op with a non-contiguous out argument
-                                unimplemented(
-                                    "out= op was called where some of the output tensors were non-contiguous"
-                                )
-                else:
-                    unimplemented(f"out variant of {type(kwargs['out'])}")
+            else:
+                unimplemented(f"out variant of {type(kwargs['out'])}")
 
-            return tensor_variable
+        return tensor_variable
 
     def _call_ntuple(self, tx: "InstructionTranslator", args, kwargs):
         """inline behavior of torch.nn.modules.utils._ntuple"""
@@ -1127,3 +1174,22 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             source
         )
         return result
+
+    def call_tensor_method(self, tx, args, kwargs):
+        return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
+
+    def is_tensor_method(self):
+        return (
+            inspect.ismethoddescriptor(self.get_function())
+            and hasattr(self.get_function(), "__objclass__")
+            and self.get_function().__objclass__ == torch._C.TensorBase
+        ) or self.get_function() is torch.Tensor.__contains__
+
+    def torch_function_override_enabled(self, tx, args, kwargs):
+        return (
+            self.get_function() in get_overridable_functions()
+            or isinstance(
+                self.get_function(),
+                (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
+            )
+        ) and can_dispatch_torch_function(tx, args, kwargs)
