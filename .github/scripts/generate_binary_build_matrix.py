@@ -77,6 +77,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -333,7 +334,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
 
     if arches is None:
         # Define default compute archivectures
@@ -369,7 +370,13 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
-            ) and python_version == "3.13":
+            ) and (python_version == "3.13" or python_version == "3.13t"):
+                continue
+
+            # TODO: Enable python 3.13t on xpu and cpu-s390x
+            if (
+                gpu_arch_type == "xpu" or gpu_arch_type == "cpu-s390x"
+            ) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
@@ -403,7 +410,7 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                             if os != "linux-aarch64"
                             else ""
                         ),
@@ -412,8 +419,8 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-                # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
-                if python_version == "3.10" and arch_version == "12.1":
+                # Special build building to use on Colab. Python 3.11 for 12.1 CUDA
+                if python_version == "3.11" and arch_version == "12.1":
                     ret.append(
                         {
                             "python_version": python_version,
@@ -451,7 +458,7 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
                             if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),
