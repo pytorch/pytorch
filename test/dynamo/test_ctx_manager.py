@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import traceback
 import unittest
+from contextlib import contextmanager
 
 import torch
 import torch._dynamo.test_case
@@ -13,6 +15,24 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+
+
+def _contextmanager(func):
+    # Copied from CPython! Behave exactly as contextlib.contextmanager but do not
+    # wraps func. It is used internally in a few tests to check if the context
+    # manager support in dynamo is correct. We can't use the original implementation
+    # as it can lead to graph breaks in some unrelated cases because it wraps(func)
+    from contextlib import _GeneratorContextManager
+
+    # @wraps(func)
+    def helper(*args, **kwds):
+        return _GeneratorContextManager(func, args, kwds)
+
+    return helper
+
+
+z_glb = 0
+k_glb = 0
 
 
 class CustomizedCtxManager:
@@ -1750,9 +1770,151 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    def test_contextlib_contextmanager_change_parent(self):
+    def test_contextlib_contextmanager_change_parent_nonlocal_0(self):
+        # test if a nonlocal actually gets propagated
+        z = 0
+        k = 0
+
         def create_ctx():
-            @contextlib.contextmanager
+            @_contextmanager
+            def ctx(x):
+                nonlocal z
+                nonlocal k
+                try:
+                    k = 100
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            nonlocal z
+            with ctx(x) as y:
+                z = k
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z, 100)
+        self.assertEqual(k, 100)
+
+    def test_contextlib_contextmanager_change_parent_nonlocal_1(self):
+        # test if finally is executed and it is reading the correct variable
+        z = 1
+        k = 0
+
+        def create_ctx():
+            @_contextmanager
+            def ctx(x):
+                nonlocal z
+                nonlocal k
+                try:
+                    yield x.sin()
+                finally:
+                    k = z
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            nonlocal z
+            z = 100
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z, 100)
+        self.assertEqual(k, 100)
+
+    def test_contextlib_contextmanager_change_parent_global_0(self):
+        # test if a global actually gets propagated
+        global z_glb
+        global k_glb
+        z_glb = 0
+        k_glb = 0
+
+        def create_ctx():
+            @_contextmanager
+            def ctx(x):
+                global z_glb
+                global k_glb
+                try:
+                    k_glb = 100
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            global z_glb
+            with ctx(x) as y:
+                z_glb = k_glb
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z_glb, 100)
+        self.assertEqual(k_glb, 100)
+
+    def test_contextlib_contextmanager_change_parent_global_1(self):
+        # test if finally is executed and it is reading the correct variable
+        global z_glb
+        global k_glb
+        z_glb = 0
+        k_glb = 0
+
+        def create_ctx():
+            @_contextmanager
+            def ctx(x):
+                global z_glb
+                global k_glb
+                try:
+                    yield x.sin()
+                finally:
+                    k_glb = z_glb
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            global z_glb
+            z_glb = 100
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z_glb, 100)
+        self.assertEqual(k_glb, 100)
+
+    def test_contextlib_contextmanager_change_parent_0(self):
+        def create_ctx():
+            @_contextmanager
             def ctx(x):
                 try:
                     yield x.sin()
@@ -1774,10 +1936,9 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    @unittest.expectedFailure
-    def test_contextlib_contextmanager_change_parent_nested_user_function(self):
+    def test_contextlib_contextmanager_change_parent_1(self):
         def create_ctx(x):
-            @contextlib.contextmanager
+            @_contextmanager
             def ctx():
                 try:
                     yield x.sin()
@@ -1798,6 +1959,358 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor([1.0])
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
+
+
+class CPythonContextManagerTestCase(unittest.TestCase):
+    def test_contextmanager_plain(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            yield 42
+            state.append(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def foo(t):
+            y = 0
+            with woohoo() as x:
+                y += len(state)
+                # self.assertEqual(state, [1])
+                y += x  # 42
+                # self.assertEqual(x, 42)
+                state.append(x)
+
+        t = torch.randn(2, 3)
+        foo(t)
+        self.assertEqual(state, [1, 42, 999])
+
+    def test_contextmanager_finally(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            try:
+                yield 42
+            finally:
+                state.append(999)
+
+        with self.assertRaises(ZeroDivisionError):
+            with woohoo() as x:
+                self.assertEqual(state, [1])
+                self.assertEqual(x, 42)
+                state.append(x)
+                raise ZeroDivisionError
+        self.assertEqual(state, [1, 42, 999])
+
+    def test_contextmanager_traceback(self):
+        @contextmanager
+        def f():
+            yield
+
+        try:
+            with f():
+                1 / 0
+        except ZeroDivisionError as e:
+            frames = traceback.extract_tb(e.__traceback__)
+
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+        self.assertEqual(frames[0].line, "1/0")
+
+        # Repeat with RuntimeError (which goes through a different code path)
+        class RuntimeErrorSubclass(RuntimeError):
+            pass
+
+        try:
+            with f():
+                raise RuntimeErrorSubclass(42)
+        except RuntimeErrorSubclass as e:
+            frames = traceback.extract_tb(e.__traceback__)
+
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+        self.assertEqual(frames[0].line, "raise RuntimeErrorSubclass(42)")
+
+        class StopIterationSubclass(StopIteration):
+            pass
+
+        for stop_exc in (
+            StopIteration("spam"),
+            StopIterationSubclass("spam"),
+        ):
+            with self.subTest(type=type(stop_exc)):
+                try:
+                    with f():
+                        raise stop_exc
+                except type(stop_exc) as e:
+                    self.assertIs(e, stop_exc)
+                    frames = traceback.extract_tb(e.__traceback__)
+                else:
+                    self.fail(f"{stop_exc} was suppressed")
+
+                self.assertEqual(len(frames), 1)
+                self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+                self.assertEqual(frames[0].line, "raise stop_exc")
+
+    def test_contextmanager_no_reraise(self):
+        @contextmanager
+        def whee():
+            yield
+
+        ctx = whee()
+        ctx.__enter__()
+        # Calling __exit__ should not result in an exception
+        self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
+
+    def test_contextmanager_trap_yield_after_throw(self):
+        @contextmanager
+        def whoo():
+            try:
+                yield
+            except:
+                yield
+
+        ctx = whoo()
+        ctx.__enter__()
+        with self.assertRaises(RuntimeError):
+            ctx.__exit__(TypeError, TypeError("foo"), None)
+        # if support.check_impl_detail(cpython=True):
+        #     # The "gen" attribute is an implementation detail.
+        #     self.assertFalse(ctx.gen.gi_suspended)
+
+    def test_contextmanager_trap_no_yield(self):
+        @contextmanager
+        def whoo():
+            if False:
+                yield
+
+        ctx = whoo()
+        with self.assertRaises(RuntimeError):
+            ctx.__enter__()
+
+    def test_contextmanager_trap_second_yield(self):
+        @contextmanager
+        def whoo():
+            yield
+            yield
+
+        ctx = whoo()
+        ctx.__enter__()
+        with self.assertRaises(RuntimeError):
+            ctx.__exit__(None, None, None)
+        # if support.check_impl_detail(cpython=True):
+        #     # The "gen" attribute is an implementation detail.
+        #     self.assertFalse(ctx.gen.gi_suspended)
+
+    def test_contextmanager_non_normalised(self):
+        @contextmanager
+        def whoo():
+            try:
+                yield
+            except RuntimeError:
+                raise SyntaxError
+
+        ctx = whoo()
+        ctx.__enter__()
+        with self.assertRaises(SyntaxError):
+            ctx.__exit__(RuntimeError, None, None)
+
+    def test_contextmanager_except(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            try:
+                yield 42
+            except ZeroDivisionError as e:
+                state.append(e.args[0])
+                self.assertEqual(state, [1, 42, 999])
+
+        with woohoo() as x:
+            self.assertEqual(state, [1])
+            self.assertEqual(x, 42)
+            state.append(x)
+            raise ZeroDivisionError(999)
+        self.assertEqual(state, [1, 42, 999])
+
+    def test_contextmanager_except_stopiter(self):
+        @contextmanager
+        def woohoo():
+            yield
+
+        class StopIterationSubclass(StopIteration):
+            pass
+
+        for stop_exc in (StopIteration("spam"), StopIterationSubclass("spam")):
+            with self.subTest(type=type(stop_exc)):
+                try:
+                    with woohoo():
+                        raise stop_exc
+                except Exception as ex:
+                    self.assertIs(ex, stop_exc)
+                else:
+                    self.fail(f"{stop_exc} was suppressed")
+
+    def test_contextmanager_except_pep479(self):
+        code = """\
+from __future__ import generator_stop
+from contextlib import contextmanager
+@contextmanager
+def woohoo():
+    yield
+"""
+        locals = {}
+        exec(code, locals, locals)
+        woohoo = locals["woohoo"]
+
+        stop_exc = StopIteration("spam")
+        try:
+            with woohoo():
+                raise stop_exc
+        except Exception as ex:
+            self.assertIs(ex, stop_exc)
+        else:
+            self.fail("StopIteration was suppressed")
+
+    def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
+        @contextmanager
+        def test_issue29692():
+            try:
+                yield
+            except Exception as exc:
+                raise RuntimeError("issue29692:Chained") from exc
+
+        try:
+            with test_issue29692():
+                raise ZeroDivisionError
+        except Exception as ex:
+            self.assertIs(type(ex), RuntimeError)
+            self.assertEqual(ex.args[0], "issue29692:Chained")
+            self.assertIsInstance(ex.__cause__, ZeroDivisionError)
+
+        try:
+            with test_issue29692():
+                raise StopIteration("issue29692:Unchained")
+        except Exception as ex:
+            self.assertIs(type(ex), StopIteration)
+            self.assertEqual(ex.args[0], "issue29692:Unchained")
+            self.assertIsNone(ex.__cause__)
+
+    def test_contextmanager_wrap_runtimeerror(self):
+        @contextmanager
+        def woohoo():
+            try:
+                yield
+            except Exception as exc:
+                raise RuntimeError(f"caught {exc}") from exc
+
+        with self.assertRaises(RuntimeError):
+            with woohoo():
+                1 / 0
+
+        # If the context manager wrapped StopIteration in a RuntimeError,
+        # we also unwrap it, because we can't tell whether the wrapping was
+        # done by the generator machinery or by the generator itself.
+        with self.assertRaises(StopIteration):
+            with woohoo():
+                raise StopIteration
+
+    def _create_contextmanager_attribs(self):
+        def attribs(**kw):
+            def decorate(func):
+                for k, v in kw.items():
+                    setattr(func, k, v)
+                return func
+
+            return decorate
+
+        @contextmanager
+        @attribs(foo="bar")
+        def baz(spam):
+            """Whee!"""
+            yield
+
+        return baz
+
+    def test_contextmanager_attribs(self):
+        baz = self._create_contextmanager_attribs()
+        self.assertEqual(baz.__name__, "baz")
+        self.assertEqual(baz.foo, "bar")
+
+    # @support.requires_docstrings
+    # def test_contextmanager_doc_attrib(self):
+    #     baz = self._create_contextmanager_attribs()
+    #     self.assertEqual(baz.__doc__, "Whee!")
+
+    # @support.requires_docstrings
+    # def test_instance_docstring_given_cm_docstring(self):
+    #     baz = self._create_contextmanager_attribs()(None)
+    #     self.assertEqual(baz.__doc__, "Whee!")
+
+    def test_keywords(self):
+        # Ensure no keyword arguments are inhibited
+        @contextmanager
+        def woohoo(self, func, args, kwds):
+            yield (self, func, args, kwds)
+
+        with woohoo(self=11, func=22, args=33, kwds=44) as target:
+            self.assertEqual(target, (11, 22, 33, 44))
+
+    # def test_nokeepref(self):
+    #     class A:
+    #         pass
+
+    #     @contextmanager
+    #     def woohoo(a, b):
+    #         a = weakref.ref(a)
+    #         b = weakref.ref(b)
+    #         # Allow test to work with a non-refcounted GC
+    #         support.gc_collect()
+    #         self.assertIsNone(a())
+    #         self.assertIsNone(b())
+    #         yield
+
+    #     with woohoo(A(), b=A()):
+    #         pass
+
+    def test_param_errors(self):
+        @contextmanager
+        def woohoo(a, *, b):
+            yield
+
+        with self.assertRaises(TypeError):
+            woohoo()
+        with self.assertRaises(TypeError):
+            woohoo(3, 5)
+        with self.assertRaises(TypeError):
+            woohoo(b=3)
+
+    def test_recursive(self):
+        depth = 0
+        ncols = 0
+
+        @contextmanager
+        def woohoo():
+            nonlocal ncols
+            ncols += 1
+            nonlocal depth
+            before = depth
+            depth += 1
+            yield
+            depth -= 1
+            self.assertEqual(depth, before)
+
+        @woohoo()
+        def recursive():
+            if depth < 10:
+                recursive()
+
+        recursive()
+        self.assertEqual(ncols, 10)
+        self.assertEqual(depth, 0)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

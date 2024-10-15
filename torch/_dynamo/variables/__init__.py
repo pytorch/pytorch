@@ -30,10 +30,10 @@ from .dicts import (
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    ContextlibContextManagerFunctionVariable,
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    ContextlibContextManagerFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,

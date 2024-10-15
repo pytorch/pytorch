@@ -44,11 +44,11 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
+    ContextlibContextManagerFunctionVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    ContextlibContextManagerFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
