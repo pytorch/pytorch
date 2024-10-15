@@ -141,7 +141,6 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
@@ -170,7 +169,6 @@ op_db: List[OpInfo] = [
         aten_name="special_i1e",
         ref=scipy.special.i1e if TEST_SCIPY else None,
         dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
