@@ -9,6 +9,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 @skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
