@@ -353,11 +353,6 @@ def skip_if_win32():
     )
 
 
-def sm_lower_than_70(device: torch.device):
-    """Returns True if the device's compute capability is lower than 70"""
-    return torch.cuda.get_device_capability(device) < (7, 0) and not torch.version.hip
-
-
 @retry_on_connect_failures
 def create_tcp_store(
     addr="localhost",
