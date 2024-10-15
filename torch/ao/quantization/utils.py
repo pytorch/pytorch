@@ -180,6 +180,7 @@ def to_underlying_dtype(qdtype):
         torch.quint2x4: torch.uint8,
         torch.uint8: torch.uint8,
         torch.int8: torch.int8,
+        torch.uint16: torch.uint16,
         torch.int16: torch.int16,
         torch.int32: torch.int32,
         torch.float8_e5m2: torch.float8_e5m2,
@@ -648,6 +649,7 @@ def determine_qparams(
     device = min_val_neg.device
     scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+    eps = eps.to(device)
 
     if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
         max_val_pos = torch.max(-min_val_neg, max_val_pos)

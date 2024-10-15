@@ -148,7 +148,7 @@ static_assert(
 static_assert(
     string_view::npos ==
         get_fully_qualified_type_name<
-            typename std::remove_pointer<typename Type<int>::type>::type>()
+            std::remove_pointer_t<typename Type<int>::type>>()
             .find("*"),
     "");
 #endif
