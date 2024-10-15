@@ -29,15 +29,15 @@ struct Communicate {
       close(inpipe_[0]);
       close(outpipe_[1]);
       close(errpipe_[1]);
-      outbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(inpipe_[1], std::ios::out));
-      inbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(outpipe_[0], std::ios::in));
-      errbuf_.reset(
-          new __gnu_cxx::stdio_filebuf<char>(errpipe_[0], std::ios::in));
-      in_.reset(new std::istream(inbuf_.get()));
-      out_.reset(new std::ostream(outbuf_.get()));
-      err_.reset(new std::ostream(errbuf_.get()));
+      outbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          inpipe_[1], std::ios::out);
+      inbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          outpipe_[0], std::ios::in);
+      errbuf_ = std::make_unique<__gnu_cxx::stdio_filebuf<char>>(
+          errpipe_[0], std::ios::in);
+      in_ = std::make_unique<std::istream>(inbuf_.get());
+      out_ = std::make_unique<std::ostream>(outbuf_.get());
+      err_ = std::make_unique<std::ostream>(errbuf_.get());
     }
   }
   ~Communicate() {
@@ -56,9 +56,12 @@ struct Communicate {
   }
 
  private:
-  int inpipe_[2];
-  int outpipe_[2];
-  int errpipe_[2];
+  // NOLINTNEXTLINE(*array*)
+  int inpipe_[2]{-1, -1};
+  // NOLINTNEXTLINE(*array*)
+  int outpipe_[2]{-1, -1};
+  // NOLINTNEXTLINE(*array*)
+  int errpipe_[2]{-1, -1};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> outbuf_, inbuf_, errbuf_;
   std::unique_ptr<std::istream> in_;
   std::unique_ptr<std::ostream> out_;
