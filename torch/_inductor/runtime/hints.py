@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import typing
-from dataclasses import fields
 from enum import auto, Enum
 from typing import Dict, List, Optional, Union
 
@@ -32,21 +31,15 @@ try:
     from triton.compiler.compiler import AttrsDescriptor
 
     attrs_descriptor_available = True
-    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
-    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
-    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
 except ImportError:
     attrs_descriptor_available = False
 
-# Define `instance_descriptor` function with clear conditional handling
+# Define `AttrsDescriptorWrapper` function with clear conditional handling
 if attrs_descriptor_available:
 
-    def instance_descriptor(
+    def AttrsDescriptorWrapper(
         divisible_by_16=None,
         equal_to_1=None,
-        ids_of_folded_args=None,
-        divisible_by_8=None,
     ):
         # Prepare the arguments for AttrsDescriptor
         kwargs = {
@@ -54,21 +47,15 @@ if attrs_descriptor_available:
             "equal_to_1": equal_to_1,
         }
 
-        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
-        if ids_of_folded_args_available:
-            kwargs["ids_of_folded_args"] = ids_of_folded_args
-        if divisible_by_8_available:
-            kwargs["divisible_by_8"] = divisible_by_8
-
         # Instantiate AttrsDescriptor with the prepared arguments
         return AttrsDescriptor(**kwargs)
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
-        "instance_descriptor",
-        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[(), (), (), ()],
+    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
+        "AttrsDescriptor",
+        ["divisible_by_16", "equal_to_1"],
+        defaults=[(), ()],
     )
 
 
@@ -85,7 +72,7 @@ class HeuristicType(Enum):
 
 
 class AutotuneHint(Enum):
-    ELEMENTS_PER_WARP_32 = 0
+    ONE_ELEMENT_PER_THREAD = 0
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
@@ -117,19 +104,23 @@ class DeviceProperties(typing.NamedTuple):
             device_type = "hip"
 
         device_interface = get_interface_for_device(device)
-        if device_type in ["cuda", "hip"]:
+        if device_type in ["cuda", "hip", "xpu"]:
             props = device_interface.get_device_properties(device)
             return cls(
                 type=device_type,
                 index=device.index,
                 cc=device_interface.get_compute_capability(device),
-                major=props.major,
+                major=props.major if hasattr(props, "major") else None,
                 regs_per_multiprocessor=props.regs_per_multiprocessor
                 if hasattr(props, "regs_per_multiprocessor")
                 else None,
-                max_threads_per_multi_processor=props.max_threads_per_multi_processor,
-                multi_processor_count=props.multi_processor_count,
-                warp_size=props.warp_size,
+                max_threads_per_multi_processor=props.max_threads_per_multi_processor
+                if hasattr(props, "max_threads_per_multi_processor")
+                else None,
+                multi_processor_count=props.multi_processor_count
+                if hasattr(props, "multi_processor_count")
+                else None,
+                warp_size=props.warp_size if hasattr(props, "warp_size") else 32,
             )
         return cls(
             type=device_type,
