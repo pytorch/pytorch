@@ -3826,8 +3826,7 @@ class ComputedBuffer(OperationBuffer):
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
-            not is_gpu(self.get_device().type)
-            or not config.loop_ordering_after_fusion
+            not is_gpu(self.get_device().type) or not config.loop_ordering_after_fusion
         )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,

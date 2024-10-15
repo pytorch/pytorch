@@ -962,6 +962,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
 if HAS_GPU and not TEST_WITH_ASAN:
+
     class FreezingGpuTests(TestCase):
         common = check_model_gpu
         device = GPU_TYPE
