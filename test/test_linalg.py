@@ -4578,6 +4578,14 @@ class TestLinalg(TestCase):
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
         os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
+
+        # Pointing to temp files. The test cannot remove them on Windows because
+        # they are in use and locked
+        import tempfile
+        tmp_dir = tempfile.mkdtemp()
+        os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+        os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
+
         torch.cuda.tunable.enable()
         # record GEMM
         torch.cuda.tunable.tuning_enable(False)
@@ -4593,7 +4601,7 @@ class TestLinalg(TestCase):
         assert torch.cuda.tunable.is_enabled()
         assert torch.cuda.tunable.tuning_is_enabled() is False
         ordinal = torch.cuda.current_device()
-        untuned_filename = f"tunableop_untuned{ordinal}.csv"
+        untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
         assert os.path.exists(untuned_filename)
 
         # tuning the untuned GEMMs in file
@@ -4609,14 +4617,15 @@ class TestLinalg(TestCase):
         assert len(torch.cuda.tunable.get_results()) > 0
         assert torch.cuda.tunable.write_file()
 
-        result_filename = f"tunableop_results{ordinal}.csv"
+        result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
         assert os.path.exists(result_filename)
 
         # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
         for filename in [untuned_filename, result_filename]:
             try:
                 os.remove(filename)
-            finally:
+            # NB: The file is locked on Windows
+            except (FileNotFoundError, PermissionError):
                 pass
 
         # disables TunableOp, no file will be written, restore to default values
