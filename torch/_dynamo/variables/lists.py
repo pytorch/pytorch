@@ -82,7 +82,9 @@ class BaseListVariable(VariableTrackerContainer):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
     def _as_python_constant(self, already_visited: list[VariableTracker]) -> Any:
-        return self.python_type()([self._recursive_constant(x, already_visited) for x in self.items])
+        return self.python_type()(
+            [self._recursive_constant(x, already_visited) for x in self.items]
+        )
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
