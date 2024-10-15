@@ -53,6 +53,7 @@ from .schemas import (
 from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
+    runtime_unwrap_tensor_subclasses,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
@@ -627,10 +628,9 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
             assert self.trace_joint is False
-            unwrapped_args = unwrap_tensor_subclasses(
+            unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
-                is_runtime=True,
                 append_symints=True,
             )
             args.clear()
@@ -1863,7 +1863,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len_tangents = len(
                         unwrap_tensor_subclasses(
                             tangents,
-                            is_runtime=False,
                             # any extra symint will be captured by the partitioner
                             append_symints=False,
                         )
@@ -1902,9 +1901,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, t in enumerate(all_args)
                     ]
 
-                    all_args = unwrap_tensor_subclasses(
+                    all_args = runtime_unwrap_tensor_subclasses(
                         all_args,
-                        is_runtime=True,  # has no effect when append_symint is False
                         append_symints=False,
                     )
                 else:

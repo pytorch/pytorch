@@ -157,7 +157,29 @@ def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List
 def unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,
-    is_runtime: bool,
+    append_symints: bool,
+):
+    xs_inner: List[Union[int, Tensor, SymInt]] = []
+
+    for x in wrapped_args:
+        if not is_traceable_wrapper_subclass(x):
+            xs_inner.append(x)
+            continue
+
+        size = x.size()
+        stride = x.stride()
+        xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
+
+        if append_symints:
+            xs_inner.extend(filter_symints(size))
+            xs_inner.extend(filter_symints(stride))
+
+    return xs_inner
+
+
+def runtime_unwrap_tensor_subclasses(
+    wrapped_args: List[Union[Tensor, int]],
+    *,
     append_symints: bool,
     subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None,
 ):
@@ -172,35 +194,23 @@ def unwrap_tensor_subclasses(
         stride = x.stride()
         xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
         if append_symints:
-            if is_runtime:
-                assert subclass_metas is not None
-                meta = subclass_metas[idx]
-                assert isinstance(meta, SubclassCreationMeta)
+            assert subclass_metas is not None
+            meta = subclass_metas[idx]
+            assert isinstance(meta, SubclassCreationMeta)
 
-                # outer_size
-                symint_placeholders = compute_symint_placeholders(meta.outer_size)
-                assert len(size) == len(symint_placeholders)
-                xs_inner.extend(
-                    [
-                        r
-                        for (r, is_symint) in zip(size, symint_placeholders)
-                        if is_symint
-                    ]
-                )
+            # outer_size
+            symint_placeholders = compute_symint_placeholders(meta.outer_size)
+            assert len(size) == len(symint_placeholders)
+            xs_inner.extend(
+                [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
+            )
 
-                # outer_stride
-                symint_placeholders = compute_symint_placeholders(meta.outer_stride)
-                assert len(stride) == len(symint_placeholders)
-                xs_inner.extend(
-                    [
-                        r
-                        for (r, is_symint) in zip(stride, symint_placeholders)
-                        if is_symint
-                    ]
-                )
-            else:
-                xs_inner.extend(filter_symints(size))
-                xs_inner.extend(filter_symints(stride))
+            # outer_stride
+            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
+            assert len(stride) == len(symint_placeholders)
+            xs_inner.extend(
+                [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
+            )
     return xs_inner
 
 
@@ -208,9 +218,7 @@ def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
     ret_unwrapped = []
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
-        a_unwrapped = unwrap_tensor_subclasses(
-            [a], is_runtime=True, append_symints=False
-        )
+        a_unwrapped = runtime_unwrap_tensor_subclasses([a], append_symints=False)
         ret_unwrapped.extend(a_unwrapped)
         n = len(a_unwrapped)
         ret_indices_to_original.extend([i] * n)
