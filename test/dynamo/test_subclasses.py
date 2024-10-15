@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 def traceable_subclass(c):
@@ -671,7 +672,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         wrapped2 = y.as_subclass(SigmoidToExpSubclass)
 
         def fn(w):
-            return w.sigmoid()
+            return w.exp()
 
         fn_opt = compile_full_eager(fn)
 
@@ -681,6 +682,38 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, res_exp2)
+
+    def test_torch_function_call_on_method_arg(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func == torch._C.TensorBase.add_:
+                    func = torch._C.TensorBase.sub_
+
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
+
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = y.as_subclass(LocalSubclass)
+        wrapped2 = z.as_subclass(LocalSubclass)
+
+        def fn(a, w):
+            a.add_(w)
+            return a
+
+        fn_opt = torch.compile(fn)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+            res_exp = fn(x, wrapped)
+            res_act = fn_opt(y, wrapped2)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_user_overidden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
@@ -1427,6 +1460,99 @@ s1 > 3""",
             lambda: torch.compile(lambda x: x * x)(x),
         )
 
+    def test_subclass_constructor_proxying(self):
+        import dataclasses
+        from collections import namedtuple
+        from typing import Any
+
+        @dataclasses.dataclass(frozen=True)
+        class SubclassTensorArgs:
+            original_shape: torch.Size
+            device: torch.device
+            inner_meta: Any
+
+        SubclassTensorArgs2 = namedtuple(
+            "SubclassTensorArgs2",
+            [
+                "original_shape",
+                "device",
+                "inner_meta",
+            ],
+        )
+
+        class SubclassTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a, meta):
+                shape = a.shape
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+                return out
+
+            def __init__(self, a, meta):
+                self.a = a
+                self.meta = meta
+
+            def __repr__(self):
+                a_repr = repr(self.a)
+                return f"SubclassTensor({a_repr})"
+
+            def __tensor_flatten__(self):
+                return ["a"], self.meta
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, _, __):
+                a = inner_tensors["a"]
+                return SubclassTensor(a, meta)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, args
+                )
+                kwargs_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, kwargs
+                )
+                out_a = func(*args_a, **kwargs_a)
+                out = pytree.tree_map(
+                    lambda x: SubclassTensor(
+                        x, SubclassTensorArgs2(x.shape, x.device, None)
+                    )
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out_a,
+                )
+                return return_and_correct_aliasing(func, args, kwargs, out)
+
+        @torch.compile(fullgraph=True)
+        def f1(x):
+            meta = SubclassTensorArgs(
+                x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None)
+            )
+            out = SubclassTensor(x, meta)
+            return out * out
+
+        x = torch.randn(3, 3)
+        f1(x)
+
+        @torch.compile(fullgraph=True)
+        def f1(x):
+            meta = SubclassTensorArgs2(
+                x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None)
+            )
+            out = SubclassTensor(x, meta)
+            return out * out
+
+        x = torch.randn(3, 3)
+        f1(x)
+
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
         # without unwrapping and calling torch._C.DisableTorchFunctionSubclass(),
@@ -1625,6 +1751,14 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def g(x):
+            typ = type(Foo())
+            typ.__base__
+            return typ.__base__
+
+        self.assertEqual(g(torch.randn(1)), Multistreamable)
 
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
@@ -2231,6 +2365,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         for ref_v, res_v in zip(values_copy, values):
             self.assertEqual(ref_v.grad, res_v.grad)
 
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     def test_unbind(self):
         # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
         # This causes a recompile later on when it realizes the batch and last dim

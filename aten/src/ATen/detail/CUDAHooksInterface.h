@@ -73,11 +73,11 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
@@ -121,7 +121,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const override {
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
 

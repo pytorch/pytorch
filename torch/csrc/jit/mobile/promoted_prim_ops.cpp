@@ -113,10 +113,8 @@ void layout(Stack& stack) {
 }
 
 void toPrimDType(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool non_blocking;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool copy;
+  bool non_blocking = false;
+  bool copy = false;
   pop(stack, non_blocking, copy);
   std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
@@ -141,10 +139,8 @@ void boolTensor(Stack& stack) {
 }
 
 void toList(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int elem_ty_val;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int dim_val;
+  int elem_ty_val = 0;
+  int dim_val = 0;
   at::Tensor t;
 
   pop(stack, elem_ty_val);
@@ -194,8 +190,7 @@ void toList(Stack& stack) {
       "Output annotation list dimension and runtime tensor dimension must match for tolist()");
 
   // Wrap out_ty in a ListType dim times.
-  for (const auto i : c10::irange(dim_val)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(dim_val)) {
     out_ty = at::ListType::create(out_ty);
   }
 

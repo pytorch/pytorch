@@ -170,9 +170,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_checkpoint"
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
@@ -220,6 +217,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
+    "inductor/test_compiler_bisector",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -297,15 +295,17 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
-    if dist.is_ucc_available():
-        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
-            "UCX_TLS": "tcp,cuda",
-            "UCC_TLS": "nccl,ucp,cuda",
-            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
-            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
-        }
+    # Test with UCC backend is deprecated.
+    # See https://github.com/pytorch/pytorch/pull/137161
+    # if dist.is_ucc_available():
+    #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+    #         "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+    #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+    #         "UCX_TLS": "tcp,cuda",
+    #         "UCC_TLS": "nccl,ucp,cuda",
+    #         "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+    #         "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
+    #     }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -387,6 +387,12 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
+    if scribe_token:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
+    else:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
+
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
@@ -567,13 +573,8 @@ def run_test(
 
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
-    # Don't do it for macos inductor tests as it makes them
-    # segfault for some reason
-    if not (
-        IS_MACOS and len(command) >= 2 and command[2].startswith(INDUCTOR_TEST_PREFIX)
-    ):
-        env = env or {}
-        env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
+    env = env or {}
+    env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if set else "0"
     return env
 
 
@@ -1416,7 +1417,16 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal", "test_modules"]
+        selected_tests = [
+            "test_mps",
+            "test_metal",
+            "test_modules",
+            "nn/test_convolution",
+            "nn/test_dropout",
+            "nn/test_pooling",
+            "test_view_ops",
+            "test_nn",
+        ]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
@@ -1834,12 +1844,12 @@ def main():
     try:
         # Actually run the tests
         start_time = time.time()
-        elapsed_time = time.time() - start_time
-        print_to_stderr(
-            f"Starting test batch '{test_batch.name}' {round(elapsed_time, 2)} seconds after initiating testing"
-        )
         run_tests(
             test_batch.sharded_tests, test_directory, options, test_batch.failures
+        )
+        elapsed_time = time.time() - start_time
+        print_to_stderr(
+            f"Running test batch '{test_batch.name}' cost {round(elapsed_time, 2)} seconds"
         )
 
     finally:

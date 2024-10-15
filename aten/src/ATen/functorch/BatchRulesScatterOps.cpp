@@ -58,7 +58,7 @@ static int64_t get_max_index_logical_dim(
 static std::vector<std::optional<Tensor>> batchIndices(
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
-  int64_t batch_size,
+  const c10::SymInt& batch_size,
   std::optional<int64_t> self_bdim,
   std::optional<int64_t> values_bdim = std::nullopt) {
   // There are 3 main cases:
@@ -89,7 +89,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
 
   for (size_t i = 0; i < indices.size(); i++) {
     auto index = indices[i];
-    if (index.has_value() && index->numel() != 0) {
+    if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
       if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
@@ -346,10 +346,10 @@ namespace {
   // Code is mostly duplicated from
   // https://github.com/pytorch/pytorch/blob/fb0e27d38a8fdab4e1c14d6378c9e41cb30fd6a3
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L294-L312
-  VmapDimVector compute_indexed_shape(const Tensor &src, TensorList indices_list)
+  VmapSymDimVector compute_indexed_shape(const Tensor &src, TensorList indices_list)
   {
     int64_t dims_before = 0, dims_indexed = 0;
-    IntArrayRef replacement_shape;
+    SymIntArrayRef replacement_shape;
     for (const auto dim : c10::irange(indices_list.size())) {
       if (!indices_list[dim].defined()) {
         if (dims_indexed == 0) {
@@ -357,7 +357,7 @@ namespace {
         }
       } else {
         dims_indexed++;
-        replacement_shape = indices_list[dim].sizes();
+        replacement_shape = indices_list[dim].sym_sizes();
       }
     }
 
@@ -365,7 +365,7 @@ namespace {
     // The offset in these dimensions is computed by the kernel using the index tensor's
     // values and the stride of src. The new shape is not meaningful. It's used to make
     // the shape compatible with the result tensor.
-    auto shape = VmapDimVector(src.sizes());
+    auto shape = VmapSymDimVector(src.sym_sizes());
     int64_t end = dims_before + dims_indexed;
     shape.erase(shape.begin() + dims_before, shape.begin() + end);
     shape.insert(shape.begin() + dims_before, replacement_shape.begin(), replacement_shape.end());
@@ -375,7 +375,7 @@ namespace {
   // Code is mostly duplicated from
   // https://github.com/pytorch/pytorch/blob/fb0e27d38a8fdab4e1c14d6378c9e41cb30fd6a3
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L379-L405
-  VmapDimVector get_indexed_shape(Tensor self, const torch::List<std::optional<at::Tensor>> &orig)
+  VmapSymDimVector get_indexed_shape(Tensor self, const torch::List<std::optional<at::Tensor>> &orig)
   {
     at::native::checkIndexTensorTypes(orig, /*allow_int*/ true);
     // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
@@ -406,13 +406,13 @@ namespace {
                               ArrayRef<std::optional<int64_t>> indices_bdims,
                               const Tensor &values,
                               std::optional<int64_t> values_bdim,
-                              std::optional<int64_t> opt_batch_size = {}) {
+                              std::optional<c10::SymInt> opt_batch_size = {}) {
 
     Tensor self_ = moveBatchDimToFront(self, self_bdim);
     Tensor values_ = moveBatchDimToFront(values, values_bdim);
     // for inplace variants `index_put_` and `_index_put_impl_` we find the batch_size
     // here while for `index_put` does it outside of this function.
-    const auto batch_size = opt_batch_size ? opt_batch_size.value() : self_.size(0);
+    const auto batch_size = opt_batch_size ? opt_batch_size.value() : self_.sym_size(0);
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
     values_ = ensure_has_bdim(values_, values_bdim.has_value(), batch_size);
     TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
@@ -427,11 +427,11 @@ namespace {
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
     if ( (int64_t) indexed_shape.size() > values_.dim()) {
-      auto values_sizes = values_.sizes();
+      auto values_sizes = values_.sym_sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)
       auto n_unit_dims = indexed_shape.size() - values_sizes.size();
-      VmapDimVector new_values_shape(values_sizes.size() + n_unit_dims);
+      VmapSymDimVector new_values_shape(values_sizes.size() + n_unit_dims);
 
       // add the batch-dim
       new_values_shape[0] = batch_size;
@@ -445,7 +445,7 @@ namespace {
         // since batch and unit dims are already be filled.
         new_values_shape[idx + n_unit_dims] = values_sizes[idx];
       }
-      values_ = values_.view(new_values_shape);
+      values_ = values_.view_symint(new_values_shape);
     }
 
     return std::make_tuple(self_, indices_, values_);
@@ -613,14 +613,14 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
   // find the batch_size
-  int64_t batch_size = 0;
+  c10::SymInt batch_size = 0;
   if (self_bdim || values_bdim) {
-    batch_size = get_bdim_size2(self, self_bdim, values, values_bdim);
+    batch_size = get_bdim_size2_symint(self, self_bdim, values, values_bdim);
   } else {
     // one or more of the indices is batched.
     for (size_t i = 0; i < indices.size(); i++) {
       if (indices_bdims[i] && indices[i].has_value()) {
-        batch_size = indices[i].value().size(*indices_bdims[i]);
+        batch_size = indices[i].value().sym_size(*indices_bdims[i]);
         break;
       }
     }
@@ -777,6 +777,28 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_batch_rule(
     const c10::string_view reduce) {
   return scatter_batch_rule(ATEN_FN2(scatter, reduce),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_two_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, std::optional<int64_t> index_bdim,
+    const Tensor& src, std::optional<int64_t> src_bdim,
+    const c10::string_view reduce,
+    bool include_self) {
+  return scatter_batch_rule(ATEN_FN2(scatter_reduce, two),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> scatter_reduce__two_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, std::optional<int64_t> index_bdim,
+    const Tensor& src, std::optional<int64_t> src_bdim,
+    const c10::string_view reduce,
+    bool include_self) {
+  return scatter_batch_rule(ATEN_FN2(scatter_reduce_, two),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> scatter_value_reduce_batch_rule(
@@ -1250,6 +1272,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
   VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
   VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
+  VMAP_SUPPORT2(scatter_reduce, two, scatter_reduce_two_batch_rule);
+  VMAP_SUPPORT2(scatter_reduce_, two, scatter_reduce__two_batch_rule);
   // as_strided_scatter does not work with the for-loop fallback today,
   // because as_strided_scatter will return an output that matches
   // the strides/storage_offset of its input.
