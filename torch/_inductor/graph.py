@@ -63,6 +63,7 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     init_backend_registration,
 )
+from .codegen.wrapper import PythonWrapperCodegen
 from .exc import (
     CppWrapperCodegenError,
     LoweringException,
@@ -107,7 +108,6 @@ from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
-    from .codegen.wrapper import PythonWrapperCodegen
 
 from torch._inductor.codecache import output_code_log
 
@@ -645,16 +645,17 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         subgraph_name: str,
-    ) -> "GraphLowering":
+    ) -> "SubgraphLowering":
         """
-        Make a subgraph of the current graph with all inherited
-        parts, except the graph module (`gm`) and `example_inputs`.
-        The subgraphs are lowered separately, but intended to be
-        inlined in the parent graph's codegening. Hence the need
-        for maintaining the same `shape_env` and other properties.
-        The subgraph name is qualified by the parent graph's name.
+        Make a subgraph of the current graph with all inherited parts, except
+        the graph module (`gm`) and `example_inputs`.  The subgraphs are lowered
+        separately and lifted into a separate function in the parent output
+        wrapper code.  The subgraph name is qualified by the parent graph's
+        name. Note that the lifting of subgraph is supported for python wrapper
+        only. For cpp wrapper, we inline the subgraphs in the parent wrapper.
         """
-        return GraphLowering(
+        return SubgraphLowering(
+            parent=self,
             gm=gm,
             example_inputs=example_inputs,
             shape_env=self._shape_env,
@@ -742,13 +743,16 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.constants:
             data = V.graph.constants[buffer_name]
             return ir.ConstantBuffer(
-                buffer_name,
-                ir.FixedLayout(
+                name=buffer_name,
+                layout=ir.FixedLayout(
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
 
         return None
+
+    def add_symbol_graph_input(self, symbol: sympy.Expr) -> None:
+        raise RuntimeError("Should not be called for the main graph")
 
     def get_buffer(self, buffer_name: str) -> Union[ir.TensorBox, ir.Buffer]:
         buf = self.try_get_buffer(buffer_name)
@@ -895,8 +899,10 @@ class GraphLowering(torch.fx.Interpreter):
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
-                new_name,
-                FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
+                name=new_name,
+                layout=FixedLayout(
+                    data.device, data.dtype, *self.static_sizes_strides(data)
+                ),
             )
         )
 
@@ -920,6 +926,7 @@ class GraphLowering(torch.fx.Interpreter):
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
+        target = self.qualify_name(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -949,11 +956,10 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
         # TODO(jansel): handle input aliasing
-        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+                name=target,
+                layout=FixedLayout(example.device, example.dtype, sizes, strides),
             )
         )
         self.graph_inputs[target] = tensor
@@ -1051,7 +1057,7 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
-            return TorchBindObject(target, value)
+            return TorchBindObject(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -1063,7 +1069,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         with no_dispatch():
             if value.shape == ():
-                return Constant(value.item(), value.dtype, value.device)
+                return Constant(
+                    value=value.item(), dtype=value.dtype, device=value.device
+                )
             if self.can_inline_constant(value):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
@@ -1227,7 +1235,9 @@ class GraphLowering(torch.fx.Interpreter):
             new_stride,
             old_layout.offset,
         )
-        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
+        return ir.TensorBox(
+            torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)
+        )
 
     def propagate_mutation(
         self,
@@ -1694,7 +1704,12 @@ class GraphLowering(torch.fx.Interpreter):
             if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
-    def init_wrapper_code(self) -> None:
+    def init_wrapper_code(
+        self,
+        is_subgraph: bool = False,
+        subgraph_name: Optional[str] = None,
+        parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+    ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
         device_types.discard("meta")
@@ -1715,7 +1730,9 @@ class GraphLowering(torch.fx.Interpreter):
         assert (
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
-        self.wrapper_code = wrapper_code_gen_cls()
+        self.wrapper_code = wrapper_code_gen_cls.create(
+            is_subgraph, subgraph_name, parent_wrapper_code
+        )
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
@@ -1979,3 +1996,76 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
+
+
+class SubgraphLowering(GraphLowering):
+    """
+    Mostly a helper class for the subgraph lowering. The main goal is to call
+    init_wrapper_code with the subgraph related arguments.
+    """
+
+    def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
+        self.parent = parent
+        super().__init__(*args, **kwargs)
+
+    def init_wrapper_code(
+        self,
+        is_subgraph: bool = False,
+        subgraph_name: Optional[str] = None,
+        parent_wrapper_code: Optional[PythonWrapperCodegen] = None,
+    ) -> None:
+        super().init_wrapper_code(
+            is_subgraph=True,
+            subgraph_name=self.name,
+            parent_wrapper_code=self.parent.wrapper_code,
+        )
+
+    def add_symbol_graph_inputs(self) -> None:
+        """
+        For subgraphs, it is possible that the aten graph does not have a symint
+        associated with the shape of the input tensors. To ensure that the
+        shape/stride symbol is available for the subgraph code (e.g. for
+        allocating intermediate tensor), we collect all the symbols from input
+        tensors of this subgraph (passed as inputs from the parent graph) and
+        add them as extra inputs to the subgraph.
+
+        The parent wrapper `codegen_subgraph` then ensures to pass on the
+        corresponding symints from the parent function to the lifted subgraph
+        function.
+        """
+
+        def get_free_symbols(expr: sympy.Expr) -> OrderedSet[sympy.Symbol]:
+            # expr can be s0 + s1, recurse to get s0 and s1
+            symbols: OrderedSet[
+                sympy.Symbol
+            ] = OrderedSet()  # Use a set to avoid duplicates
+            if isinstance(expr, sympy.Symbol):
+                symbols.add(expr)
+            elif isinstance(expr, sympy.Expr):
+                symbols.update(expr.free_symbols)
+            return symbols
+
+        subgraph_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+
+        graph_inputs_tensors = list(
+            filter(
+                lambda x: not isinstance(x[1], sympy.Expr), self.graph_inputs.items()
+            )
+        )
+
+        for name_value in graph_inputs_tensors:
+            _, value = name_value
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                subgraph_symbols.update(get_free_symbols(shape))
+
+            strides = value.get_stride()
+            for dim, shape in enumerate(strides):
+                subgraph_symbols.update(get_free_symbols(shape))
+
+        # Add the extra symints in the subgraph
+        for symbol in subgraph_symbols:
+            if symbol.name in self.graph_input_names:
+                continue
+            self.graph_inputs[symbol.name] = symbol
+            self.graph_input_names.append(symbol.name)
