@@ -63,31 +63,6 @@ class WhileLoopOp(HigherOrderOperator):
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
-class WhileLoopWithMutationAndTripCount(HigherOrderOperator):
-    def __init__(self) -> None:
-        super().__init__("while_loop_with_mutation_and_trip_count")
-
-    def __call__(
-        self,
-        cond_fn: Callable,
-        body_fn: Callable,
-        carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        /,
-        mutated_inputs: Tuple[torch.Tensor],
-        trip_count_expr: Optional[torch.SymInt],
-    ):
-        return super().__call__(
-            cond_fn,
-            body_fn,
-            carried_inputs,
-            additional_inputs,
-            mutated_inputs,
-            trip_count_expr,
-        )
-
-
-while_loop_with_mutation_and_trip_count_op = WhileLoopWithMutationAndTripCount()
 while_loop_op = WhileLoopOp()
 
 
@@ -221,11 +196,6 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
 while_loop_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(while_loop_op, deferred_error=True)
 )
-while_loop_with_mutation_and_trip_count_op.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(
-        while_loop_with_mutation_and_trip_count_op, deferred_error=True
-    )
-)
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
@@ -275,63 +245,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
-@while_loop_with_mutation_and_trip_count_op.py_impl(ProxyTorchDispatchMode)
-def while_loop_with_mutation_and_trip_count_tracing(
-    proxy_mode,
-    cond_fn,
-    body_fn,
-    carried_inputs,
-    additional_inputs,
-    mutated_inputs,
-    trip_count_expr,
-):
-    cond_graph = reenter_make_fx(cond_fn)(*carried_inputs, *additional_inputs)
-    body_graph = reenter_make_fx(body_fn)(*carried_inputs, *additional_inputs)
-    _, cond_graph_name = unique_graph_id(proxy_mode, "while_loop_cond_graph")
-    _, body_graph_name = unique_graph_id(proxy_mode, "while_loop_body_graph")
-    proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
-    proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
-    proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy,
-        (
-            cond_graph,
-            body_graph,
-            carried_inputs,
-            additional_inputs,
-            mutated_inputs,
-            trip_count_expr,
-        ),
-    )
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function",
-        while_loop_with_mutation_and_trip_count_op,
-        proxy_args,
-        {},
-        name="while_loop",
-    )
-    # body_fn return output with the same pytree and tensor meta data as carried_inputs
-    # so we could just return the output after one iteration.
-    out = body_fn(*carried_inputs, *additional_inputs)
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
-):
-    with mode:
-        return body_fn(*carried_inputs, *additional_inputs)
-
-
-@while_loop_with_mutation_and_trip_count_op.py_impl(FakeTensorMode)
-def while_loop_with_mutation_and_trip_count_fake(
-    mode,
-    cond_fn,
-    body_fn,
-    carried_inputs,
-    additional_inputs,
-    mutated_inputs,
-    trip_count_expr,
 ):
     with mode:
         return body_fn(*carried_inputs, *additional_inputs)
@@ -370,18 +287,3 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             unwrapped_additional_inputs,
         )
         return ctx.wrap_tensors(ret)
-
-
-@while_loop_with_mutation_and_trip_count_op.py_functionalize_impl
-def while_loop_with_mutation_and_trip_count_functionalize(
-    ctx,
-    cond_fn,
-    body_fn,
-    carried_inputs,
-    additional_inputs,
-    mutated_inputs,
-    trip_count_expr,
-):
-    raise RuntimeError(
-        "Funcitonalize while_loop_with_mutation_and_trip_count is not supported yet. If you need this, please file an issue."
-    )

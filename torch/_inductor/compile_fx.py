@@ -303,11 +303,7 @@ def _recursive_post_grad_passes(gm, is_inference: bool = False):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
         _recursive_post_grad_passes(subgraph, is_inference)
-    # print("before_pases:")
-    # gm.print_readable()
     post_grad_passes(gm, is_inference)
-    # print("after_passes:")
-    # gm.print_readable()
 
 
 def split_const_gm(

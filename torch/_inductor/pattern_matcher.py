@@ -123,11 +123,6 @@ class TraceFn(Protocol):
         ...
 
 
-class PostTraceFn(Protocol):
-    def __call__(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        ...
-
-
 T = TypeVar("T")
 
 # What's a better name for this?
@@ -255,14 +250,18 @@ class Match:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-            assert all(
-                isinstance(arg, (int, torch.SymInt, torch.fx.Node)) for arg in args
-            ), f"expect SymInt or fx.Node args got {[type(arg) for arg in args]}"
+
+            def _get_val(val: Union[int, torch.fx.Node]) -> Union[int, torch.Tensor]:
+                if isinstance(val, int):
+                    return val
+                elif isinstance(val, torch.fx.Node):
+                    return val.meta["val"]
+                else:
+                    raise TypeError("Allowed types are int or torch.fx.Node")
+
             replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg)  # type: ignore[arg-type]
+                replacement_fn, torch.fx.map_arg(args, _get_val)  # type: ignore[arg-type]
             )
-            # print("replacement graph:")
-            # replacement.print_readable()
             ReplacementPatternEntry.replace_with_graph(
                 self,
                 self.ctx.graph,
@@ -1051,9 +1050,6 @@ class ReplacementPatternEntry(PatternEntry):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
 
-            # The default implementation of get_attr is
-            # to inline the get_attr, but we need to keep them in the graph
-            # when replacing one HOP with the other (e.g. lowering scan to while_loop).
             def get_attr(self, target, args, kwargs) -> torch.fx.Node:  # type: ignore[no-untyped-def]
                 sub_gm = super().get_attr(target, args, kwargs)
 
@@ -1067,9 +1063,8 @@ class ReplacementPatternEntry(PatternEntry):
 
                 assert isinstance(
                     sub_gm, torch.fx.GraphModule
-                ), "{target} is not a graph module."
+                ), "NYI: {target} is not a graph module."
                 graph_name = unique_name(target)
-                print("registering_module", graph_name)
                 graph.owning_module.register_module(graph_name, sub_gm)
                 node = graph.get_attr(graph_name)
                 return node
@@ -1087,6 +1082,11 @@ class ReplacementPatternEntry(PatternEntry):
                             assert "tensor_meta" in node.meta
                             result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
+
+                # Note: the default implementation of get_attr is
+                # getting the attr without creating a new node. But when we want to replace
+                # one hop with the other (e.g. lower scan to while_loop), we need to also copy
+                # the get_attrs for subgraphs and register the subgraph to the new graph.
                 if node.op == "get_attr":
                     return self.get_attr(node.target, tuple(), {})
                 raise NotImplementedError(f"unhandled {node}")
@@ -1143,14 +1143,14 @@ class ReplacementPatternEntry(PatternEntry):
                 new: Union[torch.fx.Node, Sequence[torch.fx.Node], None],
             ) -> None:
                 def _erase_node_and_maybe_getattr_args(old: torch.fx.Node) -> None:
+                    graph.erase_node(old)
+                    # Remove the unused subgraph get_attr nodes after replacing one hop
+                    # with the other (e.g. lowering scan to while_loop)
                     get_attr_args = (
                         arg
                         for arg in old.args
                         if isinstance(arg, torch.fx.Node) and arg.op == "get_attr"
                     )
-                    graph.erase_node(old)
-                    # Remove the subgraph get_attr nodes after replacing one hop
-                    # with the other (e.g. lowering scan to while_loop)
                     for arg in get_attr_args:
                         if len(arg.users) == 0:
                             delattr(graph.owning_module, arg.target)  # type: ignore[arg-type]

@@ -1329,10 +1329,10 @@ class ScanTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
     # TODO(yidi): when setting dynamic=True, some symints are lifted to the subgraph of cond, which
     # is not supported by cond yet.
     @parametrize("dynamic", [False])
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2, 3])
     @parametrize("pred", [True, False])

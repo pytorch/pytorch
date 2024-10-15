@@ -961,7 +961,6 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
         # TODO(jansel): handle input aliasing
-        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
                 name=target,

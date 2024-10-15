@@ -99,7 +99,7 @@ def reenter_make_fx(fn, symintify_int=False):
                     return unbacked_idx
                 return t
 
-            args = [_symintify_int(arg) for arg in args]
+            args = tuple(_symintify_int(arg) for arg in args)
 
         return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args

@@ -57,9 +57,12 @@ def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
     return torch.select(t, dim, idx)
 
 
-@torch.library.register_fake("_scan_helper::unsafe_select")
-def _(t, dim, idx):
+# Note: we always select 0, becuase idx is an unbacked symint in scan,
+# and we're certain that t.size()[dim] > 0.
+@torch.library.register_fake("_scan_helper::unsafe_select")  # type: ignore[misc]
+def _(t: torch.Tensor, dim: int, idx: int):
     return t.select(dim, 0)
+
 
 def scan(
     combine_fn: Callable[
@@ -199,6 +202,10 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse):
+        if torch._inductor.config.cpp_wrapper:
+            raise RuntimeError(
+                "scan is not supported in cpp_wrapper and abi_compatible mode yet."
+            )
         return scan_op(
             combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
         )
@@ -223,87 +230,6 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
                     dim=dim,
                     reverse=reverse,
                 )
-<<<<<<< HEAD
-=======
-
-    # TODO: Support cpp warpper and abi compitatible mode
-    if torch._inductor.config.cpp_wrapper:
-        raise RuntimeError(
-            "scan is not supported in cpp_wrapper and abi_compatible mode yet."
-        )
-
-    leaves_init, spec_init = pytree.tree_flatten(init)
-    leaves_xs, spec_xs = pytree.tree_flatten(xs)
-
-    if len(leaves_init) == 0:
-        raise RuntimeError("Init tensors must be provided")
-    if any(not isinstance(x, torch.Tensor) for x in leaves_init):
-        raise RuntimeError("All init leaves must be a Tensor")
-    if any(not isinstance(x, torch.Tensor) for x in leaves_xs):
-        raise RuntimeError("All xs leaves must be a Tensor")
-    if any(x.shape[dim] == 0 for x in leaves_xs):
-        raise RuntimeError("All xs leaves must have a scan dimension > 0")
-
-    if len(leaves_xs) > 0:
-        shape = leaves_xs[0].shape
-        ndim = len(shape)
-        dim = utils.canonicalize_dim(ndim, dim)
-
-        out = combine_fn(
-            pytree.tree_unflatten(leaves_init, spec_init),
-            pytree.tree_unflatten([elem.select(dim, 0) for elem in leaves_xs], spec_xs),
-        )
-
-        # The first output needs to have the same pytree as init
-        carry_leaves = pytree.tree_leaves(out[0])
-        if len(carry_leaves) != len(leaves_init):
-            raise RuntimeError(
-                "The number of leaves of the pytree of the new carry produced by the operator\
- needs to match the length of the pytree of the init"
-            )
-
-        def _check_new_carry_match_init(leaves_init, carry_leaves):
-            for i, (init, new_carry) in enumerate(zip(leaves_init, carry_leaves)):
-                assert init.shape == new_carry.shape, (
-                    ""
-                    f"The shape of the new_carry[{i}] {new_carry.shape} doesn't match that of the init[{i}] {init.shape}."
-                )
-                assert (
-                    init.stride() == new_carry.stride()
-                ), f"The stride of the new_carry[{i}] {new_carry.stride()} doesn't match that of the init[{i}] {init.stride()}."
-                assert (
-                    init.dtype == new_carry.dtype
-                ), f"The dtype of the new_carry[{i}] {new_carry.dtype} doesn't match that of the init[{i}] {init.dtype}."
-                assert (
-                    init.requires_grad == new_carry.requires_grad
-                ), f"The requires_grad of the new_carry[{i}] {new_carry.requires_grad} doesn't match that of the init[{i}] {init.requires_grad}."  # noqa: B950
-
-        _check_new_carry_match_init(leaves_init, carry_leaves)
-
-        # There are no pytree restrictions on the second output of the operator
-        out_leaves, tree_out = pytree.tree_flatten(out[1])
-
-        combine_fn = functools.partial(
-            wrap_combine_fn_flat,
-            combine_fn=combine_fn,
-            spec_init=spec_init,
-            spec_xs=spec_xs,
-            num_init_leaves=len(leaves_init),
-            num_inp_leaves=len(leaves_xs),
-        )
-
-        result_carry, result_flat = _extract_carry_and_out(
-            scan_op(
-                combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
-            ),
-            len(leaves_init),
-        )
-
-        return pytree.tree_unflatten(result_carry, spec_init), pytree.tree_unflatten(
-            result_flat, tree_out
-        )
-
->>>>>>> d01f95f42ad ([scan] support jit inductor)
     else:
         result = run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse)
 

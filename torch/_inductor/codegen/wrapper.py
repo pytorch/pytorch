@@ -2134,8 +2134,6 @@ class PythonWrapperCodegen(CodeGen):
         # are passed in as they're before.
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
-        if while_loop.iter_idx_expr is not None:
-            self.writeline(f"{while_loop.iter_idx_expr} = 0")
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
         self.codegen_subgraph(
@@ -2153,8 +2151,6 @@ class PythonWrapperCodegen(CodeGen):
         self.codegen_subgraph(
             while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
         )
-        if while_loop.iter_idx_expr is not None:
-            self.writeline(f"{while_loop.iter_idx_expr} += 1")
         self.writeline(ExitSubgraphLine(self))
 
     @staticmethod

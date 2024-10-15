@@ -4,7 +4,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 import torch._inductor as inductor
@@ -854,89 +854,52 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
-        assert (
-            len(kwargs) == 0
-        ), "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
         assert (
             len(kwargs) == 0
-        ), "kwargs are not merged into args before entering inductor."
+        ), "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+
         combine_subgraph, fx_init, fx_xs, dim, reverse, fx_additional_inputs = args
-        assert len(match.nodes) == 1
-        cur_node = match.nodes[0]
-        num_init_leaves = len(fx_init)
         assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
         sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
-        (
-            fake_init,
-            fake_xs,
-            fake_additional_inputs,
-            specialized_dim,
-            fake_outputs,
-        ) = pytree.tree_map(
-            lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
-            (fx_init, fx_xs, fx_additional_inputs, dim, cur_node),
+        cur_node = match.nodes[0]
+        num_init_leaves = len(fx_init)
+        specialized_dim = (
+            int(dim.meta["val"]) if isinstance(dim, torch.fx.Node) else dim
         )
-        fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
-        fake_scan_length = fake_xs[0].size()[specialized_dim]
-        fake_carry_subgraph, fake_ys_outs = _extract_carry_and_out(
-            fake_outputs,
-            num_init_leaves,
-        )
-        fake_mode = fake_init[0].fake_mode
-        fake_args, tree_spec = pytree.tree_flatten(
-            [fake_init, fake_xs, fake_additional_inputs, fake_scan_length]
-        )
+        assert isinstance(specialized_dim, int)
+        fake_scan_length = fx_xs[0].meta["val"].size()[specialized_dim]
 
-        def lower_to_while_loop(*flat_args):
-            (
-                init,
-                xs,
-                additional_inputs,
-                scan_length,
-            ) = pytree.tree_unflatten(flat_args, tree_spec)
-            scan_idx = 0 if not reverse else scan_length - 1
-            sub_xs = []
-            for x in xs:
-                sub_xs.append(
+        def lower_to_while_loop(*args):
+            def maybe_reverse_idx(loop_idx: Union[torch.SymInt, int]):
+                return loop_idx if not reverse else fake_scan_length - loop_idx - 1
+
+            def run_subgraph(carry, xs, additional_inputs, scan_idx):
+                sub_xs = [
                     torch.ops._scan_helper.unsafe_select(x, specialized_dim, scan_idx)
+                    for x in xs
+                ]
+                next_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
                 )
-            next_carry, y_outs = _extract_carry_and_out(
-                sub_gm(*(list(init) + sub_xs + list(additional_inputs))),
-                num_init_leaves,
-            )
-            ys_outs = [y.repeat(scan_length, *([1] * y.ndim)) for y in y_outs]
-
-            while_loop_operands, while_loop_spec = pytree.tree_flatten(
-                (next_carry, xs, additional_inputs, 1, ys_outs)
-            )
+                return next_carry, ys
 
             def cond_fn_out(*flat_args):
-                init, xs, additional_inputs, idx, ys_outs = pytree.tree_unflatten(
-                    flat_args, while_loop_spec
-                )
-                return idx < xs[0].size()[specialized_dim]
+                _, _, _, idx, _ = pytree.tree_unflatten(flat_args, while_loop_spec)
+                return idx < scan_length
 
             def body_fn_out(*flat_args):
                 init, xs, additional_inputs, idx, ys_outs = pytree.tree_unflatten(
                     flat_args, while_loop_spec
                 )
-                scan_idx = (
-                    idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
-                )
-                sub_xs = []
-                for x in xs:
-                    sub_xs.append(
-                        torch.ops._scan_helper.unsafe_select(
-                            x, specialized_dim, scan_idx
-                        )
-                    )
 
-                new_carry, ys = _extract_carry_and_out(
-                    sub_gm(*(list(init) + sub_xs + list(additional_inputs))),
-                    num_init_leaves,
-                )
+                scan_idx = maybe_reverse_idx(idx)
+
+                new_carry, ys = run_subgraph(init, xs, additional_inputs, scan_idx)
+
+                # inplace copy ys to ys_outs[scan_idx]
                 for y, y_out in zip(ys, ys_outs):
                     y_out_slice = torch.ops._scan_helper.unsafe_select(
                         y_out, 0, scan_idx
@@ -944,6 +907,20 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
                     y_out_slice.copy_(y)
                 return *new_carry, *xs, *additional_inputs, idx + 1, *ys_outs
 
+            (
+                init,
+                xs,
+                additional_inputs,
+                scan_length,
+            ) = pytree.tree_unflatten(args, tree_spec)
+            next_carry, y_subgraph_outs = run_subgraph(
+                init, xs, additional_inputs, maybe_reverse_idx(0)
+            )
+            ys_outs = [y.repeat(scan_length, *([1] * y.ndim)) for y in y_subgraph_outs]
+
+            while_loop_operands, while_loop_spec = pytree.tree_flatten(
+                (next_carry, xs, additional_inputs, 1, ys_outs)
+            )
             last_carry, _, _, _, ys_outs = pytree.tree_unflatten(
                 torch.ops.higher_order.while_loop(
                     cond_fn_out,
@@ -963,8 +940,8 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
                 fx_scan_length.meta["val"] = fake_scan_length
         else:
             assert isinstance(fake_scan_length, int)
-            fx_scan_length = fake_scan_length
-        lower_to_while_loop_args, _ = pytree.tree_flatten(
+            fx_scan_length = fake_scan_length  # type: ignore[assignment]
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (
                 fx_init,
                 fx_xs,
@@ -986,7 +963,7 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
-register_lowering_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.cat,
         ListOf(
@@ -1007,8 +984,6 @@ register_lowering_pattern(
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
 )
-
-
 def splitwithsizes_cat_replace(match, input_):
     return input_
 

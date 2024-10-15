@@ -10,7 +10,6 @@ from torch._higher_order_ops.while_loop import while_loop
 
 __all__ = [
     "cond",
-    "scan",
     "while_loop",
     "scan",
     "flex_attention",

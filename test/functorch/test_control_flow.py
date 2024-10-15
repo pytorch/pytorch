@@ -2455,7 +2455,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
