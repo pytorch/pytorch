@@ -1693,6 +1693,15 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    return this->check_accessors_nopybind(value);
+  }
+
+  bool check_leaf_guards_nopybind(PyObject* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
@@ -1702,6 +1711,10 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_accessors_nopybind(PyObject* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
@@ -1754,6 +1767,7 @@ class GuardManager {
       // swapping).
       _dict_tag = new_tag;
     }
+
     return result;
   }
 
@@ -1762,6 +1776,19 @@ class GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
+
+    const GuardDebugInfo& debug_info =
+        check_leaf_guards_verbose_nopybind(value, num_guards_executed);
+    if (!debug_info.result) {
+      return debug_info;
+    }
+
+    return check_accessors_verbose_nopybind(value, num_guards_executed);
+  }
+
+  GuardDebugInfo check_leaf_guards_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
@@ -1772,6 +1799,12 @@ class GuardManager {
       }
     }
 
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_accessors_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
@@ -1921,7 +1954,22 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      _reset_relational_guard_state();
+      return false;
+    }
+
+    // Run accessor guards without TorchFunction enabled
+    // Dynamo should only be adding guards on values without
+    // torch function at this point, because if there
+    // was a torch function, we should've traced through it
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+    if (!GuardManager::check_accessors_nopybind(value)) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -1929,10 +1977,13 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
+
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -1953,13 +2004,33 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
-    if (!debug_info.result) {
+    int num_guards_executed = 0;
+
+    // Run leaf guards
+    // This includes the GlobalStateGuard and the Torch Function Mode stack
+    // guard, which require Torch Function to be in its unmodified state
+    const GuardDebugInfo& debug_info_leaf =
+        GuardManager::check_leaf_guards_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      return debug_info;
+      return debug_info_leaf;
     }
 
-    int num_guards_executed = debug_info.num_guards_executed;
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    const GuardDebugInfo& debug_info_accessors =
+        GuardManager::check_accessors_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_accessors.result) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      _reset_relational_guard_state();
+      return debug_info_accessors;
+    }
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -1967,11 +2038,13 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
