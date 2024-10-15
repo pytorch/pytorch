@@ -1728,6 +1728,44 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16, 52))
+    @parametrize("in_features", (32, 52))
+    @parametrize("out_features", (32, 52))
+    @parametrize("bias_gate", (True, False))
+    @parametrize("bias_up", (True, False))
+    @dtypes(
+        torch.bfloat16,
+    )
+    def test_linear_silu_linear_mul(
+        self, batch_size, in_features, out_features, bias_gate, bias_up, dtype
+    ):
+        class Linear_Gate_Up(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(
+                    in_feature, out_feature, bias=bias_gate
+                )
+                self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
+
+            def forward(self, x):
+                return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        assert dtype == torch.bfloat16
+        mod = Linear_Gate_Up(in_features, out_features, bias_gate, bias_up).eval()
+        v = torch.randn(batch_size, in_features).to(torch.bfloat16)
+        with verify(dtype) as (atol, rtol), torch.autocast(
+            device_type="cpu"
+        ), torch.no_grad():
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
@@ -1765,6 +1803,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_thread_factors_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_thread_factors
+    )
+    test_linear_silu_linear_mul_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_silu_linear_mul
     )
 
 
