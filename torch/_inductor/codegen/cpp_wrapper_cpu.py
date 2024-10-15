@@ -7,11 +7,11 @@ from itertools import count
 from typing import Dict, List, Optional, Tuple
 
 import sympy
+from sympy import Expr
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
