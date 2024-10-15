@@ -219,13 +219,7 @@ class WeakTest(TestCase):
             del k
             del v
 
-        t_copy = threading.Thread(
-            target=dict_copy,
-            args=(
-                d,
-                exc,
-            ),
-        )
+        t_copy = threading.Thread(target=dict_copy, args=(d, exc))
         t_collect = threading.Thread(target=pop_and_collect, args=(keys,))
 
         t_copy.start()

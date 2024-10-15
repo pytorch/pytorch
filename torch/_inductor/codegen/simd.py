@@ -17,6 +17,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    no_type_check,
     Optional,
     Sequence,
     Tuple,
@@ -29,7 +30,12 @@ import torch
 import torch._logging
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
-from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.symbol import (
+    free_symbol_is_type,
+    prefix_str,
+    symbol_is_type,
+    SymT,
+)
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -41,6 +47,8 @@ from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
+    cache_on_self,
+    expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
@@ -105,6 +113,13 @@ class IterationRanges:
 
     def symbol(self):
         return sympy_index_symbol(self.name)
+
+    @property
+    @cache_on_self
+    @no_type_check
+    def symt(self) -> SymT:
+        prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
+        return prefix_to_symt[self.prefix]
 
 
 class IterationRangesRoot(IterationRanges):
@@ -397,7 +412,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
@@ -1065,13 +1079,12 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: OrderedSet[str] = OrderedSet()
-
+        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        current_loop_reduced_writes: OrderedSet[str] = OrderedSet()
-        current_loop_has_writes = False
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1083,11 +1096,17 @@ class SIMDScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def expect_improved_memory_usage(n):
+            for read in n.read_writes.reads:
+                if read.name in current_loop_buffer_usage:
+                    return True
+            return False
+
         def schedule_node_in_loop(n):
-            nonlocal current_loop_has_writes
             done.add(n)
             node_schedule.append(n)
-            current_loop_has_writes = True
+            current_loop_buffer_usage.update([x.name for x in n.read_writes.reads])
+
             # A scan is modelled as a reduction in the scheduler but has a
             # full sized output that can be used inside the loop body
             if (
@@ -1096,49 +1115,52 @@ class SIMDScheduling(BaseScheduling):
                 and isinstance(n.node, ir.ComputedBuffer)
                 and not isinstance(n.node.data, ir.Scan)
             ):
-                current_loop_reduced_writes.add(n.get_name())
+                not_ready_yet_nodes.add(n.get_name())
+            else:  # this node is available within the loop
+                current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
-            nonlocal current_loop_has_writes
-            if current_loop_has_writes:
-                # flush out any other runnable nodes to reduce number of loops
-                for other_node in nodes[index + 1 :]:
-                    if (
-                        node not in done
-                        and fits_in_main_body(other_node)
-                        and not (current_loop_reduced_writes & other_node.ancestors)
-                    ):
-                        schedule_node_in_loop(node)
-
+            nonlocal maybe_split_index
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
+            if maybe_split_index:
+                node_schedule.insert(maybe_split_index, DisableReduction)
+                node_schedule.insert(maybe_split_index + 1, EnableReduction)
+                maybe_split_index = None
             yield
             node_schedule.append(EnableReduction)
-            current_loop_reduced_writes.clear()
-            current_loop_has_writes = False
+            not_ready_yet_nodes.clear()
+            current_loop_buffer_usage.clear()
+
+        def requires_closing_previous_reduction(node, node_schedule):
+            if rnumel == 1:
+                return False
+            if not not_ready_yet_nodes & node.ancestors:
+                return False
+            assert node_schedule and not isinstance(
+                node_schedule[-1], (EnableReduction, DisableReduction)
+            )
+            return bool(not_ready_yet_nodes)
 
         for index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)
 
-            def requires_closing_previous_reduction(node, node_schedule):
-                if rnumel == 1:
-                    return False
-                if not current_loop_reduced_writes & node.ancestors:
-                    return False
-                assert node_schedule and not isinstance(
-                    node_schedule[-1], (EnableReduction, DisableReduction)
-                )
-                return bool(current_loop_reduced_writes)
-
             if fits_in_main_body(node):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
+
+                if current_loop_buffer_usage and not expect_improved_memory_usage(node):
+                    # If we don't improve memory usage, then it is better to split into two loops
+                    maybe_split_index = maybe_split_index or len(node_schedule)
+                else:
+                    # Memory usage got improved, cancel the loop split
+                    maybe_split_index = None
 
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
@@ -1188,18 +1210,8 @@ class SIMDScheduling(BaseScheduling):
         numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
-        size_hint = V.graph.sizevars.size_hint
-        has_hint = V.graph.sizevars.shape_env.has_hint
 
-        def within_32bit(e):
-            # Allow for unhinted e as long as we can still statically prove
-            # (e.g., via ValueRanges) that it is still in bounds
-            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
-                return True
-            # Otherwise, the hint MUST exist and be in range
-            return has_hint(e) and size_hint(e) <= int_max
-
-        if not within_32bit(numel):
+        if not expr_fits_within_32bit(numel):
             return False
 
         # Any use of a MultiOutputLayout will create a buffer with a
@@ -1210,7 +1222,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]
 
-        if not all(within_32bit(size) for size in buf_sizes):
+        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -1395,6 +1407,7 @@ class SIMDScheduling(BaseScheduling):
 
         self.codegen_comment(node_schedule)
         final_kernel.call_kernel(final_kernel.kernel_name)
+
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
@@ -1517,6 +1530,7 @@ class SIMDScheduling(BaseScheduling):
 
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
@@ -1525,43 +1539,95 @@ class SIMDScheduling(BaseScheduling):
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
-    def codegen_foreach(self, foreach_node):
-        from .triton_foreach import ForeachKernel
+    def generate_combo_kernel_code(
+        self,
+        subkernel_nodes: List[BaseSchedulerNode],
+        custom_part_algorithm: bool,
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        only_gen_src_code: bool = False,
+    ) -> List[Tuple[str, Any, Any]]:
+        from .triton_combo_kernel import ComboKernel
 
-        for partitions_with_metadata in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes(), self
-        ):
-            kernel = ForeachKernel()
-            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
-                node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-                (
-                    reduction_hint_val,
-                    mutations,
-                    index_dtype,
-                ) = self.get_kernel_args(node_schedule, numel, rnumel)
+        fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
+        subkernel_map, node_schedule_map = {}, {}
+        for pn, nodes in zip(subkernel_nodes, fused_node_lists):
+            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
+            (
+                reduction_hint_val,
+                mutations,
+                index_dtype,
+            ) = self.get_kernel_args(node_schedule, numel, rnumel)
+            subkernel_map[pn] = ComboKernel.create_triton_kernel(
+                *tiled_groups,
+                reduction_hint=reduction_hint_val,
+                mutations=mutations,
+                index_dtype=index_dtype,
+                optimize_mask=not mixed_sizes,
+            )
 
-                subkernel = kernel.create_sub_kernel(
-                    *tiled_groups,
-                    reduction_hint=reduction_hint_val,
-                    mutations=mutations,
-                    index_dtype=index_dtype,
-                )
+        partitions = ComboKernel.horizontal_partition(
+            nodes=subkernel_nodes,
+            triton_scheduling=self,
+            custom_algorithm=custom_part_algorithm,
+            kernel_map=subkernel_map,
+            node_info_map=node_schedule_map,
+        )
+        log.debug(
+            "ComboKernels: %d nodes partitioned into %s groups",
+            len(subkernel_nodes),
+            [len(p) for p in partitions],
+        )
+        kernel_code_list = []
+        for node_group in partitions:
+            fused_node_lists = [node.get_nodes() for node in node_group]
+            kernel = ComboKernel(
+                enable_autotune=enable_autotune,
+                mixed_sizes=mixed_sizes,
+            )
 
+            for pn, nodes in zip(node_group, fused_node_lists):
+                if only_gen_src_code:
+                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+                    for n in nodes:
+                        n.last_usage = OrderedSet()
                 self.codegen_node_schedule_with_kernel(
-                    node_schedule,
-                    subkernel,
+                    node_schedule_map[pn][0],
+                    kernel.create_sub_kernel(subkernel_map[pn]),
                 )
-
-                with V.set_kernel_handler(subkernel):
-                    for node in node_schedule:
-                        if node not in (EnableReduction, DisableReduction):
-                            node.mark_run()
+                subkernel = subkernel_map[pn]
+                node_schedule = node_schedule_map[pn][0]
+                if not only_gen_src_code:
+                    with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                        for node in node_schedule:
+                            if node not in (EnableReduction, DisableReduction):
+                                node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
                 V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
-            kernel_name = self.define_kernel(src_code, [foreach_node], kernel)
-            self.codegen_comment([foreach_node])
+            kernel_code_list.append((src_code, kernel, node_group))
+        return kernel_code_list
+
+    def codegen_combo_kernel(self, combo_kernel_node):
+        subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
+        custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
+        enable_autotune = combo_kernel_node.enable_autotune
+        mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
+            config.combo_kernel_allow_mixed_sizes == 1 and custom_part_algorithm
+        )
+
+        kernel_code_list = self.generate_combo_kernel_code(
+            subkernel_nodes, custom_part_algorithm, enable_autotune, mixed_sizes
+        )
+
+        for src_code, kernel, _ in kernel_code_list:
+            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            self.codegen_comment([combo_kernel_node])
+            log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
@@ -1691,6 +1757,28 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+
+        # Optionally, prefer tiling into as many dimensions as possible.
+        if config.triton.prefer_nd_tiling:
+            # Get candidate tilings from the node ranges.
+            node_ranges = [
+                node.get_ranges()[0]
+                for node in EnableReduction.filter(node_schedule)
+                if isinstance(node, scheduler.SchedulerNode)
+            ]
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            for node_range in node_ranges:
+                # Collapse leading dims, to fit in the maximum dimensionality.
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
+                new_tilings.add(tuple(tiling))
+
+            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+            # Since this is a stable sort, ties are broken by schedule order.
+            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
+            ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

@@ -1153,14 +1153,7 @@ TreeSpec(tuple, None, [*,
             z: Any
 
         tree1 = [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5]
-        tree2 = [
-            ACustomPytree(
-                x=2,
-                y={"cin": [2, 2, 2], "bar": 2},
-                z="leaf",
-            ),
-            2,
-        ]
+        tree2 = [ACustomPytree(x=2, y={"cin": [2, 2, 2], "bar": 2}, z="leaf"), 2]
 
         py_pytree.register_pytree_node(
             ACustomPytree,
@@ -1315,10 +1308,7 @@ class TestCxxPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec),
-            ("PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)"),
-        )
+        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):

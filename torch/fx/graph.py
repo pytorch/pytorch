@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
@@ -21,6 +20,7 @@ import builtins
 import math
 import warnings
 import inspect
+import functools
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -37,6 +37,8 @@ _origin_type_map = {
     frozenset: FrozenSet,
     tuple: Tuple,
 }
+
+_legal_ops = dict.fromkeys(['call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output'])
 
 
 # Signature for functions thattransforms the body (`list[str]`) of the
@@ -85,14 +87,11 @@ def _snake_case(s: str) -> str:
         ``mod.pascalCase``-> ``mod.pascal_case``
         ``mod.ALL_CAPS`` -> ``mod.all_caps``
     """
-    chars = []
-    prev_lower = False
-    for c in s:
-        if prev_lower and c.isupper():
-            chars.append('_')
-        chars.append(c.lower())
-        prev_lower = c.islower()
-    return ''.join(chars)
+    return _snake_case_sub(s).lower()
+
+
+# Replace occurrences where a lowercase letter is followed by an uppercase letter
+_snake_case_sub = functools.partial(re.compile(r'(?<=[a-z])([A-Z])').sub, r'_\1')
 
 
 def _is_from_torch(obj: Any) -> bool:
@@ -489,6 +488,10 @@ class CodeGen:
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, Node):
                 return repr(arg)
+            elif isinstance(arg, torch.Tensor):
+                size = list(arg.size())
+                dtype = str(arg.dtype).split(".")[-1]
+                return f"torch.Tensor(size={size}, dtype={dtype})"
             else:
                 return blue(repr(arg))
 
@@ -573,14 +576,13 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
-                from torch._subclasses.fake_tensor import FakeTensor
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
 
-                if isinstance(meta_val, FakeTensor):
+                if isinstance(meta_val, torch.Tensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
                     maybe_type_annotation = \
@@ -814,10 +816,10 @@ class _FindNodesLookupTable:
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
         if op == "call_function":
             assert target is not None
-            return dict(self.table[(op, target)]).keys()
+            return [*self.table[(op, target)].keys()]
 
         if target is None:
-            return dict(self.table[(op, None)]).keys()
+            return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
         return [node for node in self.table[(op, None)].keys() if node.target == target]
@@ -1008,7 +1010,7 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
+        assert op in _legal_ops
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
@@ -1549,6 +1551,8 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
+            num_warnings = 0
+            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == 'call_function':
                     if not callable(node.target):
@@ -1575,11 +1579,21 @@ class Graph:
                               and not isinstance(new_m_itr, torch.nn.Module)
                               and not isinstance(new_m_itr, torch.nn.Parameter)
                               and atom not in m_itr._buffers):
-                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
-                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target')
+                            if num_warnings < MAX_WARNINGS:
+                                # Don't emit this warning too frequently,
+                                # for very large graphs this can become very expensive
+                                # from a performance perspective.
+                                warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                              'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                              'what \'get_attr\' Nodes typically target')
+                            num_warnings += 1
                         else:
                             m_itr = new_m_itr
+            if num_warnings > MAX_WARNINGS:
+                warnings.warn(
+                    f'Additional {num_warnings - MAX_WARNINGS} warnings '
+                    'suppressed about get_attr references'
+                )
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):

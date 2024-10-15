@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // Walk the Statement looking for Half size loads/stores.
 class HalfChecker : public IRVisitor {
@@ -57,7 +55,6 @@ class HalfChecker : public IRVisitor {
   bool hasBFloat16_{false};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
   ExprPtr mutate(const LoadPtr& v) override {
     ExprPtr child = IRMutator::mutate(v);
@@ -204,7 +201,7 @@ class HalfRewriter : public IRMutator {
     return st == ScalarType::Half || st == ScalarType::BFloat16;
   }
 
-  static bool isHalf(ExprPtr v) {
+  static bool isHalf(const ExprPtr& v) {
     return isHalf(v->dtype().scalar_type());
   }
 
@@ -212,6 +209,4 @@ class HalfRewriter : public IRMutator {
   std::unordered_map<VarPtr, VarPtr> var_map;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

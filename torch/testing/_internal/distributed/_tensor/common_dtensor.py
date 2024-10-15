@@ -207,7 +207,7 @@ class Transformer(nn.Module):
 
     @staticmethod
     def parallelize(
-        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool
+        module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool, local_output_for_attn: bool = False
     ) -> nn.Module:
         assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
         # Parallelize the root submodules.
@@ -235,9 +235,9 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=local_output_for_attn)
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=local_output_for_attn)
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=local_output_for_attn)
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
@@ -269,6 +269,10 @@ class Transformer(nn.Module):
             else ColwiseParallel(output_layouts=Replicate())
         )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
+
+        if local_output_for_attn:
+            for layer in module_tp.layers:
+                layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
 
         # Manually set output.weight so that parameters and gradients are shared.
         if module_tp.model_args.weight_tying:

@@ -2,6 +2,7 @@
 
 import dataclasses
 import functools
+import logging
 from importlib import import_module
 from typing import Any, List, Optional
 
@@ -15,18 +16,48 @@ from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
 
 
+log = logging.getLogger(__name__)
+
+
 """
 This file contains TorchDynamo backends intended for debugging uses.
 """
 
 
 @register_backend
-def eager(gm, fake_tensor_inputs):
+def eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager backend ignoring extra kwargs %s", kwargs)
     return gm.forward
 
 
+def make_eager_backend_with_torch_function_mode(mode):
+    return make_eager_backend_with_torch_function_modes([mode])
+
+
+def make_eager_backend_with_torch_function_modes(modes):
+    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
+    in the HOP, so we need to externally run this mode and not trace it."""
+    from contextlib import ExitStack
+
+    def fn(gm, fake_tensor_inputs, **kwargs):
+        stack = ExitStack()
+        for mode in modes:
+            stack.enter_context(mode)
+
+        result = gm.forward
+        stack.close()
+        return result
+
+    return fn
+
+
 @register_backend
-def eager_noexcept(gm, fake_tensor_inputs):
+def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_noexcept backend ignoring extra kwargs %s", kwargs)
+
     # This backend is intended to check that dynamo-generated GraphModules
     # do not cause errors.
     def inner(*args):
@@ -41,7 +72,10 @@ def eager_noexcept(gm, fake_tensor_inputs):
 
 
 @register_backend
-def pre_dispatch_eager(gm, fake_tensor_inputs):
+def pre_dispatch_eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("pre_dispatch_eager backend ignoring extra kwargs %s", kwargs)
+
     from torch.fx.experimental.proxy_tensor import make_fx
 
     def runnable_gm(*args):
@@ -54,7 +88,10 @@ def pre_dispatch_eager(gm, fake_tensor_inputs):
 
 
 @register_backend
-def eager_debug(gm, fake_tensor_inputs):
+def eager_debug(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_debug backend ignoring extra kwargs %s", kwargs)
+
     from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     # We could add more debugging bits here.
@@ -102,8 +139,21 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(gm, fake_tensor_inputs):
-    with functorch_config.patch(unlift_effect_tokens=True):
+def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning(
+            "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
+        )
+
+    from torch._inductor.bisect_helper import BisectionManager
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := BisectionManager.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
             fw_compiler=boxed_nop,

@@ -2,20 +2,17 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Callable, TYPE_CHECKING
+from typing import Callable
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
+from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
-
-
-if TYPE_CHECKING:
-    from torch._subclasses import fake_tensor
 
 
 class Functionalize(_pass.Transform):
@@ -119,7 +116,7 @@ class Functionalize(_pass.Transform):
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         assert fake_mode is not None  # for mypy
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), fake_mode:
+        with fake_tensor.unset_fake_temporarily(), fake_mode:
             graph_module = proxy_tensor.make_fx(
                 functionalized_callable,
                 decomposition_table={},

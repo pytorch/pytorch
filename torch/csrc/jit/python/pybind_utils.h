@@ -31,10 +31,6 @@
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
-#ifdef USE_C10D_NCCL
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
@@ -1077,7 +1073,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
@@ -1250,12 +1250,12 @@ inline py::object invokeScriptMethodFromPython(
 
 TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
 

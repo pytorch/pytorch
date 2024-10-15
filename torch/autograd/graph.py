@@ -108,6 +108,13 @@ class Node(abc.ABC):
             See :ref:`backward-hooks-execution` for more information on how when this hook
             is executed, and how its execution is ordered relative to other hooks.
 
+        .. note::
+            In the rare case where the hook is registered while the Node has already
+            begun execution, there is no longer any guarantee on :attr:`grad_outputs`
+            content (it might be as usual or empty depending on other factors). The
+            hook can still optionally return a new gradient to be used in place of
+            :attr:`grad_inputs` independent of :attr:`grad_outputs`.
+
         Example::
 
             >>> import torch
@@ -179,7 +186,8 @@ def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
     if isinstance(t, GradientEdge):
         return t.node
     if t.requires_grad and t.grad_fn is None:
-        node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        with torch.enable_grad():
+            node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
         node = t.grad_fn
     assert node is not None
@@ -215,7 +223,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr)
 
 
-def increment_version(tensor: torch.Tensor) -> None:
+def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -223,11 +231,16 @@ def increment_version(tensor: torch.Tensor) -> None:
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
-    the memory inplace based on this pointer.
+    the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
+
+    Note that if you pass in tensor constructed under torch.inference_mode(),
+    we will not bump its version counter (because your tensor does not have one).
     """
+    if isinstance(tensor, torch.Tensor):
+        tensor = (tensor,)
     torch._C._increment_version(tensor)
 
 

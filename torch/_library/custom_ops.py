@@ -18,10 +18,11 @@ from typing import (
     Union,
 )
 
+import torch
+from torch import _C, _ops, Tensor
 from torch.utils._exposed_in import exposed_in
 
-from .. import _C, _library, _ops, autograd, library, Tensor
-from . import utils
+from . import autograd, utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -331,12 +332,16 @@ class CustomOpDef:
                                 fn = self._backend_fns[device_type]
                                 module = inspect.getmodule(fn)
                                 raise RuntimeError(
-                                    f"Tensors returned from custom ops (1) must not "
-                                    f"be inputs to the custom op and (2) may not alias "
-                                    f"any inputs or other returns. Please clone the "
-                                    f"the offending output tensors (e.g. output.clone()) "
-                                    f"or refactor your code. "
-                                    f"Offending op: {self._name} (with implementation in {module})"
+                                    f"{self._name} (with implementation in {module}): "
+                                    f"The output of this custom operator (1) must not "
+                                    f"also be an input to this custom operator and "
+                                    f"(2) may not alias any inputs to this custom operator "
+                                    f"or other returns. "
+                                    f"The most common way to trigger this error is if "
+                                    f"we have y = custom_op(x) and y and x are the same Tensor. "
+                                    f"Please instead return a clone of the offending output "
+                                    f"tensor(s) (e.g. return x.clone()) or refactor the custom "
+                                    f"operator to not return y."
                                 )
                             storages.add(key)
                         return result
@@ -354,6 +359,7 @@ class CustomOpDef:
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
+                @torch._disable_dynamo
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)
@@ -363,10 +369,10 @@ class CustomOpDef:
                 self._backend_fns[device_type] = wrapped_fn
             return fn
 
-        from torch._library.utils import get_device_arg_index, has_tensor_arg
-
-        if device_types is not None and not has_tensor_arg(self._opoverload._schema):
-            device_arg_index = get_device_arg_index(self._opoverload._schema)
+        if device_types is not None and not utils.has_tensor_arg(
+            self._opoverload._schema
+        ):
+            device_arg_index = utils.get_device_arg_index(self._opoverload._schema)
             if device_arg_index is None:
                 raise ValueError(
                     "Functions without tensor inputs are required to have a `device: torch.device` argument"
@@ -566,7 +572,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not _library.utils.is_functional_schema(schema):
+        if not utils.is_functional_schema(schema):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -593,11 +599,11 @@ class CustomOpDef:
             schema_str,
             tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
         )
-        self._opoverload = _library.utils.lookup_op(self._qualname)
+        self._opoverload = utils.lookup_op(self._qualname)
 
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
-                if _library.utils.can_generate_trivial_fake_impl(self._opoverload):
+                if utils.can_generate_trivial_fake_impl(self._opoverload):
                     return None
                 raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
@@ -609,24 +615,24 @@ class CustomOpDef:
 
         lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
-        autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
+        autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
-                for arg, val in _library.utils.zip_schema(schema, args, kwargs):
+                for arg, val in utils.zip_schema(schema, args, kwargs):
                     if not arg.alias_info:
                         continue
                     if not arg.alias_info.is_write:
                         continue
                     if isinstance(val, Tensor):
-                        autograd.graph.increment_version(val)
+                        torch.autograd.graph.increment_version(val)
                     elif isinstance(val, (tuple, list)):
                         for v in val:
                             if isinstance(v, Tensor):
-                                autograd.graph.increment_version(v)
+                                torch.autograd.graph.increment_version(v)
                 with _C._AutoDispatchBelowADInplaceOrView():
                     return self._opoverload.redispatch(
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
@@ -783,18 +789,20 @@ class CustomOpDef:
 # decorator.
 
 
-OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
+OPDEF_TO_LIB: Dict[str, "torch.library.Library"] = {}
 OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
-def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
+def get_library_allowing_overwrite(
+    namespace: str, name: str
+) -> "torch.library.Library":
     qualname = f"{namespace}::{name}"
 
     if qualname in OPDEF_TO_LIB:
         OPDEF_TO_LIB[qualname]._destroy()
         del OPDEF_TO_LIB[qualname]
 
-    lib = library.Library(namespace, "FRAGMENT")
+    lib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
     OPDEF_TO_LIB[qualname] = lib
     return lib
 

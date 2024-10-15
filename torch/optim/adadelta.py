@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -14,6 +14,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -219,16 +220,15 @@ Adadelta.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
+        lr (float, Tensor, optional): coefficient that scale delta before it is applied
+            to the parameters (default: 1.0)
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will
             result in a slower average, which can be helpful for preventing
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6).
-        lr (float, Tensor, optional): coefficient that scale delta before it is applied
-            to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
         {_capturable_doc}
@@ -329,15 +329,20 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, acc_deltas, state_steps]
+        [params, grads, square_avgs, acc_deltas, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_square_avgs,
-        device_acc_deltas,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_square_avgs_,
+        device_acc_deltas_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_square_avgs = cast(List[Tensor], device_square_avgs_)
+        device_acc_deltas = cast(List[Tensor], device_acc_deltas_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
         if has_complex:
             _view_as_real(
                 device_params, device_grads, device_square_avgs, device_acc_deltas

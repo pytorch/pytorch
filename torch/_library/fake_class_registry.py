@@ -55,7 +55,7 @@ class FakeClassRegistry:
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
             log.warning(
-                "%s is already registered. Previous fake class is overrided with  %s.",
+                "%s is already registered. Previous fake class is overridden with  %s.",
                 full_qualname,
                 fake_class,
             )

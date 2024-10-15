@@ -10,7 +10,6 @@ functionalities in `torch.jit`.
 """
 
 import contextlib
-
 import copy
 import functools
 import inspect
@@ -28,14 +27,12 @@ from torch._jit_internal import (
     get_callable_argument_names,
     is_scripting,
 )
-
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
-
 from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
-
 from torch.testing._comparison import default_tolerances
+
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten

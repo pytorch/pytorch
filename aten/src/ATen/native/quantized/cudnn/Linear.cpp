@@ -40,7 +40,7 @@ constexpr uint8_t max_num_input_dim = 5;
 struct LinearParams {
   c10::DeviceIndex device_id;
   cudnnDataType_t dataType;
-  int input_size[max_num_input_dim];
+  int64_t input_size[max_num_input_dim];
   uint8_t input_dim;
   at::MemoryFormat memory_format;
   int64_t weight_size[2];
@@ -114,7 +114,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   }
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
-  CacheKey key;
+  CacheKey key{};
   // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
   // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
   // CacheKey objects have the same user defined parameters, but
@@ -128,7 +128,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   key.output_alignment = cudnn_utils::getAlignment(quantized_output);
   key.weight_alignment = cudnn_utils::getAlignment(orig_weight);
   if (bias_.has_value()) {
-    key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
+    key.bias_alignment = static_cast<int8_t>(cudnn_utils::getAlignment(broadcasted_bias.value()));
   } else {
     key.bias_alignment = -1;
   }
@@ -157,8 +157,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
-      .setDataPointers(uids.size(), data_ptrs.data())
-      .setUids(uids.size(), uids.data())
+      .setDataPointers(static_cast<int64_t>(uids.size()), data_ptrs.data())
+      .setUids(static_cast<int64_t>(uids.size()), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
@@ -224,7 +224,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // output is a fp32 tensor
   std::optional<cudnn_frontend::Operation> relu_op;
   std::shared_ptr<cudnn_frontend::OpaqueBackendPointer> tensor2requant_ptr = bias_.has_value() ? sum_linear_bias_op.value().getOutputTensor() : linear_op.getOutputTensor();
-  if (kReluFused) {
+  if constexpr (kReluFused) {
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
@@ -250,14 +250,14 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     ops.emplace_back(&(bias_mult_op.value()));
     ops.emplace_back(&(sum_linear_bias_op.value()));
   }
-  if (kReluFused) {
+  if constexpr (kReluFused) {
     ops.emplace_back(&(relu_op.value()));
   }
   ops.emplace_back(&requant_op);
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
-      .setOperationGraph(ops.size(), ops.data())
+      .setOperationGraph(static_cast<int64_t>(ops.size()), ops.data())
       .build();
   // std::cout << "opGraph: " << opGraph.describe() << std::endl;
 
@@ -286,7 +286,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       run(plan);
       execution_plan_cache.emplace(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << '\n';} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << '\n';}
   }
 
   TORCH_CHECK(false, "Unable to find an engine to execute this computation Quantized Linear Cudnn");
@@ -311,7 +311,7 @@ at::Tensor PackedLinearWeightCudnn::apply_impl(
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       output_scale,
       output_zero_point);
-  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
+  // cudnn expects tensors to be at least 3D. act is currently 2D. We will create a 3D view
   std::vector<int64_t> new_sizes(3, 1);
   // cudnn expects leading dimensions to be the dummy dimensions
   new_sizes.back() = act.sizes().back();
@@ -335,8 +335,8 @@ at::Tensor PackedLinearWeightCudnn::apply_relu(
   return apply_impl<true>(input, output_scale, output_zero_point);
 }
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 template <bool kReluFused>
@@ -348,10 +348,10 @@ class QLinearInt8 final {
       double output_scale,
       int64_t output_zero_point) {
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
-    if (kReluFused) {
-      return packed_weight->apply_relu(act, output_scale, output_zero_point);
+    if constexpr (kReluFused) {
+      return packed_weight->apply_relu(std::move(act), output_scale, output_zero_point);
     } else {
-      return packed_weight->apply(act, output_scale, output_zero_point);
+      return packed_weight->apply(std::move(act), output_scale, output_zero_point);
     }
   }
 };
@@ -363,8 +363,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 
 #endif  // AT_CUDNN_ENABLED

@@ -24,10 +24,11 @@ from typing import (
     Tuple,
     TYPE_CHECKING,
     TypeVar,
+    Union,
 )
 
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
+from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -129,6 +130,7 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -150,9 +152,26 @@ class GuardBuilderBase:
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class SLoc:
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
+    maybe_user_loc: Optional[str]
+
+    def __str__(self):
+        floc = (
+            self.framework_loc
+            if isinstance(self.framework_loc, str)
+            else format_frame(self.framework_loc)
+        )
+        if self.maybe_user_loc is not None:
+            return f"{self.maybe_user_loc} ({floc})"
+        else:
+            return f"({floc})"
+
+
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: CapturedTraceback
+    expr: sympy.logic.boolalg.Boolean
+    sloc: SLoc
 
 
 @dataclasses.dataclass
@@ -314,11 +333,7 @@ class Guard:
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
         assert (
-            self.obj_weakref
-            in (
-                obj_weakref,
-                None,
-            )
+            self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
         ), "Guarded object must be identical, None or ephemeral (dead weakref)"
@@ -370,12 +385,10 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 class Checkpointable(Generic[T]):
     @abstractmethod
-    def copy_graphstate(self) -> T:
-        ...
+    def copy_graphstate(self) -> T: ...
 
     @abstractmethod
-    def restore_graphstate(self, state: T):
-        ...
+    def restore_graphstate(self, state: T): ...
 
 
 class GuardsCheckpointState:
@@ -648,6 +661,8 @@ class TracingContext:
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,

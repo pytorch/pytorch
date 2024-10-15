@@ -32,24 +32,9 @@ STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("general")
-    group.addoption(
-        "--scs",
-        action="store",
-        default=None,
-        dest="stepcurrent_skip",
-    )
-    group.addoption(
-        "--sc",
-        action="store",
-        default=None,
-        dest="stepcurrent",
-    )
-    group.addoption(
-        "--rs",
-        action="store",
-        default=None,
-        dest="run_single",
-    )
+    group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
+    group.addoption("--sc", action="store", default=None, dest="stepcurrent")
+    group.addoption("--rs", action="store", default=None, dest="run_single")
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")

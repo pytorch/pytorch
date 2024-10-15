@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import cast, Dict, List, Optional, Set
+from typing import Any, cast, Dict, List, Optional, Set
 
 import torch
 
@@ -347,7 +347,6 @@ class _Matmul:
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten.mm.default,
-            aten._scaled_mm.default,
             aten.reshape.default,
         )
         mm_node = match[0] if len(match) == 1 else match[1]
@@ -362,7 +361,10 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
+    bias_node: Optional[torch.fx.Node]
+    result_scale_node: Optional[torch.fx.Node]
     out_dtype: Optional[torch.dtype]
+    use_fast_accum: bool
 
     def __post_init__(self):
         super().__post_init__()
@@ -373,22 +375,26 @@ class _ScaledMatmul(_Matmul):
     def from_match(cls, match: List[torch.fx.Node]) -> "_ScaledMatmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
-            aten.mm.default,
             aten._scaled_mm.default,
             aten.reshape.default,
         )
         mm_node = match[0] if len(match) == 1 else match[1]
-        out_dtype = (
-            cast(torch.dtype, mm_node.args[6]) if len(mm_node.args) > 6 else None
-        )
-        assert isinstance(out_dtype, (torch.dtype, type(None)))
+
+        def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
+            if idx >= len(node.args):
+                return default
+            return node.args[idx]
+
         return _ScaledMatmul(
             nodes=match,
             A_node=cast(torch.fx.Node, match[0].args[0]),
             B_node=cast(torch.fx.Node, mm_node.args[1]),
             A_scale_node=cast(torch.fx.Node, mm_node.args[2]),
             B_scale_node=cast(torch.fx.Node, mm_node.args[3]),
-            out_dtype=out_dtype,
+            bias_node=get_arg(mm_node, 4, None),
+            result_scale_node=get_arg(mm_node, 5, None),
+            out_dtype=get_arg(mm_node, 6, None),
+            use_fast_accum=get_arg(mm_node, 7, False),
         )
 
 
@@ -477,20 +483,19 @@ def _insert_fused_all_gather_matmul(
         )
     elif mm_type == _ScaledMatmul:
         scaled_matmuls = cast(List[_ScaledMatmul], matmuls)
-        B_nodes = [matmul.B_node for matmul in scaled_matmuls]
-        A_scale_node = scaled_matmuls[0].A_scale_node
-        B_scale_nodes = [matmul.B_scale_node for matmul in scaled_matmuls]
-        out_dtypes = [matmul.out_dtype for matmul in scaled_matmuls]
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
                 shard_node,
-                B_nodes,
-                A_scale_node,
-                B_scale_nodes,
-                out_dtypes,
+                [matmul.B_node for matmul in scaled_matmuls],
+                scaled_matmuls[0].A_scale_node,
+                [matmul.B_scale_node for matmul in scaled_matmuls],
                 gather_dim,
                 group_name,
+                [matmul.bias_node for matmul in scaled_matmuls],
+                [matmul.result_scale_node for matmul in scaled_matmuls],
+                [matmul.out_dtype for matmul in scaled_matmuls],
+                [matmul.use_fast_accum for matmul in scaled_matmuls],
             ),
         )
     else:
@@ -647,10 +652,13 @@ def _insert_fused_matmul_reduce_scatter(
                 matmul.B_node,
                 matmul.A_scale_node,
                 matmul.B_scale_node,
-                matmul.out_dtype,
                 reduce_op,
                 scatter_dim,
                 group_name,
+                matmul.bias_node,
+                matmul.result_scale_node,
+                matmul.out_dtype,
+                matmul.use_fast_accum,
             ),
         )
     else:

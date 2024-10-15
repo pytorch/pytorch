@@ -892,8 +892,11 @@ static inline void diff_check_compatible_shape(const Tensor& self, const std::op
         "diff expects prepend or append to be the same dimension as input");
 
     for (const auto i : c10::irange(other.value().dim())) {
-      TORCH_CHECK(
-          other.value().sym_size(i) == self.sym_size(i) || i == wrapped_dim,
+      if (i == wrapped_dim) {
+        continue;
+      }
+      TORCH_SYM_CHECK(
+          other.value().sym_size(i).sym_eq(self.sym_size(i)),
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
           " input.size(", i, ") = ", self.sym_size(i), ", but got"
@@ -1363,7 +1366,6 @@ TORCH_IMPL_FUNC(mean_out)
         dim_prod *= self.size(d);
       }
     }
-    auto& result_mut = const_cast<Tensor&>(result);
     // For accuracy reasons, BF16/FP16 mean should be computed via the
     // following approach:
     //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
@@ -1375,7 +1377,7 @@ TORCH_IMPL_FUNC(mean_out)
     // which, in turn, does not produce as accurate results.
     bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
     auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
-    result_mut = is_half_type ? result_mut.to(sum_out_dtype) : result_mut;
+    auto result_temp = is_half_type ? result.to(sum_out_dtype) : result;
     // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
     // FP32 in sum_out. This results in having to read that FP32 tensor again,
     // but maybe in the future, we could revise the implementation to not
@@ -1383,9 +1385,14 @@ TORCH_IMPL_FUNC(mean_out)
     // require some modifications in binary_kernel_reduce_vec(),
     // TensorIteratorBase::for_each(), and
     // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
-    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
-    // After sum & div, cast result_mut back to BF16 or FP16, if required.
-    result_mut = is_half_type ? result_mut.to(dtype) : result_mut;
+    at::sum_out(result_temp, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
+    // After sum & div, cast result_temp back to BF16 or FP16, if required.
+    // It cannot be avoided copy_() if we promotion the out of sum op, because of
+    // the result needs to be update and the storage of result tensor cannot be reused
+    // by sum op. We do not need explicit call to(dtype) func as copy_() do it.
+    if (is_half_type) {
+      result.copy_(result_temp);
+    }
   } else {
     // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
@@ -1409,6 +1416,15 @@ Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, std::optional<Sca
 Tensor& mean_out(const Tensor& self, DimnameList dim,
                  bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
+  TORCH_CHECK(
+    canCast(self.scalar_type(), result.scalar_type()),
+      "mean.dtype_out(): input types can't be cast to the desired output type ",
+      result.scalar_type());
+  // at::mean_out should make sure dtype and result.scalar_type() are the same
+  return at::mean_out(result, self, IntArrayRef{}, false, dtype);
 }
 
 // TODO(@heitorschueroff) implement custom kernels for nanmean
@@ -1444,7 +1460,9 @@ Tensor nanmean(
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
-    auto maxes = at::amax(self, dims, true);
+    // For complex numbers, use the real part to calculate the max. Based on
+    // https://scicomp.stackexchange.com/questions/34273/log-sum-exp-trick-for-signed-complex-numbers
+    auto maxes = at::amax(at::real(self), dims, true);
     auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
@@ -1457,7 +1475,8 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
 }
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
-  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
+  // Complex type implies floating point type
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
               "logsumexp(): Expected floating point type for result tensor, but got: ",
               result.scalar_type());
   {
@@ -1814,8 +1833,8 @@ static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
-              "std and var only supports tensors on a CPU or CUDA device, but got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda() || self.device().is_xpu(),
+              "std and var supports tensors on a CPU, CUDA, or XPU device only, but got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
@@ -1887,8 +1906,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              fname, " only supports tensors on a CPU or CUDA device, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              fname, " supports tensors on a CPU, CUDA, or XPU device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
@@ -2272,7 +2291,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
         other_data += strides[1];
       }
     });
-  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return result.load();
 }
 

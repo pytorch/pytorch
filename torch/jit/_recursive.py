@@ -9,7 +9,6 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch
-
 import torch._jit_internal as _jit_internal
 from torch._sources import fake_range
 from torch.jit._builtins import _find_builtin
@@ -375,7 +374,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                     f"\nThe error stack is reproduced here:\n{e}"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
-                pass
 
             continue
 

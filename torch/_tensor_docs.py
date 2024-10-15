@@ -79,9 +79,7 @@ Example::
     tensor([[ 0,  1],
             [ 2,  3]], dtype=torch.int8)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -114,9 +112,7 @@ Example::
             [ 3.1416,  3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416,  3.1416]], dtype=torch.float64)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -149,9 +145,7 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -184,9 +178,7 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -219,9 +211,7 @@ Example::
     tensor([[ 1,  1,  1],
             [ 1,  1,  1]], dtype=torch.int32)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -254,9 +244,7 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]], dtype=torch.float64)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -1180,9 +1168,7 @@ add_docstr_all(
 clone(*, memory_format=torch.preserve_format) -> Tensor
 
 See :func:`torch.clone`
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1347,9 +1333,7 @@ then no copy is performed and the original object is returned.
 Args:
     {memory_format}
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1405,9 +1389,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1427,9 +1409,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1449,9 +1429,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1471,9 +1449,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -2443,9 +2419,7 @@ Example::
             [  1.,   1.,   1.],
             [  1.,   1.,   1.],
             [  1.,   1.,   1.]])
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -2605,9 +2579,7 @@ Example::
             [ 7.,  8.,  9.],
             [ 2.,  2.,  2.],
             [ 4.,  5.,  6.]])
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -4577,9 +4549,7 @@ Example::
             [0., 2., 0., 0., 0.],
             [0., 0., 2., 1., 1.]])
 
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -4645,9 +4615,7 @@ Example::
     tensor([3., 6., 5., 2.])
 
 
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -5282,9 +5250,7 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5296,9 +5262,7 @@ byte(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5310,9 +5274,7 @@ bool(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5324,9 +5286,7 @@ char(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5337,9 +5297,7 @@ bfloat16(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5351,9 +5309,7 @@ double(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5365,9 +5321,7 @@ float(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5379,9 +5333,7 @@ cdouble(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5393,9 +5345,7 @@ cfloat(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5407,9 +5357,7 @@ chalf(memory_format=torch.preserve_format) -> Tensor
 
 Args:
      {memory_format}
- """.format(
-        **common_args
-    ),
+ """.format(**common_args),
 )
 
 add_docstr_all(
@@ -5421,9 +5369,7 @@ half(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5435,9 +5381,7 @@ int(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5461,9 +5405,7 @@ long(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5475,9 +5417,7 @@ short(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(

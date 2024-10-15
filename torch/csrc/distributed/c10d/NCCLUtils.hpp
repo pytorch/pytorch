@@ -176,14 +176,14 @@ namespace c10d {
 #define DEFINE_CONSTANT(name, value) \
   static c10::IValue name = value;   \
   static std::string name##_str = value;
-DEFINE_CONSTANT(entries_key, "entries");
-DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
-DEFINE_CONSTANT(version_key, "version");
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.3");
+DEFINE_CONSTANT(version_val, "2.4");
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
 DEFINE_CONSTANT(pg_config_key, "pg_config");
 DEFINE_CONSTANT(pg_status_key, "pg_status");
 DEFINE_CONSTANT(record_id_key, "record_id");
@@ -219,7 +219,6 @@ TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -260,11 +259,11 @@ class TORCH_API DebugInfoWriter {
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm),
-        aborted_(false),
+      : aborted_(false),
         ncclAsyncErr_(ncclSuccess),
         commFailureReason_(std::nullopt),
-        initialized_(false) {}
+        initialized_(false),
+        ncclComm_(ncclComm) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -272,7 +271,7 @@ class NCCLComm {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
     std::unique_lock<std::mutex> lock(mutex_);
-    if (ncclComm_ && !aborted_) {
+    if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
       // ncclCommDestroy could block forever waiting for work to complete on
@@ -381,7 +380,7 @@ class NCCLComm {
       std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_) {
+    if (aborted_ && !initialized_) {
       // Should not abort twice.
       return;
     }
@@ -465,15 +464,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle;
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        ncclCommRegister(comm, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -492,15 +493,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(ncclComm_, handle),
+        ncclCommDeregister(comm, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -508,12 +511,15 @@ class NCCLComm {
 #endif
   }
 
+  std::string repr() const {
+    return c10::str((void*)ncclComm_);
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized(int timeoutSecs);
-  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
@@ -530,6 +536,9 @@ class NCCLComm {
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
+
+ private:
+  ncclComm_t ncclComm_;
 };
 
 // Helper that automatically cleans up premul sums.
@@ -627,9 +636,9 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int64_t, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
@@ -660,105 +669,15 @@ struct NCCLTraceBuffer {
       Event* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
-      bool isP2P) {
-    if (!enabled_) {
-      return std::nullopt;
-    }
-    if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
-      // Current pg_status is not in FR.
-      all_pg_status_[pg_id] = pg_status;
-    }
-    auto traceback =
-        torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-    std::lock_guard<std::mutex> guard(mutex_);
-
-    auto te = Entry{
-        id_,
-        pg_id,
-        pg_name,
-        collective_seq_id,
-        p2p_seq_id,
-        op_id,
-        std::move(profiling_name),
-        std::move(traceback),
-        std::move(start),
-        std::move(end),
-        c10::getTime(),
-        timeout_ms.count(),
-        isP2P,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        {},
-        {},
-        {},
-        {},
-        {},
-        false};
-
-    for (const auto& input : inputs) {
-      c10::IntArrayRef sizes = input.sizes();
-      te.input_dtypes_.push_back(input.dtype().toScalarType());
-      te.input_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    for (const auto& output : outputs) {
-      c10::IntArrayRef sizes = output.sizes();
-      te.output_dtypes_.push_back(output.dtype().toScalarType());
-      te.output_dims_.push_back(sizes.size());
-      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
-    }
-
-    if (entries_.size() < max_entries_) {
-      entries_.emplace_back(std::move(te));
-    } else {
-      entries_[next_++] = std::move(te);
-      if (next_ == max_entries_) {
-        next_ = 0;
-      }
-    }
-    return id_++;
-  }
+      bool isP2P);
 
   void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
-      std::vector<uint64_t> ranks) {
-    if (!enabled_) {
-      return;
-    }
-    std::lock_guard<std::mutex> guard(mutex_);
-    pg_name_to_ranks_[pg_name] = ranks;
-  }
+      std::vector<uint64_t> ranks);
 
-  void update_state(Entry& r) {
-    if (r.start_ != nullptr) {
-      bool started = r.start_->query();
-      if (started && !r.time_discovered_started_) {
-        r.time_discovered_started_ = c10::getTime();
-      }
-    }
-    if (r.end_ != nullptr) {
-      bool completed = r.end_->query();
-      if (completed && !r.time_discovered_completed_) {
-        r.time_discovered_completed_ = c10::getTime();
-      }
-    }
-  }
+  void update_state(Entry& r);
 
-  std::vector<Entry> dump_entries() {
-    std::lock_guard<std::mutex> guard(mutex_);
-    std::vector<Entry> result;
-    result.reserve(entries_.size());
-    result.insert(result.end(), entries_.begin() + next_, entries_.end());
-    result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
-    // query any remaining events
-    for (auto& r : result) {
-      update_state(r);
-      r.start_ = r.end_ = nullptr;
-    }
-    return result;
-  }
+  std::vector<Entry> dump_entries();
 
   /*
   Mark an Event as completed and free its events.
@@ -770,211 +689,23 @@ struct NCCLTraceBuffer {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true) {
-    if (!enabled_ || !id) {
-      return;
-    }
-
-    bool can_compute_duration = false;
-    Event* startEvent = nullptr;
-    Event* endEvent = nullptr;
-    std::optional<float> duration = std::nullopt;
-
-    std::unique_lock<std::mutex> guard(mutex_);
-
-    Entry* entry = &entries_.at(*id % max_entries_);
-    if (entry->id_ == *id) {
-      update_state(*entry);
-
-      if (compute_duration) {
-        can_compute_duration = entry->time_discovered_completed_.has_value() &&
-            entry->start_ && entry->end_;
-        startEvent = entry->start_;
-        endEvent = entry->end_;
-      }
-      entry->retired_ = true;
-      entry->start_ = entry->end_ = nullptr;
-    }
-
-    if (can_compute_duration) {
-      // Compute duration without without holding the lock, because
-      // cudaEventDuration() can hang, and we need to acquire the lock before we
-      // can dump(), which we never want to block.
-      guard.unlock();
-      duration = getDurationFromEvent(*startEvent, *endEvent);
-      guard.lock();
-
-      // Refresh the entry pointer, see if the entry has been overwritten
-      entry = &entries_.at(*id % max_entries_);
-      if (entry->id_ != *id) {
-        LOG(INFO)
-            << "retire_id abandoned for id " << *id
-            << ", event was overwritten while waiting to compute duration.";
-        return;
-      }
-      if (duration.has_value()) {
-        entry->duration_ = duration.value();
-      }
-    }
-  }
+  void retire_id(std::optional<size_t> id, bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
-      bool onlyActive) {
-    auto entries = new_list();
-    auto result = dump_entries();
-    std::vector<torch::CapturedTraceback*> tracebacks;
-    torch::SymbolizedTracebacks stracebacks;
-    std::vector<c10::IValue> all_frames;
-    if (includeStacktraces) {
-      for (auto& e : result) {
-        tracebacks.push_back(e.traceback_.get());
-      }
-      stracebacks = torch::symbolize(tracebacks);
-      for (const auto& f : stracebacks.all_frames) {
-        auto d = new_dict();
-        d.insert(name_key, f.funcname);
-        d.insert(filename_key, f.filename);
-        d.insert(line_key, int64_t(f.lineno));
-        all_frames.emplace_back(std::move(d));
-      }
-    }
-    for (auto i : c10::irange(result.size())) {
-      auto dict = new_dict();
-      auto& e = result.at(i);
-      // Skip completed events
-      if (onlyActive && e.time_discovered_completed_.has_value()) {
-        continue;
-      }
-      if (includeStacktraces) {
-        auto& tb = stracebacks.tracebacks.at(i);
-        auto frames = new_list();
-        for (int64_t frame : tb) {
-          frames.push_back(all_frames.at(frame));
-        }
-        dict.insert(frames_key, frames);
-      }
-
-      dict.insert(record_id_key, int64_t(e.id_));
-      dict.insert(pg_id_key, int64_t(e.pg_id_));
-      dict.insert(pg_name_key, e.pg_name_);
-      dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
-      dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
-      dict.insert(op_id_key, int64_t(e.op_id_));
-      dict.insert(profiling_name_key, e.profiling_name_);
-      dict.insert(time_created_key, int64_t(e.time_created_));
-      if (e.duration_) {
-        dict.insert(duration_key, *e.duration_);
-      }
-
-      auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-        auto sizes = new_list();
-        for (auto dim : dims) {
-          auto arg_sizes = new_list();
-          for (C10_UNUSED auto i : c10::irange(dim)) {
-            arg_sizes.push_back(*it++);
-          }
-          sizes.push_back(arg_sizes);
-        }
-        return sizes;
-      };
-
-      dict.insert(input_sizes_key, read_sizes(e.input_dims_));
-      std::vector<std::string> input_dtypes_strs;
-      input_dtypes_strs.reserve(e.input_dtypes_.size());
-      for (const auto& input_dtype : e.input_dtypes_) {
-        input_dtypes_strs.push_back(c10::toString(input_dtype));
-      }
-      dict.insert(input_dtypes_key, input_dtypes_strs);
-      dict.insert(output_sizes_key, read_sizes(e.output_dims_));
-      std::vector<std::string> output_dtypes_strs;
-      output_dtypes_strs.reserve(e.output_dtypes_.size());
-      for (const auto& output_dtype : e.output_dtypes_) {
-        output_dtypes_strs.push_back(c10::toString(output_dtype));
-      }
-      dict.insert(output_dtypes_key, output_dtypes_strs);
-      if (e.time_discovered_completed_.has_value()) {
-        dict.insert(state_key, completed_state);
-      } else if (e.time_discovered_started_.has_value()) {
-        dict.insert(state_key, started_state);
-      } else {
-        dict.insert(state_key, scheduled_state);
-      }
-
-      dict.insert(
-          time_discovered_started_key,
-          e.time_discovered_started_.has_value()
-              ? int64_t(*e.time_discovered_started_)
-              : c10::IValue());
-      dict.insert(
-          time_discovered_completed_key,
-          e.time_discovered_completed_.has_value()
-              ? int64_t(*e.time_discovered_completed_)
-              : c10::IValue());
-      dict.insert(retired_key, e.retired_);
-      dict.insert(timeout_key, e.timeout_ms_);
-      dict.insert(is_p2p_key, e.isP2P_);
-
-      entries.push_back(dict);
-    }
-    return entries;
-  }
+      bool onlyActive);
 
   // dump pg_entries
-  const c10::Dict<c10::IValue, c10::IValue> getPgConfig() {
-    auto pg_config = new_dict();
-    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
-      auto pg_info = new_dict();
-      pg_info.insert("name", std::get<0>(pg_name));
-      pg_info.insert("desc", std::get<1>(pg_name));
-      pg_info.insert("ranks", ranks_str(ranks));
-      pg_config.insert(std::get<0>(pg_name), pg_info);
-    }
-    return pg_config;
-  }
+  const c10::Dict<c10::IValue, c10::IValue> getPgConfig();
 
   const std::map<std::string, std::map<std::string, std::string>>
-  getPgConfigJson() {
-    std::map<std::string, std::map<std::string, std::string>> result;
-    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
-      auto pg_info = std::map<std::string, std::string>();
-      pg_info["name"] = std::get<0>(pg_name);
-      pg_info["desc"] = std::get<1>(pg_name);
-      pg_info["ranks"] = ranks_str(ranks);
-      result.emplace(std::get<0>(pg_name), pg_info);
-    }
-    return result;
-  }
+  getPgConfigJson();
 
   // dump pg_status
-  const c10::Dict<c10::IValue, c10::IValue> getPgStatus() {
-    auto all_pg_status = new_dict();
-    for (const auto& [pg_id, status] : all_pg_status_) {
-      auto pg_status = new_dict();
-      pg_status.insert("last_enqueued_collective", status->lastEnqueuedSeq);
-      pg_status.insert("last_started_collective", status->lastStartedSeq);
-      pg_status.insert("last_completed_collective", status->lastCompletedSeq);
-      all_pg_status.insert(std::to_string(pg_id), pg_status);
-    }
-    return all_pg_status;
-  }
+  const c10::Dict<c10::IValue, c10::IValue> getPgStatus();
 
   const std::map<std::string, std::map<std::string, std::string>>
-  getPgStatusJson() {
-    std::map<std::string, std::map<std::string, std::string>> result;
-    for (const auto& [pg_id, status] : all_pg_status_) {
-      auto pg_status = std::map<std::string, std::string>();
-      pg_status["last_enqueued_collective"] =
-          std::to_string(status->lastEnqueuedSeq);
-      pg_status["last_started_collective"] =
-          std::to_string(status->lastStartedSeq);
-      pg_status["last_completed_collective"] =
-          std::to_string(status->lastCompletedSeq);
-      result[std::to_string(pg_id)] = pg_status;
-    }
-    return result;
-  }
+  getPgStatusJson();
 
   std::string dump_json(
       const std::optional<std::unordered_map<
@@ -982,6 +713,7 @@ struct NCCLTraceBuffer {
           std::unordered_map<std::string, std::string>>>& ncclDumpMap,
       bool includeCollectives,
       bool onlyActive);
+
   // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
@@ -989,35 +721,7 @@ struct NCCLTraceBuffer {
           std::unordered_map<std::string, std::string>>>& ncclDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
-      bool onlyActive) {
-    auto result = new_dict();
-    // common values
-    result.insert(version_key, version_val);
-    result.insert(pg_config_key, getPgConfig());
-    result.insert(pg_status_key, getPgStatus());
-
-    // collective trace
-    if (includeCollectives) {
-      result.insert(
-          entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
-    }
-
-    // convert ncclDumpMap into a dictionary
-    auto per_comm_dict = new_dict();
-    if (ncclDumpMap.has_value()) {
-      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
-        auto inner_dict = new_dict();
-        for (const auto& [key, value] : ncclDump) {
-          inner_dict.insert(key, value);
-        }
-        per_comm_dict.insert(ncclId, inner_dict);
-      }
-    }
-    if (per_comm_dict.size() > 0) {
-      result.insert(nccl_comm_key, per_comm_dict);
-    }
-    return pickle_str(result);
-  }
+      bool onlyActive);
 };
 } // namespace c10d
 
