@@ -49,6 +49,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
+    @skipIfXpu
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_right_assoc_good_shape(self):
