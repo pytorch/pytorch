@@ -616,6 +616,7 @@ def disable():
     exit_ctx = local.enter_ctx()
     revert_tls = local.set_tls(
         compiler=None,
+        vlogger=None,
     )
     try:
         yield

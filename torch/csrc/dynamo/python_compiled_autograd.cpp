@@ -94,7 +94,7 @@ struct VerboseLogger : public PythonLogger {
   VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
 
   static std::optional<VerboseLogger> maybe_create(PyObject* vlogger) {
-    if (vlogger == nullptr) {
+    if (vlogger == Py_None) {
       return std::nullopt;
     }
     return VerboseLogger(vlogger);
@@ -334,7 +334,7 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 }
 
 // Refer to fields in python class CompiledAutogradTLS
-// Represents an Optional[Any]
+// May return Py_None
 PyObject* PyTLSWrapper::get(std::string_view key) const {
   return check(PyObject_GetAttrString(state, key.data()));
 }
