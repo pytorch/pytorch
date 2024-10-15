@@ -1753,7 +1753,7 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_tma_descriptor_1d(self, dynamic, backend):
         def f(a, b):
             BLOCK_SIZE = 256

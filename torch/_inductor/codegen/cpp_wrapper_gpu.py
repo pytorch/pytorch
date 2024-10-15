@@ -262,6 +262,11 @@ class CppWrapperGpu(CppWrapperCpu):
             autotune_configs=configs,
         )
 
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors NYI in C++ wrapper."
+        )    
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
