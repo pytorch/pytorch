@@ -486,17 +486,6 @@ def init_gpu_context(device: torch.device) -> None:
 
 
 @contextlib.contextmanager
-def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None, None]:
-    old_value = fake_mode.cache_enabled
-
-    try:
-        fake_mode.cache_enabled = False
-        yield
-    finally:
-        fake_mode.cache_enabled = old_value
-
-
-@contextlib.contextmanager
 def in_kernel_invocation_manager(
     fake_mode: FakeTensorMode,
 ) -> Generator[None, None, None]:
@@ -1360,8 +1349,7 @@ class FakeTensorMode(TorchDispatchMode):
                 if self.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
-                    with disable_fake_tensor_cache(self):
-                        self._crosscheck_cache_output(output, func, types, args, kwargs)
+                    self._crosscheck_cache_output(output, func, types, args, kwargs)
             else:
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
@@ -1404,15 +1392,6 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
-        if func in self.supported_hops:
-            # For invoke_subgraph, ignore the subgraph arg. We rely on
-            # identifier as a hash for the subgraph. It is Dynamo responsibility
-            # to use same identifier for identical subgraphs. For non-Dynamo
-            # use cases, we will always generate unique identifiers (even if the
-            # subgraphs are identical).
-            if func is torch._higher_order_ops.invoke_subgraph:
-                args = args[1:]
-
         # Translate any FakeTensor args to metadata.
         if args:
             self._prep_args_for_hash(key_values, args, state)
@@ -1433,10 +1412,6 @@ class FakeTensorMode(TorchDispatchMode):
         # Avoid caching for any ops that would require a more sophisticated
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
-
-        if func in self.supported_hops:
-            return
-
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")
 
@@ -1924,15 +1899,6 @@ class FakeTensorMode(TorchDispatchMode):
         )
         del args, kwargs  # Invalidated
 
-        if func in self.supported_hops:
-            # For invoke_subgraph, we just call subgraph with the operands
-            if func is torch._higher_order_ops.invoke_subgraph:
-                # Signature is (subgraph, identifier, operands)
-                subgraph = flat_args[0]
-                operands = flat_args[2:]
-                assert callable(subgraph)
-                return subgraph(*operands)
-
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
@@ -2359,13 +2325,6 @@ class FakeTensorMode(TorchDispatchMode):
         return func in self._cpp_meta_supports_symint
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
-
-    @property
-    def supported_hops(self) -> Dict[torch._ops.HigherOrderOperator, Literal[True]]:
-        # Delayed import to avoid circular dependency
-        return ordered_set(
-            torch._higher_order_ops.invoke_subgraph,
-        )
 
     def may_turn_const(self, t: Tensor) -> bool:
         return (
