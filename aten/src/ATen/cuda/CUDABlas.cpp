@@ -11,6 +11,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
@@ -180,17 +181,17 @@ uint32_t _getAlignment(uintptr_t address) {
 #endif
 
 static size_t _parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
-  if (!val) {
+  if (!val.has_value()) {
     // accept either env var
-    val = getenv("HIPBLASLT_WORKSPACE_SIZE");
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
 #endif
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-  if (val) {
+  if (val.has_value()) {
     try {
-      workspace_size = std::stoi(val);
+      workspace_size = std::stoi(val.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
