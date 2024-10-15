@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "CUDATest.hpp"
+#include "TestUtils.hpp"
 
 using namespace c10d::test;
 

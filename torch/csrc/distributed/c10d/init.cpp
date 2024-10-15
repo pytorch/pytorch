@@ -1534,6 +1534,9 @@ Example::
                       bool useLibUV) {
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
+              if (worldSize.value() == 0) {
+                throw py::value_error("TCPStore world size cannot be 0");
+              }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2759,7 +2762,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+              &::c10d::ProcessGroupNCCL::performNocolorSplit)
+          .def(
+              "abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_get_intra_node_comm_usage_counter",
