@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -112,7 +112,9 @@ def lazy_init():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
-def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
+def pre_grad_passes(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[object] = ()
+) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -138,7 +140,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                     gm=mod,
                     # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
                     fake_mode=detect_fake_mode(example_inputs),
-                ).propagate(*example_inputs)
+                ).propagate(*tuple(example_inputs))
 
             # normalization pass
             pass_execution_and_save(
