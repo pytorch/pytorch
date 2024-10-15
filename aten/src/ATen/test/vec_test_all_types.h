@@ -50,7 +50,7 @@ CACHE_ALIGN #define
   }
 
 #if defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) || \
-  defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
+  defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_RVV)  && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
 #elif defined(CPU_CAPABILITY_SVE)

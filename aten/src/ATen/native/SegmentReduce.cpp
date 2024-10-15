@@ -467,6 +467,7 @@ REGISTER_AVX512_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_
 REGISTER_VSX_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel)
 REGISTER_ZVECTOR_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel)
 REGISTER_SVE256_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel)
+REGISTER_RVV_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cpu_kernel)
 
 // offsets dispatches
 REGISTER_ARCH_DISPATCH(
@@ -478,6 +479,7 @@ REGISTER_AVX512_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_
 REGISTER_VSX_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel)
 REGISTER_ZVECTOR_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel)
 REGISTER_SVE256_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel)
+REGISTER_RVV_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel)
 
 // Currently some computation is being duplicated across forward and backward.
 // TODO: Cache indices in forward pass to re-use in backward
@@ -551,6 +553,9 @@ REGISTER_ZVECTOR_DISPATCH(
 REGISTER_SVE256_DISPATCH(
     _segment_reduce_lengths_backward_stub,
     &_segment_reduce_cpu_lengths_backward_kernel)
+REGISTER_RVV_DISPATCH(
+    _segment_reduce_lengths_backward_stub,
+    &_segment_reduce_cpu_lengths_backward_kernel)
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_offsets_backward_stub,
@@ -571,5 +576,7 @@ REGISTER_ZVECTOR_DISPATCH(
 REGISTER_SVE256_DISPATCH(
     _segment_reduce_offsets_backward_stub,
     &_segment_reduce_cpu_offsets_backward_kernel)
-
+REGISTER_RVV_DISPATCH(
+    _segment_reduce_offsets_backward_stub,
+    &_segment_reduce_cpu_offsets_backward_kernel)
 } // namespace at::native

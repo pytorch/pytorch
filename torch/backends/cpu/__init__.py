@@ -13,6 +13,7 @@ def get_cpu_capability() -> str:
     - "DEFAULT"
     - "VSX"
     - "Z VECTOR"
+    - "RVV"
     - "NO AVX"
     - "AVX2"
     - "AVX512"

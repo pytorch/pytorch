@@ -6,7 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 
 #include <ATen/cpu/vec/vec_base.h>
-#if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
+#if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_RVV))
 #if defined(CPU_CAPABILITY_SVE256)
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
 #endif
@@ -19,6 +19,12 @@
 #include <ATen/cpu/vec/vec256/vec256_complex_double.h>
 #elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
+#elif defined(CPU_CAPABILITY_RVV)
+#include <ATen/cpu/vec/vec256/rvv/vec256_float_rvv.h>
+#include <ATen/cpu/vec/vec256/rvv/vec256_qint32_rvv.h>
+#include <ATen/cpu/vec/vec256/rvv/vec256_qint8_rvv.h>
+#include <ATen/cpu/vec/vec256/rvv/vec256_quint8_rvv.h>
+#include <ATen/cpu/vec/vec256/rvv/vec256_bfloat16_rvv.h>
 #else
 #include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
