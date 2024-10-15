@@ -1325,6 +1325,7 @@ class SIMDScheduling(BaseScheduling):
     def codegen_node_schedule(
         self, node_schedule, buf_accesses, numel, reduction_numel
     ):
+        from torch._inductor.codegen.triton import TritonKernel
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
@@ -1334,7 +1335,8 @@ class SIMDScheduling(BaseScheduling):
             index_dtype,
         ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
 
-        is_split_scan = any(
+        is_scan = schedule_contains_op(node_schedule, "scan")
+        is_split_scan = is_scan and any(
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
@@ -1349,19 +1351,13 @@ class SIMDScheduling(BaseScheduling):
             index_dtype=index_dtype,
         )
 
-        def _node_has_sort(node):
-            if node in (EnableReduction, DisableReduction):
-                return False
-
-            sort_nodes = node._body.root_block.graph.find_nodes(
-                op="call_method", target="sort"
-            )
-            return bool(sort_nodes)
+        if is_scan and kernel_type == TritonKernel:
+            # TODO(jansel): scan does not yet work with cooperative reductions
+            kernel_kwargs["override_cooperative_reduction"] = False
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        has_sort = any(_node_has_sort(node) for node in node_schedule)
-        if has_sort:
+        if has_sort := schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
@@ -1897,3 +1893,12 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
+
+
+def schedule_contains_op(node_schedule, op_name: str) -> bool:
+    """True if V.ops.{op_name} is used in node_schedule"""
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node._body.has_op(op_name):
+                return True
+    return False
