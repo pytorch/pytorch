@@ -149,7 +149,8 @@ class PyCodegen:
                 return
 
         if value.source is not None and allow_cache and self.value_from_source:
-            self.call_reconstruct(value.source)
+            source = self.overridden_sources.get(value.source, value.source)
+            self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
