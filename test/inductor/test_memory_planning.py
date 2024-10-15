@@ -92,7 +92,7 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
-    @skipIfXpu
+    @skipIfXpu(msg="abi_compatible doesn't work on XPU")
     def test_abi_compatible(self):
         try:
             from .test_aot_inductor import AOTIRunnerUtil

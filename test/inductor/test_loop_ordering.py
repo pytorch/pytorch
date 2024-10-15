@@ -237,6 +237,7 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
+    # xpu generate 2 kernels
     @expectedFailureXPU
     def test_apbt_realize(self):
         M = 1024
@@ -257,6 +258,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
     @expectedFailureXPU
     def test_sum_and_t(self):
         N = 1024
@@ -268,6 +270,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
     @expectedFailureXPU
     def test_pw_outer_red(self):
         def f(x):
@@ -279,6 +282,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
     @expectedFailureXPU
     def test_pw_outer_red_2(self):
         """
@@ -353,6 +357,7 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
+    # xpu generate 2 kernels
     @expectedFailureXPU
     def test_different_broadcast_shapes(self):
         def f(x, y, c):

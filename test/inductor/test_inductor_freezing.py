@@ -25,7 +25,6 @@ sys.path.append(pytorch_test_dir)
 
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
-    check_model_cuda,
     check_model_gpu,
     copy_tests,
 )
@@ -963,21 +962,11 @@ if HAS_CPU and not torch.backends.mps.is_available():
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
 if HAS_GPU and not TEST_WITH_ASAN:
-    if GPU_TYPE == "cuda":
+    class FreezingGpuTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
-        class FreezingCudaTests(TestCase):
-            common = check_model_cuda
-            device = GPU_TYPE
-            autocast = torch.cuda.amp.autocast
-
-        copy_tests(OptimizeForInferenceTemplate, FreezingCudaTests, GPU_TYPE)
-    elif GPU_TYPE == "xpu":
-
-        class FreezingXpuTests(TestCase):
-            common = check_model_gpu
-            device = GPU_TYPE
-
-        copy_tests(OptimizeForInferenceTemplate, FreezingXpuTests, GPU_TYPE)
+    copy_tests(OptimizeForInferenceTemplate, FreezingGpuTests, GPU_TYPE)
 
 
 del OptimizeForInferenceTemplate
