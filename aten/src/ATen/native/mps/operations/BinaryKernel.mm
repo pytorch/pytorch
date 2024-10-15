@@ -39,7 +39,7 @@ kernel void fmax(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = fmax(*input, *other);
+  *out = static_cast<T>(fmax(*input, *other));
 }
 
 template<typename T>
@@ -52,7 +52,7 @@ kernel void fmin(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = fmin(*input, *other);
+  *out = static_cast<T>(fmin(*input, *other));
 }
 
 template<typename T>
@@ -65,7 +65,7 @@ kernel void copysign(constant void     * input_        [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  *out = copysign(*input, *other);
+  *out = static_cast<T>(copysign(*input, *other));
 }
 
 template<typename T>
@@ -127,6 +127,11 @@ REGISTER_FMIN_OP(float);
 REGISTER_FMIN_OP(half);
 REGISTER_COPYSIGN_OP(float);
 REGISTER_COPYSIGN_OP(half);
+#if __METAL_VERSION__ >= 310
+REGISTER_FMAX_OP(bfloat);
+REGISTER_FMIN_OP(bfloat);
+REGISTER_COPYSIGN_OP(bfloat);
+#endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
 REGISTER_COPYSIGN_INTEGRAL_OP(long);
 REGISTER_COPYSIGN_INTEGRAL_OP(short);
@@ -196,7 +201,7 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
   auto input = *(constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   auto other = *(constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 #if __METAL_VERSION__ >= 310
-  *out = nextafter(input, other);
+  *out = static_cast<T>(nextafter(input, other));
 #else
   if (input == other) {
     *out = input;
@@ -225,6 +230,9 @@ kernel void nextafter_kernel<DTYPE, UTYPE>(  \
 
 REGISTER_NEXTAFTER_OP(float, uint);
 REGISTER_NEXTAFTER_OP(half, ushort);
+#if __METAL_VERSION__ >= 310
+REGISTER_NEXTAFTER_OP(bfloat, ushort);
+#endif
 
 template<typename T>
 kernel void complex_kernel(constant void  * real_       [[buffer(0)]],

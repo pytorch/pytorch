@@ -11,6 +11,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/leaky_relu.h>
 #include <ATen/ops/rrelu_with_noise_native.h>
+#include <ATen/ops/_rrelu_with_noise_native.h>
 #endif
 
 
@@ -191,6 +192,18 @@ Tensor& rrelu_with_noise_cuda_(
     std::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cuda(
       self, noise, lower, upper, training, generator, self);
+}
+
+std::tuple<Tensor,Tensor> _rrelu_with_noise_cuda(
+    const Tensor& self,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  Tensor output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  at::native::rrelu_with_noise_out_cuda(self, noise, lower, upper, training, generator, output);
+  return std::tuple<Tensor, Tensor>(output, noise);
 }
 
 }  // namespace at::native

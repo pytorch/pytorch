@@ -64,6 +64,7 @@
 #include <ATen/ops/rrelu_with_noise.h>
 #include <ATen/ops/rrelu_with_noise_backward_native.h>
 #include <ATen/ops/rrelu_with_noise_native.h>
+#include <ATen/ops/_rrelu_with_noise_native.h>
 #include <ATen/ops/selu_native.h>
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/silu_backward_native.h>
@@ -648,6 +649,19 @@ Tensor& rrelu_with_noise_cpu_(
     std::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(
       self, noise, lower, upper, training, std::move(generator), self);
+}
+
+std::tuple<Tensor, Tensor> _rrelu_with_noise_cpu(
+    const Tensor& self,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  at::native::rrelu_with_noise_out_cpu(
+      self, noise, lower, upper, training, std::move(generator), output);
+  return std::tuple<Tensor, Tensor>(output, noise);
 }
 
 Tensor rrelu_with_noise_backward(

@@ -1,9 +1,8 @@
 # Owner(s): ["module: cpp-extensions"]
 
 import _codecs
+import io
 import os
-import shutil
-import sys
 import tempfile
 import types
 import unittest
@@ -28,15 +27,6 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
-
-
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
 
 
 def generate_faked_module():
@@ -98,7 +88,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
@@ -540,35 +530,110 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
+    @unittest.skipIf(
+        np.__version__ < "1.25",
+        "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
+    )
     def test_open_device_numpy_serialization(self):
+        """
+        This tests the legacy _rebuild_device_tensor_from_numpy serialization path
+        """
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
         default_protocol = torch.serialization.DEFAULT_PROTOCOL
-        # This is a hack to test serialization through numpy
+
+        # Legacy data saved with _rebuild_device_tensor_from_numpy on f80ed0b8 via
+
+        # with patch.object(torch._C, "_has_storage", return_value=False):
+        #     x = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.float32, device=device)
+        #     x_foo = x.to(device)
+        #     sd = {"x": x_foo}
+        #     rebuild_func = x_foo._reduce_ex_internal(default_protocol)[0]
+        #     self.assertTrue(
+        #         rebuild_func is torch._utils._rebuild_device_tensor_from_numpy
+        #     )
+        #     with open("foo.pt", "wb") as f:
+        #         torch.save(sd, f)
+
+        data_legacy_numpy = (
+            b"PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x10\x00\x12\x00archive/data.pklFB\x0e\x00ZZZZZZZZZZZZZZ\x80\x02}q\x00X\x01"
+            b"\x00\x00\x00xq\x01ctorch._utils\n_rebuild_device_tensor_from_numpy\nq\x02(cnumpy.core.m"
+            b"ultiarray\n_reconstruct\nq\x03cnumpy\nndarray\nq\x04K\x00\x85q\x05c_codecs\nencode\nq\x06"
+            b"X\x01\x00\x00\x00bq\x07X\x06\x00\x00\x00latin1q\x08\x86q\tRq\n\x87q\x0bRq\x0c(K\x01K\x02K"
+            b"\x03\x86q\rcnumpy\ndtype\nq\x0eX\x02\x00\x00\x00f4q\x0f\x89\x88\x87q\x10Rq\x11(K\x03X\x01"
+            b"\x00\x00\x00<q\x12NNNJ\xff\xff\xff\xffJ\xff\xff\xff\xffK\x00tq\x13b\x89h\x06X\x1c\x00\x00"
+            b"\x00\x00\x00\xc2\x80?\x00\x00\x00@\x00\x00@@\x00\x00\xc2\x80@\x00\x00\xc2\xa0@\x00\x00\xc3"
+            b"\x80@q\x14h\x08\x86q\x15Rq\x16tq\x17bctorch\nfloat32\nq\x18X\x05\x00\x00\x00foo:0q\x19\x89"
+            b"tq\x1aRq\x1bs.PK\x07\x08\xe3\xe4\x86\xecO\x01\x00\x00O\x01\x00\x00PK\x03\x04\x00\x00\x08"
+            b"\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x11\x002\x00"
+            b"archive/byteorderFB.\x00ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZlittlePK\x07\x08"
+            b"\x85=\xe3\x19\x06\x00\x00\x00\x06\x00\x00\x00PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0f\x00=\x00archive/versionFB9\x00"
+            b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ3\nPK\x07\x08\xd1\x9egU\x02\x00\x00"
+            b"\x00\x02\x00\x00\x00PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x1e\x002\x00archive/.data/serialization_idFB.\x00ZZZZZZZZZZZZZ"
+            b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ0636457737946401051300000027264370494161PK\x07\x08\x91\xbf"
+            b"\xa7\x0c(\x00\x00\x00(\x00\x00\x00PK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00"
+            b"\xe3\xe4\x86\xecO\x01\x00\x00O\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00archive/data.pklPK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00"
+            b"\x00\x00\x85=\xe3\x19\x06\x00\x00\x00\x06\x00\x00\x00\x11\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x9f\x01\x00\x00archive/byteorderPK\x01\x02\x00\x00\x00\x00\x08\x08\x00"
+            b"\x00\x00\x00\x00\x00\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00\x0f\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x16\x02\x00\x00archive/versionPK\x01\x02\x00\x00\x00\x00\x08"
+            b"\x08\x00\x00\x00\x00\x00\x00\x91\xbf\xa7\x0c(\x00\x00\x00(\x00\x00\x00\x1e\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x92\x02\x00\x00archive/.data/serialization_idPK\x06"
+            b"\x06,\x00\x00\x00\x00\x00\x00\x00\x1e\x03-\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00"
+            b"\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x06\x01\x00\x00\x00\x00\x00\x008\x03\x00"
+            b"\x00\x00\x00\x00\x00PK\x06\x07\x00\x00\x00\x00>\x04\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+            b"PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00\x06\x01\x00\x008\x03\x00\x00\x00\x00"
+        )
+        buf_data_legacy_numpy = io.BytesIO(data_legacy_numpy)
+
+        with safe_globals(
+            [
+                np.core.multiarray._reconstruct,
+                np.ndarray,
+                np.dtype,
+                _codecs.encode,
+                np.dtypes.Float32DType,
+            ]
+        ):
+            sd_loaded = torch.load(buf_data_legacy_numpy, weights_only=True)
+            buf_data_legacy_numpy.seek(0)
+            # Test map_location
+            sd_loaded_cpu = torch.load(
+                buf_data_legacy_numpy, weights_only=True, map_location="cpu"
+            )
+        expected = torch.tensor(
+            [[1, 2, 3], [4, 5, 6]], dtype=torch.float32, device=device
+        )
+        self.assertEqual(sd_loaded["x"].cpu(), expected.cpu())
+        self.assertFalse(sd_loaded["x"].is_cpu)
+        self.assertTrue(sd_loaded_cpu["x"].is_cpu)
+
+    def test_open_device_cpu_serialization(self):
+        torch.utils.rename_privateuse1_backend("foo")
+        device = self.module.custom_device()
+        default_protocol = torch.serialization.DEFAULT_PROTOCOL
+
         with patch.object(torch._C, "_has_storage", return_value=False):
             x = torch.randn(2, 3)
             x_foo = x.to(device)
             sd = {"x": x_foo}
             rebuild_func = x_foo._reduce_ex_internal(default_protocol)[0]
             self.assertTrue(
-                rebuild_func is torch._utils._rebuild_device_tensor_from_numpy
+                rebuild_func is torch._utils._rebuild_device_tensor_from_cpu_tensor
             )
             # Test map_location
             with TemporaryFileName() as f:
                 torch.save(sd, f)
-                with safe_globals(
-                    [
-                        np.core.multiarray._reconstruct,
-                        np.ndarray,
-                        np.dtype,
-                        _codecs.encode,
-                        type(np.dtype(np.float32))
-                        if np.__version__ < "1.25.0"
-                        else np.dtypes.Float32DType,
-                    ]
-                ):
-                    sd_loaded = torch.load(f, map_location="cpu")
-                self.assertTrue(sd_loaded["x"].is_cpu)
+                sd_loaded = torch.load(f, weights_only=True)
+                # Test map_location
+                sd_loaded_cpu = torch.load(f, weights_only=True, map_location="cpu")
+            self.assertFalse(sd_loaded["x"].is_cpu)
+            self.assertEqual(sd_loaded["x"].cpu(), x)
+            self.assertTrue(sd_loaded_cpu["x"].is_cpu)
 
             # Test metadata_only
             with TemporaryFileName() as f:

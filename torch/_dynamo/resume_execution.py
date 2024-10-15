@@ -98,7 +98,6 @@ class ReenterWith:
         except:
             (restore previous tf mode stack)
             raise
-
         """
         from .variables.torch_function import get_prev_stack_var_name
 
