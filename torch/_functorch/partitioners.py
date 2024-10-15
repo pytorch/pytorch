@@ -1899,8 +1899,6 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
-        from torch._inductor.fx_utils import get_node_storage
-
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
