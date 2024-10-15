@@ -790,6 +790,48 @@ class WhileLoopTests(TestCase):
         )
 
 
+class LoweringReplacementTests(TestCase):
+    def test_tracing_lowering_replacement(self):
+        from torch._inductor.pattern_matcher import lowering_replacement_hop
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x, y = torch.randn(3, 3), torch.randn(3, 3)
+
+        def sub_f(x, y):
+            return x.sin(), y.cos()
+
+        gm = make_fx(sub_f)(x, y)
+
+        def lower_fn(x, y):
+            pass
+
+        test_name = "test"
+        assert "test" not in lowering_replacement_hop.replacement_side_table
+        lowering_replacement_hop.replacement_side_table[test_name] = (lower_fn, gm)
+
+        def f(x, y):
+            a, b = lowering_replacement_hop(test_name, x, y)
+            return a @ b
+
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.lowering_replacement,
+                )
+            ),
+            1,
+        )
+        mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with mode:
+            fake_x, fake_y = torch.empty_like(x), torch.empty_like(y)
+            fake_ret = f(fake_x, fake_y)
+        self.assertEqual(fake_ret.size(), torch.Size([3, 3]))
+        lowering_replacement_hop.replacement_side_table.pop(test_name)
+
+
 class AssociativeScanTests(TestCase):
     @requires_gpu
     @parametrize("combine_mode", ["pointwise", "generic"])

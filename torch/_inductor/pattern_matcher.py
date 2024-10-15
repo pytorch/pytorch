@@ -93,7 +93,7 @@ from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
-from .lowering import fallback_node_due_to_unsupported_type
+from .lowering import fallback_node_due_to_unsupported_type, register_lowering
 
 
 log = logging.getLogger(__name__)
@@ -999,14 +999,122 @@ class PatternEntry:
                 self.register(x, target, prepend=prepend)
 
 
+from torch._ops import HigherOrderOperator
+
+
+class LoweringReplacementOp(HigherOrderOperator):
+    # Map pattern name to sub_gm that corresponds to the pattern and its lowering function
+    replacement_side_table: [str, Tuple[Callable, torch.fx.GraphModule]] = {}
+
+    def __init__(self):
+        super().__init__("lowering_replacement")
+
+    def __call__(self, pattern_name, *args, **kwargs):
+        return super().__call__(pattern_name, *args, **kwargs)
+
+
+lowering_replacement_hop = LoweringReplacementOp()
+
+
+@lowering_replacement_hop.py_impl(
+    torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
+)
+def trace_lowering_replacement_hop(mode, pattern_name, *args, **kwargs):
+    proxy_args, proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
+    sub_gm = LoweringReplacementOp.replacement_side_table[pattern_name][1]
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        lowering_replacement_hop,
+        (pattern_name,) + proxy_args,
+        proxy_kwargs,
+    )
+    out = sub_gm(*args, **kwargs)
+    return torch.fx.experimental.proxy_tensor.track_tensor_tree(
+        out, out_proxy, constant=None, tracer=mode.tracer
+    )
+
+
+lowering_replacement_hop.py_impl(torch._C.DispatchKey.Autograd)(
+    torch._higher_order_ops.utils.autograd_not_implemented(
+        lowering_replacement_hop, deferred_error=True
+    )
+)
+
+
+@lowering_replacement_hop.py_impl(torch._subclasses.fake_tensor.FakeTensorMode)
+def lowering_replacement_hop_fake(mode, pattern_name, *args, **kwargs):
+    return LoweringReplacementOp.replacement_side_table[pattern_name][1](
+        *args, **kwargs
+    )
+
+
+@register_lowering(lowering_replacement_hop)
+def unwrap_lowering_replacement(
+    pattern_name: str, *args: Tuple[Any], **kwargs: Dict[Any, Any]
+):
+    return LoweringReplacementOp.replacement_side_table[pattern_name][0](
+        *args, **kwargs
+    )
+
+
+def match_to_graph_module(match: Match) -> torch.fx.GraphModule:
+    import copy
+
+    nodes = match.nodes
+    subgraph = torch.fx.Graph()
+
+    node_to_placeholder: Dict[
+        torch.fx.Node, torch.fx.Node
+    ] = {}  # mapping of nodes from old graph to placeholder in new graph
+    node_map: Dict[
+        torch.fx.Node, torch.fx.Node
+    ] = {}  # mapping of nodes from old graph to new graph
+
+    def remap_inputs(x: torch.fx.Node) -> torch.fx.Node:
+        if x.op == "get_attr":
+            raise NotImplementedError("NYI: creating getattr nodes")
+
+        if x in node_map:
+            # x is inside subgraph, return the copied node
+            # the node should have been copied aleady, as we are copying graph in the topological order
+            return node_map[x]
+
+        if x not in node_to_placeholder:
+            # x is not in subgraph, create a new placeholder for subgraph
+            placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
+            # copy all meta fields, even if some fields might be irrelvant for the placeholder node
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
+
+        return node_to_placeholder[x]
+
+    for node in nodes:
+        new_node = subgraph.node_copy(node, remap_inputs)
+        node_map[node] = new_node
+    subgraph.output(node_map[nodes[-1]])
+    return torch.fx.GraphModule({}, subgraph)
+
+
 @dataclasses.dataclass
 class LoweringPatternEntry(PatternEntry):
     handler: Callable[..., Any]
+    pattern_name: str
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
+        if self.pattern_name not in LoweringReplacementOp.replacement_side_table:
+            gm = match_to_graph_module(match)
+            LoweringReplacementOp.replacement_side_table[self.pattern_name] = (
+                handler,
+                match_to_graph_module(match),
+            )
+
         with graph.inserting_before(node):
-            replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
+            replacement = graph.call_function(
+                lowering_replacement_hop,
+                (self.pattern_name,) + tuple(match.args),
+                match.kwargs,
+            )
             replacement.meta.update(node.meta)
             node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
@@ -1576,7 +1684,10 @@ def register_lowering_pattern(
     def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
         assert callable(handler)
         LoweringPatternEntry(
-            pattern=pattern, extra_check=extra_check, handler=handler
+            pattern=pattern,
+            extra_check=extra_check,
+            handler=handler,
+            pattern_name=f"lowering_repacement_pattern{len(LoweringReplacementOp.replacement_side_table)}",
         ).register(pass_dict, prepend=prepend)
         handler._inductor_lowering_function = True  # type: ignore[attr-defined]
         return handler
