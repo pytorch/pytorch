@@ -103,9 +103,8 @@ class SubgraphSlicer {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool changed;
-          std::tie(it, changed) = scanNode(*it);
+          auto [tmp_it, changed] = scanNode(*it);
+          it = tmp_it;
           any_changed |= changed;
         }
       }

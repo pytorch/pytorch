@@ -11,9 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 namespace registerizer {
 
 /* The Registerizer performs scalar replacement by looking for common Stores and
@@ -64,14 +62,14 @@ class AccessInfo {
         accessOrder_(accessOrder) {}
 
   // Adds a Store to this access, which is in the provided scope.
-  void addStore(StorePtr store, const std::shared_ptr<Scope>& scope);
+  void addStore(const StorePtr& store, const std::shared_ptr<Scope>& scope);
 
   // Adds a Load to this access, which occurs in the usage Stmt in the provided
   // scope.
   void addLoad(
-      LoadPtr load,
+      const LoadPtr& load,
       const std::shared_ptr<Scope>& scope,
-      StmtPtr usage);
+      const StmtPtr& usage);
 
   // Merge another AccessInfo into this one.
   void merge(const std::shared_ptr<AccessInfo>& other);
@@ -80,7 +78,7 @@ class AccessInfo {
   bool overlaps(const std::shared_ptr<AccessInfo>& other);
 
   // Returns true if the indices of this access depend on the provided Var.
-  bool dependsOnVar(VarPtr v);
+  bool dependsOnVar(const VarPtr& v);
 
   // Clone this AccessInfo, and set this as the new accesses' hiddenAccess.
   static std::shared_ptr<AccessInfo> cloneWithHiddenInfo(
@@ -106,7 +104,7 @@ class AccessInfo {
   }
 
   void setEnclosingBlock(BlockPtr b) {
-    block_ = b;
+    block_ = std::move(b);
   }
 
   StmtPtr first_usage() const {
@@ -117,8 +115,8 @@ class AccessInfo {
   }
 
   void setUsageMarks(StmtPtr first, StmtPtr last) {
-    first_usage_ = first;
-    last_usage_ = last;
+    first_usage_ = std::move(first);
+    last_usage_ = std::move(last);
   }
 
   bool firstUsageOverlapped() const {
@@ -141,7 +139,7 @@ class AccessInfo {
     return loads_;
   }
 
-  void hoistCosts(ExprPtr extent) {
+  void hoistCosts(const ExprPtr& extent) {
     store_cost_ = IRSimplifier::simplify(alloc<Mul>(store_cost_, extent));
     load_cost_ = IRSimplifier::simplify(alloc<Mul>(load_cost_, extent));
   }
@@ -225,7 +223,7 @@ class Scope {
         parent_(std::move(parent)),
         conditionId_(conditionId) {}
 
-  AccessHashMap& getAccessMapByBuf(BufPtr b);
+  AccessHashMap& getAccessMapByBuf(const BufPtr& b);
 
   std::unordered_map<BufPtr, AccessHashMap>& openAccesses() {
     return openAccesses_;
@@ -251,7 +249,7 @@ class Scope {
     return localVars_;
   }
   void addLocalVar(VarPtr v) {
-    localVars_.insert(v);
+    localVars_.insert(std::move(v));
   }
 
   void closeAccess(const std::shared_ptr<AccessInfo>& info);
@@ -425,6 +423,4 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
 // atomics.
 TORCH_API StmtPtr registerize(StmtPtr s);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

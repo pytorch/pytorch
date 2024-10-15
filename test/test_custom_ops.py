@@ -20,7 +20,7 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.infer_schema import tuple_to_list
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -353,16 +353,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            torch.library.opcheck(
-                op.op,
-                args,
-                kwargs,
-            )
+            torch.library.opcheck(op.op, args, kwargs)
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -470,6 +465,44 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
+
+    def test_deploy_interaction(self):
+        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
+        script = """
+import torch
+torch._running_with_deploy = lambda: True
+
+# creating the library is a no-op, so you can DEF multiple times
+m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+
+m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
+
+# define is a no-op
+m.define("foobarbaz9996(Tensor x) -> Tensor")
+assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
+
+def sin_override(x):
+    raise AssertionError("m.impl should have been a noop")
+
+# impl is a no-op
+m.impl("sin", sin_override, "CompositeImplicitAutograd")
+x = torch.randn(3)
+y = torch.sin(x)
+        """
+        script = script.strip()
+        env = os.environ.copy()
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=env,
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
 
     @requires_compile
     def test_functionalize_error(self):
@@ -1570,7 +1603,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
+        with self.assertRaisesRegex(RuntimeError, "data-dependent shape"):
             numpy_nonzero(x)
 
     def test_basic_make_fx(self):
@@ -1927,9 +1960,7 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
-        for op in [
-            torch.ops.aten.fill.Tensor_out,
-        ]:
+        for op in [torch.ops.aten.fill.Tensor_out]:
             self.assertIn(torch.Tag.generated, op.tags)
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
@@ -2656,9 +2687,7 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "string"):
 
             @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
-            def f3(
-                x: Tensor,
-            ) -> None:
+            def f3(x: Tensor) -> None:
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
@@ -3356,9 +3385,7 @@ Please use `add.register_fake` to add an fake impl.""",
             return x + 1
 
         self.assertEqual(f(x), x + 1)
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("gpu", enabled=False):
                 self.assertEqual(f(x), x + 1)
             self.assertIn(
@@ -3371,9 +3398,7 @@ Please use `add.register_fake` to add an fake impl.""",
 
         self.assertEqual(f(x), x + 2)
 
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("cpu", enabled=True):
                 self.assertEqual(f(x), x + 2)
             self.assertIn("already enabled", captured.output[0])
@@ -3381,9 +3406,7 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
-            with self.assertLogs(
-                "torch._library.custom_ops",
-            ) as captured:
+            with self.assertLogs("torch._library.custom_ops") as captured:
                 with f.set_kernel_enabled("cpu", enabled=False):
                     self.assertEqual(f(x), x + 1)
                 self.assertIn("already disabled", captured.output[0])
@@ -3443,6 +3466,26 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertTrue(called)
             self.assertEqual(result, w * 2 * 3 * 42)
 
+    def test_layout_constraint_tags(self):
+        needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
+        flexible_layout = torch._C.Tag.flexible_layout
+        # (tags, the result of the tag inference)
+        tests = [
+            ({needs_fixed_stride_order}, needs_fixed_stride_order),
+            ({flexible_layout}, flexible_layout),
+            # If no tags are provided, then the following is the default
+            (set(), needs_fixed_stride_order),
+            # If multiple tags are provided, then we use the most constrained tag.
+            ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
+        ]
+        from torch._inductor.lowering import get_layout_constraint_tag
+
+        for tags, expected in tests:
+            with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+                m.define("foobar(Tensor x) -> Tensor", tags=tags)
+                result = get_layout_constraint_tag(torch.ops.mylib.foobar.default)
+                self.assertEqual(result, expected)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap(self):
         for mode in ["function", "qualname", "opoverload", "c_opdef"]:
@@ -3464,24 +3507,13 @@ Please use `add.register_fake` to add an fake impl.""",
                 return result, 0
 
             if mode == "function":
-                torch.library.register_vmap(
-                    f,
-                    fvmap,
-                )
+                torch.library.register_vmap(f, fvmap)
             elif mode == "qualname":
-                torch.library.register_vmap(
-                    "mylib::f",
-                    fvmap,
-                )
+                torch.library.register_vmap("mylib::f", fvmap)
             elif mode == "opoverload":
-                torch.library.register_vmap(
-                    torch.ops.mylib.f.default,
-                    fvmap,
-                )
+                torch.library.register_vmap(torch.ops.mylib.f.default, fvmap)
             elif mode == "c_opdef":
-                f.register_vmap(
-                    fvmap,
-                )
+                f.register_vmap(fvmap)
 
             x = torch.randn(2, 2)
             y = torch.randn(2, 2)
@@ -3526,6 +3558,11 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x * y)
 
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3551,6 +3588,11 @@ Please use `add.register_fake` to add an fake impl.""",
         result = torch.vmap(f)(x, y)
         self.assertTrue(called)
         self.assertEqual(result, x * y)
+
+        x = torch.randn(3)
+        y = torch.randn(2)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):
@@ -3649,10 +3691,7 @@ class MiniOpTestOther(CustomOpTestCaseBase):
 optests.generate_opcheck_tests(
     MiniOpTest,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
@@ -3662,10 +3701,7 @@ optests.generate_opcheck_tests(
 optests.generate_opcheck_tests(
     MiniOpTestOther,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
@@ -3827,12 +3863,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         result = torch.library.opcheck(
             torch.ops.aten.sin.default, (x,), test_utils="test_schema"
         )
-        self.assertEqual(
-            result,
-            {
-                "test_schema": "SUCCESS",
-            },
-        )
+        self.assertEqual(result, {"test_schema": "SUCCESS"})
 
         result = torch.library.opcheck(
             torch.ops.aten.sin.default,

@@ -389,7 +389,7 @@ void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph) {
         return;
       }
       fixupTypeInfoForValue(
-          input, *tt->scalarType(), tt->device() ? *tt->device() : at::kCPU);
+          input, tt->scalarType(), tt->device() ? tt->device() : at::kCPU);
     }
   }
 

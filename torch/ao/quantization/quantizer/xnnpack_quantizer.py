@@ -76,7 +76,6 @@ def _supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPattern
         ],
         "linear": [[torch.nn.Linear], [F.linear]],
         "add": [[torch.add]],
-        "max_pool2d": [[torch.nn.MaxPool2d], [F.max_pool2d]],
         "adaptive_avg_pool2d": [
             [torch.nn.AdaptiveAvgPool2d],
             [F.adaptive_avg_pool2d],
@@ -256,7 +255,6 @@ class XNNPACKQuantizer(Quantizer):
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
-        "max_pool2d",
         "add_relu",
         "add",
         "mul_relu",

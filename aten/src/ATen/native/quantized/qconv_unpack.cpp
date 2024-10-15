@@ -35,8 +35,8 @@ extern template int register_conv_params<2>();
 extern template int register_conv_params<3>();
 
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 /*
@@ -240,5 +240,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

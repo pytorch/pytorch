@@ -30,7 +30,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
 
-    def get_backend_features(self, device):
+    def get_backend_features(self, device):  # type:ignore[override]
         return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
@@ -85,8 +85,8 @@ class CUDACombinedScheduling(BaseScheduling):
     def flush(self):
         return self._triton_scheduling.flush()
 
-    def codegen_foreach(self, *args, **kwargs):
-        return self._triton_scheduling.codegen_foreach(*args, **kwargs)
+    def codegen_combo_kernel(self, *args, **kwargs):
+        return self._triton_scheduling.codegen_combo_kernel(*args, **kwargs)
 
     def benchmark_fused_nodes(self, nodes):
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
@@ -95,3 +95,6 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel
         )
+
+    def benchmark_combo_kernel(self, node_list):
+        return self._triton_scheduling.benchmark_combo_kernel(node_list)

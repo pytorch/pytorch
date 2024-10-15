@@ -12,8 +12,8 @@ functionalities in `torch.jit`.
 import torch
 from torch._jit_internal import Future
 from torch.jit._builtins import _register_builtin
-
 from torch.utils import set_module
+
 
 set_module(Future, "torch.jit")
 

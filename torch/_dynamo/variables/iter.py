@@ -5,7 +5,7 @@ import operator
 import sys
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
     handle_observed_exception,
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-MAX_CYCLE = 3000
+MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
 
 
 class ItertoolsVariable(VariableTracker):
@@ -32,9 +32,6 @@ class ItertoolsVariable(VariableTracker):
 
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -54,15 +51,6 @@ class ItertoolsVariable(VariableTracker):
             items = []
             for item in itertools.product(*seqs):
                 items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
-            self.value is itertools.chain
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            # TODO support itertools.chain with arbitrary iterables
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
@@ -187,18 +175,18 @@ class ItertoolsVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.repeat), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
+            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
                 tx, args, kwargs
             )
         elif self.value is itertools.zip_longest:
-            return variables.UserFunctionVariable(polyfill.zip_longest).call_function(
+            return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
                 tx, args, kwargs
             )
         else:
@@ -308,7 +296,7 @@ class CycleIteratorVariable(IteratorVariable):
         if self.iterator is not None:
             try:
                 new_item = self.iterator.next_variable(tx)
-                if len(self.saved) > MAX_CYCLE:
+                if len(self.saved) > MAX_ITERATOR_LIMIT:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
@@ -327,7 +315,7 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise_observed_exception(StopIteration, tx, self)
+            raise_observed_exception(StopIteration, tx)
 
 
 class ZipVariable(IteratorVariable):
@@ -383,7 +371,7 @@ class ZipVariable(IteratorVariable):
         def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
-                    raise_observed_exception(StopIteration, tx, self)
+                    raise_observed_exception(StopIteration, tx)
                 return it[old_index]
             else:
                 return it.next_variable(tx)
@@ -485,23 +473,3 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
-
-
-class EnumerateVariable(ZipVariable):
-    def __init__(
-        self,
-        iterable: Union[List[VariableTracker], VariableTracker],
-        start: int = 0,
-        **kwargs,
-    ) -> None:
-        super().__init__(
-            [CountIteratorVariable(start, mutable_local=MutableLocal()), iterable],
-            **kwargs,
-        )
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "enumerate"))
-        codegen(self.iterables[1])
-        assert isinstance(self.iterables[0], CountIteratorVariable)
-        codegen(self.iterables[0].item)
-        codegen.extend_output(codegen.create_call_function_kw(2, ("start",), False))

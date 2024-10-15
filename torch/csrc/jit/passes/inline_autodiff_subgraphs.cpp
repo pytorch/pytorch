@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // aten and prim nodes (except FusionGroup) are guaranteed to work
 // with Autograd, other nodes (e.g. user-defined nodes) are not necessarily
@@ -86,5 +85,4 @@ void InlineAutodiffSubgraphs(std::shared_ptr<Graph>& graph, size_t threshold) {
   EliminateDeadCode(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

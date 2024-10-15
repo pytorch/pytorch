@@ -102,8 +102,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
-    TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
-    TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X2 got: ", device2);
   }
 
   auto dim1 = x1.dim();

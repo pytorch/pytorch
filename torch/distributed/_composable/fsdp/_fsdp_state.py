@@ -15,7 +15,6 @@ from typing import (
 )
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._logging import warning_once
 from torch.autograd import Variable
@@ -25,6 +24,7 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
+from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -35,6 +35,13 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -56,7 +63,7 @@ class FSDPStateContext:
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.cuda.Event] = None
+        self.post_optim_event: Optional[torch.Event] = None
 
 
 def disable_if_config_true(func):
@@ -93,6 +100,7 @@ class FSDPState(_State):
             _insert_module_state(module, self)
         self._modules = modules
         self._device = device
+        self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
@@ -127,10 +135,10 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_stream.wait_event(event)
                 self._state_ctx.post_optim_event = None
             else:
-                current_stream = torch.cuda.current_stream()
+                current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type == "cuda":
+            if self._device.type in ["cuda", "hpu"]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -180,7 +188,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.lazy_init()
+        self._comm_ctx.lazy_init(self._device)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
@@ -290,7 +298,11 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                self._comm_ctx.reduce_scatter_state = None
+                if self._comm_ctx.reduce_scatter_state is not None:
+                    self._device_handle.current_stream().wait_event(
+                        self._comm_ctx.reduce_scatter_state.event
+                    )
+                    self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
@@ -313,12 +325,9 @@ class FSDPState(_State):
         if not torch.is_grad_enabled():
             return output
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(
-            t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
-        )
-        if tensors:
-            for tensor in tensors:
-                tensor.register_hook(self._pre_backward)
+        for t in flat_outputs:
+            if torch.is_tensor(t) and t.requires_grad:
+                t.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):
@@ -350,12 +359,14 @@ def _register_group_forward_hooks(
     """
     modules_set = set(modules)
 
+    @disable_if_config_true
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):
         if len(modules_to_run) == 0:  # first to run
             modules_to_run.update(modules_set)
             return pre_hook(*args, **kwargs)
 
+    @disable_if_config_true
     def get_wrapped_post_hook(module: nn.Module):
         @functools.wraps(post_hook)
         def wrapped_post_hook(*args: Any, **kwargs: Any):

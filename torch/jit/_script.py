@@ -22,7 +22,6 @@ from torch._jit_internal import _get_model_id, _qualified_name
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
-
 from torch.jit._monkeytype_config import (
     JitTypeTraceConfig,
     JitTypeTraceStore,
@@ -52,6 +51,7 @@ from torch.package import PackageExporter, PackageImporter
 from torch.utils import set_module
 
 from ._serialization import validate_map_location
+
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -295,7 +295,8 @@ class ScriptMeta(type):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
-            return super().__init__(name, bases, attrs)
+            super().__init__(name, bases, attrs)
+            return
 
         original_init = getattr(cls, "__init__", lambda self: None)
 
