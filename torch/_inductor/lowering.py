@@ -6322,7 +6322,14 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata,
+    kwargs,
+):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
