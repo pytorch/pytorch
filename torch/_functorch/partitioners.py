@@ -1901,12 +1901,10 @@ def min_cut_rematerialization_partition(
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
 
-        storages = {get_node_storage(node) for node in saved_values}
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
         )
-        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
