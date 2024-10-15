@@ -11549,7 +11549,7 @@ fn
 
     def test_data_ptr_graph_break_aten(self):
         def f(a):
-            # builtin + not implemented for DataPtrVariable
+            # torch.add not implemented for DataPtrVariable
             return torch.add(a, a.data_ptr())
 
         a = torch.randn(4)
