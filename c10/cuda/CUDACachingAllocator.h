@@ -240,15 +240,6 @@ class CUDAAllocator : public Allocator {
         " does not yet support ensureExistsAndIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void decrefPoolAndMaybeMarkFree(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) {
-    TORCH_CHECK(
-        false,
-        name(),
-        " does not yet support decrefPoolAndMaybeMarkFree. "
-        "If you need it, please file an issue describing your use case.");
-  }
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
@@ -460,12 +451,6 @@ inline void ensureExistsAndIncrefPool(
 
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
-}
-
-inline void decrefPoolAndMaybeMarkFree(
-    c10::DeviceIndex device,
-    MempoolId_t mempool_id) {
-  get()->decrefPoolAndMaybeMarkFree(device, mempool_id);
 }
 
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
