@@ -211,7 +211,7 @@ class WorkRegistry {
 
   bool can_unregister_completed_works() {
     std::unique_lock lock(lock_);
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && !defined(USE_ROCM)
     if (at::cuda::is_available() && !at::cuda::CUDAGraph::is_capturing()) {
       return false;
     }
