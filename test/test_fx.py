@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# ruff: noqa: F841
 
 import builtins
 import contextlib

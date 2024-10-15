@@ -90,7 +90,7 @@ def model_iter_fn(model, example_inputs, collect_outputs=False):
 
 def get_model(args):
     if args.torchbench_model:
-        old_cwd = setup_torchbench_cwd()
+        setup_torchbench_cwd()
         module = importlib.import_module(
             f"torchbenchmark.models.{args.torchbench_model}"
         )

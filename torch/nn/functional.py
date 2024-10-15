@@ -6236,7 +6236,7 @@ def multi_head_attention_forward(
     #
 
     if need_weights:
-        B, Nt, E = q.shape
+        _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (

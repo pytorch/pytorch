@@ -181,7 +181,7 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
                 aoti_output_dir,
                 model_name,
             )
-            for root, dirs, files in os.walk(aoti_output_dir):
+            for root, _dirs, files in os.walk(aoti_output_dir):
                 for file in files:
                     log.debug(
                         "Saving AOTI generated file %s to archive in %s%s/%s",

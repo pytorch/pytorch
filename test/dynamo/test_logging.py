@@ -484,7 +484,7 @@ LoweringException: AssertionError:
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import torch.distributed as dist
 import logging
@@ -754,7 +754,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
-            stdout, stderr = self.run_process_no_exception(
+            _, stderr = self.run_process_no_exception(
                 """\
 import torch
 @torch.compile(backend="eager")

@@ -753,11 +753,11 @@ class TestBasicGEMM(TestCase):
         input_tensor = torch.rand((1, 2, 2), device=device).to(dtype)
         if dtype != torch.float32:
             with self.assertRaisesRegex(RuntimeError, "Input dtypes must be the same"):
-                y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
+                torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
         else:
             out = torch.randn((1, 2, 2), dtype=dtype, device=device).fill_(torch.nan)
             y_ref = torch.bmm(batch1, batch2)
-            y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
+            torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
             self.assertEqual(out, y_ref)
 
     @dtypes(torch.float)
@@ -838,9 +838,6 @@ class TestBasicGEMM(TestCase):
         a_data = torch.arange(1, o * s + 1, device=device, dtype=dtype).view(o, s)
         x_data = torch.arange(1, s + 1, 1, device=device, dtype=dtype)
         y_data = torch.ones(o, device=device, dtype=dtype)
-        control = torch.tensor(
-            [15.0, 33.0, 51.0, 69.0, 87.0], device=device, dtype=dtype
-        )
 
         def _test(row_major, incx, incy, lda_tail):
             if row_major:
@@ -917,7 +914,8 @@ class TestBasicGEMM(TestCase):
                 return result
             else:
                 out = torch.full_like(result, math.nan)
-                out1 = call_torch_fn(*args, **kwargs, out=out)
+                out1 = call_torch_fn(*args, **kwargs, out=out)  # noqa: F841
+                # FIXME(rec): should this return out1?
                 return out
 
         # mm, addmm

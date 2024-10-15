@@ -359,11 +359,11 @@ class TestTensorBoardSummary(BaseTestCase):
         self.assertEqual(scale_factor, 255, msg='Values are in [0, 1], scale factor should be 255')
 
     def test_list_input(self):
-        with self.assertRaises(Exception) as e_info:
+        with self.assertRaises(Exception):
             summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
     def test_empty_input(self):
-        with self.assertRaises(Exception) as e_info:
+        with self.assertRaises(Exception):
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
     def test_image_with_boxes(self):
@@ -659,7 +659,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             w.add_graph(myMLP(), dummy_input)
 
     def test_wrong_input_size(self):
-        with self.assertRaises(RuntimeError) as e_info:
+        with self.assertRaises(RuntimeError):
             dummy_input = torch.rand(1, 9)
             model = torch.nn.Linear(3, 5)
             with self.createSummaryWriter() as w:
@@ -749,7 +749,7 @@ class TestTensorBoardNumpy(BaseTestCase):
 
     def test_pytorch_np_expect_fail(self):
         with self.assertRaises(NotImplementedError):
-            res = make_np({'pytorch': 1.0})
+            make_np({'pytorch': 1.0})
 
 
 

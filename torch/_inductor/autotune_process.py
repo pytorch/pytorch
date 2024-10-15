@@ -117,7 +117,7 @@ class TuningProcess:
         )
         try:
             TuningProcess.workloop(request_queue, response_queue)
-        except Exception as ex:
+        except Exception:
             log.exception("Exception in TuningProcess")
 
     @staticmethod
@@ -646,7 +646,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
-        extra_args = list(self.extra_args)
 
         # Newer version of triton add warmup argument to JITFunction.run.
         # This code handles backward-compatibility.

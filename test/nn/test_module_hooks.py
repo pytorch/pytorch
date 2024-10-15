@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+# ruff: noqa: F841
 import gc
 import math
 import pickle

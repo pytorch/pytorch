@@ -51,7 +51,7 @@ def main() -> None:
                 sys.exit(1)
         else:
             delete_all_label_err_comments(pr)
-    except Exception as e:
+    except Exception:
         if args.exit_non_zero:
             sys.exit(1)
 
