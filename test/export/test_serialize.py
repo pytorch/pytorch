@@ -176,6 +176,28 @@ class TestSerialize(TestCase):
         loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
         self.assertEqual(orig_out, loaded_out)
 
+    def test_metadata_run_decomp_serder(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        exp_program = torch.export.export_for_training(M(), (torch.randn(4, 4),))
+
+        output_buffer = io.BytesIO()
+        # Tests that example forward arg names are preserved when saving and loading module.
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+
+        ep = loaded_model.run_decompositions({})
+        # We should preserve the original module name
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x);  x = None
+    return (sin,)""",
+        )
+
     def test_metadata_parsing_with_layer_split(self):
         # Tests that modules with more complicated layer patterns can be serialized
         # and deserialized correctly.

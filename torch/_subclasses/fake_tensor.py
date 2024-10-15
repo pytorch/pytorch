@@ -475,17 +475,14 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_gpu_context() -> None:
+def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() or torch.xpu.is_available():
         (
-            torch.empty(1, device="cuda")
+            torch.empty(1, device=device)
             if torch.version.hip is None
-            else torch.zeros(1, device="cuda")
+            else torch.zeros(1, device=device)
         )
-
-    if torch.xpu.is_available():
-        (torch.empty(1, device="xpu"))
 
 
 @contextlib.contextmanager
@@ -673,7 +670,10 @@ class FakeTensor(Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
-        torch._C._set_throw_on_mutable_data_ptr(self)
+        if not fake_mode._allow_unsafe_data_ptr_access:
+            torch._C._set_throw_on_mutable_data_ptr(self)
+        else:
+            torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -688,7 +688,7 @@ class FakeTensor(Tensor):
             assert device.type != "meta"
         # normalize device.
         if device.type in ["cuda", "xpu"]:
-            init_gpu_context()
+            init_gpu_context(device)
 
         if (
             device.type
@@ -1129,6 +1129,9 @@ class FakeTensorMode(TorchDispatchMode):
         # places where we unconditionally allow scalar outputs, TO BE REMOVED
         self.allow_scalar_outputs = False
 
+        self._allow_unsafe_data_ptr_access = (
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
+        )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
         self.cache_enabled = (
             torch._dynamo.config.fake_tensor_cache_enabled
