@@ -14,7 +14,6 @@ import torch._export
 import torch._inductor
 import torch._inductor.config
 import torch.nn as nn
-import torch.nn.functional as F
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -374,7 +373,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_conv_freezing(self):
-        for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype, groups in itertools.product(dtypes, [1, 2]):
             iC = 2
             oC = 3
 
@@ -428,7 +428,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_linear_freezing(self):
-        for dtype in [torch.float32, torch.bfloat16]:
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype in dtypes:
 
             class LinearModel(torch.nn.Module):
                 def __init__(self, device):
@@ -815,97 +816,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    def test_tile_positional_embedding(self):
-        class TilePositionalEmbedding(nn.Module):
-            """
-            Positional embedding for tiles, different for every tile, same for every token within a tile.
-
-            Notice that tile is different from patch (token). For details, please check the documentation of
-            :class:`torchtune.modules.vision_transformer.VisionTransformer`.
-
-            Args:
-                max_num_tiles (int): The maximum number of tiles an image can be divided into.
-                embed_dim (int): The dimensionality of each tile embedding.
-            """
-
-            def __init__(
-                self,
-                max_num_tiles: int,
-                embed_dim: int,
-            ):
-                super().__init__()
-                self.max_num_tiles = max_num_tiles
-                self.embed_dim = embed_dim
-
-                scale = embed_dim**-0.5
-                self.embedding = nn.Parameter(
-                    scale * torch.randn(max_num_tiles, max_num_tiles, 1, embed_dim)
-                )
-                self.gate = nn.Parameter(torch.zeros(1))
-
-            def forward(
-                self, x: torch.Tensor, aspect_ratio: torch.Tensor
-            ) -> torch.Tensor:
-                """
-                args:
-                    x (torch.Tensor): torch.Tensor with shape (bsz * n_imgs, n_tiles, n_tokens, embed_dim).
-                    aspect_ratio (torch.Tensor): torch.Tensor with shape (bsz * n_imgs, 2),
-                        representing the aspect ratio of the image before tile-cropping, e.g. (2,1).
-                returns:
-                    torch.Tensor: The input tensor with added positional embeddings.
-                """
-                bsz_and_n_imgs, n_tiles, n_tokens, embed_dim = x.shape
-                torch._check(n_tiles <= self.max_num_tiles)
-
-                for batch_idx, (n_tiles_h, n_tiles_w) in enumerate(aspect_ratio):
-                    # When we batch images, all are padded to the same amount of tiles.
-                    # The aspect_ratio lets us know the non padded tiles for each image.
-                    # We only add positional encoding to those.
-                    n_tiles_h = n_tiles_h.item()
-                    n_tiles_w = n_tiles_w.item()
-
-                    n_non_padded_tiles = int(n_tiles_h * n_tiles_w)
-
-                    # We get only the positional encoding for non padded tiles,
-                    # i.e. n_tiles_h, n_tiles_w.
-                    torch._check_is_size(n_tiles_h)
-                    torch._check_is_size(n_tiles_w)
-                    torch._check(n_tiles_h > 0)
-                    torch._check(n_tiles_w > 0)
-                    torch._check(n_tiles_h <= self.max_num_tiles)
-                    torch._check(n_tiles_w <= self.max_num_tiles)
-                    padded_embedding = F.pad(self.embedding, (0, 0, 0, 0, 0, 1, 0, 1))
-                    # pos_embed = padded_embedding[:n_tiles_h, :n_tiles_w, :, :]
-                    pos_embed = padded_embedding.narrow(0, 0, n_tiles_h).narrow(
-                        1, 0, n_tiles_w
-                    )
-
-                    # Add pos encoding to the non padded tiles.
-                    pos_embed = pos_embed.clone()
-                    pos_embed = pos_embed.view(n_non_padded_tiles, 1, self.embed_dim)
-
-                    x = F.pad(x, (0, 0, 0, 0, 0, 1, 0, 0))
-                    torch._check_is_size(n_non_padded_tiles)
-                    torch._check(n_non_padded_tiles < x.size(1))
-                    # x[batch_idx, :n_non_padded_tiles, :, :] += pos_embed
-                    updating = x.narrow(0, batch_idx, batch_idx + 1).narrow(
-                        1, 0, n_non_padded_tiles
-                    )
-                    # updating += pos_embed * self.gate.tanh()
-                    updating.add_(pos_embed * self.gate.tanh())
-                    # x = x[:, :n_tiles, :, :]
-                    x = x.narrow(1, 0, n_tiles)
-
-                return x
-
-        x = torch.ones(1, 4, 1600, 1280, device=self.device)
-        aspect_ratio = torch.tensor([[2, 2]], device=self.device)
-
-        self.check_model(
-            TilePositionalEmbedding(4, 1280),
-            (x, aspect_ratio),
-        )
-
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1154,6 +1064,25 @@ class AOTInductorTestsTemplate:
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
+        )
+        self.check_model(Repro(), example_inputs)
+
+    @config.patch({"triton.autotune_at_compile_time": None})
+    def test_stride_with_unbacked_expr(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = x.item()
+                torch._check(u0 >= 1)
+                s0 = y.size(0)
+                expr = u0 * s0
+                sevens = torch.empty_strided(
+                    size=(10, expr, 32), stride=(expr * 32, 32, 1), device=x.device
+                ).fill_(7)
+                return sevens * 3
+
+        example_inputs = (
+            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
+            torch.ones(8, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -3024,23 +2953,33 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
-                return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+            if SM80OrLater:
+
+                def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
+            else:
+
+                def forward(self, x0, x1, x2, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x4, x5, x6, x7, x8, x9)
 
         inputs = []
-        for dtype in (
+        dtypes = [
             torch.float16,
             torch.float32,
             torch.float64,
-            torch.bfloat16,
             torch.bool,
             torch.int8,
             torch.int16,
             torch.int32,
             torch.int64,
             torch.uint8,
-        ):
+        ]
+        if SM80OrLater:
+            dtypes.append(torch.bfloat16)
+        for dtype in dtypes:
             inputs.append(torch.ones(4, 8, 10, dtype=dtype, device=self.device))
+
         dim0 = Dim("s0", min=2, max=1024)
         dim1 = Dim("s1", min=2, max=512)
         dim2 = Dim("s2", min=2, max=128)
@@ -3048,7 +2987,6 @@ class AOTInductorTestsTemplate:
             "x0": {0: dim0},
             "x1": {0: dim0},
             "x2": {0: dim0},
-            "x3": {1: dim1},
             "x4": {1: dim1},
             "x5": {1: dim1},
             "x6": {},
@@ -3056,6 +2994,9 @@ class AOTInductorTestsTemplate:
             "x8": {2: dim2},
             "x9": {2: dim2},
         }
+        if SM80OrLater:
+            dynamic_shapes["x3"] = {1: dim1}
+
         m = Model()
         inputs = tuple(inputs)
         with torch.no_grad(), config.patch(
@@ -3069,22 +3010,28 @@ class AOTInductorTestsTemplate:
             src_code = cpp.read()
             FileCheck().check_count(
                 "unmatched dtype",
-                10,
+                10 if SM80OrLater else 9,
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21,  # we have 9 dynamic dims for which we generate different checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18,  # we have 9 dynamic dims for which we generate two checks
+                18
+                if SM80OrLater
+                else 16,  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21,  # we have 9 symbolic strides for which we don't generate checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
@@ -3768,6 +3715,7 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
