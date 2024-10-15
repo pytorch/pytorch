@@ -718,10 +718,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                   secondaryTensor:epsilonTensor
                                                                              name:nil];
 #ifdef __MAC_15_0
-          rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
-#else
-          rsqrtTensor = [mpsGraph reverseSquareRootWithTensor:varianceEpsTensor name:nil];
-#endif
+          if (@available(macOS 15.0, *)) {
+            rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
+          } else
+#endif // __MAC_15_0
+          {
+            rsqrtTensor = [mpsGraph reverseSquareRootWithTensor:varianceEpsTensor name:nil];
+          }
           MPSGraphTensor* bnForwardTensor = [mpsGraph multiplicationWithPrimaryTensor:xMinusMean
                                                                       secondaryTensor:rsqrtTensor
                                                                                  name:nil];
