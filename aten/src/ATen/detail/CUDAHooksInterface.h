@@ -74,7 +74,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
         CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
