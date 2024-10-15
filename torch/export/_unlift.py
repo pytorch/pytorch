@@ -309,6 +309,14 @@ def _create_stateful_graph_module(
     for const_name, value in ep.constants.items():
         if not torch.fx.graph_module._has_attr(stateful_gm, const_name):
             if isinstance(value, torch.Tensor):
+                if value.requires_grad:
+                    warnings.warn(
+                        f"A model attribute `{const_name}` requires gradient. "
+                        f"but it's not properly registered as a parameter. "
+                        f"torch.export will detach it and treat it as a constant tensor "
+                        f"but please register it as parameter instead."
+                    )
+                    value = value.detach()
                 _assign_attr(
                     value,
                     stateful_gm,
