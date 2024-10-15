@@ -698,6 +698,14 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     LOG(ERROR) << logPrefix() << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
+    auto logger = c10d::C10dLogger::getLogger();
+    if (logger) {
+      ::c10d::C10dLoggingData data;
+      data.strings["work_nccl_exception"] =
+          getExceptionMsgFromExceptionPtr(exception_);
+      logger->log(data);
+    }
+
     if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
@@ -1024,9 +1032,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
   // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
+  // Init for CUDA is called (and is a no-op if CUDA is already
+  // initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitCUDA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
