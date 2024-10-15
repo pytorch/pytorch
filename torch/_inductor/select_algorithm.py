@@ -646,7 +646,7 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
-        fake_out = ir.Buffer("buf_out", layout)
+        fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
@@ -1675,7 +1675,7 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmarking.
         """
         if isinstance(node, ir.Layout):
-            node = ir.Buffer("fake", node)
+            node = ir.Buffer(name="fake", layout=node)
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
