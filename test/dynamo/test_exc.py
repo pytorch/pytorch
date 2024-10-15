@@ -92,7 +92,7 @@ from user code:
                 raise NotImplementedError
 
             # Ensure graph break is not possible
-            for _ in range(3):
+            for i in range(3):
                 comptime(f)
 
         torch.compile(fn001, backend="eager")(torch.randn(1))

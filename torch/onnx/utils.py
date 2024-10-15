@@ -1059,7 +1059,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception:
+    except Exception as e:
         _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
@@ -1453,8 +1453,8 @@ def _export(
                 (
                     proto,
                     export_map,
-                    _val_use_external_data_format,
-                    _node_names,
+                    val_use_external_data_format,
+                    node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
                     opset_version,
@@ -1472,8 +1472,8 @@ def _export(
                 (
                     proto,
                     export_map,
-                    _,
-                    _,
+                    val_use_external_data_format,
+                    node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,

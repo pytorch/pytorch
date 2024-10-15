@@ -693,7 +693,7 @@ def emit_inplace_functionalization_body(
             ]
         )
     else:
-        mutable_input_post_processing = "\n".join(  # noqa: F841
+        mutable_input_post_processing = "\n".join(
             [
                 f"""
       at::functionalization::impl::replace_({a.name}, tmp_output);

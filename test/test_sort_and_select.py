@@ -54,6 +54,7 @@ class TestSortAndSelect(TestCase):
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
+        are_ordered = True
         for k in range(1, SIZE):
             self.assertTrue(
                 check_order(mxx[:, k - 1], mxx[:, k]),
@@ -61,6 +62,7 @@ class TestSortAndSelect(TestCase):
             )
 
         seen = set()
+        indicesCorrect = True
         size0 = x.size(0)
         size = x.size(x.dim() - 1)
         x = x.tolist()
@@ -720,8 +722,7 @@ class TestSortAndSelect(TestCase):
                     dtype=dtype,
                     device=device,
                 )
-
-            expected_y_unique = torch.tensor(  # noqa: F841
+            expected_y_unique = torch.tensor(
                 [[0, 1], [1, 2], [3, 4], [0, 1], [3, 4], [1, 2]],
                 dtype=dtype,
                 device=device,

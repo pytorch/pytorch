@@ -178,6 +178,7 @@ class CallgrindStats:
     stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
+        newline = "\n"  # `\` cannot appear in fstring code section.
         base_stats = self.baseline_exclusive_stats
         output = f"""
 {super().__repr__()}
@@ -664,7 +665,7 @@ class _ValgrindWrapper:
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(fpath: str, inclusive: bool) -> FunctionCounts:
-                _annotate_invocation, annotate_invocation_output = run([
+                annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
                     "--threshold=100",

@@ -150,7 +150,7 @@ class DTensorXLAIntegrationTest(TestCase):
             shard_spec = [Shard(0)]
             # annoate fc1 and fc2
             if isinstance(mod, nn.Linear):
-                for _, param in mod.named_parameters():
+                for name, param in mod.named_parameters():
                     # annotate the parameter tensors directly
                     distribute_tensor(param, mesh, shard_spec)
 

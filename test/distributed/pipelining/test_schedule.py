@@ -154,7 +154,10 @@ class TestSchedulePlan(TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                _format_pipeline_order(schedule.pipeline_order)
+                formatted_pipeline_order = _format_pipeline_order(
+                    schedule.pipeline_order
+                )
+                # print(formatted_pipeline_order)
                 _validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
@@ -185,7 +188,10 @@ class TestSchedulePlan(TestCase):
                     schedule = ScheduleClass(
                         stages, num_microbatches, enable_zero_bubble=(i == 0)
                     )
-                    _format_pipeline_order(schedule.pipeline_order)
+                    formatted_pipeline_order = _format_pipeline_order(
+                        schedule.pipeline_order
+                    )
+                    # print(formatted_pipeline_order)
                     _validate_pipeline_order(
                         schedule.pipeline_order,
                         num_microbatches,

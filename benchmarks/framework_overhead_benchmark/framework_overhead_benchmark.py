@@ -25,7 +25,7 @@ SUPPORTED_OPS = {"add_op"}
 
 
 def parse_op_args(op):
-    op_list = op.split(",")  # noqa: F841
+    op_list = op.split(",")
 
 
 def print_results(result):

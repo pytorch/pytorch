@@ -13,6 +13,7 @@ from .ir import (
     FixedLayout,
     FlexibleLayout,
     ir_node_to_tensor,
+    IRNode,
     is_contiguous_storage_and_layout,
     Layout,
     may_convert_to_optional,
@@ -1081,7 +1082,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            _kernel_layout,
+            kernel_layout,
             req_stride_order,
         ) = _prepare_convolution_fusion_create(
             cls,
@@ -1252,9 +1253,10 @@ class LinearUnary(ExternKernelAlloc):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ic = x.get_size()
-        oc, _ic = w.get_size()
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
         output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -1332,9 +1334,10 @@ class LinearBinary(ExternKernelAlloc):
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ic = x.get_size()
-        oc, _ic = w.get_size()
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
         output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:
@@ -1912,6 +1915,8 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         hy_shape = hx.get_size()
         cy_shape = cx.get_size()
+
+        res: List[IRNode] = []
 
         inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [

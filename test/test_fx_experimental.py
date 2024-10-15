@@ -1,5 +1,4 @@
 # Owner(s): ["module: fx"]
-# ruff: noqa: F841
 
 import functools
 import math

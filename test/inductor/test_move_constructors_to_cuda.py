@@ -77,7 +77,7 @@ class TestMoveConstructorsToCuda(TestCase):
             return x[c1 + c2], c2 - 4 * 2
 
         inp = torch.rand([4]).cuda()
-        _, code = run_and_get_code(foo, inp)
+        out, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
         @torch.compile()
@@ -86,7 +86,7 @@ class TestMoveConstructorsToCuda(TestCase):
             c1 = torch.ones([4], dtype=torch.long)
             return x[c1 + c2], c2 - 4 * 2
 
-        _, code = run_and_get_code(foo, inp)
+        out, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
     @requires_multigpu()

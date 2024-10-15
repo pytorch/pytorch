@@ -45,7 +45,7 @@ def get_per_process_cpu_info() -> list[dict[str, Any]]:
                 # only availiable in linux
                 info["pss_memory"] = memory_full_info.pss
 
-        except psutil.AccessDenied:
+        except psutil.AccessDenied as e:
             # It's ok to skip this
             pass
 

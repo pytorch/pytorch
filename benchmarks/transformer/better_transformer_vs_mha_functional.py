@@ -136,7 +136,7 @@ def run(
         torch.testing.assert_close(
             y_native_mha_fast, y_native_mha_slow, atol=1e-3, rtol=1e-3
         )
-    except AssertionError:
+    except AssertionError as e:
         error_dict[entry_name] += 1
         pprint(error_dict)
 

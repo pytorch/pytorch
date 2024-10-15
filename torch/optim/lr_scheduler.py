@@ -247,7 +247,8 @@ class LRScheduler:
                 else:
                     values = self.get_lr()
 
-        for param_group, lr in zip(self.optimizer.param_groups, values):
+        for i, data in enumerate(zip(self.optimizer.param_groups, values)):
+            param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
                 param_group["lr"].fill_(lr)
             else:
@@ -1852,7 +1853,8 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         with _enable_get_lr_call(self):
-            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            for i, data in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
+                param_group, lr = data
                 param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]

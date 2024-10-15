@@ -117,6 +117,7 @@ def must_recompute(node: fx.Node) -> bool:
 
 
 def has_recomputable_ops(fx_g: fx.GraphModule) -> bool:
+    found = False
     for node in fx_g.graph.nodes:
         if must_recompute(node):
             return True
@@ -413,7 +414,7 @@ def default_partition(
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
-    fwd_outputs, _bwd_outputs = _extract_fwd_bwd_outputs(
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
     )
     forward_only_graph = _extract_graph_with_inputs_outputs(
@@ -1168,7 +1169,7 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        _cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
         print("Failed to compute min-cut on following graph:")
         print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
@@ -1683,7 +1684,7 @@ def choose_saved_values_set(
         with no_dispatch():
             (
                 expected_runtime,
-                _saved_node_idxs,
+                saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
                 memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
@@ -1900,14 +1901,12 @@ def min_cut_rematerialization_partition(
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
 
-        storages = {get_node_storage(node) for node in saved_values}  # noqa: F841
+        storages = {get_node_storage(node) for node in saved_values}
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
         )
-        sorted_sizes = sorted(  # noqa: F841
-            [(_size_of(i), str(i)) for i in saved_values]
-        )
+        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
