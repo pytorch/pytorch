@@ -1,8 +1,5 @@
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List
-
-import numpy as np
+from typing import Dict, List, Tuple
 
 from torch.distributed._tools.ilp_utils import Graph, is_submodule
 
@@ -31,21 +28,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-@dataclass
-class SACSolution:
-    # fqn -> percentage of memory to discard
-    ac_decisions: Dict[str, float] = field(default_factory=dict)
-    recomputation_time: float = 0  # in ms
-    peak_mem: int = -1  # in bytes
-
-
 def sac_milp(
     graph: Graph,
     memory_budget: float,
     world_size: int = 1,
     ac_units: List[str] | None = None,
     fsdp_units: List[str] | None = None,
-) -> SACSolution:
+) -> Tuple[Dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.
     The objective is to minimize recomputation time.
@@ -61,7 +50,11 @@ def sac_milp(
         fsdp_units: a list of FSDP units. AC units cannot be supermodules of FSDP units.
 
     Returns:
-        SACSolution: the optimal SAC solution
+        Dict[str, float]: the optimal SAC solution, mapping from module fqn to
+            the percentage of activation memory to discard
+        float: the recomputation time of the optimal SAC solution
+        int: upper bound on the peak memory of the optimal SAC solution.
+            note that value of -1 means that the ILP solver failed to find a solution.
 
     """
     num_nodes = len(graph.nodes)
@@ -162,7 +155,7 @@ def sac_milp(
         TA_i = graph.nodes[i]["act_total"] / MEM_MULTIPLIER
         # related to discarded amount of memory
         pos = graph.nodes[i]["pos_fw_post_order"]
-        coeff = np.zeros(num_nodes)
+        coeff = [0] * num_nodes
         for p in range(pos):
             j = graph.name2node[graph.fw_post_order[p]]["index"]
             coeff[j] = 1
@@ -207,16 +200,14 @@ def sac_milp(
     # If solver fails, print status and return empty solution
     if status != 1:
         logger.error("Solver failed to find a solution: %s", LpStatus[status])
-        return SACSolution()
+        return {}, 0, -1
 
     # Gather and return solution if optimal solution is found
     ac_decisions = {}
     for i in range(num_nodes):
         if round(y[i].varValue) == 1:
             ac_decisions[graph.nodes[i]["fqn"]] = round(r[i].varValue, 4)
+    recomputation_time = round(value(prob.objective), 2)
+    peak_mem = round(max_m.varValue * MEM_MULTIPLIER)
 
-    return SACSolution(
-        ac_decisions=ac_decisions,
-        recomputation_time=round(value(prob.objective), 2),
-        peak_mem=round(max_m.varValue * MEM_MULTIPLIER),
-    )
+    return ac_decisions, recomputation_time, peak_mem

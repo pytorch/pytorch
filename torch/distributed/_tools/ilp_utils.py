@@ -1,8 +1,188 @@
-from typing import cast, Dict, List, Tuple
+import copy
+from typing import cast, Dict, List, OrderedDict, Tuple, TypedDict
 
 import numpy as np
 
-from torch.distributed._tools.collect_stats import ModStats, ModuleInfo
+import torch
+from torch.distributed._tools.mem_tracker import (
+    _MemRefType,
+    _ModMemStats,
+    _ModState,
+    MemTracker,
+)
+from torch.distributed._tools.runtime_estimator import RuntimeEstimator
+from torch.distributed._tools.sac_estimator import SACEstimator, SACTradeOffStats
+
+
+class ModOrder(TypedDict):
+    fw_pre_order: List[str]
+    bw_pre_order: List[str]
+    fw_post_order: List[str]
+    bw_post_order: List[str]
+
+
+class ModRuntime(TypedDict):
+    fw: float
+    bw: float
+
+
+class ModStats(TypedDict):
+    fqn: str
+    # per-module params
+    param_per_module: int
+    # per-module grads
+    grad_per_module: int
+    # total accumulated gradients up to and including this module
+    grad_total: int
+    # per module fw activation size (excluding input and output)
+    act_fw_per_module: int
+    # per module bw activation size during peak_bw
+    act_bw_per_module: int
+    # per module activation grad size during peak_bw
+    act_grad_per_module: int
+    # total activation size up to but excluding the current module
+    # includes input of the current module (i.e., output of previous module)
+    act_total: int
+    # Inputs to the module
+    input_per_module: int
+    # Outputs of the module
+    output_per_module: int
+    # Total fw run-time of the module
+    fw_runtime_per_module: float
+    # Total bw run-time of the module
+    bw_runtime_per_module: float
+    # Is this module a leaf module
+    is_leaf: bool
+    # Total ac run-time of the module
+    sac_runtime: float
+    # Total ac_memory for the module
+    sac_memory: int
+    # Number of piecewise-linear functions used for approximating ac tradeoff curve
+    n_segments: int
+    # Slopes of the of piecewise-linear functions
+    slopes: List[float]
+    # Intercepts of the of piecewise-linear functions
+    intercepts: List[float]
+    # X breakpoints of the of piecewise-linear functions
+    breakpoints: List[float]
+    # Original trade-off curves
+    tradeoff_curve: OrderedDict[float, float]
+
+
+class ModuleInfo(TypedDict):
+    mod_order: ModOrder
+    mod_stats: List[ModStats]
+
+
+def aggregate_stats(
+    model: torch.nn.Module,
+    mem_tracker: MemTracker,
+    runtime_estimator: RuntimeEstimator,
+    sac_estimator: SACEstimator,
+    dev: torch.device,
+) -> ModuleInfo:
+    """
+    Collect modulewise stats for a given model, including memory, runtime, and AC tradeoff stats.
+
+    Args:
+        model: nn.Module object
+        runtime_estimator: RuntimeEstimator object with runtime stats
+        mem_tracker: MemTracker object with memory stats
+        sac_estimator: SACEstimator object with AC tradeoff stats
+        dev: device the model was run on (used to extract memory stats from MemTracker)
+
+    Returns:
+        ModuleInfo: A dictionary with module order and module stats.
+    """
+
+    # Memory stats
+    mod_mem_stats: Dict[torch.nn.Module, _ModMemStats] = dict(
+        copy.deepcopy(mem_tracker.memory_tracking)
+    )
+
+    # Runtime stats
+    mod_runtime_stats: Dict[str, ModRuntime] = {
+        fqn: {"fw": v["fw"], "bw": v["bw"]}
+        for fqn, v in runtime_estimator.mod_runtimes.items()
+    }
+
+    # Module order
+    mod_order: ModOrder = {
+        "fw_pre_order": list(runtime_estimator.mod_fw_pre_order),
+        "bw_pre_order": list(runtime_estimator.mod_bw_pre_order),
+        "fw_post_order": list(runtime_estimator.mod_fw_post_order),
+        "bw_post_order": list(runtime_estimator.mod_bw_post_order),
+    }
+
+    # Selective Activation Checkpointing stats
+    sac_estimator.pwlf_sac_tradeoff_curve()
+    mod_sac_tradeoff_stats: Dict[str, SACTradeOffStats] = copy.deepcopy(
+        sac_estimator.sac_mod_tradeoff_stats
+    )
+
+    module_info: ModuleInfo = {
+        "mod_order": mod_order,
+        "mod_stats": [],
+    }
+
+    for mod in model.modules():
+        if mod_mem_stat := mod_mem_stats.get(mod, None):
+            if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn, None):
+                sac_runtime = tradeoff_stats.sac_runtime
+                sac_memory = tradeoff_stats.sac_memory
+                n_segments = tradeoff_stats.n_segments
+                slopes = tradeoff_stats.slopes
+                intercepts = tradeoff_stats.intercepts
+                breakpoints = tradeoff_stats.fit_breaks
+                tradeoff_curve = tradeoff_stats.tradeoff_curve
+                is_leaf = False
+            else:
+                sac_runtime = sac_memory = n_segments = 0
+                slopes = intercepts = breakpoints = []
+                tradeoff_curve: OrderedDict[float, float] = OrderedDict()  # type: ignore[no-redef]
+                is_leaf = True
+            mod_stat: ModStats = {
+                "fqn": mod_mem_stat.mod_fqn,
+                "param_per_module": mod_mem_stat.parameter_mem,
+                "grad_per_module": mod_mem_stat.parameter_mem,
+                "grad_total": mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
+                    _MemRefType.GRAD
+                ],
+                "act_fw_per_module": max(
+                    0,
+                    mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][_MemRefType.ACT]
+                    - mod_mem_stat.snapshots[_ModState.PRE_FW][-1][dev][_MemRefType.ACT]
+                    - mod_mem_stat.output_mem,
+                ),
+                "act_bw_per_module": max(
+                    0,
+                    mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][_MemRefType.ACT],
+                ),
+                "act_grad_per_module": (
+                    mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][_MemRefType.TEMP]
+                    - mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
+                        _MemRefType.TEMP
+                    ]
+                ),
+                "act_total": mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][
+                    _MemRefType.ACT
+                ],
+                "input_per_module": mod_mem_stat.input_mem,
+                "output_per_module": mod_mem_stat.output_mem,
+                "fw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn]["fw"],
+                "bw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn]["bw"],
+                "is_leaf": is_leaf,
+                "sac_runtime": sac_runtime,
+                "sac_memory": sac_memory,
+                "n_segments": n_segments,
+                "slopes": slopes,
+                "intercepts": intercepts,
+                "breakpoints": breakpoints,
+                "tradeoff_curve": tradeoff_curve,
+            }
+            module_info["mod_stats"].append(mod_stat)
+
+    return module_info
 
 
 class Node(ModStats):
