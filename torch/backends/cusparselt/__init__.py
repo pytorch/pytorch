@@ -31,12 +31,6 @@ if _cusparselt is not None:
             A = torch._cslt_compress(A)
             B = torch.zeros(128, 128, dtype=torch.float16).cuda()
             _, _, _, __MAX_ALG_ID = torch._cslt_sparse_mm_search(A, B)
-            if __cusparselt_version == 400:
-                __MAX_ALG_ID = 4
-            elif __cusparselt_version == 502:
-                __MAX_ALG_ID = 5
-            elif __cusparselt_version == 602:
-                __MAX_ALG_ID = 37
         return True
 
 else:
@@ -58,6 +52,7 @@ def is_available() -> bool:
 
 
 def get_max_alg_id() -> Optional[int]:
+    r"""Return the maximum algorithm id supported by the current version of cuSPARSELt"""
     if not _init():
         return None
     return __MAX_ALG_ID

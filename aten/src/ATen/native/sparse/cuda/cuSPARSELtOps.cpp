@@ -345,11 +345,11 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
   int max_alg_id;
   if (split_k != 1) {
      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
-      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K, &split_k, sizeof(split_k))); 
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K, &split_k, sizeof(split_k)));
 
     splitKMode = split_k_one_kernel ? CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL : CUSPARSELT_SPLIT_K_MODE_TWO_KERNELS;
      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
-      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K_MODE, &splitKMode, sizeof(splitKMode))); 
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K_MODE, &splitKMode, sizeof(splitKMode)));
   }
 
   // set tensor_alpha_mode and alpha pointer for matmul
@@ -397,7 +397,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
     // get matmul params used
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
-            
+
     TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
                                        CUSPARSELT_MATMUL_SPLIT_K,
                                        &split_k, sizeof(split_k)));

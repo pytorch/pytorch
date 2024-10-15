@@ -1156,7 +1156,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
         alg_id, split_k, split_k_one_kernel, _ = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(),
+                                              alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
 
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
         dense_result = dense_result.to(dtype)
@@ -1170,7 +1171,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id, _, _, _= torch._cslt_sparse_mm_search(A_compressed, B.t())
+        alg_id, _, _, _ = torch._cslt_sparse_mm_search(A_compressed, B.t())
         assert alg_id in range(torch.backends.cusparselt.get_max_alg_id())
 
     def test_cusparselt_backend(self):
@@ -1188,7 +1189,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 12.4+ has cuSPARSELt v0.6.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
-            assert torch.backends.cusparselt.get_max_alg_id() == 37
+            assert torch.backends.cusparselt.get_max_alg_id() == 44
         else:
             assert torch.backends.cusparselt.version() is None
 

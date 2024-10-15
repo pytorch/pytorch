@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -526,17 +526,28 @@ def tuned_sparse_semi_structured_mm(
         "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
     )
 
+
 @register_lowering(aten._cslt_sparse_mm, type_promotion_kind=None)
 def tuned_cslt_sparse_mm(
-    mat1_compressed, mat2, bias=None, alpha=None, out_dtype=None, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=False, layout=None
+    mat1_compressed,
+    mat2,
+    bias=None,
+    alpha=None,
+    out_dtype=None,
+    alg_id=0,
+    split_k=1,
+    split_k_one_kernel=True,
+    transpose_result=False,
+    layout=None,
 ):
-    from torch._inductor.select_algorithm import realize_inputs, AlgorithmSelectorCache
+    from torch._inductor.select_algorithm import AlgorithmSelectorCache, realize_inputs
+
     mat1_compressed, mat2 = realize_inputs(mat1_compressed, mat2)
-    input_nodes = (mat1_compressed, mat2)
+    input_nodes: Tuple[Any, ...] = (mat1_compressed, mat2)
     k, n = mat2.get_size()
 
-    is_int8_input_type = mat1_compressed.dtype == torch.int8
-    compression_factor = 10 if is_int8_input_type else 9
+    is_8bit_input_type = mat1_compressed.dtype in [torch.int8, torch.float8_e4m3fn]
+    compression_factor = 10 if is_8bit_input_type else 9
     m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
 
     from torch._inductor.ir import FixedLayout
@@ -550,30 +561,77 @@ def tuned_cslt_sparse_mm(
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is not None:
         bias = realize_inputs(bias)
-        input_nodes = input_nodes + (bias, )
+        input_nodes = input_nodes + (bias,)
 
     if alpha is not None:
         alpha = realize_inputs(alpha)
-        input_nodes = input_nodes + (alpha, )
+        input_nodes = input_nodes + (alpha,)
 
-    # cuSPARSELt alg_id search
-    searched_alg_id, searched_split_k, searched_split_k_one_kernel, _ = torch._cslt_sparse_mm_search(
-        AlgorithmSelectorCache.benchmark_example_value(mat1_compressed),
-        AlgorithmSelectorCache.benchmark_example_value(mat2),
-        AlgorithmSelectorCache.benchmark_example_value(bias) if bias is not None else None,
-        AlgorithmSelectorCache.benchmark_example_value(alpha) if alpha is not None else None,
+    # cuSPARSELt alg_id search, not that we cannot use
+    # AlgorithmSelectorCache.benchmark_example_value() because this will return the base view
+    # and mat2 needs to have transpose properties preserved for cslt mm
+    (
+        searched_alg_id,
+        searched_split_k,
+        searched_split_k_one_kernel,
+        _,
+    ) = torch._cslt_sparse_mm_search(
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(mat1_compressed.get_size()),
+            V.graph.sizevars.size_hints(mat1_compressed.get_stride()),
+            mat1_compressed.get_device(),
+            mat1_compressed.dtype,
+            mat1_compressed.layout.offset,
+        ),
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(mat2.get_size()),
+            V.graph.sizevars.size_hints(mat2.get_stride()),
+            mat2.get_device(),
+            mat2.dtype,
+            mat2.layout.offset,
+        ),
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(bias.get_size()),
+            V.graph.sizevars.size_hints(bias.get_stride()),
+            bias.get_device(),
+            bias.dtype,
+            bias.layout.offset,
+        )
+        if bias is not None
+        else None,
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(alpha.get_size()),
+            V.graph.sizevars.size_hints(alpha.get_stride()),
+            alpha.get_device(),
+            alpha.dtype,
+            alpha.layout.offset,
+        )
+        if alpha is not None
+        else None,
         out_dtype=out_dtype,
-        transpose_result=transpose_result
+        transpose_result=transpose_result,
     )
 
     baseline = aten__cslt_sparse_mm.bind(
-        input_nodes, layout, out_dtype=out_dtype, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=transpose_result,
+        input_nodes,
+        layout,
+        out_dtype=out_dtype,
+        alg_id=0,
+        split_k=1,
+        split_k_one_kernel=True,
+        transpose_result=transpose_result,
     )
-    baseline.debug_extra=f"ALG_ID: 0 SPLIT_K: 1 SPLIT_K_ONE_KERNEL: True TRANSPOSE_RESULT: {transpose_result}"
+    baseline.debug_extra = f"ALG_ID: 0 SPLIT_K: 1 SPLIT_K_ONE_KERNEL: True TRANSPOSE_RESULT: {transpose_result}"
     searched = aten__cslt_sparse_mm.bind(
-        input_nodes, layout, out_dtype=out_dtype, alg_id=searched_alg_id, split_k=searched_split_k, split_k_one_kernel=searched_split_k_one_kernel, transpose_result=transpose_result,
+        input_nodes,
+        layout,
+        out_dtype=out_dtype,
+        alg_id=searched_alg_id,
+        split_k=searched_split_k,
+        split_k_one_kernel=searched_split_k_one_kernel,
+        transpose_result=transpose_result,
     )
-    searched.debug_extra=f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"
+    searched.debug_extra = f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"  # noqa: B950
     choices = [baseline, searched]
 
     return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
