@@ -1063,6 +1063,13 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     if isinstance(x, SymBool):
         expr = x.node.expr
         shape_env = x.node.shape_env
+        # This can be expensive, BUT it is a really a trade of between construction time simplication and here 
+        # and its all program depends. 
+        try:
+            if expr.simplify():
+                return True
+        except Exception:
+            pass
         try:
             simplified = shape_env._maybe_evaluate_static(expr)
             if simplified is not None:

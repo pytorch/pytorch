@@ -808,8 +808,12 @@ def _sympy_min(a, b):
 
 def _sympy_max(a, b):
     from torch.utils._sympy.functions import Max
-
-    return Max(a, b)
+    # return Max(a, b)
+    # print(f"Max({a}, {b})")
+    # x= Max(a, b)
+    # # print(f"result  is {x}")
+    import sympy
+    return sympy.Max(a, b, evaluate=False)
 
 
 def _sympy_ite(a, t, f):
