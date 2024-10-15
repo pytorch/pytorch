@@ -1,5 +1,4 @@
 # Owner(s): ["module: serialization"]
-# ruff: noqa: F841
 
 import contextlib
 import copy

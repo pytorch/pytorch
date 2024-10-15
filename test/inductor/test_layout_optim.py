@@ -73,7 +73,7 @@ class TestLayoutOptim(TestCase):
                     x.sum().backward()
 
                     grads = []
-                    for _, param in m.named_parameters():
+                    for name, param in m.named_parameters():
                         grad = param.grad
                         if param.grad is None:
                             grad = torch.zeros_like(param)
@@ -321,7 +321,7 @@ class TestLayoutOptim(TestCase):
         model = MyModel(input_dim, num_classes)
         model.to(device)
 
-        opt_model = torch.compile(model)  # noqa: F841
+        opt_model = torch.compile(model)
 
         x = torch.ones((batch_size, 1, seq_len, input_dim), device=device)
         targets = torch.randint(

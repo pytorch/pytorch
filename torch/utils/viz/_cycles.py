@@ -279,6 +279,7 @@ def create_graph(objects, *, context=None, filter=None):
             tidx = id_to_node.get(rid, None)
             if tidx is None:
                 continue
+            t = nodes[tidx]
             labels = references.get(rid, ["?"])
             node_referrers[tidx].append(fidx)
             for label in labels:
@@ -319,7 +320,7 @@ def cuda_allocation_context():
         addr = seg['address']
         for blk in seg['blocks']:
             if blk['state'] == 'active_allocated':
-                frames, _real_size = _block_extra(blk)
+                frames, real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
             addr += blk['size']
 

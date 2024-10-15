@@ -1,5 +1,4 @@
 # Owner(s): ["module: ProxyTensor"]
-# ruff: noqa: F841
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch

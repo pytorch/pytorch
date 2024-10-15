@@ -1,5 +1,4 @@
 # Owner(s): ["NNC"]
-# ruff: noqa: F841
 
 import contextlib
 import math

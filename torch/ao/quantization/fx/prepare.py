@@ -608,6 +608,8 @@ def _get_target_activation_dtype_for_node(
         # with the output activation being in fp32.
         # In the future this may change as we add more fields
         # to the `QConfig` object.
+        output_act_dtype = act_dtype if (not input_act_is_dynamic) else torch.float
+
         bias_dtype = (
             torch.float16
             if (
@@ -1265,11 +1267,11 @@ def _maybe_propagate_dtype_for_node(
     node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
     # if this is a copy node, propagate to first arg
     (
-        _root_node,
+        root_node,
         _,
-        _pattern,
+        pattern,
         qhandler,
-        _qconfig,
+        qconfig,
     ) = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None)
     )
@@ -1921,7 +1923,7 @@ def _run_prepare_fx_on_standalone_modules(
     for (
         root_node,
         _,
-        _pattern,
+        pattern,
         qhandler,
         qconfig,
     ) in node_name_to_match_result_with_qconfig.values():

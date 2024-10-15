@@ -1,5 +1,4 @@
 # Owner(s): ["NNC"]
-# ruff: noqa: F841
 
 import numpy as np
 import torch

@@ -590,7 +590,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
-        for _ in range(10):
+        for iter_idx in range(10):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad()
@@ -624,12 +624,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         # sync point after each iteration
         ref_losses: List[torch.Tensor] = []
         losses: List[torch.Tensor] = []
-        for _ in range(10):
+        for iter_idx in range(10):
             ref_optim.zero_grad()
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
             ref_optim.step()
-        for _ in range(10):
+        for iter_idx in range(10):
             optim.zero_grad()
             losses.append(model(inp).sum())
             losses[-1].backward()
@@ -1183,7 +1183,7 @@ class TestFullyShardNDTraining(FSDPTest):
         foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
-        _, dp_mesh, tp_mesh = (
+        pp_mesh, dp_mesh, tp_mesh = (
             global_mesh["pp"],
             global_mesh["dp"],
             global_mesh["tp"],
@@ -1215,7 +1215,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for _, p in model.named_parameters():
+        for n, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
@@ -1286,7 +1286,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for _, p in model.named_parameters():
+        for n, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 3)
             self.assertEqual(len(p.placements), 3)

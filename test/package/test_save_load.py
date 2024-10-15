@@ -82,7 +82,7 @@ class TestSaveLoad(PackageTestCase):
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        hi.load_pickle("res", "obj.pkl")
+        loaded_obj = hi.load_pickle("res", "obj.pkl")
 
         package_b = hi.import_module("package_b")
         self.assertEqual(package_b.result, "package_b")

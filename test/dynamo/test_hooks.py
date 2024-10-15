@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import contextlib
 import functools
@@ -103,7 +102,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
     def test_tensor_register_hook_repeated_handle_return(self):
         def fn(x, y, z):
             handle = x.register_hook(lambda grad: grad * 2)
-            h2 = handle  # noqa: F841
+            h2 = handle
             z = z * z
             return x, y * y, z, handle, handle
 

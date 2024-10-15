@@ -706,7 +706,7 @@ class OutputGraph:
                 handle_tensor(t.ccol_indices(), src)
                 handle_tensor(t.row_indices(), src)
             if is_traceable_wrapper_subclass(t):
-                attrs, _ctx = t.__tensor_flatten__()
+                attrs, ctx = t.__tensor_flatten__()
                 for attr in attrs:
                     inner_t = getattr(t, attr)
                     handle_tensor(inner_t, AttrSource(src, attr))

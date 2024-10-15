@@ -40,19 +40,21 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model = FSDP(model, device_mesh=device_mesh)
         dcp.save(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
-        dcp.load(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
+        sd = dcp.load(
+            model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first")
+        )
 
         with patch.object(
             dcp.FileSystemReader, "validate_checkpoint_id", return_value=False
-        ):
+        ) as m1:
             with patch.object(
                 dcp.FileSystemWriter, "validate_checkpoint_id", return_value=False
-            ):
+            ) as m2:
                 dcp.save(
                     model.state_dict(),
                     checkpoint_id=os.path.join(self.temp_dir, "second"),
                 )
-                dcp.load(
+                sd = dcp.load(
                     model.state_dict(),
                     checkpoint_id=os.path.join(self.temp_dir, "second"),
                 )
@@ -60,7 +62,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
             dcp.save(model.state_dict(), checkpoint_id="abc://abc.abc")
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
-            dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
+            sd = dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
 
 
 if __name__ == "__main__":

@@ -1784,6 +1784,7 @@ def normalize(
 ) -> Tensor:
     if dtype is None:
         dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
     # TODO: eliminate mask_input as unnecessary when using masked divide.
     mask_input = _combine_input_and_mask(sum, input, mask)
     if mask_input.layout == torch.strided:

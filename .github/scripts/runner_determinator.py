@@ -245,7 +245,7 @@ def load_yaml(yaml_text: str) -> Any:
     try:
         data = yaml.safe_load(yaml_text)
         return data
-    except yaml.YAMLError:
+    except yaml.YAMLError as exc:
         log.exception("Error loading YAML")
         raise
 
