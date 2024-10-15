@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
-from torch import dtype as torch_dtype, uint8
+from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
@@ -18,7 +18,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import SymbolicCallArg
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -170,6 +170,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperGpu()
 
     def write_header(self):
         if V.graph.is_const_graph:
@@ -469,20 +477,8 @@ class CppWrapperGpu(CppWrapperCpu):
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
-    def generate_workspace_allocation(self, nbytes, device, zero_fill):
-        line = self.make_allocation(
-            "workspace", device, uint8, shape=(nbytes,), stride=(1,)
-        )
-        self.writeline(line)
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(line)
-        if zero_fill:
-            if config.abi_compatible:
-                # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
-                # default behavior is f"workspace.zero_(){self.ending}"
-                # or add f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
-                pass
-            else:
-                self.writeline(f"workspace.zero_(){self.ending}")
-            if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
+    def make_zero_buffer(self, name):
+        if config.abi_compatible:
+            return f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get())){self.ending}"
+        else:
+            self.writeline(f"{name}.zero_(){self.ending}")
