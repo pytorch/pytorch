@@ -64,15 +64,13 @@ class TestMemoryPlanning(TestCase):
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
+        with config.patch({"cpp_wrapper": True, "abi_compatible": True}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<int64_t>(s0*s0)))), }, {1L, }"
-        ).check_next(
-            "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
-        ).check(
-            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<int64_t>(s0*s0))),"
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
+        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
+            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
         ).run(
             code
         )
