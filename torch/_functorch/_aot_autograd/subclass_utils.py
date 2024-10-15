@@ -208,7 +208,9 @@ def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
     ret_unwrapped = []
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
-        a_unwrapped = unwrap_tensor_subclasses([a], is_joint_structure=False)
+        a_unwrapped = unwrap_tensor_subclasses(
+            [a], is_runtime=True, append_symints=False
+        )
         ret_unwrapped.extend(a_unwrapped)
         n = len(a_unwrapped)
         ret_indices_to_original.extend([i] * n)
@@ -258,9 +260,7 @@ def wrap_tensor_subclasses(
             assert isinstance(subclass_meta, SubclassCreationMeta)
             assert subclass_meta.included_subclass_symints == included_subclass_symints
             wrapped_args.append(
-                subclass_meta.creation_fn(
-                    unwrapped_args, is_runtime=is_runtime, is_nested=False
-                )
+                subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
             num_args_tallied += subclass_meta.arg_count
 

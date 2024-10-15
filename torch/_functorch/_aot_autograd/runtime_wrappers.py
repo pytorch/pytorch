@@ -1902,17 +1902,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, t in enumerate(all_args)
                     ]
 
-                    metas = iter(CompiledFunction.metadata.subclass_tangent_meta)
-                    tangent_metadata = [
-                        next(metas)
-                        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
-                        else i
-                        for i, a in enumerate(all_args)
-                    ]
-
                     all_args = unwrap_tensor_subclasses(
                         all_args,
-                        is_runtime=False,
+                        is_runtime=True,  # has no effect when append_symint is False
                         append_symints=False,
                     )
                 else:

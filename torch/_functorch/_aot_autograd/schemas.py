@@ -203,8 +203,6 @@ class SubclassCreationMeta:
         all_args,
         *,
         curr_start_idx: int,
-        is_runtime: bool,
-        is_nested: bool,
     ):
         from .subclass_utils import compute_symint_placeholders
 
@@ -212,24 +210,22 @@ class SubclassCreationMeta:
             placeholders = compute_symint_placeholders(outer)
             has_symbolic = any(placeholders)
 
-            if is_runtime and has_symbolic:
-                if is_nested:
-                    return None, curr_start_idx
-                else:
-                    start = curr_start_idx
-                    end = start_idx + sum(placeholders)
-                    it_args = iter(all_args[start:end])
-                    it_placeholders = iter(placeholders)
-                    return pytree.tree_map_only(
-                        lambda _: next(it_placeholders), lambda _: next(it_args), outer
-                    ), start + len(placeholders)
-            return outer, start_idx
+            if has_symbolic:
+                start = curr_start_idx
+                end = start_idx + sum(placeholders)
+                it_args = iter(all_args[start:end])
+                it_placeholders = iter(placeholders)
+                return pytree.tree_map_only(
+                    lambda _: next(it_placeholders), lambda _: next(it_args), outer
+                ), start + len(placeholders)
+            else:
+                return outer, start_idx
 
         outer_size, next_idx = compute(self.outer_size, curr_start_idx)
         outer_stride, _ = compute(self.outer_stride, next_idx)
         return outer_size, outer_stride
 
-    def creation_fn(
+    def _creation_fn(
         self,
         all_args,
         *,
@@ -244,7 +240,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta.creation_fn(
+                subclass = creation_meta._creation_fn(
                     all_args,
                     is_runtime=is_runtime,
                     is_nested=True,
@@ -258,12 +254,16 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
-        outer_size, outer_stride = self.compute_outer_size_and_stride(
-            all_args,
-            curr_start_idx=curr_start_idx,
-            is_runtime=is_runtime,
-            is_nested=is_nested,
-        )
+        if is_runtime:
+            if is_nested:
+                outer_size, outer_stride = None, None
+            else:
+                outer_size, outer_stride = self.compute_outer_size_and_stride(
+                    all_args,
+                    curr_start_idx=curr_start_idx,
+                )
+        else:
+            outer_size, outer_stride = self.outer_size, self.outer_stride
 
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, self.meta, outer_size, outer_stride
@@ -278,22 +278,35 @@ class SubclassCreationMeta:
 
         return rebuilt
 
+    def creation_fn(
+        self,
+        all_args,
+        *,
+        is_runtime: bool,
+    ):
+        return self._creation_fn(all_args, is_runtime=is_runtime, is_nested=False)
+
     def make_runtime_safe(self):
         def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
             dummy = -1
             if isinstance(x, torch.SymInt):
                 # Replace nested ints by a dummy value (-1) as NJT ignores
-                # the outer_size/outer_stride at runtime
+                # the outer_size/outer_stride at runtime.
                 return dummy if x.node.is_nested_int() else None
             return x
 
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
-        self.outer_size = tuple([_make_size_runtime_safe(x) for x in self.outer_size])
-        self.outer_stride = tuple(
-            [_make_size_runtime_safe(x) for x in self.outer_stride]
-        )
+
+        # Note: NJT outer_size in AOTDispatcher
+        # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
+        # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
+        # is designed to safely ignore this dummy value.
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
+        self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
+
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:
