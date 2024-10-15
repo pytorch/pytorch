@@ -9,12 +9,10 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
-
+@skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
-    # fail on CI machine
-    @skipIfXpu
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_left_assoc_good_shape(self):
@@ -49,7 +47,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
-    @skipIfXpu
     @torch._dynamo.config.patch(cache_size_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_right_assoc_good_shape(self):
