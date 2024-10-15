@@ -490,6 +490,16 @@ class TestPySymInt(TestCase):
             str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s2)), 6)"""
         )
 
+    def test_sym_log2(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 4)
+        r = torch._sym_log2(a0)
+        self.assertEqual(r, 2.0)
+        self.assertIsInstance(r, torch.SymFloat, msg=type(r))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_log2(ToFloat(s0)), 2.0)"""
+        )
+
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
