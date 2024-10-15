@@ -6190,8 +6190,8 @@ def multi_head_attention_forward(
             static_k.size(0) == bsz * num_heads
         ), f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
         assert (
-            static_k.size(2) == head_dim
-        ), f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+            static_k.size(2) == head_qk_dim
+        ), f"expecting static_k.size(2) of {head_qk_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
