@@ -551,81 +551,86 @@ def _compile_fx_inner(
         This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
         compiled fx graph. The metadata is saved to FXGraphCache.
         """
-        compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-        if isinstance(compiled_graph, str):
-            # We only return a string in aot mode, in which case we don't
-            # need to do any post-compilation steps: we just return the string,
-            # which is the filename of the compiled code.
-            return compiled_graph
-        cudagraph_info = None
-        if cudagraphs:
-            # check cudagraph disabling reasons from inductor lowering
-            if compiled_graph.disabled_cudagraphs_reason:
-                if "cuda" in compiled_graph.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
-                if not config.triton.cudagraph_support_input_mutation:
-                    # Skip supports for cudagraph-managed tensors
-                    from torch._inductor.cudagraph_utils import (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor,
-                    )
-
-                    has_mutation_str = (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor(
-                            gm,
-                            compiled_graph,
-                            static_input_idxs,  # type:ignore[arg-type]
+        with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
+            compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
+            if isinstance(compiled_graph, str):
+                # We only return a string in aot mode, in which case we don't
+                # need to do any post-compilation steps: we just return the string,
+                # which is the filename of the compiled code.
+                return compiled_graph
+            cudagraph_info = None
+            if cudagraphs:
+                # check cudagraph disabling reasons from inductor lowering
+                if compiled_graph.disabled_cudagraphs_reason:
+                    if "cuda" in compiled_graph.device_types:
+                        log_cudagraph_skip_and_bump_counter(
+                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
                         )
-                    )
-                    has_mutation = has_mutation_str is not None
-
-                    if has_mutation:
-                        compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        counters["inductor"]["cudagraph_skips"] += 1
+                    BoxedBool.disable(cudagraphs)
                 else:
-                    # Check mutation later to support cudagraph-managed tensors
-                    has_mutation = None
+                    complex_memory_overlap_inputs = any(
+                        complex_memory_overlap(t)
+                        for t in example_inputs
+                        if isinstance(t, torch.Tensor)
+                    )
 
-                cudagraph_tests = [
-                    (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
-                    (
-                        all(
-                            isinstance(t, (torch.Tensor, torch.SymInt))
-                            for t in example_inputs
+                    if not config.triton.cudagraph_support_input_mutation:
+                        # Skip supports for cudagraph-managed tensors
+                        from torch._inductor.cudagraph_utils import (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor,
+                        )
+
+                        has_mutation_str = (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor(
+                                gm,
+                                compiled_graph,
+                                static_input_idxs,  # type:ignore[arg-type]
+                            )
+                        )
+                        has_mutation = has_mutation_str is not None
+
+                        if has_mutation:
+                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        # Check mutation later to support cudagraph-managed tensors
+                        has_mutation = None
+
+                    cudagraph_tests = [
+                        (not has_mutation, "mutated inputs"),
+                        (not complex_memory_overlap_inputs, "complex memory overlap"),
+                        (
+                            all(
+                                isinstance(t, (torch.Tensor, torch.SymInt))
+                                for t in example_inputs
+                            ),
+                            "non-Tensor inputs",
                         ),
-                        "non-Tensor inputs",
-                    ),
-                ]
-                output = output_node(gm)
-                # output args are tuple of first argument
-                assert len(output.args) == 1
-                stack_traces = [
-                    (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
-                ]
-                cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                placeholders = tuple(get_placeholder_info(gm.graph))
-                cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
-                )
+                    ]
+                    output = output_node(gm)
+                    # output args are tuple of first argument
+                    assert len(output.args) == 1
+                    stack_traces = [
+                        (
+                            arg.stack_trace
+                            if isinstance(arg, torch.fx.node.Node)
+                            else None
+                        )
+                        for arg in output.args[0]
+                    ]
+                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+                    placeholders = tuple(get_placeholder_info(gm.graph))
+                    cudagraph_info = CudagraphCachedInfo(
+                        placeholders, stack_traces, cudagraph_fail_reasons
+                    )
 
-        compiled_graph.cudagraph_info = cudagraph_info
-        compiled_graph.inputs_to_check = inputs_to_check
-        compiled_graph.fx_kwargs = fx_kwargs
-        # TODO: should this be part of fx_kwargs
-        compiled_graph.boxed_forward_device_index = boxed_forward_device_index
-        return compiled_graph
+            compiled_graph.cudagraph_info = cudagraph_info
+            compiled_graph.inputs_to_check = inputs_to_check
+            compiled_graph.fx_kwargs = fx_kwargs
+            # TODO: should this be part of fx_kwargs
+            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
+            return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
         if (
