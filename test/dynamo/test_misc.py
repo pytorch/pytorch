@@ -11542,6 +11542,12 @@ fn
         a = torch.randn(4)
         b = torch.randn(5)
 
+        # make sure there is a graph break
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
         expected = f(a, b)
         actual = torch.compile(f, backend="eager")(a, b)
 
