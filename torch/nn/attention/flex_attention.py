@@ -899,7 +899,60 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-# TODO: Add njt_score_mod_adapter too
+def njt_score_mod_adapter(
+    orig_score_mod: _score_mod_signature,
+    njt: torch.Tensor,
+):
+    r"""Adapter to convert a score_mod to an NJT-compatible score_mod. The given score_mod
+    should be written as if operating over a single sequence at a item. This adapter will
+    handle conversion from indices operating over a "stacked sequence" of length ``sum(S)``
+    for sequence length ``S`` in the NJT to "sequence relative" indices in range ``[0, S)``.
+
+    Args:
+        orig_score_mod (Callable): Function to modify attention scores. It takes five arguments:
+            score, b (batch size), h (number of heads), q_idx (query index), and
+            kv_idx (key/value index). It should return a value to add to the score.
+        njt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query / key / value.
+
+    Returns:
+        njt_score_mod: An NJT-compatible version of orig_score_mod
+    """
+
+    # Used to convert indices within the "stacked" sequence (range [0, sum(*)))
+    # to "sequence local" indices (range [0, S) for each S).
+    def _build_seq_idx(offsets, total_length):
+        range_tensor = torch.arange(
+            total_length, device=offsets.device, dtype=torch.int32
+        )
+
+        # Use searchsorted to find the index for each position
+        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
+        # If we ever loosen this restriction, this logic will need to be updated.
+        seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
+        return seq_idx
+
+    offsets = njt._offsets  # type: ignore[attr-defined]
+    total_length = njt._values.shape[njt._ragged_idx - 1]  # type: ignore[attr-defined]
+    seq_idx = _build_seq_idx(offsets, total_length)
+
+    def njt_score_mod(score, b, h, q_idx, kv_idx):
+        # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
+        # to the sequence length for each sequence in the NJT, for use in given
+        # score_mod. This allows the user to write a score_mod as if it were
+        # operating on a single sequence and the "stacked sequence" is split
+        # automatically into individual sequences for them.
+        q_nested = q_idx - offsets[seq_idx[q_idx]]
+        kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+        is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+        return torch.where(
+            is_same_sequence,
+            orig_score_mod(score, b, h, q_nested, kv_nested),
+            # don't allow inter-sequence attention
+            float("-inf"),
+        )
+
+    return njt_score_mod
 
 
 def njt_mask_mod_adapter(
