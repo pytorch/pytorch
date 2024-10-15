@@ -72,8 +72,8 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
 from torch._C import (  # noqa: F401
-    _cuda_ensureExistsAndIncrefPool,
     _cuda_CUDAAllocator,
+    _cuda_ensureExistsAndIncrefPool,
     _cuda_releasePool,
     _MemPool,
     _MemPoolContext,
