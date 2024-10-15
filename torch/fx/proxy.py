@@ -535,6 +535,10 @@ class MetaProxy(Proxy):
     A Proxy subclass that propagates metadata (meta['val']) during graph tracing.
     """
 
+    def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None, fake_mode=None):
+        super().__init__(node, tracer)
+        self.fake_mode = fake_mode
+
     def __repr__(self) -> str:
         return f'MetaProxy({self.node.name})'
 
@@ -543,9 +547,21 @@ class MetaProxy(Proxy):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        meta_proxy = None
+        for arg in args:
+            if isinstance(arg, MetaProxy):
+                meta_proxy = arg
+                break
+
+        assert meta_proxy is not None, "No MetaProxy found in arguments, but one is expected."
+
         proxy = super().__torch_function__(orig_method, types, args, kwargs)
-        proxy.node.meta["val"] = orig_method(*[a.node.meta["val"] if isinstance(a, Proxy) else a for a in args], **kwargs)
-        return MetaProxy(proxy.node, proxy.tracer)
+        with meta_proxy.fake_mode:
+            proxy.node.meta["val"] = orig_method(
+                *[a.node.meta["val"] if isinstance(a, Proxy) else a for a in args],
+                **kwargs
+            )
+        return MetaProxy(proxy.node, proxy.tracer, meta_proxy.fake_mode)
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):

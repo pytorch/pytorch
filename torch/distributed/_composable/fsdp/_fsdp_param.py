@@ -6,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -25,6 +24,13 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 """
@@ -699,13 +705,13 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
+                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh)
                 else:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
-                        self.mesh_info.mesh,
+                        self.shard_mesh,
                         self._orig_size,
                         self._contiguous_orig_stride,
                         self._module_info.module,
@@ -783,6 +789,16 @@ class FSDPParam:
     @property
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
+
+    @property
+    def shard_mesh(self):
+        mesh = self.mesh_info.mesh
+        if mesh.ndim == 1:
+            return mesh
+        elif mesh.ndim == 2:
+            assert mesh.mesh_dim_names is not None
+            return mesh[mesh.mesh_dim_names[-1]]
+        raise ValueError(f"Invalid mesh: {mesh}")
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
