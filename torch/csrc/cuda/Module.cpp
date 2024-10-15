@@ -1313,10 +1313,10 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
-      "_cuda_beginAllocateToPool",
+      "_cuda_ensureExistsAndIncrefPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [](cudaStream_t) { return true; });
+        c10::cuda::CUDACachingAllocator::ensureExistsAndIncrefPool(
+            device, mempool_id);
       });
 
   m.def(
