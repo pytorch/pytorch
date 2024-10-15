@@ -14,7 +14,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -128,8 +128,18 @@ class ConstDictVariable(VariableTracker):
             return Hashable._eq_impl(self.underlying_value, other)
 
     def __init__(
-        self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
+        self,
+        items: Dict[VariableTracker, VariableTracker],
+        user_cls=dict,
+        **kwargs,
     ) -> None:
+        # .clone() pass these arguments in kwargs but they're recreated a few
+        # lines below
+        if "original_items" in kwargs:
+            kwargs.pop("original_items")
+        if "should_reconstruct_all" in kwargs:
+            kwargs.pop("should_reconstruct_all")
+
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -145,6 +155,10 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         self.items = {make_hashable(x): v for x, v in items.items()}
+        # need to reconstruct everything if the dictionary is an intermediate value
+        # or if a pop/delitem was executed
+        self.should_reconstruct_all = not is_from_local_source(self.source)
+        self.original_items = items.copy()
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -189,6 +203,9 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
+    def _maybe_realize(self, item):
+        return item.realize() if item else item
+
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
@@ -201,27 +218,36 @@ class ConstDictVariable(VariableTracker):
                 )
             )
         # instructions to build the dict keys and values
+        num_args = 0
         for key, value in self.items.items():
-            codegen(key.vt)
-            codegen(value)
+            # We can safely call realize() here as it won't introduce any new guards
+            is_new_item = (
+                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
+            )
+
+            if is_new_item or self.should_reconstruct_all:
+                codegen(key.vt)
+                codegen(value)
+                num_args += 1
+
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    create_instruction("BUILD_MAP", arg=len(self.items)),
+                    create_instruction("BUILD_MAP", arg=num_args),
                     *create_call_function(1, False),
                 ]
             )
         # BUILD_MAP only if user_cls is dict
         else:
-            codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
+            codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            raise_observed_exception(KeyError, tx, self)
+            raise_observed_exception(KeyError, tx)
         return self.items[key]
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
@@ -288,6 +314,7 @@ class ConstDictVariable(VariableTracker):
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
@@ -298,16 +325,16 @@ class ConstDictVariable(VariableTracker):
             else:
                 return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "clear":
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif (
-            name == "update"
-            and len(args) == 1
-            and isinstance(
+        elif name == "update" and self.mutable_local:
+            is_args_supported = len(args) == 1 and isinstance(
                 args[0],
                 (
                     ConstDictVariable,
@@ -318,20 +345,25 @@ class ConstDictVariable(VariableTracker):
                     UserDefinedObjectVariable,
                 ),
             )
-            and self.mutable_local
-        ):
-            tx.output.side_effects.mutation(self)
-            if isinstance(args[0], ConstDictVariable):
-                dict_vt = args[0]
+
+            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
+
+            if is_args_supported or is_kwargs_supported:
+                tx.output.side_effects.mutation(self)
+                if len(args) == 1:
+                    if isinstance(args[0], ConstDictVariable):
+                        dict_vt = args[0]
+                    else:
+                        dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
+                    self.items.update(dict_vt.items)
+                # Wrap strings
+                kwargs = {
+                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
+                }
+                self.items.update(kwargs)
+                return ConstantVariable.create(None)
             else:
-                dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
-            self.items.update(dict_vt.items)
-            # Wrap strings
-            kwargs = {
-                Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-            }
-            self.items.update(kwargs)
-            return ConstantVariable.create(None)
+                return super().call_method(tx, name, args, kwargs)
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
