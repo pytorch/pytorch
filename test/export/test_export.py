@@ -652,9 +652,7 @@ graph():
         example_args = (torch.tensor(10), as_tuple)
         dim0_x_max = 100
         dynamic_shapes = {
-            "x": {
-                0: Dim("dim0_x", max=dim0_x_max),
-            },
+            "x": None,
             "as_tuple": None,
         }
         m = M()
