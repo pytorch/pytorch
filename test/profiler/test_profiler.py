@@ -1957,6 +1957,9 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             record_shapes=True,
             with_stack=True,
             schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                adjust_profiler_step=True
+            ),
         ) as prof:
             for i in range(5):
                 self._step_helper_func(prof)
@@ -2041,6 +2044,40 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         p.events()
         self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
         self.assertGreater(stats.number_of_events, 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(
+        torch.cuda.is_available(), "CUDA complains about forking after init"
+    )
+    @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    def test_forked_process(self):
+        # Induce a pid cache by running the profiler with payload
+        def validate_forked_json(profiler):
+            nonlocal cpu_op_found, parent_tid, child_pid
+            with TemporaryFileName(mode="w+") as fname:
+                profiler.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    for event in events:
+                        if "cat" in event and event["cat"] == "cpu_op":
+                            self.assertEqual(event["pid"], child_pid)
+                            self.assertNotEqual(event["tid"], parent_tid)
+                            cpu_op_found = True
+
+        cpu_op_found = False
+        parent_tid = threading.current_thread().ident
+        with profile() as p:
+            self.payload()
+        pid = os.fork()
+        if pid == 0:
+            child_pid = os.getpid()
+            with profile() as p:
+                self.payload()
+            validate_forked_json(p)
+            self.assertTrue(cpu_op_found)
+            os._exit(0)
+        else:
+            os.waitpid(pid, 0)
 
 
 class SimpleNet(nn.Module):
