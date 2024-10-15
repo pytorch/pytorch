@@ -51,6 +51,7 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
+        overridden_sources=None,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
@@ -65,6 +66,7 @@ class PyCodegen:
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        self.overridden_sources = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
@@ -116,7 +118,8 @@ class PyCodegen:
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self.call_reconstruct(value)
+            source = self.overridden_sources.get(value, value)
+            self.call_reconstruct(source)
             self.clear_tos()
             return
 
