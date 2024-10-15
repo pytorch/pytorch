@@ -12,18 +12,20 @@ namespace at {
 struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
   ~HPUHooksInterface() override = default;
 
-  void init() const override{
+  void init() const override {
     TORCH_CHECK(false, "Cannot initialize HPU without HPU backend");
   }
 
   virtual bool hasHPU() const {
     return false;
   }
-  virtual const Generator& getDefaultHPUGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const {
+
+  const Generator& getDefaultGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const override {
     TORCH_CHECK(false, "Cannot get default HPU generator without HPU backend");
   }
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(
         false, "Cannot get device of pointer on HPU without HPU backend");
   }
@@ -37,6 +39,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         false,
         "You should register `HPUHooksInterface` for HPU before call `getPinnedMemoryAllocator`.");
   }
+
   bool hasPrimaryContext(C10_UNUSED DeviceIndex device_index) const override {
     TORCH_CHECK(
         false,
