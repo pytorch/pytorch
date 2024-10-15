@@ -510,8 +510,36 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
+
+        # Only override builtin tensor methods
+        # The user can manually add override handling
+        # with a decorator for other methods (e.g. a dispatch subclass with other methods)
+        has_torch_function_override = False
+        try:
+            inspect.getattr_static(torch.Tensor, name)
+            has_torch_function_override = True
+        except AttributeError:
+            has_torch_function_override = False
+
+        if (
+            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            and has_torch_function_override
+        ):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx, AttrSource(AttrSource(self.source, "__class__"), name)
+                )(inspect.getattr_static(torch.Tensor, name))
+            else:
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
+
+            return dispatch_torch_function(
+                tx, func_var, tuple([self] + list(args)), kwargs
+            )
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -772,6 +800,30 @@ class TensorVariable(VariableTracker):
             self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
 
+    def method___getitem__(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import wrap_fx_proxy
+
+        tx = InstructionTranslator.current_tx()
+        if isinstance(args[0], SymNodeVariable):
+            # Standard indexing will force specialization due to
+            # __index__.  Rewrite as a regular torch op which will
+            # trace fine
+            fn, args = torch.select, [
+                variables.ConstantVariable.create(0),
+                args[0],
+            ]
+        else:
+            fn = operator.getitem
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            fn,
+            *proxy_args_kwargs([self] + list(args), kwargs),
+        )
+
+        return wrap_fx_proxy(tx, proxy)
+
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
@@ -822,15 +874,6 @@ class TensorVariable(VariableTracker):
             else:
                 return False
 
-        if (
-            has_bool_key(key)
-            and isinstance(value, TensorVariable)
-            and value.requires_grad
-            and torch.is_grad_enabled()
-        ):
-            unimplemented(
-                "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
-            )
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
