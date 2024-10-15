@@ -902,7 +902,7 @@ PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg)
 }
 
 PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs){ 
-  if( at::globalContext().allowTF32Mkldnn())
+  if(at::globalContext().allowTF32Mkldnn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1430,8 +1430,8 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
-    {"_get_mkldnn_allow_tf32", THPModule_allowTF32Mkldnn, METH_O, nullptr},
-    {"_set_mkldnn_allow_tf32",THPModule_setAllowTF32Mkldnn, METH_O, nullptr},
+    {"_get_mkldnn_allow_tf32", THPModule_allowTF32Mkldnn, METH_NOARGS, nullptr},
+    {"_set_mkldnn_allow_tf32", THPModule_setAllowTF32Mkldnn, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -2418,4 +2418,3 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
- 

@@ -201,6 +201,12 @@ sycl::event convolution(
     }
   #endif
 
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32Mkldnn();
+  if(allow_tf32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+  }
+
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -287,6 +293,12 @@ sycl::event convolution_backward_weights(
         pattr.set_deterministic(true);
     }
   #endif
+
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32Mkldnn();
+  if(allow_tf32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+  }
   
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
