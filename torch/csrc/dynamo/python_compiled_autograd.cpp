@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
+#include <torch/csrc/dynamo/python_logger.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -69,13 +70,17 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
+// see https://github.com/pytorch/pytorch/pull/34845
+void throw_python_error() {
+  python_error err;
+  err.persist();
+  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+  throw err;
+}
+
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
-    // see https://github.com/pytorch/pytorch/pull/34845
-    python_error err;
-    err.persist();
-    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-    throw err;
+    throw_python_error();
   }
   return pyresult;
 }
@@ -85,19 +90,14 @@ static void check(bool result) {
     check(nullptr);
 }
 
-struct VerboseLogger {
-  VerboseLogger(PyObject* vlogger) : vlogger(vlogger) {}
+struct VerboseLogger : public PythonLogger {
+  VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
 
   static std::optional<VerboseLogger> maybe_create(PyObject* vlogger) {
     if (vlogger == nullptr) {
       return std::nullopt;
     }
     return VerboseLogger(vlogger);
-  }
-
-  void verbose_log_fn(std::string_view msg) const {
-    TORCH_CHECK(vlogger != nullptr);
-    check(PyObject_CallFunction(vlogger, "s", msg.data()));
   }
 
   void log_node_check(
@@ -137,7 +137,7 @@ struct VerboseLogger {
       }
     }
     oss << "]";
-    verbose_log_fn(oss.str());
+    log(PythonLogger::DEBUG, oss.str());
   }
 
   void log_dynamic_shapes_check(size_t size_idx) const {
@@ -149,13 +149,12 @@ struct VerboseLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    verbose_log_fn(
+    log(PythonLogger::DEBUG,
         "Cache miss due to changed shapes: marking size idx " +
-        std::to_string(size_idx - start_idx) + " of " + it->second +
-        " as dynamic");
+            std::to_string(size_idx - start_idx) + " of " + it->second +
+            " as dynamic");
   }
 
-  PyObject* vlogger;
   // track which size index belongs to which node
   std::map<size_t, std::string> cumulative_sizes_per_node;
   // only log cache miss due to node key once
