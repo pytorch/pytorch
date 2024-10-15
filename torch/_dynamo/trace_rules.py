@@ -3274,6 +3274,7 @@ MOD_INLINELIST = [
     "torch.nn",
     "torch.overrides",
     "torch.random",
+    "torch.return_types",
     "torch.sparse",
     "torch.testing",
     "torch.utils._content_store",
