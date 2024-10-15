@@ -1703,9 +1703,9 @@ def forward(self, x_1, output_1):
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
         if cfg == "normal":
-            config_kwargs = {"cpp_wrapper": False, "abi_compatible": True}
+            config_kwargs = {"cpp_wrapper": False}
         elif cfg == "cpp_wrapper":
-            config_kwargs = {"cpp_wrapper": True, "abi_compatible": True}
+            config_kwargs = {"cpp_wrapper": True}
 
         with torch._inductor.config.patch(**config_kwargs):
 
