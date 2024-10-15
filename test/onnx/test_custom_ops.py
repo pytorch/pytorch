@@ -96,7 +96,7 @@ class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
             def forward(self, x):
                 res = []
                 res2 = []
-                for i in range(x.size(0)):
+                for _ in range(x.size(0)):
                     if len(res) > 0:
                         res2.append(res[0])
                     else:

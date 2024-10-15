@@ -1,4 +1,5 @@
 # Owner(s): ["module: fft"]
+# ruff: noqa: F841
 
 import torch
 import unittest

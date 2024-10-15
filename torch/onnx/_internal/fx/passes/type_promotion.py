@@ -43,7 +43,7 @@ _SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
 def _try_getclosurevars(func):
     try:
         return inspect.getclosurevars(func)
-    except TypeError as e:
+    except TypeError:
         return None
 
 

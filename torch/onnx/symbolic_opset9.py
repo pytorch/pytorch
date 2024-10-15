@@ -2955,7 +2955,6 @@ def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accum
 
 @_onnx_symbolic("aten::index_fill")
 def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
     expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
@@ -2968,8 +2967,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
-    dim_value = symbolic_helper._parse_arg(dim, "i")
-    expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
+    _expanded_index_shape, expanded_index = symbolic_helper._index_fill_reshape_helper(
         g, self, dim, index
     )
     return scatter(g, self, dim, expanded_index, source)
@@ -3674,14 +3672,14 @@ def new_full(
 def eye(g: jit_utils.GraphContext, *args):
     if len(args) == 5:
         # aten::eye(n, dtype, layout, device, pin_memory)
-        n, dtype, layout, device, pin_memory = args
+        n, dtype, layout, device, _pin_memory = args
         dim_size = symbolic_helper._unsqueeze_helper(g, n, [0])
         shape = g.op("Concat", dim_size, dim_size, axis_i=0)
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
     if len(args) == 6:
         # aten::eye(n, m, dtype, layout, device, pin_memory)
-        n, m, dtype, layout, device, pin_memory = args
+        n, m, dtype, layout, device, _pin_memory = args
         shape = g.op(
             "Concat",
             symbolic_helper._unsqueeze_helper(g, n, [0]),
@@ -5567,14 +5565,14 @@ def linalg_matrix_norm(
             g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim
         )
         if ord_value > 0:
-            result, indices = max(
+            result, _indices = max(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),
                 keepdim=keepdim,
             )
         else:
-            result, indices = min(
+            result, _indices = min(
                 g,
                 sum,
                 dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])),
@@ -6391,7 +6389,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
     opset_version = GLOBALS.export_onnx_opset_version
 
     old_blocks = tuple(node.blocks())
-    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+    _new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
         g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
     )
 
@@ -6500,7 +6498,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
         return final_b_list
     else:
         old_blocks = tuple(n.blocks())
-        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+        _new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
             g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
         )
 

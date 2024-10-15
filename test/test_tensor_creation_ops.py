@@ -1,4 +1,5 @@
 # Owner(s): ["module: tensor creation"]
+# ruff: noqa: F841
 
 import torch
 import numpy as np

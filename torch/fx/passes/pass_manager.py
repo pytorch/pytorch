@@ -31,7 +31,7 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        val = fn(gm)
+        fn(gm)
         return gm
 
     return wrapped_fn

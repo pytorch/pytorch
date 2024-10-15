@@ -29,7 +29,7 @@ def find_and_instantiate_subclasses(
             module = importlib.import_module(module_name)
 
             # look for classes that are subclasses of base_class
-            for name, obj in inspect.getmembers(module):
+            for _name, obj in inspect.getmembers(module):
                 if (
                     inspect.isclass(obj)
                     and issubclass(obj, base_class)

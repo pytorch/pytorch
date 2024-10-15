@@ -2089,7 +2089,6 @@ class BuiltinVariable(VariableTracker):
 def dynamo_disable_grad(tx):
     from . import GradModeVariable
 
-    org_value = torch.is_grad_enabled()
     gmv = GradModeVariable.create(tx, False)
     try:
         gmv.enter(tx)

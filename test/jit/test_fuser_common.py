@@ -14,7 +14,7 @@ class TestFuserCommon(JitTestCase):
 
             x = torch.randn(5, requires_grad=not rq)
             # cause optimization to be created
-            for i in range(5):
+            for _ in range(5):
                 fn(x)
             # test fallback when optimization is not applicable
             y = fn(torch.randn(5, requires_grad=rq))

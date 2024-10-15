@@ -570,10 +570,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
-
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", []
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
     def init_fn(script_module):
@@ -838,9 +834,6 @@ def infer_methods_to_compile(nn_module):
     (TODO add a link when the rules are published).
     """
     check_module_initialized(nn_module)
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", []
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
     methods: List[str] = []
