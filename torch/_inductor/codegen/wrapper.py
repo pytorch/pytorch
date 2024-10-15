@@ -842,13 +842,14 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def generate_tma_descriptor(self, desc):
-        ptr = f"{desc.tensor.get_name()}.data_ptr()"
-        dims = ", ".join(str(dim) for dim in desc.dims)
-        block_dims = ", ".join(str(dim) for dim in desc.block_dims)
+        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
         prefix = "triton.tools.experimental_descriptor"
         fn_name = f"create_{desc.rank}d_tma_descriptor"
         call = f"{prefix}.{fn_name}"
-        args = f"{ptr}, {dims}, {block_dims}, {desc.element_size}"
+        args = f"{ptr}, {dims}, {block_dims}, {element_size}"
         line = f"{desc.name} = {call}({args})"
         self.writeline(line)
 
