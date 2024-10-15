@@ -821,7 +821,7 @@ struct PrivatePool {
   PrivatePool(PrivatePool&&) = delete;
   PrivatePool& operator=(const PrivatePool&) = delete;
   // Number of live graphs using this pool
-  int use_count{0};
+  int use_count{1};
   // Number of unfreed cudaMallocs made for this pool. When use_count and
   // cudaMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
@@ -2054,7 +2054,7 @@ class DeviceCachingAllocator {
         false, "endAllocatePool: not currently recording to mempool_id");
   }
 
-  // Called by CUDAGraph::reset
+  // Called by CUDAGraph::reset and MemPool::~MemPool()
   void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
@@ -2067,19 +2067,21 @@ class DeviceCachingAllocator {
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
     auto pp = get_private_pool(mempool_id);
-    decref_pool_and_maybe_mark_free(mempool_id, pp);
+    auto uc = --(pp->use_count);
+    TORCH_INTERNAL_ASSERT(uc >= 0);
+    if (uc == 0) {
+      // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
+      // and makes sure this pool wasn't somehow made freeable already.
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+      bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
+      TORCH_INTERNAL_ASSERT(inserted);
+    }
   }
 
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
     return pp->use_count;
-  }
-
-  void decrefPoolAndMaybeMarkFree(MempoolId_t mempool_id) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto pp = get_private_pool(mempool_id);
-    decref_pool_and_maybe_mark_free(mempool_id, pp);
   }
 
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
@@ -2155,11 +2157,9 @@ class DeviceCachingAllocator {
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
       // Make a new pool for CUDAGraph capture or torch.cuda.use_mem_pool
-      // usage. use_count is initially 0. Increment it to establish the usage.
-      auto inserted =
-          graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
-      TORCH_INTERNAL_ASSERT(inserted.second);
-      inserted.first->second->use_count++;
+      // usage. use_count is initially 1, which means the pool is
+      // being used since somebody called ensureExistsAndIncrefPool.
+      graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
     } else {
       // mempool_id references an existing pool, which the current CUDAGraph
       // capture or torch.cuda.use_mem_pool will
@@ -2174,20 +2174,6 @@ class DeviceCachingAllocator {
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
     return it->second.get();
-  }
-
-  void decref_pool_and_maybe_mark_free(
-      MempoolId_t mempool_id,
-      PrivatePool* pool) {
-    auto uc = --(pool->use_count);
-    TORCH_INTERNAL_ASSERT(uc >= 0);
-    if (uc == 0) {
-      // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
-      // and makes sure this pool wasn't somehow made freeable already.
-      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      bool inserted = graph_pools_freeable.insert({mempool_id, pool}).second;
-      TORCH_INTERNAL_ASSERT(inserted);
-    }
   }
 
   // returns the smallest possible address in any segment
@@ -3609,13 +3595,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  void decrefPoolAndMaybeMarkFree(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) override {
-    assertValidDevice(device);
-    device_allocator[device]->decrefPoolAndMaybeMarkFree(std::move(mempool_id));
-  }
-
   void* raw_alloc(size_t nbytes) override {
     if (nbytes == 0) {
       return nullptr;
@@ -3909,7 +3888,7 @@ MemPool::MemPool(
 
 MemPool::~MemPool() {
   TORCH_INTERNAL_ASSERT(use_count() == 1);
-  CUDACachingAllocator::decrefPoolAndMaybeMarkFree(device_, id_);
+  CUDACachingAllocator::releasePool(device_, id_);
 }
 
 MempoolId_t MemPool::id() {
