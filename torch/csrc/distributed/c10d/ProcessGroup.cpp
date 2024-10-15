@@ -178,36 +178,31 @@ class WorkRegistry {
       return;
     }
     auto storage = tensor.storage().getWeakStorageImpl();
-    auto work_weakptr = c10::weak_intrusive_ptr<c10d::Work>(work);
     std::unique_lock lock(lock_);
 
     auto it = registry_.find(storage);
     if (it == registry_.end()) {
       registry_.emplace(
           std::move(storage),
-          std::vector<c10::weak_intrusive_ptr<c10d::Work>>{work_weakptr});
+          std::vector<c10::intrusive_ptr<c10d::Work>>{work});
     } else {
       // There is no guarantee that the previous work object for this
       // tensor storage is completed before the new work object is registered.
       // Therefore we need to maintain a list of work objects for each tensor
       // storage.
-      it->second.push_back(work_weakptr);
+      it->second.push_back(work);
     }
   }
 
-  std::vector<size_t> _collect_uncompleted_works_indices(
-      const std::vector<c10::weak_intrusive_ptr<c10d::Work>>& work_weakptrs) {
-    std::vector<size_t> uncompleted_indices;
-    for (size_t i = 0; i < work_weakptrs.size(); ++i) {
-      const auto& work_weakptr = work_weakptrs[i];
-      if (!work_weakptr.expired()) {
-        auto work = work_weakptr.lock();
-        if (work.defined() && !work->isCompleted()) {
-          uncompleted_indices.push_back(i);
-        }
+  std::vector<c10::intrusive_ptr<c10d::Work>> _collect_uncompleted_works(
+      const std::vector<c10::intrusive_ptr<c10d::Work>>& works) {
+    std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
+    for (const auto& work : works) {
+      if (work.defined() && !work->isCompleted()) {
+        uncompleted_works.push_back(work);
       }
     }
-    return uncompleted_indices;
+    return uncompleted_works;
   }
 
   std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
@@ -218,11 +213,7 @@ class WorkRegistry {
     if (it == registry_.end()) {
       return {};
     }
-    std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
-    auto uncompleted_indices = _collect_uncompleted_works_indices(it->second);
-    for (auto index : uncompleted_indices) {
-      uncompleted_works.push_back(it->second[index].lock());
-    }
+    auto uncompleted_works = _collect_uncompleted_works(it->second);
     registry_.erase(it);
     return uncompleted_works;
   }
@@ -230,15 +221,10 @@ class WorkRegistry {
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
-      auto uncompleted_indices = _collect_uncompleted_works_indices(it->second);
-      if (uncompleted_indices.empty()) {
+      auto uncompleted_works = _collect_uncompleted_works(it->second);
+      if (uncompleted_works.empty()) {
         it = registry_.erase(it);
       } else {
-        std::vector<c10::weak_intrusive_ptr<c10d::Work>> uncompleted_works;
-        uncompleted_works.reserve(uncompleted_indices.size());
-        for (auto index : uncompleted_indices) {
-          uncompleted_works.push_back(std::move(it->second[index]));
-        }
         it->second = std::move(uncompleted_works);
         ++it;
       }
@@ -281,7 +267,7 @@ class WorkRegistry {
  private:
   std::unordered_map<
       c10::weak_intrusive_ptr<c10::StorageImpl>,
-      std::vector<c10::weak_intrusive_ptr<c10d::Work>>>
+      std::vector<c10::intrusive_ptr<c10d::Work>>>
       registry_;
   std::mutex lock_;
 };
