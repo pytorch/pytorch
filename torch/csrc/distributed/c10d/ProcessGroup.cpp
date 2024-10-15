@@ -116,9 +116,7 @@ ProcessGroup::ProcessGroup(
 ProcessGroup::ProcessGroup(int rank, int size)
     : rank_(rank), size_(size), backendType_(BackendType::UNDEFINED) {}
 
-ProcessGroup::~ProcessGroup() {
-  c10d::unregister_completed_works();
-}
+ProcessGroup::~ProcessGroup() = default;
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
@@ -194,17 +192,6 @@ class WorkRegistry {
     }
   }
 
-  std::vector<c10::intrusive_ptr<c10d::Work>> _collect_uncompleted_works(
-      const std::vector<c10::intrusive_ptr<c10d::Work>>& works) {
-    std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
-    for (const auto& work : works) {
-      if (work.defined() && !work->isCompleted()) {
-        uncompleted_works.push_back(work);
-      }
-    }
-    return uncompleted_works;
-  }
-
   std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
       const at::Tensor& tensor) {
     const auto storage = tensor.storage().getWeakStorageImpl();
@@ -213,15 +200,20 @@ class WorkRegistry {
     if (it == registry_.end()) {
       return {};
     }
-    auto uncompleted_works = _collect_uncompleted_works(it->second);
+    auto works = it->second;
     registry_.erase(it);
-    return uncompleted_works;
+    return works;
   }
 
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
-      auto uncompleted_works = _collect_uncompleted_works(it->second);
+      std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
+      for (const auto& work : it->second) {
+        if (work.defined() && !work->isCompleted()) {
+          uncompleted_works.push_back(work);
+        }
+      }
       if (uncompleted_works.empty()) {
         it = registry_.erase(it);
       } else {
