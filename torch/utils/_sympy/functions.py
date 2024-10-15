@@ -577,6 +577,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             args = cls._collapse_arguments(args, **assumptions)
             # find local zeros
             args = cls._find_localzeros(args, **assumptions)
+
         args = frozenset(args)
 
         if not args:
@@ -761,49 +762,44 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         When a value is identified as being more extreme than another member it
         replaces that member; if this is never true, then the value is simply
         appended to the localzeros.
+
+        Unlike the sympy implementation, we only look for zero and one, we don't
+        do generic is connected test pairwise which is slow
         """
-        localzeros = set()  # type: ignore[var-annotated]
-        for v in values:
-            is_newzero = True
-            localzeros_ = list(localzeros)
-            for z in localzeros_:
-                if id(v) == id(z):
-                    is_newzero = False
+
+        # First, collapse all numeric arguments
+        other_values = set()
+        num_value = None
+        for arg in values:
+            if arg.is_Number:
+                if num_value is None:
+                    num_value = arg
                 else:
-                    con = cls._is_connected(v, z)
-                    if con:
-                        is_newzero = False
-                        if con is True or con == cls:
-                            localzeros.remove(z)
-                            localzeros.update([v])
-            if is_newzero:
-                localzeros.update([v])
-        return localzeros
-
-    @classmethod
-    def _is_connected(cls, x, y):
-        """
-        Check if x and y are connected somehow.
-        """
-        if x == y:
-            return True
-        t, f = Max, Min
-        for op in "><":
-            for j in range(2):
-                try:
-                    if op == ">":
-                        v = x >= y
+                    if cls is Max:
+                        num_value = max(num_value, arg)
+                    elif cls is Min:
+                        num_value = min(num_value, arg)
                     else:
-                        v = x <= y
-                except TypeError:
-                    return False  # non-real arg
-                if not v.is_Relational:
-                    return t if v else f
-                t, f = f, t  # type: ignore[assignment]
-                x, y = y, x
-            x, y = y, x  # run next pass with reversed order relative to start
+                        raise AssertionError(f"impossible {cls}")
+            else:
+                other_values.add(arg)
 
-        return False
+        # Special cases when there is only one symbolic value
+        if num_value is None:
+            return other_values
+
+        if len(other_values) == 0:
+            return {num_value}
+
+        if len(other_values) == 1:
+            other_value = next(iter(other_values))
+            if num_value in (0.0, 0) and other_value.is_nonnegative:
+                return other_values if cls is Max else {num_value}
+            if num_value == 1 and other_value.is_positive:
+                return other_values if cls is Max else {num_value}
+
+        other_values.add(num_value)
+        return other_values
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
