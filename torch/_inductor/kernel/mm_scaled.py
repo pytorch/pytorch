@@ -159,9 +159,9 @@ device_tma = r"""
             tile_id += NUM_SMS
             group_id = tile_id // num_pid_in_group
             first_pid_m = group_id * GROUP_M
-            GROUP_M = min(num_pid_m - first_pid_m, GROUP_M)
-            pid_m = first_pid_m + (tile_id % GROUP_M)
-            pid_n = (tile_id % num_pid_in_group) // GROUP_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+            pid_m = first_pid_m + (tile_id % group_size_m)
+            pid_n = (tile_id % num_pid_in_group) // group_size_m
 
             offs_am = pid_m * BLOCK_M
             offs_bn = pid_n * BLOCK_N
@@ -169,10 +169,10 @@ device_tma = r"""
         offs_k = ki * BLOCK_K
 
         a = tl._experimental_descriptor_load(
-            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K], dtype
+            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
         )
         b = tl._experimental_descriptor_load(
-            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K], dtype
+            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
         )
         if USE_FAST_ACCUM:
             accumulator = tl.dot(a, b.T, accumulator)
