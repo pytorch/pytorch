@@ -78,7 +78,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
         # Generate partial function.
-        return functools.partial(
+        result = functools.partial(
             run_method,
             *args,
             *size_args,
@@ -86,6 +86,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
         )
+        # import pdb; pdb.set_trace()
+        return result
 
     def update_workspace_size(self) -> None:
         if self._workspace_size_updated:

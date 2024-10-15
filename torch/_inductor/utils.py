@@ -1179,9 +1179,6 @@ def use_ck_template(layout):
     # config knobs check 1
     if not use_max_autotune():
         return False
-    # config knobs check 2
-    if not _use_autotune_backend("CK"):
-        return False
     # platform check
     if not torch.version.hip:
         return False
@@ -1223,6 +1220,13 @@ def use_ck_template(layout):
 
     return True
 
+
+def use_ck_gemm_template(layout):
+    return use_ck_template(layout) and _use_autotune_backend("CK")
+
+
+def use_ck_conv_template(layout):
+    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
 
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"

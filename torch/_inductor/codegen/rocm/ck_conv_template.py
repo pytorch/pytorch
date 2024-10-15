@@ -369,9 +369,20 @@ class CKConvTemplate(CKTemplate):
             std::cerr << "p_e is nullptr" << std::endl;
             return -1;
         }
+        if (workspace == nullptr) {
+            std::cerr << "workspace is nullptr" << std::endl;
+            return -1;
+        }
+
+        // when debugging, do time kernel to serialize launches
+        auto stream_config = StreamConfig{stream, /* time kernel */ false, /* log level */ 0};
+
+        if (workspace != nullptr) {
+            conv.SetWorkSpacePointer(&argument, workspace, stream_config);
+        }
 
         // run the kernel
-        float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
+        float elapsed_time = invoker.Run(argument, stream_config);
         return 0;
     } // kernel definition
     } // extern C
@@ -499,6 +510,7 @@ class CKConvTemplate(CKTemplate):
                             1;
                     }
                 }
+
                 } // namespace conv
                 } // namespace utils
                 } // namespace ck
@@ -532,6 +544,8 @@ class CKConvTemplate(CKTemplate):
 
                 #include "ck/library/utility/convolution_parameter.hpp"
                 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
+                #include "ck/library/utility/device_memory.hpp"
+                #include "ck/library/utility/host_tensor.hpp"
             """
         )
         return res

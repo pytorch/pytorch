@@ -366,8 +366,8 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
-    def test_max_autotune_conv2d(self, max_autotune_gemm_backends):
+    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         tensor_options = {"device": "cuda", "dtype": torch.float32}
@@ -382,11 +382,11 @@ class TestCKBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 1,
+                "autotune_in_subproc": False,
+                "max_autotune_conv_backends": max_autotune_conv_backends,
+                "compile_threads": 4,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 1,
+                "rocm.n_max_profiling_configs": 4,
             }
         ):
 

@@ -26,7 +26,7 @@ from ..utils import (
     is_zeros,
     pad_listlike,
     sympy_product,
-    use_ck_template,
+    use_ck_conv_template,
     use_triton_template,
 )
 from ..virtualized import V
@@ -470,6 +470,7 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
+    # import pdb; pdb.set_trace()
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -556,15 +557,7 @@ def convolution(
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
-        layout = conv_layout(x, weight, None, **kwargs)
-    else:
-        layout = conv_layout(x, weight, None, **kwargs)
-        req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
-        )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
-
+    layout = conv_layout(x, weight, None, **kwargs)
     ordered_kwargs_for_cpp_kernel = [
         "stride",
         "padding",
@@ -664,12 +657,11 @@ def convolution(
 
     # import pdb; pdb.set_trace()
 
-    if use_ck_template(layout):
-        ck_w = ir.ExternKernel.require_channels_last(weight)
+    if use_ck_conv_template(layout):
         CKConvTemplate.add_ck_conv_choices(
             choices,
             layout,
-            input_nodes=(x, ck_w) + ((bias,) if bias is not None else tuple()),
+            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
             stride=stride,
             padding=padding,
             dilation=dilation,
