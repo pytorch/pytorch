@@ -1,6 +1,5 @@
 #ifdef USE_C10D_UCC
 
-#include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
@@ -33,9 +32,9 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
   }
 
   std::string fullpath = "/tmp/" + dirname;
-  auto user_path = c10::utils::get_env("TORCH_UCC_COMMS_TRACE_OUTPUT_DIR");
-  if (user_path.has_value()) {
-    fullpath = std::move(user_path.value());
+  char* user_path = std::getenv("TORCH_UCC_COMMS_TRACE_OUTPUT_DIR");
+  if (user_path) {
+    fullpath = user_path;
   }
   std::string trace_filename = c10::str(fullpath, "/rank", rank, ".json");
   std::ofstream _outfile;
