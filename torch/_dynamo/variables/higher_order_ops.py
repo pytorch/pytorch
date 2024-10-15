@@ -790,7 +790,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_graph,
             false_graph,
             true_shared,
-            false_shared,
+            _false_shared,
             unique_true,
             unique_false,
         ) = _merge_graph_inputs(
@@ -925,7 +925,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs = args[3].unpack_var_sequence(tx)
 
         (
-            (cond_r, cond_treespec),
+            (cond_r, _cond_treespec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -971,7 +971,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             body_graph,
             cond_shared,
-            body_shared,
+            _body_shared,
             cond_unique,
             body_unique,
         ) = _merge_graph_inputs(
@@ -1077,7 +1077,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             for leaf in itertools.chain(xs.items, xs.items)
         ]
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1242,7 +1242,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ]
         sub_args = sub_args_init + sub_args_inp
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1556,9 +1556,14 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
-            tx, args, kwargs, "wrap"
-        )
+        (
+            p_args,
+            p_kwargs,
+            _example_value,
+            body_r,
+            treespec,
+            _,
+        ) = self.create_wrapped_node(tx, args, kwargs, "wrap")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -1766,8 +1771,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        callable = args[0]
-
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
@@ -1857,7 +1860,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
-            body_r,
+            _body_r,
             treespec,
             checkpointed_gmod,
         ) = self.create_wrapped_node(
@@ -2029,7 +2032,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (body_output, body_treespec),
+                (_body_output, _body_treespec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
@@ -2439,7 +2442,7 @@ def maybe_positional_arg_names(func):
     except (Unsupported, NotImplementedError):
         return None
     try:
-        sig = inspect.signature(func.get_function())
+        sig = inspect.signature(fn)
     except ValueError:
         return None
     for name, param in sig.parameters.items():

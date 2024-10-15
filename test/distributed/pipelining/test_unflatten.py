@@ -58,7 +58,7 @@ class UnflattenTests(TestCase):
         # Check qualnames
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
-            for param_name, param in stage_mod.named_parameters():
+            for param_name, _ in stage_mod.named_parameters():
                 assert (
                     param_name in orig_state_dict
                 ), f"{param_name} not in original state dict"

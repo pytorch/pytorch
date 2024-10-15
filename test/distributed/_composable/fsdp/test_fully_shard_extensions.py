@@ -241,7 +241,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
                 if _model is ref_model:
-                    for param_name, param in _model.named_parameters():
+                    for _, param in _model.named_parameters():
                         dist.all_reduce(param.grad)
                         param.grad.detach().div_(self.world_size)
             self.assertEqual(losses[0], losses[1])

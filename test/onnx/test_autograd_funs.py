@@ -65,7 +65,7 @@ class TestAutogradFuns(pytorch_test_common.ExportTestCase):
             @staticmethod
             def forward(ctx, input):
                 ctx.save_for_backward(input)
-                values, indices = torch.topk(input, 3)
+                values, _ = torch.topk(input, 3)
                 return values
 
         class Caller(torch.nn.Module):

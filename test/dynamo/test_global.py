@@ -196,7 +196,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        v0, s0 = opt_fn(a, b)
+        _, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
 
@@ -220,7 +220,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        v0, s0 = opt_fn(a, b)
+        _, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
 

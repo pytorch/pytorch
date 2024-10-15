@@ -104,7 +104,7 @@ def get_param_groups(
     # but omits weights and any subgraphs connecting weights to this closure
     inputs_closure, _ = reverse_closure(inputs, set(), reverse_edges_dict)
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
-    for i, param in enumerate(params):
+    for param in params:
         closure, intersected = reverse_closure(
             [param], inputs_closure, reverse_edges_dict
         )

@@ -130,7 +130,6 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     # manually create the embedding table's local shards
     num_embeddings = 8
     embedding_dim = 16
-    emb_table_shape = torch.Size([num_embeddings, embedding_dim])
     # tensor shape
     local_shard_shape = torch.Size(
         [num_embeddings // world_size, embedding_dim]  # (local_rows, local_cols)
@@ -270,7 +269,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     device = torch.device(device_type)
     # note: without initializing this mesh, the following local_tensor will be put on
     # device cuda:0.
-    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
+    init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
 
     # manually create the embedding table's local shards
     num_embeddings = 8
@@ -293,8 +292,6 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
             else torch.empty(0, device=device)
         )
         table_to_local_tensor[i] = local_tensor
-        # tensor shape
-        local_shard_shape = local_tensor.shape
         # tensor offset
         local_shard_offset = torch.Size((0, 0))
         # wrap local shards into a wrapper

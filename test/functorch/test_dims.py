@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -362,10 +363,10 @@ class TestMin(TestCase):
         # XXX - chunk changes the size of a dimension, has to take a new dimension...
         # assert torch.allclose(A.chunk(2,1)[0], A[i, k].chunk(2, k)[0].order(i, k))
         assert torch.allclose(A[i].renorm(1, i, 7).order(i), A.renorm(1, 0, 7))
-        kk = dims()
+        # kk = dims()
         # assert torch.allclose( torch.stack([A, A], 1), stack([A[i,k], A[i, k]], kk, k).order(i, kk, k))
 
-        k2 = dims()
+        # k2 = dims()
         # r = cat((A[i, k], A[i,k]), k, k2)
         # assert torch.allclose(torch.cat([A, A], 1), r.order(i, k2))
         # assert k2.size == 2*k.size
@@ -497,11 +498,10 @@ class TestMin(TestCase):
         _test_c()
 
     def test_seg(self):
-        A = torch.rand(3, 4)
         i, k = dims()
         i.size = 4
         k.size = 3
-        r = i + k - 1
+        i + k - 1
 
     def test_expand(self):
         A = torch.rand(3, 4)
@@ -582,7 +582,6 @@ class TestMin(TestCase):
 
     def test_index(self):
         A = torch.rand(3, 4)
-        B = torch.rand(4, 5)
         i, j, k = dims()
 
         o, l = dims()

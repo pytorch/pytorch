@@ -214,10 +214,8 @@ class TestSplitOutputType(TestCase):
 
         inputs = torch.randn((1, 3, 224, 224))
 
-        gm, tag_node = TestSplitOutputType.trace_and_tag(module, inputs, tags)
-        split_gm, orig_to_split_fqn_mapping = split_by_tags(
-            gm, tags, return_fqn_mapping=True
-        )
+        gm, _ = TestSplitOutputType.trace_and_tag(module, inputs, tags)
+        split_gm, _ = split_by_tags(gm, tags, return_fqn_mapping=True)
 
         gm_output = module(inputs)
         split_gm_output = split_gm(inputs)

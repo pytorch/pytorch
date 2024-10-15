@@ -83,7 +83,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         # This behavior is not ideal, but supporting it would add overhead
         # to callsites of eval_frame.innermost_fn. A warning would also be very noisy.
-        w = torch._dynamo.disable(fn=wrapper, recursive=True)
+        torch._dynamo.disable(fn=wrapper, recursive=True)
 
     def test_disable_nn_modules_forward_hook(self):
         class SimpleLinear(torch.nn.Module):
@@ -543,7 +543,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return v1, v2, v3, v4, v5, v6, v7, v8, v9
 
         a, b, c = A(), B(), C()
-        v1, v2, v3, v4, v5, v6, v7, v8, v9 = fn(a, b, c)
+        v1, v2, v3, v4, v5, _, v7, v8, v9 = fn(a, b, c)
 
         self.assertEqual(v1, (A, 1))
         self.assertEqual(v2, (A, 2))

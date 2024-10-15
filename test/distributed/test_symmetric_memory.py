@@ -197,7 +197,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
@@ -230,7 +229,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda").to(
@@ -298,7 +296,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda")
@@ -328,7 +325,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)

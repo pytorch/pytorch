@@ -159,7 +159,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
-        m_eager = M().eval()
+        M().eval()
 
         example_inputs = (
             torch.randn(1, 3, 3, 3),
@@ -235,7 +235,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         # use per channel quantization for weight
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
-        m_eager = M().eval()
+        M().eval()
 
         inputs = [
             (torch.randn(1, 5),),
@@ -284,7 +284,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
-        m_eager = M().eval()
+        M().eval()
 
         example_inputs = (
             torch.randn(1, 3, 3, 3),

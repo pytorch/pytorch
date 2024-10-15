@@ -387,7 +387,7 @@ class NNVisionModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(1, 3, 16, 16)
-        for i, module in enumerate(self.vision_modules):
+        for module in self.vision_modules:
             r = module(self.input)
         return len(
             r,

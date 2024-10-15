@@ -31,7 +31,7 @@ from torch.ao.quantization.quantize_fx import prepare_qat_fx
 def calibrate(model, data_loader):
     model.eval()
     with torch.no_grad():
-        for image, target in data_loader:
+        for image, _ in data_loader:
             model(image)
 
 from torch.ao.quantization.experimental.qconfig import (

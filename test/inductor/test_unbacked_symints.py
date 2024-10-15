@@ -53,7 +53,7 @@ class TestUnbackedSymints(InductorTestCase):
             return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})

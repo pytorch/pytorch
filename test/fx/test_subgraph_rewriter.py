@@ -342,10 +342,10 @@ class TestSubgraphRewriter(JitTestCase):
     ):
         class M(torch.nn.Module):
             def forward(self, x, w1, w2, b1, b2):
-                m0 = torch.cat([w1, w2])
+                m0 = torch.cat([w1, w2])  # noqa: F841
                 m1 = torch.cat([w1, w2])
                 m2 = torch.cat([x, b2])
-                t0 = torch.addmm(b1, m1, m2.t())
+                t0 = torch.addmm(b1, m1, m2.t())  # noqa: F841
                 t1 = torch.sum(w1, 1)
                 t2 = torch.addmm(b1, m1, m2.t())
                 return torch.sum(t1), torch.sum(t2)

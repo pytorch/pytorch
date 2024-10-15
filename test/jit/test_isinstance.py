@@ -206,7 +206,7 @@ class TestIsinstance(JitTestCase):
                 hit = not hit
                 for el in obj:
                     # perform some tensor operation
-                    y = el.clamp(0, 0.5)
+                    y = el.clamp(0, 0.5)  # noqa: F841
             if torch.jit.isinstance(obj, Dict[str, str]):
                 hit = not hit
                 str_cat = ""
