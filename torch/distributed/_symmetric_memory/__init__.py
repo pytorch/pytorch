@@ -423,7 +423,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
+lib = torch.library.Library("symm_mem", "FRAGMENT")  # noqa: TOR901
 
 
 @torch.library.impl(lib, "one_shot_all_reduce", "Meta")
