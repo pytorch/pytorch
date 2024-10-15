@@ -257,11 +257,13 @@ def set_stance(stance: str, force_backend=None):
 
     Args:
         stance: The stance to set the compiler to. Valid values are:
+
             - "default": The default stance, used for normal compilation.
             - "force_eager": Ignore all `torch.compile` directives.
             - "eager_on_recompile": Run code eagerly when a recompile is necessary.
               If there is cached compiled code valid for the input, it will still be used.
             - "fail_on_recompile": Raise an error when recompiling a function.
+
         force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
             to use a specific backend. Otherwise, an error is raised.
     """
