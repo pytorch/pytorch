@@ -25,6 +25,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static void inc_pending_event_queries();
   static void dec_pending_event_queries();
   static int num_pending_event_queries();
+  static bool is_capturing();
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
