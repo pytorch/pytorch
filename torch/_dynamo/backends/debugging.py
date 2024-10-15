@@ -120,11 +120,21 @@ def boxed_nop(fx_g, example_inputs):
 
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(
-    fw_compiler=boxed_nop,
-    partition_fn=min_cut_rematerialization_partition,
-    keep_inference_input_mutations=True,
-)
+def aot_eager(
+    gm,
+    fake_tensor_inputs,
+    fw_compiler=None,
+    bw_compiler=None,
+    **kwargs,
+):
+    return aot_autograd(
+        fw_compiler=fw_compiler or boxed_nop,
+        bw_compiler=bw_compiler or boxed_nop,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs, **kwargs)
+
+
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
 aot_eager_default_partitioner = aot_autograd(
@@ -139,13 +149,7 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(
-    gm,
-    fake_tensor_inputs,
-    fw_compiler=None,
-    bw_compiler=None,
-    **kwargs,
-):
+def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
         log.warning(
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
@@ -162,8 +166,8 @@ def aot_eager_decomp_partition(
     with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=fw_compiler or boxed_nop,
-            bw_compiler=bw_compiler or boxed_nop,
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"

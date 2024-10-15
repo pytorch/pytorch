@@ -24,7 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
-from torch._dynamo.backends.debugging import aot_eager_decomp_partition
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -259,7 +259,7 @@ class AOTEagerAndRecordGraphs:
             self.graphs.append(gm)
             return gm.forward
 
-        return aot_eager_decomp_partition(
+        return aot_eager(
             gm,
             example_inputs,
             fw_compiler=save_graph,

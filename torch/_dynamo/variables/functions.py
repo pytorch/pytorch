@@ -1236,8 +1236,9 @@ class CreateTMADescriptorVariable(VariableTracker):
 
         if not isinstance(ptr, variables.DataPtrVariable):
             raise Unsupported(
-                "create_{1d,2d}_tma_descriptor can only be traced "
-                "when the upstream .data_ptr() call has been traced."
+                "Please ensure there were no graph breaks between "
+                f"create_{self.rank}d_tma_descriptor and the upstream "
+                ".data_ptr() call."
             )
 
         if self.rank == 1:
@@ -1261,8 +1262,8 @@ class CreateTMADescriptorVariable(VariableTracker):
         element_size = kwargs["ptr"] if "ptr" in kwargs else args[-1]
 
         return TMADescriptorVariable(
-            data_ptr=ptr,  # pyre-ignore[6]
-            dims=dims,  # pyre-ignore[6]
-            block_dims=block_dims,  # pyre-ignore[6]
-            element_size=element_size,  # pyre-ignore[6]
+            data_ptr=ptr,
+            dims=dims,
+            block_dims=block_dims,
+            element_size=element_size,
         )
