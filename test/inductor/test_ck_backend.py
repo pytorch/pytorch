@@ -3,6 +3,12 @@ import logging
 import os
 import unittest
 
+
+try:
+    from .test_aot_inductor_utils import AOTIRunnerUtil
+except ImportError:
+    from test_aot_inductor_utils import AOTIRunnerUtil
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -65,12 +71,12 @@ class TestCKBackend(TestCase):
             ] = old_disable_fresh_cache_envvar
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("autotune_in_subproc", (True, False))
+    @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, autotune_in_subproc
+        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -98,12 +104,24 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-            Y = mm(a, b)
+            if use_aoti:
+                Y_compiled = AOTIRunnerUtil.run(
+                    device="cuda",
+                    model=mm,
+                    example_inputs=(a, b),
+                )
+            else:
+
+                @torch.compile(dynamic=False)
+                def compiled_mm(x, w):
+                    return mm(x, w)
+
+                Y_compiled = compiled_mm(a, b)
+
+            Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK",))
     @parametrize("autotune_in_subproc", (True,))
@@ -150,7 +168,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
@@ -185,7 +202,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
@@ -222,7 +238,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
@@ -260,7 +275,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("dtype", (torch.bfloat16,))

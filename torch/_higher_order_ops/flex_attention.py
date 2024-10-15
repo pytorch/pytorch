@@ -1,10 +1,9 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
@@ -20,7 +19,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
-from torch.overrides import TorchFunctionMode
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -68,21 +66,6 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
-
-
-class TransformGetItemToIndex(TorchFunctionMode):
-    # This is needed since we want to support calling
-    # A[q_idx], where q_idx is a scalar tensor in score_mod.
-    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
-    # scalar and create a view. We do not want that behavior in this case, so we
-    # use this torchfunctionmode to override that behavior for score_mod
-    # wherever we're running it.
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        if func == torch.Tensor.__getitem__:
-            index_args = pytree.tree_leaves(args[1])
-            if all(isinstance(x, torch.Tensor) for x in index_args):
-                return torch.ops.aten.index(args[0], index_args)
-        return func(*args, **(kwargs or {}))
 
 
 class FlexAttentionHOP(HigherOrderOperator):
@@ -180,6 +163,8 @@ def _math_attention_inner(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
@@ -313,6 +298,8 @@ def trace_flex_attention(
     This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
     access this graph module in inductor to inline the score_mod function to the triton template.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention(
         query,
         key,
@@ -324,10 +311,10 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    example_vals = [
-        torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
-    ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+        query.new_zeros((), dtype=torch.int) for _ in range(4)
+    ]
+    mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_mod = block_mask[-1]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(
@@ -409,6 +396,8 @@ def flex_attention_functionalize(
     guard against any mutations in the score_mod function, to the other_buffers since those
     are free variables.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
@@ -485,7 +474,11 @@ def flex_attention_fake_tensor_mode(
 
 
 # ---------------------------- Autograd Implementation ----------------------------
-def create_fw_bw_graph(score_mod, index_values, other_buffers):
+def create_fw_bw_graph(
+    score_mod: Callable,
+    index_values: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
+    other_buffers: Tuple[Tensor, ...],
+) -> Tuple[Callable, Callable]:
     # See Note:[HOP create fw_bw graph]
 
     # All of these imports need to be here in order to avoid circular dependencies
@@ -508,7 +501,7 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
 
-            def _from_fun(t):
+            def _from_fun(t: Tensor) -> Tensor:
                 return torch.empty_strided(
                     t.size(),
                     t.stride(),
@@ -544,8 +537,18 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
                 )
             example_grad = _from_fun(example_flat_out)
 
-        def joint_f(score, b, h, m, n, example_grad, *other_buffers):
-            def fw_with_masks(*args):
+        def joint_f(
+            score: Tensor,
+            b: Tensor,
+            h: Tensor,
+            m: Tensor,
+            n: Tensor,
+            example_grad: Tensor,
+            *other_buffers: Tuple[Tensor, ...],
+        ) -> Tuple[Tensor, ...]:
+            def fw_with_masks(
+                *args: Tuple[Tensor, ...]
+            ) -> Tuple[Tuple[Tensor], Tuple[bool]]:
                 fw_out = score_mod(*args)
                 out_requires_grad = fw_out.requires_grad
                 return ((fw_out,), (out_requires_grad,))
@@ -566,17 +569,17 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
 class FlexAttentionAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(
-        ctx,
-        query,
-        key,
-        value,
-        fw_graph,
-        joint_graph,
-        block_mask,
-        scale,
-        kernel_options,
-        score_mod_other_buffers,
-        mask_mod_other_buffers,
+        ctx: Any,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        fw_graph: Callable,
+        joint_graph: Callable,
+        block_mask: Tuple[Any, ...],
+        scale: float,
+        kernel_options: Dict[str, Any],
+        score_mod_other_buffers: Tuple[Any, ...],
+        mask_mod_other_buffers: Tuple[Any, ...],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
             buffer.requires_grad
@@ -589,8 +592,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
         # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
-        ctx._KV_BLOCK_SIZE = block_mask[8]
-        ctx._Q_BLOCK_SIZE = block_mask[9]
+        ctx._Q_BLOCK_SIZE = block_mask[8]
+        ctx._KV_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
@@ -620,7 +623,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return out, logsumexp
 
     @staticmethod
-    def backward(ctx, grad_out, grad_logsumexp):
+    def backward(ctx: Any, grad_out: Tensor, grad_logsumexp: Tensor) -> Tuple[Optional[Tensor], ...]:  # type: ignore[override]
         fw_args = ctx.saved_tensors
         (
             query,
@@ -672,8 +675,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 q_indices,
                 full_q_num_blocks,
                 full_q_indices,
-                KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
+                KV_BLOCK_SIZE,
                 mask_graph,
             ),
             scale,
@@ -693,15 +696,21 @@ def flex_attention_autograd(
     block_mask: Tuple,
     scale: float,
     kernel_options: Dict[str, Any],
-    score_mod_other_buffers: Tuple = (),
-    mask_mod_other_buffers: Tuple = (),
+    score_mod_other_buffers: Tuple[Tensor, ...] = (),
+    mask_mod_other_buffers: Tuple[Tensor, ...] = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         input_requires_grad = any(t.requires_grad for t in (query, key, value))
         if torch.is_grad_enabled() and input_requires_grad:
-            example_vals = [
-                torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad)
-            ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+            example_vals = (
+                torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad),
+                torch.zeros((), dtype=torch.int),
+                torch.zeros((), dtype=torch.int),
+                torch.zeros((), dtype=torch.int),
+                torch.zeros((), dtype=torch.int),
+            )
             fw_graph, bw_graph = create_fw_bw_graph(
                 score_mod, example_vals, score_mod_other_buffers
             )
@@ -742,6 +751,8 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     # Get outputs before calling repeat interleave
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
@@ -869,6 +880,8 @@ def trace_flex_attention_backward(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention_backward(
         query,
         key,
