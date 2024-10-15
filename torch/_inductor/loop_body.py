@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import collections
 import functools
 import itertools
 import re
@@ -101,7 +100,6 @@ class LoopBody:
     indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
     memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
-    op_counts: collections.Counter[str]
 
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
@@ -132,7 +130,6 @@ class LoopBody:
         self.indirect_vars = []
         self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
         self.memory_usage = {t: [] for t in MemoryUsageType}
-        self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
         del self.indexing_exprs_name  # not used after _init_with_tracing
 
@@ -151,7 +148,6 @@ class LoopBody:
         self.indirect_vars = other.indirect_vars
         self.indirect_var_ranges = other.indirect_var_ranges
         self.memory_usage = other.memory_usage
-        self.op_counts = other.op_counts
         self.root_block = other.root_block.clone(self)
 
         submodules = {**other.submodules}
@@ -160,9 +156,6 @@ class LoopBody:
             "get_index": self.get_index,
             **{k: v.clone(self) for k, v in submodules.items()},  # type: ignore[attr-defined]
         }
-
-    def has_op(self, name: str):
-        return self.op_counts.get(name, 0) > 0
 
     def merge_loops(self) -> LoopBody:
         """
@@ -616,9 +609,8 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        handler: Any = CountOps(
-            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges),
-            body.op_counts,
+        handler: Any = SimplifyIndexing(
+            CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(
@@ -657,13 +649,3 @@ class LoopBodyBlock:
         copy = LoopBodyBlock.__new__(LoopBodyBlock)
         copy.__dict__.update({**self.__dict__, "body": body})
         return copy
-
-
-class CountOps:
-    def __init__(self, inner: Any, counts: collections.Counter[str]):
-        self._inner = inner
-        self._counts = counts
-
-    def __getattr__(self, name):
-        self._counts[name] += 1
-        return getattr(self._inner, name)
