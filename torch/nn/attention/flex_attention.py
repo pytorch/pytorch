@@ -1156,8 +1156,6 @@ def flex_attention(
                 f"but got Hq={Hq} and Hkv={Hkv}."
             )
 
-    from torch.fx.experimental.symbolic_shapes import is_nested_int
-
     if score_mod is None:
         score_mod = _identity
     elif query.is_nested:
@@ -1165,7 +1163,7 @@ def flex_attention(
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
-    elif not is_nested_int(query.size(-2)) and (
+    elif not query.is_nested and (
         query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
         or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
     ):
