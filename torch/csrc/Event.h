@@ -5,7 +5,8 @@
 #include <torch/csrc/python_headers.h>
 
 struct TORCH_API THPEvent {
-  PyObject_HEAD c10::Event event;
+  PyObject_HEAD
+  c10::Event event;
 };
 TORCH_API extern PyTypeObject* THPEventClass;
 TORCH_API extern PyTypeObject THPEventType;

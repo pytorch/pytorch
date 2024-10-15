@@ -1534,6 +1534,9 @@ Example::
                       bool useLibUV) {
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
+              if (worldSize.value() == 0) {
+                throw py::value_error("TCPStore world size cannot be 0");
+              }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2759,32 +2762,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+              &::c10d::ProcessGroupNCCL::performNocolorSplit)
+          .def(
+              "abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
-
-  using IntraNodeComm = ::c10d::intra_node_comm::IntraNodeComm;
-  py::class_<IntraNodeComm, c10::intrusive_ptr<IntraNodeComm>>(
-      module, "_IntraNodeComm")
-      .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      size_t rank,
-                      size_t world_size,
-                      std::optional<size_t> buffer_size) {
-            auto comm = c10::make_intrusive<IntraNodeComm>(
-                store, rank, world_size, buffer_size);
-            if (!comm->rendezvous()) {
-              throw std::runtime_error("IntraNodeComm::rendezvous failed");
-            }
-            return comm;
-          }),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("world_size"),
-          py::arg("buffer_size") = std::nullopt)
-      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none());
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2988,7 +2974,24 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "wait",
           &::c10d::Work::wait,
           py::arg("timeout") = kNoTimeout,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+              Returns:
+                  true/false.
+
+              Example::
+                 try:
+                     work.wait(timeout)
+                 except:
+                     # some handling
+
+              .. warning ::
+                  In normal cases, users do not need to set the timeout.
+                  calling wait() is the same as calling synchronize():
+                  Letting the current stream block on the completion of the NCCL work.
+                  However, if timeout is set, it will block the CPU thread until the NCCL work is completed
+                  or timed out. If timeout, exception will be thrown.
+            )")
       .def(
           "get_future",
           [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
