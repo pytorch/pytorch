@@ -15,6 +15,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
+from typing_extensions import ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -26,6 +27,7 @@ from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
 
+_P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
@@ -76,7 +78,7 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details: object) -> None:
+    def __init__(self, details: str) -> None:
         self.details = details
 
 
@@ -85,7 +87,7 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: object) -> None:
+    def __init__(self, details: str) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
 
@@ -139,9 +141,11 @@ class SubprocPool:
         # before any access.
         self.read_thread.start()
 
-    def submit(self, job_fn: Callable[..., _T], *args: object) -> Future[_T]:
-        if args:
-            job_fn = functools.partial(job_fn, *args)
+    def submit(
+        self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+    ) -> Future[_T]:
+        if args or kwargs:
+            job_fn = functools.partial(job_fn, *args, **kwargs)
         job_data = pickle.dumps(job_fn, pickle.HIGHEST_PROTOCOL)
         future: Future[_T]
         with self.futures_lock:
@@ -254,7 +258,7 @@ class SubprocMain:
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
 
-        def callback(_: Future[Any]) -> object:
+        def callback(_: Future[Any]) -> None:
             if not self.running:
                 return None
             try:
