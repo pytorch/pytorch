@@ -11,7 +11,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
@@ -101,9 +100,9 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
       " but got ",                            \
       X)
 
-namespace at::cuda::blas {
+namespace {
 
-cublasOperation_t _cublasOpFromChar(char op) {
+static cublasOperation_t _cublasOpFromChar(char op) {
   switch (op) {
     case 'n':
     case 'N':
@@ -119,7 +118,7 @@ cublasOperation_t _cublasOpFromChar(char op) {
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
-void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
+static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
   // be used).
@@ -133,7 +132,7 @@ void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-void _cublasAdjustLdLevel3(
+static void _cublasAdjustLdLevel3(
     char transa,
     char transb,
     int64_t m,
@@ -180,18 +179,18 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-size_t _parseChosenWorkspaceSize() {
-  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
+static size_t _parseChosenWorkspaceSize() {
+  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
-  if (!val.has_value()) {
+  if (!val) {
     // accept either env var
-    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+    val = getenv("HIPBLASLT_WORKSPACE_SIZE");
   }
 #endif
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-  if (val.has_value()) {
+  if (val) {
     try {
-      workspace_size = std::stoi(val.value());
+      workspace_size = std::stoi(val);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -203,10 +202,14 @@ size_t _parseChosenWorkspaceSize() {
   return workspace_size * 1024;
 }
 
-size_t _getWorkspaceSize() {
+static size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
+
+} // anonymous namespace
+
+namespace at::cuda::blas {
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
@@ -230,6 +233,91 @@ size_t _getWorkspaceSize() {
     CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldc);  \
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
+
+
+namespace {
+// Following the pattern of CuSparseDescriptor
+// Defined here for now because this is the only place cublas_lt interface is
+// used but can be moved to a header once cublas_lt interface is used in
+// multiple places.
+template <typename T, cublasStatus_t (*destructor)(T*)>
+struct CuBlasLtDeleter {
+  void operator()(T* x) {
+    if (x != nullptr) {
+      TORCH_CUDABLAS_CHECK(destructor(x));
+    }
+  }
+};
+
+template <typename T, cublasStatus_t (*destructor)(T*)>
+class CuBlasLtDescriptor {
+ public:
+  T* descriptor() const {
+    return descriptor_.get();
+  }
+  T* descriptor() {
+    return descriptor_.get();
+  }
+
+ protected:
+  std::unique_ptr<T, CuBlasLtDeleter<T, destructor>> descriptor_;
+};
+
+class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
+                                     cublasLtMatmulDescOpaque_t,
+                                     &cublasLtMatmulDescDestroy> {
+ public:
+  CuBlasLtMatmulDescriptor(
+      cublasComputeType_t compute_type,
+      cudaDataType_t scale_type) {
+    cublasLtMatmulDesc_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+
+class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
+                                 cublasLtMatrixLayoutOpaque_t,
+                                 &cublasLtMatrixLayoutDestroy> {
+ public:
+  CuBlasLtMatrixLayout(
+      cudaDataType_t type,
+      uint64_t rows,
+      uint64_t cols,
+      int64_t ld,
+      bool t = false) {
+    cublasLtMatrixLayout_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatrixLayoutCreate(&raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+
+class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
+                                     cublasLtMatmulPreferenceOpaque_t,
+                                     &cublasLtMatmulPreferenceDestroy> {
+ public:
+  CuBlasLtMatmulPreference() {
+    cublasLtMatmulPreference_t raw_descriptor = nullptr;
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+  template <typename T>
+  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
+    TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
+  }
+};
+} // namespace
+
 
 template <typename Dtype>
 inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
@@ -607,19 +695,19 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES(DType)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
     bgemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{&params};
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
     bgemm(&params);
   }
   else {
@@ -1003,19 +1091,19 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
     gemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
     gemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
     gemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{&params};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
     gemm(&params);
   }
   else {
