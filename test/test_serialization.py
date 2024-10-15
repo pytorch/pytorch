@@ -4337,6 +4337,17 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    def test_save_use_pin_memory_options(self):
+        sd = torch.nn.ModuleList([torch.nn.Linear(3, 5, device='cuda') for i in range(10)]).state_dict()
+        with TemporaryFileName() as f:
+            try:
+                torch.serialization.set_save_d2h_pin_memory_options(True)
+                torch.save(sd, f)
+                sd_loaded = torch.load(f, weights_only=True)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                torch.serialization.set_save_d2h_pin_memory_options(False)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)

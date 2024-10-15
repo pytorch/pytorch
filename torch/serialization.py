@@ -197,6 +197,33 @@ def set_crc32_options(compute_crc32: bool):
     _compute_crc32 = compute_crc32
 
 
+_save_use_pin_memory: bool = False
+
+
+def get_save_d2h_pin_memory_options() -> bool:
+    """
+    Gets whether :func:`torch.save` uses pinned memory for D2H copies.
+    """
+    return _save_use_pin_memory
+
+
+def set_save_d2h_pin_memory_options(use_pin_memory: bool):
+    """
+    Set whether :func:`torch.save` uses pinned memory for D2H copies.
+
+    .. note::
+        Setting this to ``True`` will mean the if the pinned memory allocator
+        is not warmed up, cost must be paid for ``cudaHostAlloc`` during ``torch.save``.
+        However, device to host bandwidth to pinned memory on the host is signficantly
+        higher than to pageable memory on the host.
+
+    Args:
+        use_pin_memory (bool): set pin memory flag
+    """
+    global _save_use_pin_memory
+    _save_use_pin_memory = use_pin_memory
+
+
 _default_mmap_options: int = MAP_PRIVATE
 
 
@@ -1149,7 +1176,11 @@ def _save(
             # this means to that to get tensors serialized, you need to implement
             # .cpu() on the underlying Storage
             if storage.device.type != "cpu":
-                storage = storage.cpu()
+                if _save_use_pin_memory:
+                    storage = storage.to(device="cpu", non_blocking=True)
+                    torch.cuda.current_stream().synchronize()
+                else:
+                    storage = storage = storage.cpu()
             # Now that it is on the CPU we can directly copy it into the zip file
             zip_file.write_record(name, storage, num_bytes)
 
