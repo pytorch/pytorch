@@ -3,7 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/PTThreadPool.h>
 #include <ATen/Version.h>
-#include <c10/util/env.h>
 
 #include <sstream>
 #include <thread>
@@ -24,17 +23,17 @@ namespace at {
 
 namespace {
 
-std::string get_env_var(
+const char* get_env_var(
     const char* var_name, const char* def_value = nullptr) {
-  auto env = c10::utils::get_env(var_name);
-  return env.has_value() ? env.value() : def_value;
+  const char* value = std::getenv(var_name);
+  return value ? value : def_value;
 }
 
 #ifndef C10_MOBILE
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
-    if (auto value = c10::utils::get_env(var_name)) {
-      int nthreads = std::stoi(value.value());
+    if (auto* value = std::getenv(var_name)) {
+      int nthreads = std::stoi(value);
       TORCH_CHECK(nthreads > 0);
       return nthreads;
     }
