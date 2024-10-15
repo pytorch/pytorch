@@ -77,6 +77,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -409,7 +410,7 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                             if os != "linux-aarch64"
                             else ""
                         ),
@@ -457,7 +458,7 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
                             if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),

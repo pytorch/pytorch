@@ -15,7 +15,6 @@ from typing import (
 )
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._logging import warning_once
 from torch.autograd import Variable
@@ -36,6 +35,13 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
