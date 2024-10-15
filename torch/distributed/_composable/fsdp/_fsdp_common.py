@@ -16,8 +16,9 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+    from torch.distributed.utils import FakeCompiledAutogradModule
+
+    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
 
 
 @dataclass

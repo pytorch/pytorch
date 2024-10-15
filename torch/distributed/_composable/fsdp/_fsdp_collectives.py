@@ -18,8 +18,9 @@ from ._fsdp_param import FSDPParam, ShardedState
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+    from torch.distributed.utils import FakeCompiledAutogradModule
+
+    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
 
 
 class AllGatherResult(NamedTuple):
@@ -189,7 +190,7 @@ def foreach_all_gather(
 def _get_param_all_gather_inputs(
     fsdp_params: List[FSDPParam],
 ) -> List[List[torch.Tensor]]:
-    if ca.compiled_autograd_enabled:
+    if ca.local.enabled():
         return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
 
     # Intentionally try to run a fast-path that bypasses abstractions for the

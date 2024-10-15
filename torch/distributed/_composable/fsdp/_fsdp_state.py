@@ -40,9 +40,9 @@ if TYPE_CHECKING:
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+    from torch.distributed.utils import FakeCompiledAutogradModule
 
+    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 
