@@ -1,0 +1,23 @@
+name: Close nonexistent disable issues
+
+on:
+  schedule:
+    - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
+
+jobs:
+  close-nonexistent-disable-issues:
+    environment: rockset-read-only
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Run close_nonexistent_disable_issues.py
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip3 install requests==2.32.2
+          pip3 install rockset==1.0.3
+          python3 .github/scripts/close_nonexistent_disable_issues.py
