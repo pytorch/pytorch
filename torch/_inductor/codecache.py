@@ -1387,7 +1387,7 @@ class FxGraphCache:
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache hit for key %s", key)
+            log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1401,7 +1401,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache miss for key %s", key)
+            log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
