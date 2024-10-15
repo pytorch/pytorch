@@ -270,12 +270,23 @@ def check_bc(existing_schemas):
     broken_ops = []
     for existing_schema in existing_schemas:
         if allow_listed(existing_schema):
-            logging.info("schema: %s found on allowlist, skipping", existing_schema)
-            continue
+            if not is_core_aten_op(existing_schema):
+                logging.info("schema: %s found on allowlist, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s found on allowlist, but is a core ATen op, checking BC",
+                    existing_schema,
+                )
         if has_valid_upgraders(existing_schema, version_map):
-            logging.info("schema: %s has valid upgrader, skipping", existing_schema)
-            continue
-        logging.info("processing existing schema: %s", existing_schema)
+            if not is_core_aten_op(existing_schema):
+                logging.info("schema: %s has valid upgrader, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s has a valid upgrader, but is a core ATen op, checking BC"
+                )
+        logging.debug("processing existing schema: %s", existing_schema)
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
         for matching_new_schema in matching_new_schemas:
@@ -298,59 +309,6 @@ def check_bc(existing_schemas):
         logging.warning(
             "The PR is introducing backward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
-            "whether this change is wanted or not. \n\nBroken ops: "
-            "[\n\t%s\n]",
-            "\n\t".join(broken_ops),
-        )
-    return is_bc
-
-
-def check_core_aten_ops_bc(existing_schemas):
-    """
-    Given existing schemas, check if all of the core ATen ops are backward compatible.
-    """
-    new_schema_dict = load_schemas_to_dict()
-    is_bc = True
-    broken_ops = []
-
-    for existing_schema in existing_schemas:
-        logging.debug(
-            "processing existing core ATen op: %s::%s ",
-            existing_schema.name,
-            existing_schema.overload_name,
-        )
-        matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
-        found = False
-        for matching_new_schema in matching_new_schemas:
-            if matching_new_schema.is_backward_compatible_with(existing_schema):
-                found = True
-                break
-            else:
-                logging.debug(
-                    "Candidate schema: \n\t%s \nis not BC with existing schema: \n\t%s",
-                    matching_new_schema,
-                    existing_schema,
-                )
-        if not found:
-            schema_str = "\n\t".join(str(s) for s in matching_new_schemas)
-            logging.warning(
-                "Can NOT find backward compatible schemas after changes "
-                "for schema %s from the following candidates:\n[\n%s\n]. "
-                "Please contact PyTorch team to confirm if this BC breaking change is safe or not. ",
-                existing_schema,
-                schema_str,
-            )
-            # TODO Print out more details about why candidates don't match.
-            broken_ops.append(str(existing_schema))
-            is_bc = False
-    if is_bc:
-        logging.info(
-            "Found backward compatible schemas for all existing core ATen op schemas"
-        )
-    else:
-        logging.warning(
-            "The PR is introducing backward incompatible changes to core "
-            "ATen operators. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
             "[\n\t%s\n]",
             "\n\t".join(broken_ops),
@@ -428,14 +386,9 @@ if __name__ == "__main__":
             s = parse_schema(line.strip())
             slist.append(s)
 
-    core_aten_schema_list = list(filter(is_core_aten_op, slist))
-    non_core_aten_schema_list = list(filter(lambda s: not is_core_aten_op(s), slist))
-
-    if not check_core_aten_ops_bc(core_aten_schema_list):
-        sys.exit(1)
     # TODO in case there is FC breaking changes,
     # we just warn for now until there is a policy.
     check_fc(slist)
 
-    if not check_bc(non_core_aten_schema_list):
+    if not check_bc(slist):
         sys.exit(1)
