@@ -47,8 +47,6 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
-invoke_subgraph.tags = ()  # type: ignore[attr-defined]
-invoke_subgraph.is_view = False  # type: ignore[attr-defined]
 
 
 def get_invoke_subgraph_cache():
@@ -247,11 +245,8 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
 
 @invoke_subgraph.py_impl(FakeTensorMode)
 def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
-    # Redirect to the torch_dispatch of fake tensor mode. This enables us to use
-    # the caching infra of fake tensor mode.
-    return mode.__torch_dispatch__(
-        invoke_subgraph, [], (subgraph, identifier, operands)
-    )
+    # TODO(anijain2305) - Implement fake tensor caching.
+    return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
