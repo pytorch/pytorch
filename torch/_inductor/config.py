@@ -79,9 +79,7 @@ triton_kernel_default_layout_constraint = "flexible_layout"
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # codegen cpp wrapper code in an ABI compatible mode
-abi_compatible = (
-    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
-)
+abi_compatible = os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1") == "1"
 
 c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
@@ -1265,6 +1263,11 @@ _cache_config_ignore_prefix = [
 
 # External callable for matmul tuning candidates
 external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+
+
+class test_configs:
+    force_extern_kernel_in_multi_template = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

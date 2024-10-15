@@ -1285,6 +1285,12 @@ class FxGraphCache:
                 "Freezing may introduce constants that aren't static across runs"
             )
 
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if BisectionManager.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            raise BypassFxGraphCache
+
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
@@ -1381,7 +1387,7 @@ class FxGraphCache:
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache hit for key %s", key)
+            log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1395,7 +1401,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache miss for key %s", key)
+            log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
@@ -1673,7 +1679,7 @@ class AotCodeCompiler:
             else:
                 objcopy_command = build_paths.objcopy
         else:
-            ld_command = "ld"
+            ld_command = "ld -z noexecstack"
             objcopy_command = "objcopy"
 
         (
