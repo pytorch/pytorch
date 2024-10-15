@@ -4574,6 +4574,69 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.enable(False)
 
     @onlyCUDA
+    @dtypes(torch.half)
+    def test_matmul_offline_tunableop(self, device, dtype):
+        import os
+        os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
+
+        # Pointing to temp files. The test cannot remove them on Windows because
+        # they are in use and locked
+        import tempfile
+        tmp_dir = tempfile.mkdtemp()
+        os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+        os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
+
+        torch.cuda.tunable.enable()
+        # record GEMM
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(True)
+        assert torch.cuda.tunable.record_untuned_is_enabled()
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
+
+        assert torch.cuda.tunable.is_enabled()
+        assert torch.cuda.tunable.tuning_is_enabled() is False
+        ordinal = torch.cuda.current_device()
+        untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
+        assert os.path.exists(untuned_filename)
+
+        # tuning the untuned GEMMs in file
+        torch.cuda.tunable.tuning_enable(True)
+        torch.cuda.tunable.record_untuned_enable(False)
+
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_duration(1)
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+        assert len(torch.cuda.tunable.get_validators()) > 0
+        assert len(torch.cuda.tunable.get_results()) > 0
+        assert torch.cuda.tunable.write_file()
+
+        result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
+        assert os.path.exists(result_filename)
+
+        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+        for filename in [untuned_filename, result_filename]:
+            try:
+                os.remove(filename)
+            # NB: The file is locked on Windows
+            except (FileNotFoundError, PermissionError):
+                pass
+
+        # disables TunableOp, no file will be written, restore to default values
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.record_untuned_enable(False)
+        torch.cuda.tunable.set_max_tuning_duration(30)
+        torch.cuda.tunable.set_max_tuning_iterations(100)
+        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
+        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_bmm_tunableop_rocm(self, device, dtype):

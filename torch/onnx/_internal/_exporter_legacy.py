@@ -126,7 +126,7 @@ class OnnxRegistry:
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
-        import onnxscript._framework_apis.torch_2_5 as onnxscript_apis
+        import onnxscript._framework_apis.torch_2_6 as onnxscript_apis
 
         for meta in onnxscript_apis.get_torchlib_ops():
             internal_name_instance = registration.OpName.from_qualified_name(

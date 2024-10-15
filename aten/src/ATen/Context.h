@@ -43,9 +43,19 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kPrivateUse1) {
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
+          device.index());
     } else {
-      return getAcceleratorHooksInterface(device_type)
-          .getDefaultGenerator(device.index());
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
 
@@ -77,14 +87,8 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type).getDeviceFromPtr(data);
     }
   }
 
@@ -339,6 +343,23 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
   void setAllowFP16ReductionCPU(bool);
+
+  // Preserved for BC
+  void lazyInitCUDA() {
+    lazyInitDevice(at::kCUDA);
+  }
+  void lazyInitHIP() {
+    lazyInitDevice(at::kHIP);
+  }
+  void lazyInitXPU() {
+    lazyInitDevice(at::kXPU);
+  }
+  void lazyInitMTIA() {
+    lazyInitDevice(at::kMTIA);
+  }
+  void lazyInitPrivateUse1() {
+    lazyInitDevice(at::kPrivateUse1);
+  }
 
  private:
   static bool checkCuBLASConfigDeterministic();
