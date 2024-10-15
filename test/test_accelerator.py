@@ -7,14 +7,13 @@ import torch
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
-    TEST_ACCELERATOR,
     TEST_CUDA,
     TEST_XPU,
     TestCase,
 )
 
 
-if not TEST_ACCELERATOR:
+if not torch.acc.is_available():
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
 
