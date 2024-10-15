@@ -6219,25 +6219,36 @@ class TestAOTModuleSimplified(AOTTestCase):
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
     def test_rrelu_noise_mutation(self):
-        def fn(x):
-            # 0. non-functional op
-            noise = torch.ones_like(x)
-            result = torch._C._nn.rrelu_with_noise(x, noise, 0.2, 0.8, True)
-
-            # 1. functional op
-            # result, noise = torch.ops.aten._rrelu_with_noise_functional(
-            #     x, 0.2, 0.8, True
-            # )
-
+        def fn_functional(x):
+            result, noise = torch.ops.aten._rrelu_with_noise_functional(
+                x, 0.2, 0.8, True
+            )
             return result, noise
 
-        x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+        def fn_mutation(x):
+            noise = torch.ones_like(x)
+            result = torch._C._nn.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+            return result, noise
 
-        ref_y, ref_noise = fn(x)
-        self.assertTrue(torch.all(ref_noise < torch.ones_like(ref_noise)).item())
+        def fn_inplace(x):
+            noise = torch.ones_like(x)
+            torch.ops.aten.rrelu_with_noise_(x, noise, 0.2, 0.8, True)
+            return x, noise
 
-        comp_y, comp_noise = torch.compile(fn, backend="inductor", fullgraph=True)(x)
-        self.assertTrue(torch.all(comp_noise < torch.ones_like(comp_noise)).item())
+        def _test_fn(fn):
+            x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+
+            ref_y, ref_noise = fn(x)
+            self.assertTrue(torch.all(ref_noise < torch.ones_like(ref_noise)).item())
+
+            comp_y, comp_noise = torch.compile(fn, backend="inductor", fullgraph=True)(
+                x
+            )
+            self.assertTrue(torch.all(comp_noise < torch.ones_like(comp_noise)).item())
+
+        _test_fn(fn_functional)
+        _test_fn(fn_mutation)
+        _test_fn(fn_inplace)
 
 
 # entries in here don't work and need to be fixed.
