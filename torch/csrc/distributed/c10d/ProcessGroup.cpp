@@ -206,6 +206,16 @@ class WorkRegistry {
     return works;
   }
 
+  bool can_unregister_completed_works() {
+    std::unique_lock lock(lock_);
+#ifdef USE_CUDA
+    if (at::cuda::is_available() && !at::cuda::CUDAGraph::is_capturing()) {
+      return false;
+    }
+#endif
+    return true;
+  }
+
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
@@ -277,7 +287,7 @@ void register_work(
   // Always clean up previously completed work objects, so that even if
   // the user keeps issuing new collectives without waiting on previous ones,
   // the registry size would not grow unbounded.
-  if (!at::cuda::CUDAGraph::is_capturing()) {
+  if (RankLocal<WorkRegistry>::get().can_unregister_completed_works()) {
     RankLocal<WorkRegistry>::get().unregister_completed_works();
   }
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
