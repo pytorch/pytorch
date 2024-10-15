@@ -135,6 +135,11 @@ def memory(snapshot, format_flamegraph=format_flamegraph):
     return format_flamegraph(f.getvalue())
 
 def compare(before, after, format_flamegraph=format_flamegraph):
+    assert 'segments' in before
+    before = before['segments']
+    assert 'segments' in after
+    after = after['segments']
+
     def _seg_key(seg):
         return (seg['address'], seg['total_size'])
 
