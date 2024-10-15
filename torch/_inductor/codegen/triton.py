@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -637,60 +638,64 @@ class TritonPrinter(PythonPrinter):
 
 texpr = TritonPrinter().doprint
 
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_triton_type_re = re.compile(r"^.*[.]")
 
-def triton_compute_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    elif (
-        triton_type_name in ("float16", "bfloat16")
-        and config.triton.codegen_upcast_to_fp32
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_compute_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
+    return triton_type(upcast_compute_type(dtype))
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype == torch.float16 or dtype == torch.bfloat16
     ):
-        # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2fnuz":
-        triton_type_name = "float8e5b16"
-    return f"tl.{triton_type_name}"
+        return torch.float32
+    return dtype
 
 
-def _get_primitive_bitwidth(dtype):
-    if hasattr(dtype, "is_floating_point"):
-        if dtype.is_floating_point:
-            # triton_compute_type changes the bitwidth
-            if (
-                dtype in [torch.bfloat16, torch.float16]
-                and config.triton.codegen_upcast_to_fp32
-            ):
-                return 32
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
+def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
+    """Number of bits of triton_compute_type()"""
+    dtype = upcast_compute_type(dtype)
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize:
+        return itemsize * 8
     else:
         return -1
 
 
-def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
+def triton_store_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with fix for storing tl.bool"""
+    if dtype == torch.bool:
+        dtype = torch.int8
+    return triton_type(dtype)
 
 
-def triton_acc_type(dtype):
-    if is_integer_dtype(dtype) and dtype.is_signed:
-        nbits = 64 if dtype == torch.int64 else 32
-        return f"tl.int{nbits}"
-    return triton_compute_type(dtype)
+def upcast_acc_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Implicit upcasts used for Triton reduction types"""
+    if is_integer_dtype(dtype) and dtype.is_signed and dtype.itemsize <= 4:
+        return torch.int32
+    return upcast_compute_type(dtype)
+
+
+def triton_acc_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with reduction upcasts"""
+    return triton_compute_type(upcast_acc_dtype(dtype))
 
 
 class TritonCSEVariable(CSEVariable):
