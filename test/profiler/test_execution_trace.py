@@ -33,18 +33,18 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_HPU, skipIfHpu
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
+    skipIfHpu,
     skipIfTorchDynamo,
+    TEST_HPU,
     TestCase,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-
-
 from torch.utils._triton import has_triton
+
 
 Json = Dict[str, Any]
 
@@ -128,7 +128,10 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        use_device = (
+            torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        )
         # Create a temp file to save execution trace and kineto data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -195,7 +198,10 @@ class TestExecutionTrace(TestCase):
         )
 
     def test_execution_trace_alone(self, device):
-        use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        use_device = (
+            torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        )
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -234,8 +240,7 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
-    
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")    
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
     @skipIfHpu
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
@@ -282,7 +287,10 @@ class TestExecutionTrace(TestCase):
         assert found_captured_triton_kernel_node
 
     def test_execution_trace_start_stop(self, device):
-        use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        use_device = (
+            torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        )
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -317,7 +325,10 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     def test_execution_trace_repeat_in_loop(self, device):
-        use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        use_device = (
+            torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.HPU in supported_activities()
+        )
         iter_list = {3, 4, 6, 8}
         expected_loop_events = len(iter_list)
         output_files = []
@@ -390,10 +401,11 @@ class TestExecutionTrace(TestCase):
                 found_cos = True
         assert found_cos
 
+
 devices = ["cpu", "cuda"]
 if TEST_HPU:
     devices.append("hpu")
-instantiate_device_type_tests(TestExecutionTrace, globals(),only_for=devices)
+instantiate_device_type_tests(TestExecutionTrace, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
