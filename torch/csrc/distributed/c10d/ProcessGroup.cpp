@@ -1,4 +1,5 @@
 #include <ATen/ThreadLocalState.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
@@ -276,7 +277,9 @@ void register_work(
   // Always clean up previously completed work objects, so that even if
   // the user keeps issuing new collectives without waiting on previous ones,
   // the registry size would not grow unbounded.
-  RankLocal<WorkRegistry>::get().unregister_completed_works();
+  if (!at::cuda::CUDAGraph::is_capturing()) {
+    RankLocal<WorkRegistry>::get().unregister_completed_works();
+  }
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
