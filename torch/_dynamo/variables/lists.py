@@ -5,7 +5,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -26,7 +26,7 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker, VariableTrackerContainer
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-class BaseListVariable(VariableTracker):
+class BaseListVariable(VariableTrackerContainer):
     @staticmethod
     def cls_for_instance(obj):
         if is_namedtuple(obj):
@@ -81,8 +81,8 @@ class BaseListVariable(VariableTracker):
     def debug_repr_helper(self, prefix, suffix):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def as_python_constant(self):
-        return self.python_type()([x.as_python_constant() for x in self.items])
+    def _as_python_constant(self, already_visited: list[VariableTracker]) -> Any:
+        return self.python_type()([self._recursive_constant(x, already_visited) for x in self.items])
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable

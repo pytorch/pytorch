@@ -385,6 +385,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self.mutable_local = mutable_local
 
 
+class VariableTrackerContainer(VariableTracker):
+    def as_python_constant(self) -> Any:
+        return self._as_python_constant([])
+
+    def _as_python_constant(self, already_visited: list[VariableTracker]):
+        """Implement this in subclasses"""
+        unimplemented(f"_as_python_constant: {self}")
+
+    @staticmethod
+    def _recursive_constant(
+        vt: VariableTracker,
+        already_visited: Optional[list[VariableTracker]],
+    ) -> Any:
+        """Use this in subclasses for your recursive calls"""
+        if not isinstance(vt, VariableTrackerContainer):
+            return vt.as_python_constant()
+        if vt in already_visited:
+            unimplemented(f"recursive containment {vt}")
+
+        already_visited.append(vt)
+        return vt._as_python_constant(already_visited)
+
+
 def typestr(*objs):
     if len(objs) == 1:
         (obj,) = objs
