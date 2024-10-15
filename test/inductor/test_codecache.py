@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import os
 import pickle
 import tempfile
@@ -37,10 +36,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
+    HAS_TRITON,
     requires_gpu,
+    requires_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda
-from torch.utils._triton import has_triton
 
 
 try:
@@ -49,14 +49,10 @@ except ImportError:
     from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
-HAS_TRITON = has_triton()
-
 if HAS_TRITON:
     import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
-
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
@@ -982,13 +978,14 @@ class TestAutotuneCache(TestCase):
         self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
         self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
-        # Check that the cache entries seem reasonable
-        for k in global_stats.autotune_local.cache.keys():
-            self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
-        for k in global_stats.bundled_autotune.cache.keys():
-            self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
-        for k in global_stats.triton.cache.keys():
-            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.autotune_local.cache.keys():
+                self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
+            for k in global_stats.bundled_autotune.cache.keys():
+                self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
+            for k in global_stats.triton.cache.keys():
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
 
 class TestRemoteAOTAutogradCache(TestCase):

@@ -176,7 +176,6 @@ class ComposabilityTest(MultiProcessTestCase):
                 num_stages,
                 self.device,
                 group=pp_group,
-                input_args=input_mb[0],
             )
             return stage, offset
 
@@ -212,7 +211,14 @@ class ComposabilityTest(MultiProcessTestCase):
             )
 
         # Run
-        pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+        # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
+        # why are we passing inputs/targets on every rank?
+        if pp_group.rank() == 0:
+            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+        else:
+            pipeline_schedule._step_microbatches(
+                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+            )
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
