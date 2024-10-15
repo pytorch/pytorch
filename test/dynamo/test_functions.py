@@ -568,7 +568,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_range2(x, y):
         r = x + y
-        for i in range(x.size(0) + 2):
+        for _ in range(x.size(0) + 2):
             r = r / y
         return r
 
@@ -1109,7 +1109,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_module_constant(x, y):
         r = x + y
-        for i in range(torch._dynamo.testing.three):
+        for _ in range(torch._dynamo.testing.three):
             r = r / y
         return r
 
@@ -2451,7 +2451,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_mul, x)
 
         eager_result = fn(udf_mul, udf_mul, x)
-        gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(
@@ -2498,7 +2497,6 @@ class GraphModule(torch.nn.Module):
         dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_add, x)
 
         eager_result = fn(udf_mul, udf_add, x)
-        gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(
@@ -2549,7 +2547,6 @@ class GraphModule(torch.nn.Module):
         dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, x)
 
         eager_result = fn(udf_mul, x)
-        gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(
@@ -2597,7 +2594,6 @@ class GraphModule(torch.nn.Module):
         dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul2, x)
 
         eager_result = fn(udf_mul2, x)
-        gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(
@@ -2643,7 +2639,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 2)
         fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        dynamo_result = fn(lambda0, lambda1, x)
+        fn(lambda0, lambda1, x)
         self.assertEqual(cnts.frame_count, 1)
 
         fn(lambda1, lambda0, x)
@@ -2670,7 +2666,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 2)
         fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
-        dynamo_result = fn2(lambda0, lambda1, [x])
+        fn2(lambda0, lambda1, [x])
         self.assertEqual(cnts.frame_count, 1)  # start over
 
         lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
@@ -2837,7 +2833,7 @@ class GraphModule(torch.nn.Module):
         opt_fn_dtype = torch._dynamo.optimize(cnts_1)(func_dtype)
         a = torch.zeros(3, dtype=typ)
         for arg in dt_args:
-            r = opt_fn_dtype(a, arg)
+            opt_fn_dtype(a, arg)
         # each should produce an identical arg
         self.assertEqual(cnts_1.frame_count, 1)
 
@@ -2845,7 +2841,7 @@ class GraphModule(torch.nn.Module):
         opt_fn_info = torch._dynamo.optimize(cnts_2)(func_info)
         info_args = [info_func(dt) for dt in dt_args]
         for arg in info_args:
-            r = opt_fn_info(a, arg)
+            opt_fn_info(a, arg)
 
         # each should produce an identical arg
         self.assertEqual(cnts_2.frame_count, 1)
@@ -2992,7 +2988,7 @@ class GraphModule(torch.nn.Module):
         test(10, 1, -3)
 
         # Fuzz testing
-        for i in range(100):
+        for _ in range(100):
             args = self.gen_random_range_args()
             print("testing :", args)
             test(*args)
@@ -3018,7 +3014,7 @@ class GraphModule(torch.nn.Module):
         test(range(10, 20, 2), 1, expected=12)
 
         # Fuzz testing
-        for i in range(100):
+        for _ in range(100):
             range_args = self.gen_random_range_args()
             r = range(*range_args)
 
@@ -3081,7 +3077,7 @@ class GraphModule(torch.nn.Module):
                 return slice(r_item(), r_item(), r_item(False))
 
         # Fuzz testing
-        for i in range(100):
+        for _ in range(100):
             range_args = self.gen_random_range_args()
             r = range(*range_args)
             # generate random slice
@@ -3117,8 +3113,8 @@ class GraphModule(torch.nn.Module):
             idx_size = [10]
             idx_size[random.randint(0, 0)] = random.randint(1, 8)
             t = tuple(idx_size)
-            src_size = [random.randint(1, 5) + s for s in idx_size]
-            idx = torch.empty(t)
+            src_size = [random.randint(1, 5) + s for s in idx_size]  # noqa: F841
+            idx = torch.empty(t)  # noqa: F841
 
         fn()
 
@@ -3145,7 +3141,7 @@ class GraphModule(torch.nn.Module):
             )
             t1 = make_q_tensor()
             t2 = make_kv_tensor()
-            t3 = t1 + t2
+            t3 = t1 + t2  # noqa: F841
 
         func()
 
@@ -3153,7 +3149,7 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager")
         def fn():
             t = torch.ones(2)
-            y = t.to("meta")
+            y = t.to("meta")  # noqa: F841
 
         fn()
 
@@ -3314,7 +3310,7 @@ class GraphModule(torch.nn.Module):
             y += 1
             return x
 
-        l = list(zip([a, b], map(f, [1, 2, 3, 4])))
+        l = list(zip([a, b], map(f, [1, 2, 3, 4])))  # noqa: F841
         return a + y
 
     @make_test
@@ -3903,7 +3899,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
             disallowed(g)
 
-        f_opt = torch._dynamo
         opt_f = torch._dynamo.optimize(backend="eager")(f)
         opt_f()
         f()

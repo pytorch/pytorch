@@ -187,7 +187,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=FAIL_DIR),
     )
     def test_fail(self, path):
-        __tracebackhide__ = True
+        __tracebackhide__ = True  # noqa: F841
 
         with open(path) as fin:
             lines = fin.readlines()
@@ -226,7 +226,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=REVEAL_DIR),
     )
     def test_reveal(self, path):
-        __tracebackhide__ = True
+        __tracebackhide__ = True  # noqa: F841
 
         with open(path) as fin:
             lines = _parse_reveals(fin)

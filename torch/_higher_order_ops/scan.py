@@ -172,7 +172,7 @@ def scan(
             )
 
         # There are no pytree restrictions on the second output of the operator
-        out_leaves, tree_out = pytree.tree_flatten(out[1])
+        _out_leaves, tree_out = pytree.tree_flatten(out[1])
 
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -428,7 +428,7 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, dim, reverse):
 def scan_functionalize(ctx, combine_fn, init, xs, dim, reverse):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_xs = list(itertools.chain(unwrapped_init, unwrapped_init))

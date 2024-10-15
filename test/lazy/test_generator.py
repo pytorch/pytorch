@@ -65,7 +65,8 @@ class LazyGeneratorTest(TestCase):
         metrics.reset()
 
         with torch.device("lazy"):
-            t = generate_tensor(1)
+            generate_tensor(1)
+
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")
@@ -73,7 +74,7 @@ class LazyGeneratorTest(TestCase):
                 uncached_compile == 1
             ), f"Expected 1 uncached compiles, got {uncached_compile}"
 
-            t = generate_tensor(2)
+            generate_tensor(2)
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")
@@ -81,7 +82,7 @@ class LazyGeneratorTest(TestCase):
                 uncached_compile == 2
             ), f"Expected 2 uncached compiles, got {uncached_compile}"
 
-            t = generate_tensor(1)
+            generate_tensor(1)
             torch._lazy.mark_step()
 
             uncached_compile = metrics.counter_value("UncachedCompile")

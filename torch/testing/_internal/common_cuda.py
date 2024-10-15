@@ -94,7 +94,7 @@ if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
+    except Exception:
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:

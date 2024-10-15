@@ -145,8 +145,6 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
 
 
 def train(db, net, device, meta_opt, epoch, log):
-    params = dict(net.named_parameters())
-    buffers = dict(net.named_buffers())
     n_train_iter = db.x_train.shape[0] // db.batchsz
 
     for batch_idx in range(n_train_iter):

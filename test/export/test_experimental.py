@@ -106,7 +106,7 @@ def forward(self, arg0_1, arg1_1):
         with self.assertRaisesRegex(
             RuntimeError, "strict_mode HOO doesn't work unless"
         ):
-            ep = torch.export.export(M(), inp, strict=False)
+            torch.export.export(M(), inp, strict=False)
 
     def test_torchscript_module_export(self):
         class M(torch.nn.Module):
@@ -326,7 +326,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         ep = torch.export._trace._export(
             m, example_inputs, pre_dispatch=True, dynamic_shapes={"x": {0: Dim("x0")}}
         )
-        joint_ep = _export_forward_backward(ep)
+        _export_forward_backward(ep)
 
     def test_joint_cifar10_backwards(self) -> None:
         import torch.nn as nn
