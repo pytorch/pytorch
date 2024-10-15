@@ -5,6 +5,7 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
+from torch.compiler import is_compiling
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -141,17 +142,18 @@ class NestedTensor(torch.Tensor):
         # holds properties that are computed lazily
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
-        # collapsed ragged dim must always be dynamic
-        torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
+        if is_compiling():
+            # collapsed ragged dim must always be dynamic
+            torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
+            torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
 
-        # min / max sequence length should be dynamic if present
-        max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
-        if max_seqlen_tensor is not None:
-            torch._dynamo.mark_dynamic(max_seqlen_tensor, 0)
-        min_seqlen_tensor = self._metadata_cache.get("min_seqlen", None)
-        if min_seqlen_tensor is not None:
-            torch._dynamo.mark_dynamic(min_seqlen_tensor, 0)
+            # min / max sequence length should be dynamic if present
+            max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
+            if max_seqlen_tensor is not None:
+                torch._dynamo.mark_dynamic(max_seqlen_tensor, 0)
+            min_seqlen_tensor = self._metadata_cache.get("min_seqlen", None)
+            if min_seqlen_tensor is not None:
+                torch._dynamo.mark_dynamic(min_seqlen_tensor, 0)
 
     def values(self):
         # dispatch to get proper view relationship
