@@ -14646,12 +14646,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Note: This xfail is fine -- it's inherent to how as_strided works
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
-               # RuntimeError: This operator is not Composite Compliant: the
-               # storage_offset of the tensor was modified directly without
-               # going through the PyTorch dispatcher.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-
                # These fail because the test changes the input's in-memory layout
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),

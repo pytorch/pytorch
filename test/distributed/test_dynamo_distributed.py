@@ -894,9 +894,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            # TODO: This should be possible to do inside the function, but
-            device = f"cuda:{self.rank}"
-
             @torch.compile()
             def f(x, y):
                 zx = x.shape
@@ -926,8 +923,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_compiler_collectives_graph_break_empty_graph_still_collective(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
-
-            device = f"cuda:{self.rank}"
 
             @torch.compile()
             def f(x, y):
