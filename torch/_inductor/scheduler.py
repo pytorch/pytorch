@@ -368,6 +368,17 @@ class BaseSchedulerNode:
     def is_split_scan(self) -> bool:
         return False
 
+    def is_scan(self) -> bool:
+        return False
+
+    def is_last_usage_barrier(self, kernel):
+        if self.is_scan():
+            from .codegen.triton import TritonKernel
+
+            if isinstance(kernel, TritonKernel):
+                return kernel.cooperative_reduction
+        return False
+
     def is_template(self) -> bool:
         return False
 
@@ -973,11 +984,13 @@ class SchedulerNode(BaseSchedulerNode):
         return bool(self.node.get_reduction_type())
 
     def is_split_scan(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
+        )
+
+    def is_scan(self) -> bool:
+        return isinstance(self.node, ir.ComputedBuffer) and isinstance(
+            self.node.data, ir.Scan
         )
 
     def is_template(self) -> bool:
@@ -1227,6 +1240,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_split_scan(self) -> bool:
         return any(x.is_split_scan() for x in self.snodes)
+
+    @cache_on_self
+    def is_scan(self) -> bool:
+        return any(x.is_scan() for x in self.snodes)
 
     @cache_on_self
     def is_template(self) -> bool:

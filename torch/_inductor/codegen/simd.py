@@ -1325,7 +1325,6 @@ class SIMDScheduling(BaseScheduling):
     def codegen_node_schedule(
         self, node_schedule, buf_accesses, numel, reduction_numel
     ):
-        from torch._inductor.codegen.triton import TritonKernel
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
@@ -1335,8 +1334,7 @@ class SIMDScheduling(BaseScheduling):
             index_dtype,
         ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
 
-        is_scan = schedule_contains_op(node_schedule, "scan")
-        is_split_scan = is_scan and any(
+        is_split_scan = any(
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
@@ -1350,10 +1348,6 @@ class SIMDScheduling(BaseScheduling):
             mutations=mutations,
             index_dtype=index_dtype,
         )
-
-        if is_scan and kernel_type == TritonKernel:
-            # TODO(jansel): scan does not yet work with cooperative reductions
-            kernel_kwargs["override_cooperative_reduction"] = False
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
@@ -1437,7 +1431,9 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
         def current_reduction_nodes(nodes):
-            return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
+            return itertools.takewhile(
+                lambda n: not n.is_last_usage_barrier(kernel), nodes
+            )
 
         with kernel:
             stack = contextlib.ExitStack()
@@ -1467,12 +1463,33 @@ class SIMDScheduling(BaseScheduling):
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
-                    kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
+                    kernel.set_last_usage(
+                        current_reduction_nodes(node_schedule[i + 1 :])
+                    )
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
-                    node.codegen(index_vars)
+                    if (
+                        node.is_scan() and kernel.cooperative_reduction
+                    ):  # kernel.needs_two_pass_codegen(node)
+                        kernel.two_pass_codegen = 1
+                        kernel.two_pass_state = collections.deque()
+                        node.codegen(index_vars)
+
+                        # start a new reduction loop for second pass
+                        with kernel.disable_reduction():
+                            pass
+                        kernel.set_last_usage(
+                            [node, *current_reduction_nodes(node_schedule[i + 1 :])]
+                        )
+
+                        kernel.two_pass_codegen = 2
+                        node.codegen(index_vars)
+                        kernel.two_pass_codegen = None
+                        kernel.two_pass_state = None
+                    else:
+                        node.codegen(index_vars)
 
     def codegen_template(
         self, template_node, epilogue_nodes, only_gen_src_code=False
@@ -1868,6 +1885,10 @@ class DisableReduction:
     of a reduction.
     """
 
+    @staticmethod
+    def is_usage_barrier(kernel):
+        return True
+
 
 class EnableReduction:
     """
@@ -1889,6 +1910,10 @@ class EnableReduction:
                 pass
             else:
                 yield node
+
+    @staticmethod
+    def is_usage_barrier(kernel):
+        return False
 
 
 class CantSplit(Exception):

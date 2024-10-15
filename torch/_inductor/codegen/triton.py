@@ -1431,6 +1431,9 @@ class TritonKernel(SIMDKernel):
         self.cooperative_reduction_workspace_cache = CooperativeReductionWorkspaceCache(
             self.args
         )
+        self.two_pass_codegen = None
+        self.two_pass_state = None
+
         self.body.splice(
             """
             rsplit_id = tl.program_id(0)
@@ -2026,6 +2029,8 @@ class TritonKernel(SIMDKernel):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
+        if self.cooperative_reduction and self.two_pass_codegen == 1:
+            return
         var = self.args.output(name)
         original_index = index
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
@@ -2548,7 +2553,7 @@ class TritonKernel(SIMDKernel):
         values: Tuple[CSEVariable, ...],
     ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
-        assert not self.cooperative_reduction, "TODO"
+        assert not self.cooperative_reduction or self.two_pass_codegen
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -2575,16 +2580,20 @@ class TritonKernel(SIMDKernel):
             acc_type = triton_acc_type(dtype)
 
             if not self.persistent_reduction:
-                accumulator = self.cse.newvar()
-                reduced_size = self.dense_size_list()
-                reduced_size[-1] = "1"
-                reduced_size = f"[{', '.join(reduced_size)}]"
+                if self.cooperative_reduction and self.two_pass_codegen == 2:
+                    accumulator = self.two_pass_state.popleft()
+                else:
+                    accumulator = self.cse.newvar()
+                    reduced_size = self.dense_size_list()
+                    reduced_size[-1] = "1"
+                    reduced_size = f"[{', '.join(reduced_size)}]"
 
-                default = "float('nan')" if dtype.is_floating_point else "-1"
-                self.body.writeline(
-                    f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
-                )
-
+                    default = "float('nan')" if dtype.is_floating_point else "-1"
+                    self.body.writeline(
+                        f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+                    )
+                    if self.cooperative_reduction:
+                        self.two_pass_state.append(accumulator)
                 accumulators.append(accumulator)
 
         def csv(values):
@@ -2622,18 +2631,51 @@ class TritonKernel(SIMDKernel):
             ]
             accs_next = combine_fn(tuple(accumulators), tuple(partial_reduce_vars))
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
+            if self.cooperative_reduction:
+                if self.two_pass_codegen == 1:
+                    not_first = "roffset > rsplit_start"
+                else:
+                    not_first = "(rsplit_id > 0) | (roffset > rsplit_start)"
+            else:
+                not_first = "roffset > 0"
             result_vars = [
-                cse_compute(f"tl.where(roffset > 0, {full_scan}, {partial_scan})")
+                cse_compute(f"tl.where({not_first}, {full_scan}, {partial_scan})")
                 for full_scan, partial_scan in zip(full_scan_vars, partial_scan_vars)
             ]
             for acc_next, accumulator, partial_reduce in zip(
                 accs_next, accumulators, partial_reduce_vars
             ):
                 self.compute.writeline(
-                    f"{accumulator} = tl.where(roffset > 0, {acc_next}, {partial_reduce})"
+                    f"{accumulator} = tl.where({not_first}, {acc_next}, {partial_reduce})"
                 )
         else:
+            assert (
+                not self.cooperative_reduction
+            ), "persistent+cooperative+scan not yet supported"
             result_vars = partial_scan_vars
+
+        if self.cooperative_reduction and self.two_pass_codegen == 1:
+            exit_stack = contextlib.ExitStack()
+            for buf in (self.post_loop_combine, self.post_loop_store):
+                # only do cooperative reduction combines if we have more than one thread block
+                buf.writeline("if RSPLIT > 1:")
+                exit_stack.enter_context(buf.indent())
+
+            peers = []
+            for accumulator, dtype in zip(accumulators, dtypes):
+                peers.append(
+                    self.codegen_cooperative_reduction_peer_combine(accumulator, dtype)
+                )
+            assert dim == 1
+            self.post_loop_store.writeline(
+                f"{csv(peers)} = tl.associative_scan(({csv(peers)}), {dim}, {combine_helper_fn})"
+            )
+            for peer, accumulator in zip(peers, accumulators):
+                self.post_loop_store.writeline(
+                    f"{accumulator} = triton_helpers.select_one({peer}, tl.arange(0, RSPLIT)[None,:] == rsplit_id - 1, dim=-1, keep_dims=True)"
+                )
+
+            exit_stack.close()
 
         for result_var in result_vars:
             result_var.mask_vars = masks  # type: ignore[attr-defined]
