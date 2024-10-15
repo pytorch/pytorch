@@ -63,6 +63,7 @@ class WorkspaceArg:
 
     nbytes: sympy.Expr
     zero_fill: bool
+    dtype: torch.dtype = torch.uint8
 
 
 @dataclasses.dataclass
@@ -1256,6 +1257,7 @@ class KernelArgs:
         self.inplace_buffers = {}
         self.sizevars = sizevars or {}
         self.workspace_arg = None
+        self.semaphores_arg = None
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -1318,6 +1320,13 @@ class KernelArgs:
         zero_fill = zero_fill or self.workspace_arg.zero_fill
         self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
         return "ws_ptr", offset
+
+    def semaphores(self, min_size=1):
+        if self.semaphores_arg is None:
+            self.semaphores_arg = WorkspaceArg(min_size, True, dtype=torch.int32)
+        else:
+            self.semaphores_arg.nbytes = sympy.Max(min_size, self.semaphores_arg.nbytes)
+        return "semaphores_ptr"
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -1385,6 +1394,7 @@ class KernelArgs:
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         assert self.workspace_arg is None, "Workspace not supported on CPU "
+        assert self.semaphores_arg is None, "Semaphore not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
@@ -1431,7 +1441,17 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
+            arg_types.append(self.workspace_arg.dtype)
+        if self.semaphores_arg is not None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            arg_defs.append("semaphores_ptr")
+            call_args.append(
+                V.graph.cached_allocate_semaphores(
+                    self.semaphores_arg.nbytes, current_device
+                )
+            )
+            precompile_args.append(self.semaphores_arg)
+            arg_types.append(self.semaphores_arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):

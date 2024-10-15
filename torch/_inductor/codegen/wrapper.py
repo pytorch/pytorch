@@ -614,7 +614,14 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
+            from {triton_heuristics.__name__} import (
+                grid,
+                split_scan_grid,
+                grid_combo_kernels,
+                start_graph,
+                end_graph,
+                cooperative_reduction_grid,
+            )
             """
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
@@ -1513,6 +1520,23 @@ class PythonWrapperCodegen(CodeGen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
+
+    def generate_semaphores_allocation(self, count, device):
+        name = f"semaphores{device.index or 0}"
+        line = self.make_allocation(
+            name,
+            device,
+            torch.int32,
+            shape=(count,),
+            stride=(1,),
+        )
+        zline = self.make_zero_buffer(name)
+        self.writeline(line)
+        self.writeline(zline)
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(line)
+            self.kernel_autotune_calls.writeline(zline)
+        return name
 
     def generate_workspace_allocation(self, nbytes, device, zero_fill):
         if isinstance(nbytes, sympy.Expr):
