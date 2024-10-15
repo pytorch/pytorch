@@ -7,11 +7,11 @@ from itertools import count
 from typing import Dict, List, Optional, Tuple
 
 import sympy
-from sympy import Expr
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -440,8 +440,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
-                # Since we are removing non-abi-compatible mode, let's generate
-                # runtime checks only for abi_compatible mode to avoid extra branches.
                 if config.aot_inductor.debug_compile:
                     self.generate_input_output_runtime_checks()
                     run_impl_proto += """
