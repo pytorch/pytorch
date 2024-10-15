@@ -178,6 +178,7 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
     def test_weight_only_observers(self):
         model = MyConvLinearModule()
         qconfig_dict = {"": default_dynamic_qconfig}
+        inputs = model.get_example_inputs()
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observe_forward_graph = scripted_model.observe_forward.graph
         num_weight_only_observers = 0
@@ -378,7 +379,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         thrown = False
         try:
             m(*inputs)
-        except Exception:
+        except Exception as e:
             thrown = True
         self.assertTrue(thrown)
 
@@ -398,7 +399,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         thrown = False
         try:
             m(*inputs)
-        except Exception:
+        except Exception as e:
             thrown = True
         self.assertTrue(thrown)
 

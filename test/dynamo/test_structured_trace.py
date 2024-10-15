@@ -698,7 +698,7 @@ def forward(self, x, y):
         trace_log.addHandler(payload_handler)
 
         def f(x):
-            y = x + 1  # noqa: F841
+            y = x + 1
             raise RuntimeError("boo")
 
         try:

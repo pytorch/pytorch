@@ -50,7 +50,7 @@ class MentionedInPR(HeuristicInterface):
         ) + self._search_for_linked_issues(pr_body):
             try:
                 linked_issue_bodies.append(get_issue_or_pr_body(int(issue)))
-            except Exception:
+            except Exception as e:
                 pass
 
         mentioned = []

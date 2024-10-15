@@ -673,7 +673,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
-        except Exception:
+        except Exception as e:
             logger.error(
                 "Caught exception: \n%s exiting "
                 "process %s with exit code: %s",

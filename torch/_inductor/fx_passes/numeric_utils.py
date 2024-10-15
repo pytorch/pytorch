@@ -172,7 +172,7 @@ def run_model(
                     "compare parameters with optimizer added. Numerical result : %s",
                     res,
                 )
-            except Exception:
+            except Exception as e:
                 logger.exception(
                     "Exception when optimizer is added to check parameter names"
                 )

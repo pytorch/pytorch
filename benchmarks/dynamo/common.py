@@ -603,7 +603,7 @@ def print_summary_table(data, print_dataframe=False):
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
                 )
-        except Exception:
+        except Exception as e:
             pass
 
 
@@ -2953,7 +2953,7 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -3045,7 +3045,7 @@ class BenchmarkRunner:
                     tol=tolerance,
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -3092,7 +3092,7 @@ class BenchmarkRunner:
                 self.init_optimizer(name, current_device, model.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
-            except Exception:
+            except Exception as e:
                 log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
@@ -3485,7 +3485,7 @@ class BenchmarkRunner:
 
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
-        except OSError:
+        except OSError as e:
             logging.error("Could not find repro script for model %s", name)
         else:
             logging.info(
@@ -4312,6 +4312,9 @@ def run(runner, args, original_dir=None):
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
 
+        ci = functools.partial(
+            CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+        )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
         torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
