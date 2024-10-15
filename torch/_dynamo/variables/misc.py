@@ -349,21 +349,6 @@ class ClosureVariable(UnknownVariable):
         codegen.append_output(codegen.create_load_closure(self.name))
 
 
-# closure variable created by an inlined function
-class InlinedClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -950,7 +935,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.local.in_compiled_autograd_region:
+            if torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"

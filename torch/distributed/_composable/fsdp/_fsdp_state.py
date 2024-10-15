@@ -15,7 +15,6 @@ from typing import (
 )
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._logging import warning_once
 from torch.autograd import Variable
@@ -25,6 +24,7 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
+from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -35,6 +35,13 @@ from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -56,7 +63,7 @@ class FSDPStateContext:
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.cuda.Event] = None
+        self.post_optim_event: Optional[torch.Event] = None
 
 
 def disable_if_config_true(func):
@@ -93,6 +100,7 @@ class FSDPState(_State):
             _insert_module_state(module, self)
         self._modules = modules
         self._device = device
+        self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
@@ -117,7 +125,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
-        if not ca.local.enabled:
+        if not ca.local.enabled():
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
@@ -127,10 +135,10 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_stream.wait_event(event)
                 self._state_ctx.post_optim_event = None
             else:
-                current_stream = torch.cuda.current_stream()
+                current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type == "cuda":
+            if self._device.type in ["cuda", "hpu"]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -180,7 +188,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
-        self._comm_ctx.lazy_init()
+        self._comm_ctx.lazy_init(self._device)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
@@ -275,7 +283,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
-        if not ca.local.enabled:
+        if not ca.local.enabled():
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
@@ -291,7 +299,7 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 if self._comm_ctx.reduce_scatter_state is not None:
-                    torch.cuda.current_stream().wait_event(
+                    self._device_handle.current_stream().wait_event(
                         self._comm_ctx.reduce_scatter_state.event
                     )
                     self._comm_ctx.reduce_scatter_state = None

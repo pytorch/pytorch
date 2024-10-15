@@ -85,19 +85,19 @@ static void check(bool result) {
     check(nullptr);
 }
 
-// snapshot of python verbose logging toggle
-static PyObject* python_verbose_logger = nullptr;
 struct VerboseLogger {
-  static std::optional<VerboseLogger> maybe_create() {
-    if (python_verbose_logger == nullptr) {
+  VerboseLogger(PyObject* vlogger) : vlogger(vlogger) {}
+
+  static std::optional<VerboseLogger> maybe_create(PyObject* vlogger) {
+    if (vlogger == nullptr) {
       return std::nullopt;
     }
-    return VerboseLogger();
+    return VerboseLogger(vlogger);
   }
 
   void verbose_log_fn(std::string_view msg) const {
-    TORCH_CHECK(python_verbose_logger != nullptr);
-    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
+    TORCH_CHECK(vlogger != nullptr);
+    check(PyObject_CallFunction(vlogger, "s", msg.data()));
   }
 
   void log_node_check(
@@ -155,6 +155,7 @@ struct VerboseLogger {
         " as dynamic");
   }
 
+  PyObject* vlogger;
   // track which size index belongs to which node
   std::map<size_t, std::string> cumulative_sizes_per_node;
   // only log cache miss due to node key once
@@ -324,42 +325,19 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
   }
 };
 
-PyTLSSnapshot::~PyTLSSnapshot() {
-  // leak on shutdown
-  if (Py_IsInitialized()) {
-    for (auto& [_, v] : state) {
-      Py_DECREF(v);
-    }
-  }
-}
-
-/* static */ PyTLSSnapshot PyTLSSnapshot::create() {
+/* static */ PyTLSWrapper PyTLSWrapper::create() {
   TORCH_INTERNAL_ASSERT(
       at::impl::ThreadLocalPythonObjects::contains("compiled_autograd_state"));
-  PyObject* pystate =
+  PyObject* compiled_autograd_state =
       check(at::impl::ThreadLocalPythonObjects::get("compiled_autograd_state")
                 ->ptr(getPyInterpreter()));
-  TORCH_INTERNAL_ASSERT(PyDict_Check(pystate));
-
-  std::unordered_map<std::string_view, PyObject*> state;
-  Py_ssize_t pos = 0;
-  PyObject* key = nullptr;
-  PyObject* value = nullptr;
-  while (PyDict_Next(pystate, &pos, &key, &value)) {
-    TORCH_INTERNAL_ASSERT(
-        PyUnicode_Check(key),
-        "Compiled autograd TLS state should only has string keys");
-    Py_INCREF(value);
-    state.emplace(std::string_view(PyUnicode_AsUTF8(key)), value);
-  }
-  return PyTLSSnapshot(std::move(state));
+  return PyTLSWrapper(compiled_autograd_state);
 }
 
-PyObject* PyTLSSnapshot::get(std::string_view key) const {
-  auto it = state.find(key);
-  TORCH_CHECK(
-      it != state.end(), "Compiled autograd TLS state missing key ", key);
-  return it->second;
+// Refer to fields in python class CompiledAutogradTLS
+// Represents an Optional[Any]
+PyObject* PyTLSWrapper::get(std::string_view key) const {
+  return check(PyObject_GetAttrString(state, key.data()));
 }
 
 static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args);
@@ -380,28 +358,11 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
-  HANDLE_TH_ERRORS;
-  PyObject* logger = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &logger)) {
-    Py_RETURN_FALSE;
-  }
-
-  if (logger == Py_None) {
-    python_verbose_logger = nullptr;
-  } else {
-    python_verbose_logger = logger;
-  }
-  Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS;
-}
-
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"notify_autograd_engine", notify_autograd_engine, METH_NOARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
-    {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -530,7 +491,8 @@ static TraceState call_begin_capture(
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(inputs));
-  return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
+  return check(
+      PyObject_CallMethodObjArgs(self, method_name, pyinput.get(), nullptr));
 }
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
@@ -541,7 +503,7 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
       return;
     }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+    if (PyObject_CallMethodObjArgs(get(), method_name, nullptr) == nullptr) {
       PyErr_WriteUnraisable(get());
       PyErr_Clear();
     }
@@ -560,7 +522,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call(PyTLSSnapshot::create());
+  AutogradCompilerCall compiler_call(PyTLSWrapper::create());
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -575,7 +537,8 @@ CacheNode* _compiled_autograd_impl(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   int i = 0;
-  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
+  std::optional<VerboseLogger> vlogger =
+      VerboseLogger::maybe_create(compiler_call.state.get("vlogger"));
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -835,7 +798,7 @@ variable_list compiled_autograd(
 
 static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  PyTLSSnapshot state = PyTLSSnapshot::create();
+  PyTLSWrapper state = PyTLSWrapper::create();
   PyObject* compiler = state.get("compiler");
   if (compiler == Py_None) { // disable
     Engine::set_compiled_autograd(nullptr);
