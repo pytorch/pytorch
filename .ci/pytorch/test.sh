@@ -1457,14 +1457,10 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    install_torchaudio cpu
-  else
-    install_torchaudio cuda
-  fi
+  install_torchaudio cuda
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
-  test_inductor_cpp_wrapper
+  TORCHBENCHPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
