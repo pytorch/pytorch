@@ -32,13 +32,23 @@ def eager(gm, fake_tensor_inputs, **kwargs):
 
 
 def make_eager_backend_with_torch_function_mode(mode):
+    return make_eager_backend_with_torch_function_modes([mode])
+
+
+def make_eager_backend_with_torch_function_modes(modes):
     """Used to trace HOPs (cond and while) for eager exectution, the metadata
     TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
     in the HOP, so we need to externally run this mode and not trace it."""
+    from contextlib import ExitStack
 
     def fn(gm, fake_tensor_inputs, **kwargs):
-        with mode:
-            return gm.forward
+        stack = ExitStack()
+        for mode in modes:
+            stack.enter_context(mode)
+
+        result = gm.forward
+        stack.close()
+        return result
 
     return fn
 
@@ -135,7 +145,15 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    with functorch_config.patch(unlift_effect_tokens=True):
+    from torch._inductor.bisect_helper import BisectionManager
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := BisectionManager.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
             fw_compiler=boxed_nop,
