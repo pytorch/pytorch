@@ -4912,8 +4912,8 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tuning_enable(False)
 
             # Try to tune one more GEMM
-            M = 4
-            N = 4
+            M = 3
+            N = 3
             K = 4
             A = torch.randn(N, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
