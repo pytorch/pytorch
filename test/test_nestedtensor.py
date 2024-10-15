@@ -26,12 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
-from torch.nn.attention.flex_attention import (
-    create_njt_block_mask,
-    flex_attention,
-    njt_mask_mod_adapter,
-    njt_score_mod_adapter,
-)
+from torch.nn.attention.flex_attention import create_njt_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -7008,6 +7003,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         return query, key, value
 
+    @onlyCUDA
     @flex_attention_supported_platform
     @dtypes(torch.float32)
     def test_flex_attention(self, device, dtype):
@@ -7017,9 +7013,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        njt_causal_mask = njt_mask_mod_adapter(causal_mask, query)
-        block_mask = create_njt_block_mask(njt_causal_mask, 1, 1, query, _compile=True)
-
+        block_mask = create_njt_block_mask(causal_mask, 1, 1, query, _compile=True)
         out_flex = flex_attention(query, key, value, block_mask=block_mask)
         grad_out = torch.randn_like(out_flex)
         grads_flex = torch.autograd.grad(
@@ -7031,9 +7025,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         def causal_score_mod(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, float("-inf"))
 
-        njt_causal_score_mod = njt_score_mod_adapter(causal_score_mod, query)
-
-        out_flex2 = flex_attention(query, key, value, score_mod=njt_causal_score_mod)
+        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
         grads_flex2 = torch.autograd.grad(
             out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
         )
@@ -7052,23 +7044,32 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
             self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
 
+    @onlyCUDA
     @flex_attention_supported_platform
     @dtypes(torch.float32)
-    def test_flex_attention_with_score_mod_table(self, device, dtype):
+    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
         # This test verifies that a score_mod function written to operate within
         # NJT sequence index space, such as a lookup table, works correctly. This
         # validates that FlexAttention properly converts indices within the
         # "stacked sequence" space used for NJT -> sequence-relative indices.
         query, key, value = self._rand_qkv(device, dtype)
 
-        scoremod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
+        # Test with score_mod
+        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
 
         def my_score_mod(score, b, h, q_idx, kv_idx):
-            return scoremod_table[q_idx]
+            return score_mod_table[q_idx]
 
-        # Adapter is required for index conversion.
-        njt_my_score_mod = njt_score_mod_adapter(my_score_mod, query)
-        flex_attention(query, key, value, score_mod=njt_my_score_mod)
+        flex_attention(query, key, value, score_mod=my_score_mod)
+
+        # Test with mask_mod
+        mask_mod_table = score_mod_table > 0.0
+
+        def my_mask_mod(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx]
+
+        block_mask = create_njt_block_mask(my_mask_mod, 1, 1, query, _compile=True)
+        flex_attention(query, key, value, block_mask=block_mask)
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
