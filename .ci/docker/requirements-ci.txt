@@ -73,9 +73,9 @@ librosa>=0.6.2 ; python_version < "3.11"
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
+mkl==2021.4.0 ; platform_machine == "x86_64"
+mkl-include==2021.4.0 ; platform_machine == "x86_64"
 
-#mkl-devel
-# see mkl
 
 #mock
 #Description: A testing library that allows you to replace parts of your
