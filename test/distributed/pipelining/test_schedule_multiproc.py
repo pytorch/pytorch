@@ -6,11 +6,11 @@ import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
-
 import torch
 import torch.distributed as dist
+
+from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
+from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
@@ -21,6 +21,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ZeroBubbleAlgorithm,
 )
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -772,7 +773,10 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Attach to a schedule
         schedule = ScheduleClass(
-            stages, chunks, loss_fn=full_loss_fn, enable_zero_bubble=True
+            stages,
+            chunks,
+            loss_fn=full_loss_fn,
+            zero_bubble_algorithm=ZeroBubbleAlgorithm.ZB2P,
         )
 
         for _ in range(2):

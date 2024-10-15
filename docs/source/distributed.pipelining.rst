@@ -491,6 +491,8 @@ Pipeline Schedules
 
 .. autoclass:: ScheduleInterleavedZeroBubble
 
+.. autoclass:: ZeroBubbleAlgorithm
+
 .. autoclass:: PipelineScheduleSingle
   :members:
 

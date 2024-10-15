@@ -4,6 +4,7 @@
 import csv
 import itertools
 import logging
+import math
 import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -117,6 +118,20 @@ W = WEIGHT
 _action_regex = re.compile(
     r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
 )
+
+
+class ZeroBubbleAlgorithm(Enum):
+    ZB1P = 1
+    ZB2P = 2
+    ZBV = 3
+
+    def __str__(self):
+        str_map = {
+            ZeroBubbleAlgorithm.ZB1P: "ZB1P",
+            ZeroBubbleAlgorithm.ZB2P: "ZB2P",
+            ZeroBubbleAlgorithm.ZBV: "ZBV",
+        }
+        return str_map[self]
 
 
 class _Action(NamedTuple):
@@ -1707,14 +1722,10 @@ def _get_1f1b_rank_ops(
     rank,
     forward_stage_index,
     backward_stage_index,
-    num_1f1b_microbatches=0,
-    enable_zero_bubble=False,
 ):
     # All stages start with handling microbatch 0
     fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
     bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
-    weight_stage_mb_index: Dict[int, int] = defaultdict(int)
-
     # Store the list of operations used for that rank
     rank_ops: List[Optional[_Action]] = []
     # Pre-padding, rank starts with no-ops based on the warmup.
@@ -1731,13 +1742,7 @@ def _get_1f1b_rank_ops(
         n_local_stages * pp_group_size + 2 * (pp_group_size - 1 - rank)
     ) - (warmup_ops + rank)
 
-    if enable_zero_bubble:
-        post_warmup_ops = pp_group_size - rank - 1
-
     total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
-
-    backward_op_ids = []
-    weight_op_count = 0
 
     for op in range(total_ops):
         # Warmup phase
@@ -1769,28 +1774,11 @@ def _get_1f1b_rank_ops(
             rank_ops.append(
                 _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
             )
-            backward_op_ids.append(op)
-
-            if enable_zero_bubble and op - warmup_ops >= num_1f1b_microbatches:
-                weight_stage_index = backward_stage_index(
-                    backward_op_ids[weight_op_count]
-                )
-                weight_stage_mb_index[weight_stage_index] = (
-                    weight_mb_index := weight_stage_mb_index[weight_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(
-                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
-                    )
-                )
-                weight_op_count += 1
         # Cooldown phase
         else:
             # During cooldown phase, we need steps to align with 1f1b happening in other ranks
             # TODO: we don't need to always append, after all 1f1b are finished we can stop appending None
-            if not enable_zero_bubble:
-                rank_ops.append(None)
-
+            rank_ops.append(None)
             bwd_stage_index = backward_stage_index(op)
             bwd_stage_mb_index[bwd_stage_index] = (
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
@@ -1798,32 +1786,6 @@ def _get_1f1b_rank_ops(
             rank_ops.append(
                 _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
             )
-            backward_op_ids.append(op)
-
-            if enable_zero_bubble and op - warmup_ops >= num_1f1b_microbatches:
-                weight_stage_index = backward_stage_index(
-                    backward_op_ids[weight_op_count]
-                )
-                weight_stage_mb_index[weight_stage_index] = (
-                    weight_mb_index := weight_stage_mb_index[weight_stage_index]
-                ) + 1
-                rank_ops.append(
-                    _Action(
-                        weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
-                    )
-                )
-                weight_op_count += 1
-
-    while enable_zero_bubble and weight_op_count < len(backward_op_ids):
-        weight_stage_index = backward_stage_index(backward_op_ids[weight_op_count])
-        weight_stage_mb_index[weight_stage_index] = (
-            weight_mb_index := weight_stage_mb_index[weight_stage_index]
-        ) + 1
-        rank_ops.append(
-            _Action(weight_stage_index, _ComputationType.WEIGHT, weight_mb_index)
-        )
-        weight_op_count += 1
-
     return rank_ops
 
 
@@ -1942,7 +1904,8 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
 
-    When enable_zero_bubble is True, we will use the ZB1P schedule in https://openreview.net/pdf?id=tuzTN0eIO5
+    When zero_bubble_algorithm is passed in, we will use the corresponding schedule in
+    https://openreview.net/pdf?id=tuzTN0eIO5
     """
 
     def __init__(
@@ -1953,7 +1916,7 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-        enable_zero_bubble: bool = False,
+        zero_bubble_algorithm: Optional[ZeroBubbleAlgorithm] = None,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -1963,13 +1926,14 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-            use_full_backward=not enable_zero_bubble,
+            use_full_backward=not zero_bubble_algorithm,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
         self.number_of_rounds = max(1, n_microbatches // self.pp_group_size)
         self.microbatches_per_round = n_microbatches // self.number_of_rounds
-        self.enable_zero_bubble = enable_zero_bubble
+        self.zero_bubble_algorithm = zero_bubble_algorithm
+
         if n_microbatches % self.number_of_rounds != 0:
             raise ValueError(
                 "Flexible Interleaved 1F1B requires the number of microbatches to be a "
@@ -1980,9 +1944,29 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
-        for rank in range(self.pp_group_size):
-            rank_ops = self._calculate_single_rank_operations(rank)
-            self.pipeline_order[rank] = rank_ops
+
+        if self.zero_bubble_algorithm is ZeroBubbleAlgorithm.ZBV:
+            if n_microbatches < self.n_local_stages * 2:
+                raise ValueError(
+                    "ZBV expects n_microbatches to be at least 2 * local_stages"
+                )
+            if self.n_local_stages % 2 != 0:
+                raise ValueError(
+                    f"ZBV expects local stages to be multiple of 2 got {self.n_local_stages}"
+                )
+            if n_microbatches % self.pp_group_size != 0:
+                raise ValueError(
+                    f"ZBV schedule requires the number of microbatches ({n_microbatches}) \
+                    to be a multiple of the number of pipeline ranks ({self.pp_group_size})."
+                )
+
+            for rank in range(self.pp_group_size):
+                rank_ops = self._calculate_single_rank_operations_zbv(rank)
+                self.pipeline_order[rank] = rank_ops
+        else:
+            for rank in range(self.pp_group_size):
+                rank_ops = self._calculate_single_rank_operations(rank)
+                self.pipeline_order[rank] = rank_ops
 
         # This function add bubbles to the generated schedule based on dependencies of actions
         # Note that the ZB1P schedule will not require bubbles to be manually added and it is
@@ -1998,7 +1982,9 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
                 self.n_local_stages - 1
             ) * self.microbatches_per_round
             # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 1 if self.enable_zero_bubble else 2
+            multiply_factor = 1
+            if self.zero_bubble_algorithm is ZeroBubbleAlgorithm.ZB2P:
+                multiply_factor = 2
             warmup_ops = warmups_ops_last_stage + multiply_factor * (
                 (self.pp_group_size - 1) - rank
             )
@@ -2040,10 +2026,12 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             )
             return (local_index * self.pp_group_size) + rank
 
-        if self.enable_zero_bubble:
+        if self.zero_bubble_algorithm:
             num_1f1b_microbatches = rank
+            if self.zero_bubble_algorithm is ZeroBubbleAlgorithm.ZB2P:
+                num_1f1b_microbatches = 2 * rank
 
-            return _get_1f1b_rank_ops(
+            return self._get_1f1b_rank_ops_zero_bubble(
                 self.n_local_stages,
                 self.pp_group_size,
                 warmup_ops,
@@ -2053,7 +2041,8 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
                 forward_stage_index,
                 backward_stage_index,
                 num_1f1b_microbatches,
-                enable_zero_bubble=True,
+                zero_bubble_algorithm=self.zero_bubble_algorithm,
+                forward_local_stage_one_index=self.pp_group_size + rank,
             )
 
         return _get_1f1b_rank_ops(
@@ -2067,9 +2056,113 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
             backward_stage_index,
         )
 
+    def _calculate_single_rank_operations_zbv(self, rank) -> List[Optional[_Action]]:
+        num_local_stages = self.n_local_stages
+        mb_size = self._n_microbatches
+        pp_group_size = self.pp_group_size
+        def get_ops(rank, pp_group_size, mb_size):
+            result = []
+            result += (["F"] * 2 * pp_group_size)
+
+            forward_left = mb_size * 2 - 2 * pp_group_size
+            total_backward = 2 * mb_size
+
+            for i in range(forward_left):
+                if i < (forward_left - (pp_group_size - 1 - rank)):
+                    result += ["B", "W", "F"]
+                    total_backward -= 1
+                else:
+                    result += ["B", "W", "B", "W", "F"]
+                    total_backward -=2
+
+            total_weight = total_backward
+            result += (["B"] * (2 * rank + 1))
+            total_backward -= (2 * rank + 1)
+
+            for i in range(total_backward):
+                result += ["B", "W"]
+                total_weight -= 1
+            result += (["W"] * total_weight)
+            return result
+
+        def backward_stage_index(bwd_index, rank, pp_group_size, mb_size):
+            buffer = pp_group_size - rank - 1
+            if bwd_index < buffer:
+                return 1
+            if bwd_index >= mb_size * 2 - buffer:
+                return 0
+            return 1 if (bwd_index - buffer) % 2 == 0 else 0
+
+        def forward_stage_index(fwd_index, rank, pp_group_size, mb_size):
+            total_forward = mb_size * 2
+            warmup_buffer = 2 * (pp_group_size - rank - 1)
+            if fwd_index < warmup_buffer:
+                return 0
+            warmup_steps = 2 * pp_group_size - 1
+            if fwd_index < warmup_steps:
+                return 0 if (fwd_index - warmup_buffer) % 2 == 0 else 1
+
+            if fwd_index < warmup_steps + (pp_group_size - rank - 1):
+                return 1
+            if fwd_index > mb_size * 2 - (pp_group_size - rank - 1) - 1:
+                return 1
+            return 1 if (fwd_index - (warmup_steps + (pp_group_size - rank - 1))) % 2 == 0 else 0
+
+        ops = get_ops(rank, pp_group_size, mb_size)
+        result = []
+        forward_ops = 0
+        backward_ops = 0
+        weight_ops = 0
+        forward_mb_id = defaultdict(int)
+        backward_mb_id = defaultdict(int)
+        weight_mb_id = defaultdict(int)
+
+        for op in ops:
+            if op == "F":
+                stage_id = forward_stage_index(forward_ops, rank, pp_group_size, mb_size)
+                mb_id = forward_mb_id[stage_id]
+                forward_mb_id[stage_id] = mb_id + 1
+                result.append((mb_id, _ComputationType.FORWARD, stage_id))
+                forward_ops += 1
+            if op == "B":
+                stage_id = backward_stage_index(backward_ops, rank, pp_group_size, mb_size)
+                mb_id = backward_mb_id[stage_id]
+                backward_mb_id[stage_id] = mb_id + 1
+                result.append((mb_id, _ComputationType.BACKWARD, stage_id))
+                backward_ops += 1
+            if op == "W":
+                stage_id = backward_stage_index(weight_ops, rank, pp_group_size, mb_size)
+                mb_id = weight_mb_id[stage_id]
+                weight_mb_id[stage_id] = mb_id + 1
+                result.append((mb_id, _ComputationType.WEIGHT, stage_id))
+                weight_ops += 1
+
+        expanded_results = []
+        total_stages = num_local_stages * pp_group_size
+        logical_stage_to_stages = {}
+        stage_0 = []
+        stage_1 = []
+        initial_bubbles = rank * int(num_local_stages/2)
+        expanded_results += ([None] * initial_bubbles)
+        for i in range(int(num_local_stages/2)):
+            temp = int(i - rank * num_local_stages/2)
+            stage_0.append(temp)
+            stage_1.append(total_stages - temp - 1)
+        logical_stage_to_stages[0] = stage_0
+        stage_1.sort()
+        logical_stage_to_stages[1] = stage_1
+
+        for (mb_id, op, stage_id) in result:
+            stages = logical_stage_to_stages[stage_id]
+            for physical_stage in stages:
+                expanded_results.append(_Action(md_id, op, physical_stage))
+        result = expanded_results
+
+        return result
+
     def _add_bubbles_to_actions(self, num_stages_global):
         actions = self.pipeline_order
-        if not self.enable_zero_bubble:
+        if not self.zero_bubble_algorithm:
             return actions
 
         def need_bubble(stage, op, microbatch, num_stages_global, seen_ops):
@@ -2163,6 +2256,177 @@ class ScheduleInterleavedZeroBubble(ScheduleFlexibleInterleaved1F1B):
             output_merge_spec=output_merge_spec,
             enable_zero_bubble=True,
         )
+
+    def _get_1f1b_rank_ops_zero_bubble(
+        self,
+        n_local_stages,
+        pp_group_size,
+        warmup_ops,
+        fwd_bwd_ops,
+        cooldown_ops,
+        rank,
+        forward_stage_index,
+        backward_stage_index,
+        num_1f1b_microbatches,
+        zero_bubble_algorithm,
+        forward_local_stage_one_index,
+    ):
+        # All stages start with handling microbatch 0
+        fwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+        bwd_stage_mb_index: Dict[int, int] = defaultdict(int)
+        weight_stage_mb_index: Dict[int, int] = defaultdict(int)
+
+        # Store the list of operations used for that rank
+        rank_ops: List[Optional[_Action]] = []
+        # Pre-padding, rank starts with no-ops based on the warmup.
+        for _ in range(rank):
+            rank_ops.append(None)
+        # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
+        # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
+        # Formula:
+        # pre-padding + warmup_ops + post_warmup_ops = earliest time step of first backward
+        # post_warmup_ops = [earliest time step of first backward] - (warmup_ops + pre-padding)
+        # earliest time step of first backward = [local_stages * group_size + 2 * (group_size - 1 - rank)]
+        # warmup_ops = calculated above
+        post_warmup_ops = (
+            n_local_stages * pp_group_size + 2 * (pp_group_size - 1 - rank)
+        ) - (warmup_ops + rank)
+
+        if zero_bubble_algorithm is ZeroBubbleAlgorithm.ZB1P:
+            post_warmup_ops = pp_group_size - rank - 1
+        elif zero_bubble_algorithm is ZeroBubbleAlgorithm.ZB2P:
+            post_warmup_ops = 0
+
+        total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+
+        prefill_steps_1b1w = 0
+        if zero_bubble_algorithm is ZeroBubbleAlgorithm.ZB2P:
+            prefill_steps_1b1w = max(0, math.ceil((pp_group_size - 4) / 2) - rank)
+
+        backward_op_ids = []
+        weight_op_count = 0
+        forward_op_id = 0
+        backward_op_id = warmup_ops
+        has_backfilled = False
+
+        for op in range(total_ops - prefill_steps_1b1w):
+            # Warmup phase
+            if op < warmup_ops:
+                fwd_stage_index = forward_stage_index(forward_op_id)
+                # This will assign the current microbatch index and update it as well
+                fwd_stage_mb_index[fwd_stage_index] = (
+                    mb_index := fwd_stage_mb_index[fwd_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(fwd_stage_index, _ComputationType.FORWARD, mb_index)
+                )
+                if forward_op_id == warmup_ops - 1:
+                    # This is the last step in the warmup phase, so we need to wait for the backward to trickle back up
+                    rank_ops.extend([None] * post_warmup_ops)
+                forward_op_id += 1
+
+            # 1F1B Phase (forward and backward)
+            elif warmup_ops <= op < warmup_ops + fwd_bwd_ops:
+                fwd_stage_index = forward_stage_index(forward_op_id)
+                if (
+                    fwd_stage_index == forward_local_stage_one_index
+                    and not has_backfilled
+                ):
+                    has_backfilled = True
+                    for _ in range(prefill_steps_1b1w):
+                        bwd_stage_index = backward_stage_index(backward_op_id)
+                        bwd_stage_mb_index[bwd_stage_index] = (
+                            bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
+                        ) + 1
+                        rank_ops.append(
+                            _Action(
+                                bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index
+                            )
+                        )
+                        backward_op_ids.append(backward_op_id)
+                        backward_op_id += 1
+                        weight_stage_index = backward_stage_index(
+                            backward_op_ids[weight_op_count]
+                        )
+                        weight_stage_mb_index[weight_stage_index] = (
+                            weight_mb_index := weight_stage_mb_index[weight_stage_index]
+                        ) + 1
+                        rank_ops.append(
+                            _Action(
+                                weight_stage_index,
+                                _ComputationType.WEIGHT,
+                                weight_mb_index,
+                            )
+                        )
+                        weight_op_count += 1
+
+                fwd_stage_mb_index[fwd_stage_index] = (
+                    fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(fwd_stage_index, _ComputationType.FORWARD, fwd_mb_index)
+                )
+                bwd_stage_index = backward_stage_index(backward_op_id)
+                bwd_stage_mb_index[bwd_stage_index] = (
+                    bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
+                )
+                backward_op_ids.append(backward_op_id)
+                forward_op_id += 1
+                backward_op_id += 1
+
+                if op - warmup_ops >= num_1f1b_microbatches:
+                    weight_stage_index = backward_stage_index(
+                        backward_op_ids[weight_op_count]
+                    )
+                    weight_stage_mb_index[weight_stage_index] = (
+                        weight_mb_index := weight_stage_mb_index[weight_stage_index]
+                    ) + 1
+                    rank_ops.append(
+                        _Action(
+                            weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
+                        )
+                    )
+                    weight_op_count += 1
+            # Cooldown phase
+            else:
+                bwd_stage_index = backward_stage_index(backward_op_id)
+                bwd_stage_mb_index[bwd_stage_index] = (
+                    bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
+                ) + 1
+                rank_ops.append(
+                    _Action(bwd_stage_index, _ComputationType.BACKWARD, bwd_mb_index)
+                )
+                backward_op_ids.append(backward_op_id)
+                backward_op_id += 1
+
+                if zero_bubble_algorithm and op - warmup_ops >= num_1f1b_microbatches:
+                    weight_stage_index = backward_stage_index(
+                        backward_op_ids[weight_op_count]
+                    )
+                    weight_stage_mb_index[weight_stage_index] = (
+                        weight_mb_index := weight_stage_mb_index[weight_stage_index]
+                    ) + 1
+                    rank_ops.append(
+                        _Action(
+                            weight_stage_index, _ComputationType.WEIGHT, weight_mb_index
+                        )
+                    )
+                    weight_op_count += 1
+
+        while weight_op_count < len(backward_op_ids):
+            weight_stage_index = backward_stage_index(backward_op_ids[weight_op_count])
+            weight_stage_mb_index[weight_stage_index] = (
+                weight_mb_index := weight_stage_mb_index[weight_stage_index]
+            ) + 1
+            rank_ops.append(
+                _Action(weight_stage_index, _ComputationType.WEIGHT, weight_mb_index)
+            )
+            weight_op_count += 1
+
+        return rank_ops
 
 
 def get_schedule_class(schedule_name: str):
