@@ -570,19 +570,18 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
-# TODO - Use abc to make this an abstract base class
 class HopSubgraphCache:
-    def add_autograd_key_entry(self, identifier: str, key: Callable):
-        raise NotImplementedError
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
 
-    def get_autograd_key_entry(self, identifier: str):
-        raise NotImplementedError
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
 
-    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
-        raise NotImplementedError
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
 
-    def get_proxy_dispatch_entry(self, identifier: str):
-        raise NotImplementedError
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
