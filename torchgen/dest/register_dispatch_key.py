@@ -515,9 +515,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                         # CUDA requires special handling
                         if is_cuda_dispatch_key(self.backend_index.dispatch_key):
-                            device_guard = (
-                                f"globalContext().lazyInitCUDA();\n{device_guard}"
-                            )
+                            device_guard = f"globalContext().lazyInitDevice(c10::DeviceType::CUDA);\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -710,7 +708,10 @@ resize_out(out, sizes, strides, options);
             raise RuntimeError(f"Unsupported SchemaKind {k}")
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
-            guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
+            if self.rocm:
+                guard_field = "c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;"
+            else:
+                guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
         elif (
             self.backend_index.dispatch_key
             == DispatchKey.CompositeExplicitAutogradNonFunctional

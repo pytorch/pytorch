@@ -1998,8 +1998,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn: "VariableTracker",
         fn_name: str,
     ):
-        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
-
+        from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -2218,7 +2217,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
