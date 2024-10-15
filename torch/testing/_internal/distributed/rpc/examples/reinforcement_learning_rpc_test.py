@@ -5,6 +5,7 @@
 # and https://pytorch.org/tutorials/intermediate/rpc_tutorial.html
 
 import numpy as np
+from itertools import count
 
 import torch
 import torch.distributed.rpc as rpc
@@ -108,8 +109,8 @@ class Observer:
             agent_rref (RRef): an RRef referencing the agent object.
             n_steps (int): number of steps in this episode
         """
-        state, _ep_reward = self.env.reset(), 0
-        for _ in range(n_steps):
+        state, ep_reward = self.env.reset(), 0
+        for step in range(n_steps):
             # send the state to the agent to get an action
             action = _remote_method(Agent.select_action, agent_rref, self.id, state)
 
@@ -221,9 +222,9 @@ class Agent:
 
 
 def run_agent(agent, n_steps):
-    while True:
+    for i_episode in count(1):
         agent.run_episode(n_steps=n_steps)
-        agent.finish_episode()
+        last_reward = agent.finish_episode()
 
         if agent.running_reward > agent.reward_threshold:
             print(f"Solved! Running reward is now {agent.running_reward}!")

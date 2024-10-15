@@ -1087,6 +1087,7 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
         ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
+        cp_rank = mesh.get_local_rank()
 
         all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
         ft_c.all_gather_inplace(all_buffers, buffer, mesh)

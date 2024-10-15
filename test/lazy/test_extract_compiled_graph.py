@@ -131,7 +131,7 @@ def allclose(expected, actual):
 
 def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
     args = gen_rand_args(mod)
-    mod(*args)
+    out = mod(*args)
 
     dis.dis(mod.forward)
 

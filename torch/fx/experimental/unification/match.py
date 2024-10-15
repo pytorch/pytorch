@@ -16,7 +16,7 @@ class Dispatcher:
         self.ordering = ordering(self.funcs)
 
     def __call__(self, *args, **kwargs):
-        func, _ = self.resolve(args)
+        func, s = self.resolve(args)
         return func(*args, **kwargs)
 
     def resolve(self, args):

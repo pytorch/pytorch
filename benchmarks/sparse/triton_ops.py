@@ -374,7 +374,7 @@ if __name__ == "__main__":
                 for r in range(args.repeat):
                     try:
                         time_ms, performance_tflops = test_func(x, y, **meta)
-                    except triton.compiler.OutOfResources:
+                    except triton.compiler.OutOfResources as msg:
                         print(
                             f"op={op}[{meta_str}]({bsr_size},{k}x{n}) dtype={args.dtype} {sparsity=}(nnz={x._nnz()})"
                             f" blocksize={bm}x{bk} OutOfResources",

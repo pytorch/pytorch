@@ -76,8 +76,7 @@ def evaluate(model, criterion, data_loader):
     with torch.no_grad():
         for image, target in data_loader:
             output = model(image)
-
-            loss = criterion(output, target)  # noqa: F841
+            loss = criterion(output, target)
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], image.size(0))
             top5.update(acc5[0], image.size(0))
@@ -134,7 +133,7 @@ def training_loop(model, criterion, data_loader):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
     model.train()
-    for _ in range(10):
+    for i in range(10):
         for data, target in data_loader:
             optimizer.zero_grad()
             output = model(data)

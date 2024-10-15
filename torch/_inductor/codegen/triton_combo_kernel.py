@@ -209,7 +209,7 @@ class ComboKernel(Kernel):
         )
 
         for node in subkernel_nodes:
-            _node_schedule, tiled_groups, _numel, _rnumel = node_info_map[node]
+            node_schedule, tiled_groups, numel, rnumel = node_info_map[node]
             node_info = node
 
             read_writes = node.read_writes
@@ -744,7 +744,7 @@ class ComboKernel(Kernel):
     def add_blockd_to_args(self, argdefs: List[str]) -> List[str]:
         block_args = {}
         block_names = {}
-        for sub_kernel in self.sub_kernels:
+        for num, sub_kernel in enumerate(self.sub_kernels):
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
                 if tree.prefix == "r" and (
@@ -889,7 +889,7 @@ class ComboKernel(Kernel):
         self, num_gb: float, grid: Optional[List[Any]] = None
     ) -> IndentedBuffer:
         result = IndentedBuffer()
-        _argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():

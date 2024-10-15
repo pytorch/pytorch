@@ -422,7 +422,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            for _ in range(n_iter):
+            for i in range(n_iter):
                 inp = input_creation_fn()
                 loss = fwd_bwd_func(inp)
                 losses.append(loss.item())
@@ -578,7 +578,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def __init__(self, n_layers):
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for _ in range(n_layers):
+                for layer_id in range(n_layers):
                     self.layers.append(TestSubmodule(hidden_dim))
 
             def forward(self, x):
@@ -597,7 +597,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
             model = TestModule(n_layers=3)
-            for mod in model.layers:
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
@@ -778,7 +778,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         else:
                             v.requires_grad_(False)
                 assert requires_grad_param_count == n_layers * len(requires_grad_params)
-            for _, mod in enumerate(model.layers):
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config

@@ -2264,7 +2264,7 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
-        except NotImplementedError:
+        except NotImplementedError as e:
             pass
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":

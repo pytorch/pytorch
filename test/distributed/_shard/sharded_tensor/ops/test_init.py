@@ -40,6 +40,8 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
         a, b = 10, 20
 
         seed = 1234
@@ -73,6 +75,8 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
         mean, std = 10, 5
 
         seed = 1234
@@ -106,6 +110,8 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
+        expected_h = 2
+        expected_device = torch.device(f"cuda:{self.rank}")
         a, mode, nonlinearity = 0, "fan_in", "leaky_relu"
 
         seed = 1234

@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-# ruff: noqa: F841
 import contextlib
 import copy
 import dataclasses

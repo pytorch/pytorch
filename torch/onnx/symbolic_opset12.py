@@ -346,7 +346,8 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
 
         loop_block = loop_context.block
         block_input_iter = utils._add_input_to_block(loop_block)
-        cond = utils._add_input_to_block(loop_block)  # noqa: F841
+        # FIXME(justinchuby): cond is unused?
+        cond = utils._add_input_to_block(loop_block)
 
         starts = loop_context.op("Gather", low_indices, block_input_iter)
         ends = loop_context.op("Gather", hi_indices, block_input_iter)

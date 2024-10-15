@@ -110,8 +110,8 @@ def print_seen():
         return "{" + r + "}"
 
     def sort_key(kv):
-        k, _ = kv
-        _, op = k
+        k, v = kv
+        device_type, op = k
         if isinstance(op, tuple):
             return op
         else:
@@ -1008,7 +1008,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP  # noqa: F841
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1019,9 +1019,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
+            test_expect = ExpectedTestResult.XFAILURE
         else:
-            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
+            test_expect = ExpectedTestResult.SUCCESS
 
         overridden_kwargs = {}
         overridden_kwargs.update(
