@@ -201,6 +201,79 @@ PyObject* THPModule_DisableTorchFunctionType() {
 
   return (PyObject*)(&DisableTorchFunctionType);
 }
+typedef struct {
+  PyObject_HEAD
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
+} EnableTorchFunction;
+
+PyObject* EnableTorchFunction__enter(PyObject* self, PyObject* unused) {
+  ((EnableTorchFunction*)self)->old_state =
+      at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(
+      at::impl::TorchFunctionDisabledState::ENABLED);
+  Py_RETURN_NONE;
+}
+
+PyObject* EnableTorchFunction__exit(PyObject* self, PyObject* unused) {
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(
+      ((EnableTorchFunction*)self)->old_state);
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef EnableTorchFunction_methods[] = { // NOLINT
+    {"__enter__", EnableTorchFunction__enter, METH_NOARGS, nullptr},
+    {"__exit__", EnableTorchFunction__exit, METH_VARARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
+
+PyTypeObject EnableTorchFunctionType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.EnableTorchFunction", /* tp_name */
+    sizeof(EnableTorchFunction), /* tp_basicsize */
+    0, /* tp_itemsize */
+    nullptr, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    nullptr, /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    EnableTorchFunction_methods, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    PyType_GenericAlloc, /* tp_alloc */
+    PyType_GenericNew, /* tp_new */
+};
+
+PyObject* THPModule_EnableTorchFunctionType() {
+  if (PyType_Ready(&EnableTorchFunctionType) < 0) {
+    return nullptr;
+  }
+
+  return (PyObject*)(&EnableTorchFunctionType);
+}
 
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   HANDLE_TH_ERRORS

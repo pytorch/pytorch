@@ -1010,8 +1010,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
