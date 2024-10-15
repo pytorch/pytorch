@@ -559,7 +559,7 @@ class NCCLComm {
 #endif
 
  private:
-  ncclComm_t ncclComm_;
+  ncclComm_t ncclComm_{nullptr};
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized();
 };
