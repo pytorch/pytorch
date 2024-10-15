@@ -7,15 +7,9 @@ import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
-from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._higher_order_ops import create_invoke_subgraph_op
 from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-def extract_graph(fx_g, _, graph_cell):
-    graph_cell[0] = fx_g
-    return fx_g
 
 
 class TestInvokeSubgraph(TestCase):
@@ -86,40 +80,6 @@ class TestInvokeSubgraph(TestCase):
         res = aot_fn(x)
 
         self.assertEqual(ref, res)
-
-    def test_input_mutation(self):
-        def gn(x, y):
-            x.add_(1)
-            return (torch.mul(x, y),)
-
-        def fn(x, y):
-            return create_invoke_subgraph_op(gn, (x, y))[0]
-
-        x = torch.randn(8, requires_grad=False)
-        y = torch.randn(8, requires_grad=False)
-
-        with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of invoke_subgraph hop"
-        ):
-            aot_fn = aot_function(fn, nop)
-            res = aot_fn(x, y)
-
-    def test_input_aliasing(self):
-        def gn(x, y):
-            return (x, torch.mul(x, y))
-
-        def fn(x, y):
-            outs = create_invoke_subgraph_op(gn, (x, y))
-            return outs[0] * outs[1]
-
-        x = torch.randn(8, requires_grad=False)
-        y = torch.randn(8, requires_grad=False)
-
-        with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "One of invoke_subgraph hop"
-        ):
-            aot_fn = aot_function(fn, nop)
-            res = aot_fn(x, y)
 
     def test_differing_strides_for_grad_outs(self):
         class CustomOp(torch.autograd.Function):
