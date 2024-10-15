@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import contextlib
+import copy
 import functools
 import inspect
 import itertools
@@ -19,6 +20,7 @@ from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
+from torch.fx.node import map_arg
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
@@ -1064,11 +1066,15 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        leaf.size
-                        if leaf.size is not None
-                        else BuiltinVariable(getattr)
-                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        .items,
+                        (
+                            leaf.size
+                            if leaf.size is not None
+                            else BuiltinVariable(getattr)
+                            .call_function(
+                                tx, [leaf, ConstantVariable.create("shape")], {}
+                            )
+                            .items
+                        ),
                     ),
                 ),
                 kwargs={
@@ -1197,14 +1203,16 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        ini.size
-                        if ini.size is not None
-                        else tuple(
-                            BuiltinVariable(getattr)
-                            .call_function(
-                                tx, [ini, ConstantVariable.create("shape")], {}
+                        (
+                            ini.size
+                            if ini.size is not None
+                            else tuple(
+                                BuiltinVariable(getattr)
+                                .call_function(
+                                    tx, [ini, ConstantVariable.create("shape")], {}
+                                )
+                                .items
                             )
-                            .items
                         ),
                     ),
                 ),
@@ -2481,19 +2489,29 @@ def canonicalize(gmod, root_gmod):
     new_graph = torch.fx.Graph()
     env = {}
 
-    index = 0
+    placeholder_counter = itertools.count(0)
 
     def next_placeholder_name():
-        nonlocal index
-        index += 1
-        return f"placeholder_{index}"
+        nonlocal placeholder_counter
+        return f"placeholder_{next(placeholder_counter)}"
+
+    node_counter = itertools.count(0)
+
+    def next_node_name():
+        nonlocal node_counter
+        return f"node_{next(node_counter)}"
 
     for node in gmod.graph.nodes:
         if node.op == "placeholder":
             env[node] = new_graph.placeholder(next_placeholder_name())
         else:
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
-        env[node].meta = node.meta
+            # Can't use node_copy because node.name will not be unique.
+            args = map_arg(node.args, lambda x: env[x])
+            kwargs = map_arg(node.kwargs, lambda x: env[x])
+            env[node] = new_graph.create_node(
+                node.op, node.target, args, kwargs, next_node_name(), node.type
+            )
+        env[node].meta = copy.copy(node.meta)
 
     new_graph.lint()
     new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
