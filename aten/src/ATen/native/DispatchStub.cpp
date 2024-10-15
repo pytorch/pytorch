@@ -38,33 +38,18 @@ static CPUCapability compute_cpu_capability() {
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
     int sve_vl = cpuinfo_get_max_arm_sve_length(); //Returns maximum SVE VL supported by your HW.
-#ifdef HAVE_SVE512_CPU_DEFINITION
-    if (strcmp(envar, "sve512") == 0) {
+    if (strcmp(envar->c_str(), "sve") == 0) {
       if (sve_vl == 512) {
         return CPUCapability::SVE512;
-      }
-      TORCH_WARN("SVE512 capability not available on hardware. Falling back to DEFAULT");
-      return CPUCapability::DEFAULT;
-    }
-#endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
-    if (strcmp(envar, "sve256") == 0) {
-      if (sve_vl == 256) {
+      } else if (sve_vl == 256) {
         return CPUCapability::SVE256;
-      }
-      TORCH_WARN("SVE256 capability not available on hardware. Falling back to DEFAULT");
-      return CPUCapability::DEFAULT;
-    }
-#endif
-#ifdef HAVE_SVE128_CPU_DEFINITION
-    if (strcmp(envar, "sve128") == 0) {
-      if (sve_vl == 128) {
+      } else if (sve_vl == 128) {
         return CPUCapability::SVE128;
+      } else {
+        TORCH_WARN("SVE capability not available on hardware. Falling back to DEFAULT");
+        return CPUCapability::DEFAULT;
       }
-      TORCH_WARN("SVE128 capability not available on hardware. Falling back to DEFAULT");
-      return CPUCapability::DEFAULT;
     }
-#endif
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
     if (strcmp(envar, "avx512") == 0) {
