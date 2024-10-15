@@ -322,7 +322,6 @@ lxml==5.0.0
 
 PyGithub==2.3.0
 
-sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
 #Pinned versions:
@@ -342,3 +341,13 @@ parameterized==0.8.1
 #Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
 #test that import:
+
+numpy>=1.22.4 ; python_version >= "3.8"
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 1.24.0
+#test that import: test_sac_estimator.py
+
+pwlf==2.2.1 ; python_version >= "3.8"
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 2.2.1
+#test that import: test_sac_estimator.py
