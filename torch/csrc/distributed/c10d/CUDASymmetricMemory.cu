@@ -360,8 +360,11 @@ at::Tensor CUDASymmetricMemory::get_buffer(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     int64_t storage_offset) {
-  const auto numel =
-      std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      sizes.begin(),
+      sizes.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const auto element_size = c10::elementSize(dtype);
   const auto req_size = (numel + storage_offset) * element_size;
   TORCH_CHECK(
