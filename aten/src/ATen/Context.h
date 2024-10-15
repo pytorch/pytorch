@@ -86,14 +86,8 @@ class TORCH_API Context {
     initXPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type).getDeviceFromPtr(data);
     }
   }
   bool isPinnedPtr(

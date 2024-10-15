@@ -33,7 +33,7 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
+        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
