@@ -212,6 +212,40 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_input_mutation(self):
+        def gn(x, y):
+            x.add_(1)
+            return (torch.mul(x, y),)
+
+        def fn(x, y):
+            return create_invoke_subgraph_op(gn, (x, y))[0]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x, y)
+
+    def test_input_aliasing(self):
+        def gn(x, y):
+            return (x, torch.mul(x, y))
+
+        def fn(x, y):
+            outs = create_invoke_subgraph_op(gn, (x, y))
+            return outs[0] * outs[1]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x, y)
+
 
 if __name__ == "__main__":
     run_tests()
