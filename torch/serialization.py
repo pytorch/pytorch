@@ -59,6 +59,8 @@ __all__ = [
     "set_default_load_endianness",
     "get_default_mmap_options",
     "set_default_mmap_options",
+    "get_save_d2h_pin_memory_options",
+    "set_save_d2h_pin_memory_options",
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",

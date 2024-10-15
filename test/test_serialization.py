@@ -4337,6 +4337,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_save_use_pin_memory_options(self):
         sd = torch.nn.ModuleList([torch.nn.Linear(3, 5, device='cuda') for i in range(10)]).state_dict()
         with TemporaryFileName() as f:
