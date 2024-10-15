@@ -2868,7 +2868,7 @@ std::pair<Vectorized<int64_t>, Vectorized<int64_t>> inline deinterleave2<
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<float>>::type
+typename std::enable_if_t<std::is_same_v<T, uint8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(const Vectorized<T> &src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
   // Only handle first 64 bits
@@ -2878,7 +2878,7 @@ inline convert_int8_to_float(const Vectorized<T> &src) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<T>>::type
+typename std::enable_if_t<std::is_same_v<T, uint8_t>, at::vec::Vectorized<T>>
 inline convert_float_to_int8(const Vectorized<float> &src) {
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();

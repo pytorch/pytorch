@@ -12,29 +12,26 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline adam_math(
-  scalar_t* param_ptr,
-  scalar_t* exp_avg_ptr,
-  scalar_t* exp_avg_sq_ptr,
-  scalar_t* grad_ptr,
-  scalar_t* max_exp_avg_sq_ptr,
-  double lr,
-  double bias_correction1,
-  double bias_correction2,
-  double exp_avg_grad_coefficient,
-  double exp_avg_sq_grad_coefficient,
-  double bias_correction2_sqrt,
-  double eps,
-  double weight_decay,
-  double beta2,
-  bool amsgrad,
-  bool maximize,
-  const float* grad_scale_ptr,
-  int64_t size
-){
+typename std::
+    enable_if_t<std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>, void> inline adam_math(
+        scalar_t* param_ptr,
+        scalar_t* exp_avg_ptr,
+        scalar_t* exp_avg_sq_ptr,
+        scalar_t* grad_ptr,
+        scalar_t* max_exp_avg_sq_ptr,
+        double lr,
+        double bias_correction1,
+        double bias_correction2,
+        double exp_avg_grad_coefficient,
+        double exp_avg_sq_grad_coefficient,
+        double bias_correction2_sqrt,
+        double eps,
+        double weight_decay,
+        double beta2,
+        bool amsgrad,
+        bool maximize,
+        const float* grad_scale_ptr,
+        int64_t size) {
   double step_size = lr / bias_correction1;
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
@@ -153,31 +150,27 @@ typename std::enable_if<
   }
 }
 
-
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline adam_math(
-  scalar_t* param_ptr,
-  scalar_t* exp_avg_ptr,
-  scalar_t* exp_avg_sq_ptr,
-  scalar_t* grad_ptr,
-  scalar_t* max_exp_avg_sq_ptr,
-  double lr,
-  double bias_correction1,
-  double bias_correction2,
-  double exp_avg_grad_coefficient,
-  double exp_avg_sq_grad_coefficient,
-  double bias_correction2_sqrt,
-  double eps,
-  double weight_decay,
-  double beta2,
-  bool amsgrad,
-  bool maximize,
-  const float* grad_scale_ptr,
-  int64_t size
-){
+typename std::
+    enable_if_t<std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>, void> inline adam_math(
+        scalar_t* param_ptr,
+        scalar_t* exp_avg_ptr,
+        scalar_t* exp_avg_sq_ptr,
+        scalar_t* grad_ptr,
+        scalar_t* max_exp_avg_sq_ptr,
+        double lr,
+        double bias_correction1,
+        double bias_correction2,
+        double exp_avg_grad_coefficient,
+        double exp_avg_sq_grad_coefficient,
+        double bias_correction2_sqrt,
+        double eps,
+        double weight_decay,
+        double beta2,
+        bool amsgrad,
+        bool maximize,
+        const float* grad_scale_ptr,
+        int64_t size) {
   double step_size = lr / bias_correction1;
   using Vec = at::vec::Vectorized<scalar_t>;
   int64_t d = 0;
@@ -189,8 +182,9 @@ typename std::enable_if<
       Vec grad_vec_to_store = grad_vec;
       grad_vec_to_store.store(grad_ptr + d);
     }
-    if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
-    if (weight_decay != 0.f){
+    if (maximize)
+      grad_vec = grad_vec * Vec(scalar_t(-1.0));
+    if (weight_decay != 0.f) {
       if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
         grad_vec += param_vec * Vec(scalar_t(weight_decay));
       } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
@@ -216,10 +210,12 @@ typename std::enable_if<
           maximum(Vec::loadu(max_exp_avg_sq_ptr + d), exp_avg_sq_vec);
       max_exp_avg_sq_vec.store(max_exp_avg_sq_ptr + d);
       denom_vec =
-          (max_exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) + Vec(scalar_t(eps));
+          (max_exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) +
+          Vec(scalar_t(eps));
     } else {
       denom_vec =
-          (exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) + Vec(scalar_t(eps));
+          (exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) +
+          Vec(scalar_t(eps));
     }
     param_vec = param_vec + Vec(scalar_t(-step_size)) * exp_avg_vec / denom_vec;
     param_vec.store(param_ptr + d);
@@ -230,8 +226,9 @@ typename std::enable_if<
       grad_val = grad_ptr[d] / scalar_t(*grad_scale_ptr);
       grad_ptr[d] = grad_val;
     }
-    if (maximize) grad_val = -grad_val;
-    if (weight_decay != 0.f){
+    if (maximize)
+      grad_val = -grad_val;
+    if (weight_decay != 0.f) {
       if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
         grad_val += param_ptr[d] * scalar_t(weight_decay);
       } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
@@ -239,11 +236,15 @@ typename std::enable_if<
       }
     }
     // exp_avg.lerp_(grad, 1 - beta1)
-    auto is_lerp_weight_small = std::abs(scalar_t(exp_avg_grad_coefficient)) < scalar_t(0.5);
+    auto is_lerp_weight_small =
+        std::abs(scalar_t(exp_avg_grad_coefficient)) < scalar_t(0.5);
     if (is_lerp_weight_small) {
-      exp_avg_ptr[d] = exp_avg_ptr[d] + scalar_t(exp_avg_grad_coefficient) * (grad_val - exp_avg_ptr[d]);
+      exp_avg_ptr[d] = exp_avg_ptr[d] +
+          scalar_t(exp_avg_grad_coefficient) * (grad_val - exp_avg_ptr[d]);
     } else {
-      exp_avg_ptr[d] = grad_val - (grad_val - exp_avg_ptr[d]) * (scalar_t(1) - scalar_t(exp_avg_grad_coefficient));
+      exp_avg_ptr[d] = grad_val -
+          (grad_val - exp_avg_ptr[d]) *
+              (scalar_t(1) - scalar_t(exp_avg_grad_coefficient));
     }
     exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] * scalar_t(beta2);
     exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] +
@@ -253,14 +254,17 @@ typename std::enable_if<
       max_exp_avg_sq_ptr[d] =
           std::max(max_exp_avg_sq_ptr[d], exp_avg_sq_ptr[d]);
       demon_val =
-          std::sqrt(max_exp_avg_sq_ptr[d]) / scalar_t(bias_correction2_sqrt) + scalar_t(eps);
+          std::sqrt(max_exp_avg_sq_ptr[d]) / scalar_t(bias_correction2_sqrt) +
+          scalar_t(eps);
     } else {
-      demon_val = std::sqrt(exp_avg_sq_ptr[d]) / scalar_t(bias_correction2_sqrt) + scalar_t(eps);
+      demon_val =
+          std::sqrt(exp_avg_sq_ptr[d]) / scalar_t(bias_correction2_sqrt) +
+          scalar_t(eps);
     }
-    param_ptr[d] = param_ptr[d] - scalar_t(step_size) * exp_avg_ptr[d] / demon_val;
+    param_ptr[d] =
+        param_ptr[d] - scalar_t(step_size) * exp_avg_ptr[d] / demon_val;
   }
 }
-
 
 template <typename scalar_t, ADAM_MODE adam_mode>
 void adam_fused_step_impl(

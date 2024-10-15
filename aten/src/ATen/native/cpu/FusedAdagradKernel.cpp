@@ -12,52 +12,54 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline adagrad_math(
-  scalar_t* param_ptr,
-  scalar_t* grad_ptr,
-  scalar_t* state_sum_ptr,
-  const double clr,
-  const double eps,
-  const double weight_decay,
-  const bool maximize,
-  const float* grad_scale_ptr,
-  int64_t size
-){
+typename std::
+    enable_if_t<std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>, void> inline adagrad_math(
+        scalar_t* param_ptr,
+        scalar_t* grad_ptr,
+        scalar_t* state_sum_ptr,
+        const double clr,
+        const double eps,
+        const double weight_decay,
+        const bool maximize,
+        const float* grad_scale_ptr,
+        int64_t size) {
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
   int64_t d = 0;
   for (; d < size - (size % lpVec::size()); d += lpVec::size()) {
     lpVec param_lpvec = lpVec::loadu(param_ptr + d);
-    auto [param_vec1, param_vec2] = vec::convert_to_float<scalar_t>(param_lpvec);
+    auto [param_vec1, param_vec2] =
+        vec::convert_to_float<scalar_t>(param_lpvec);
     lpVec grad_lpvec = lpVec::loadu(grad_ptr + d);
     auto [grad_vec1, grad_vec2] = vec::convert_to_float<scalar_t>(grad_lpvec);
     if (grad_scale_ptr) {
       grad_vec1 = grad_vec1 / fVec(float(*grad_scale_ptr));
       grad_vec2 = grad_vec2 / fVec(float(*grad_scale_ptr));
-      lpVec grad_vec_to_store = vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
+      lpVec grad_vec_to_store =
+          vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
       grad_vec_to_store.store(grad_ptr + d);
     }
-    if (maximize){
+    if (maximize) {
       grad_vec1 = grad_vec1 * fVec(opmath_t(-1.0));
       grad_vec2 = grad_vec2 * fVec(opmath_t(-1.0));
     }
-    if (weight_decay != 0.0){
+    if (weight_decay != 0.0) {
       grad_vec1 += param_vec1 * fVec(scalar_t(weight_decay));
       grad_vec2 += param_vec2 * fVec(scalar_t(weight_decay));
     }
-    auto [state_sum_vec1, state_sum_vec2] = vec::convert_to_float<scalar_t>(lpVec::loadu(state_sum_ptr + d));
+    auto [state_sum_vec1, state_sum_vec2] =
+        vec::convert_to_float<scalar_t>(lpVec::loadu(state_sum_ptr + d));
     state_sum_vec1 += grad_vec1 * grad_vec1;
     state_sum_vec2 += grad_vec2 * grad_vec2;
-    vec::convert_from_float<scalar_t>(state_sum_vec1, state_sum_vec2).store(state_sum_ptr + d);
+    vec::convert_from_float<scalar_t>(state_sum_vec1, state_sum_vec2)
+        .store(state_sum_ptr + d);
 
     fVec std_vec1 = state_sum_vec1.sqrt() + fVec(scalar_t(eps));
     fVec std_vec2 = state_sum_vec2.sqrt() + fVec(scalar_t(eps));
     param_vec1 = param_vec1 - fVec(scalar_t(clr)) * grad_vec1 / std_vec1;
     param_vec2 = param_vec2 - fVec(scalar_t(clr)) * grad_vec2 / std_vec2;
-    vec::convert_from_float<scalar_t>(param_vec1, param_vec2).store(param_ptr + d);
+    vec::convert_from_float<scalar_t>(param_vec1, param_vec2)
+        .store(param_ptr + d);
   }
   for (; d < size; d++) {
     opmath_t grad_val = grad_ptr[d];
@@ -66,8 +68,9 @@ typename std::enable_if<
       grad_val = grad_ptr[d] / opmath_t(*grad_scale_ptr);
       grad_ptr[d] = grad_val;
     }
-    if (maximize) grad_val = -grad_val;
-    if (weight_decay != 0.0){
+    if (maximize)
+      grad_val = -grad_val;
+    if (weight_decay != 0.0) {
       grad_val += param_val * opmath_t(weight_decay);
     }
     opmath_t state_sum_val = state_sum_ptr[d];
@@ -79,22 +82,18 @@ typename std::enable_if<
   }
 }
 
-
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline adagrad_math(
-  scalar_t* param_ptr,
-  scalar_t* grad_ptr,
-  scalar_t* state_sum_ptr,
-  const double clr,
-  const double eps,
-  const double weight_decay,
-  const bool maximize,
-  const float* grad_scale_ptr,
-  int64_t size
-){
+typename std::
+    enable_if_t<std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>, void> inline adagrad_math(
+        scalar_t* param_ptr,
+        scalar_t* grad_ptr,
+        scalar_t* state_sum_ptr,
+        const double clr,
+        const double eps,
+        const double weight_decay,
+        const bool maximize,
+        const float* grad_scale_ptr,
+        int64_t size) {
   using Vec = at::vec::Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -105,8 +104,9 @@ typename std::enable_if<
       Vec grad_vec_to_store = grad_vec;
       grad_vec_to_store.store(grad_ptr + d);
     }
-    if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
-    if (weight_decay != 0.0){
+    if (maximize)
+      grad_vec = grad_vec * Vec(scalar_t(-1.0));
+    if (weight_decay != 0.0) {
       grad_vec += param_vec * Vec(scalar_t(weight_decay));
     }
 
@@ -125,8 +125,9 @@ typename std::enable_if<
       grad_val_to_store = grad_val;
       grad_ptr[d] = grad_val_to_store;
     }
-    if (maximize) grad_val = -grad_val;
-    if (weight_decay != 0.0){
+    if (maximize)
+      grad_val = -grad_val;
+    if (weight_decay != 0.0) {
       grad_val += param_ptr[d] * scalar_t(weight_decay);
     }
     state_sum_ptr[d] += grad_val * grad_val;
