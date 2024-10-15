@@ -65,6 +65,11 @@ if(NOT MSVC)
   target_compile_options_if_supported(test_api "-Wno-maybe-uninitialized")
   # gcc gives nonsensical warnings about variadic.h
   target_compile_options_if_supported(test_api "-Wno-unused-but-set-parameter")
+
+  # Add -Wno-error=nonnull for GCC 12+
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    target_compile_options_if_supported(test_api "-Wno-error=nonnull")
+  endif()
 endif()
 
 if(INSTALL_TEST)

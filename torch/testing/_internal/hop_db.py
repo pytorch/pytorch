@@ -11,6 +11,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
+from torch.testing._internal.common_device_type import onlyCUDA
 from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
@@ -244,6 +245,7 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
+        decorators=[onlyCUDA],
     ),
     OpInfo(
         name="flex_attention_backward",
@@ -262,5 +264,6 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
+        decorators=[onlyCUDA],
     )
 ]

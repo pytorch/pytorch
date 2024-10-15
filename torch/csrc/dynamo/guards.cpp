@@ -46,7 +46,8 @@
 
 // Manually create _PyTupleIterObject struct
 typedef struct {
-  PyObject_HEAD Py_ssize_t it_index;
+  PyObject_HEAD
+  Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
@@ -499,7 +500,8 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
@@ -616,7 +618,8 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
@@ -1463,8 +1466,8 @@ class DYNAMIC_INDICES : public LeafGuard {
     }
 
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodOneArg(
-        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    PyObject* call_result = PyObject_CallMethodObjArgs(
+        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);
@@ -3648,6 +3651,10 @@ PyObject* torch_c_dynamo_guards_init() {
   auto m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
+
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
 
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
