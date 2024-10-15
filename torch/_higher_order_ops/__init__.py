@@ -12,6 +12,7 @@ __all__ = [
     "cond",
     "scan",
     "while_loop",
+    "scan",
     "flex_attention",
     "flex_attention_backward",
     "hints_wrapper",
