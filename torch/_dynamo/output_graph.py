@@ -906,7 +906,7 @@ class OutputGraph:
         maybe_gm = self.local_scope.get("self")
         stolen_list_names = get_locals_to_steal(maybe_gm)
         if not stolen_list_names:
-            return []
+            return [], {}
 
         alias_insts = []
         needs_alias: Dict[str, List[VariableTracker]] = {}
@@ -941,7 +941,7 @@ class OutputGraph:
             needs_alias[stolen_name].append(x)
 
         visited = {}
-        updated_vars: Set[VariableTracker] = set()
+        overridden_sources: Dict[Source, Source] = {}
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
@@ -954,9 +954,8 @@ class OutputGraph:
             list_name = arg.source.local_name
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
-                # We need this check because we update `VariableTracker.source`
-                # below, which could wipe the original `GetItemSource`.
-                if x in updated_vars:
+                # Skip if already handled.
+                if x.source in overridden_sources:
                     continue
 
                 # A small codegen optimization because we might have different
@@ -979,9 +978,14 @@ class OutputGraph:
                     )
 
                 # operate on alias, handled by suffix codegen
-                x.source = LocalSource(visited[list_idx])
-                updated_vars.add(x)
-        return alias_insts
+                old_source = x.source
+                overridden_sources[old_source] = LocalSource(visited[list_idx])
+
+        # NOTE: we need `overridden_sources` because (1) we want to codegen for
+        # these list items to use the new local source, but (2) we want to avoid
+        # updating `source` in place because that might break invariants in
+        # other parts of Dynamo like guards.
+        return alias_insts, overridden_sources
 
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
@@ -1023,7 +1027,8 @@ class OutputGraph:
             self.pregraph_bytecode and self.export
         ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
-        prefix_insts.extend(self.handle_aliases_for_stolen_lists(tx))
+        alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(tx)
+        prefix_insts.extend(alias_insts)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1091,7 +1096,7 @@ class OutputGraph:
             self.random_values_var = self.new_var("random_values")
             rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
-            codegen = PyCodegen(tx, root)
+            codegen = PyCodegen(tx, root, overridden_sources=overridden_sources)
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
@@ -1129,11 +1134,18 @@ class OutputGraph:
             )
             # restore all the live local vars
             self.add_output_instructions(
-                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+                [
+                    PyCodegen(tx, overridden_sources=overridden_sources).create_store(
+                        var
+                    )
+                    for var in reversed(restore_vars)
+                ]
             )
         else:
             graph_output_var = self.new_var("graph_out")
-            pass1 = PyCodegen(tx, root, graph_output_var)
+            pass1 = PyCodegen(
+                tx, root, graph_output_var, overridden_sources=overridden_sources
+            )
             self.codegen_suffix(tx, stack_values, pass1)
 
             # one more time now that we have established tempvars
@@ -1142,6 +1154,7 @@ class OutputGraph:
                 root,
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+                overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values, pass2)
 
@@ -1166,12 +1179,21 @@ class OutputGraph:
 
             # restore all the live local vars
             self.add_output_instructions(
-                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+                [
+                    PyCodegen(tx, overridden_sources=overridden_sources).create_store(
+                        var
+                    )
+                    for var in reversed(restore_vars)
+                ]
             )
 
             if stored_graph_output_var:
                 self.add_output_instructions(
-                    [PyCodegen(tx).create_delete(graph_output_var)]
+                    [
+                        PyCodegen(
+                            tx, overridden_sources=overridden_sources
+                        ).create_delete(graph_output_var)
+                    ]
                 )
 
     def codegen_suffix(self, tx, stack_values, cg):
