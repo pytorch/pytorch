@@ -217,7 +217,7 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
-    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
+    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) { \
       return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
     });                                                                                                          \
   }
@@ -243,7 +243,7 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) {
+  mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
 #ifdef __MAC_15_0
     if (@available(macOS 15.0, *)) {
       return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
