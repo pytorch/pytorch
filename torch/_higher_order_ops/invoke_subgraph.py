@@ -8,14 +8,11 @@ from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _from_fun,
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     clone_outputs_aliasing_inputs,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
-    UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -223,23 +220,9 @@ def invoke_subgraph_autograd(subgraph, identifier, operands):
 def invoke_subgraph_func(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
     with ctx.redispatch_to_next() as m:
-        # TODO(anijain2305) - Long term, it might be a bit restrictive to ban
-        # mutation/aliasing. Investigate if there is a way to support this.
-        # TODO(anijain2305) - Short term, improve compilation time by
-        # skipping this check if the identifier has been seen before.
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        if _has_potential_branch_input_mutation(
-            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "One of invoke_subgraph hop might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "One of invoke_subgraph hop might be aliasing the input!"
-            )
+        # NB: There is an assumption that subgraph does not mutate inputs and
+        # there is no aliasing. Its Dynamo responsibility to prevent formation
+        # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = ctx.functionalize(subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
