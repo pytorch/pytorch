@@ -138,6 +138,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "CUDADeviceAllocator requires CUDA. ", CUDA_HELP);
   }
 
+  Allocator* getDeviceAllocator() const override {
+    return getCUDADeviceAllocator();
+  }
+
   virtual bool compiledWithCuDNN() const {
     return false;
   }
