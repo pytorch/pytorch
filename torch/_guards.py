@@ -570,6 +570,55 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
+# TODO - Use abc to make this an abstract base class
+class HopSubgraphCache:
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        raise NotImplementedError
+
+    def get_autograd_key_entry(self, identifier: str):
+        raise NotImplementedError
+
+    def add_functional_tensor_entry(self, identifier: str, key: bool):
+        raise NotImplementedError
+
+    def get_functional_tensor_entry(self, identifier: str):
+        raise NotImplementedError
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: Dict[str, Callable] = {}
+        self.functional_tensor_cache: Dict[str, bool] = {}
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_functional_tensor_entry(self, identifier: str, key: bool):
+        # key ignored
+        self.functional_tensor_cache[identifier] = True
+
+    def get_functional_tensor_entry(self, identifier: str):
+        return self.functional_tensor_cache.get(identifier, False)
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
+
+
 _TLS = threading.local()
 
 """
@@ -686,6 +735,7 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`

@@ -51,6 +51,13 @@ invoke_subgraph.tags = ()  # type: ignore[attr-defined]
 invoke_subgraph.is_view = False  # type: ignore[attr-defined]
 
 
+def get_invoke_subgraph_cache():
+    cache = None
+    if tracing_ctx := torch._guards.TracingContext.try_get():
+        cache = tracing_ctx.hop_dispatch_set_cache.get_cache(invoke_subgraph)
+    return cache
+
+
 def create_invoke_subgraph_op(subgraph, operands):
     # Helper to set the identifier for the invoke_subgraph op. We ensure that
     # each identifier is different here. Its torch.compile responsibility to
@@ -190,11 +197,26 @@ def invoke_subgraph_autograd(subgraph, identifier, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, operands)
 
+    # Check if we have already traced the subgraph.
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    if invoke_subgraph_cache:
+        if saved_autograd_fn := invoke_subgraph_cache.get_autograd_key_entry(
+            identifier
+        ):
+            return saved_autograd_fn(*operands)
+
     fw_graph, bw_graph, num_fw_outs = create_fw_bw_graph(subgraph, operands)
-    # TODO(anijain2305) - Implement caching of autograd function op.
-    return InvokeSubgraphAutogradOp.apply(
-        fw_graph, bw_graph, identifier, num_fw_outs, *operands
-    )
+
+    def autograd_fn_callable(*args):
+        return InvokeSubgraphAutogradOp.apply(
+            fw_graph, bw_graph, identifier, num_fw_outs, *args
+        )
+
+    # Save the autograd_fn_callable in the dispatch set cache.
+    if invoke_subgraph_cache:
+        invoke_subgraph_cache.add_autograd_key_entry(identifier, autograd_fn_callable)
+
+    return autograd_fn_callable(*operands)
 
 
 @invoke_subgraph.py_functionalize_impl
@@ -203,21 +225,28 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
     with ctx.redispatch_to_next() as m:
         # TODO(anijain2305) - Long term, it might be a bit restrictive to ban
         # mutation/aliasing. Investigate if there is a way to support this.
-        # TODO(anijain2305) - Short term, improve compilation time by
-        # skipping this check if the identifier has been seen before.
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        if _has_potential_branch_input_mutation(
-            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "One of invoke_subgraph hop might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "One of invoke_subgraph hop might be aliasing the input!"
-            )
+        skip_check = False
+        invoke_subgraph_cache = get_invoke_subgraph_cache()
+        if invoke_subgraph_cache:
+            if invoke_subgraph_cache.get_functional_tensor_entry(identifier):
+                skip_check = True
+
+        if not skip_check:
+            pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+            if _has_potential_branch_input_mutation(
+                subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
+                raise UnsupportedAliasMutationException(
+                    "One of invoke_subgraph hop might be modifying the input!"
+                )
+            if _has_potential_branch_input_alias(
+                subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
+                raise UnsupportedAliasMutationException(
+                    "One of invoke_subgraph hop might be aliasing the input!"
+                )
+            if invoke_subgraph_cache:
+                invoke_subgraph_cache.add_functional_tensor_entry(identifier, True)
 
         functionalized_subgraph = ctx.functionalize(subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
