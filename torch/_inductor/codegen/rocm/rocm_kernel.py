@@ -218,7 +218,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
