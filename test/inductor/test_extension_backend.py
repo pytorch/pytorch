@@ -54,9 +54,7 @@ class BaseExtensionBackendTests(TestCase):
     module = None
 
     # Use a lock file so that only one test can build this extension at a time
-    lock_file = os.path.join(
-        torch.utils.cpp_extension.get_default_build_root(), "extension_device.lock"
-    )
+    lock_file = "extension_device.lock"
     lock = FileLock(lock_file)
 
     @classmethod
@@ -90,6 +88,9 @@ class BaseExtensionBackendTests(TestCase):
         super().tearDownClass()
 
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+        if os.path.exists(cls.lock_file):
+            os.remove(cls.lock_file)
         cls.lock.release()
 
     def setUp(self):
