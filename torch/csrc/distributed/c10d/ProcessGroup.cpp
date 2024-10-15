@@ -1,5 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGraph.h>
 #endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
