@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -646,58 +647,30 @@ class TritonPrinter(PythonPrinter):
 
 texpr = TritonPrinter().doprint
 
-
-def triton_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2fnuz":
-        triton_type_name = "float8e5b16"
-    return f"tl.{triton_type_name}"
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_triton_type_re = re.compile(r"^.*[.]")
 
 
-def triton_compute_type(dtype):
-    if config.triton.codegen_upcast_to_fp32 and dtype in (torch.float16, torch.float32):
-        dtype = torch.float32
-    return triton_type(dtype)
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
 
 
-def _get_primitive_bitwidth(dtype):
-    if hasattr(dtype, "is_floating_point"):
-        if dtype.is_floating_point:
-            # triton_compute_type changes the bitwidth
-            if (
-                dtype in [torch.bfloat16, torch.float16]
-                and config.triton.codegen_upcast_to_fp32
-            ):
-                return 32
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
-    else:
-        return -1
+def triton_compute_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
+    return triton_type(upcast_compute_type(dtype))
 
 
-def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
-
-
-def acc_dtype(dtype: torch.dtype) -> torch.dtype:
-    if is_integer_dtype(dtype) and dtype.is_signed and dtype.itemsize <= 4:
-        return torch.int32
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
     if config.triton.codegen_upcast_to_fp32 and (
         dtype == torch.float16 or dtype == torch.bfloat16
     ):
@@ -705,8 +678,33 @@ def acc_dtype(dtype: torch.dtype) -> torch.dtype:
     return dtype
 
 
-def triton_acc_type(dtype):
-    return triton_compute_type(acc_dtype(dtype))
+def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
+    """Number of bits of triton_compute_type()"""
+    dtype = upcast_compute_type(dtype)
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize:
+        return itemsize * 8
+    else:
+        return -1
+
+
+def triton_store_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with fix for storing tl.bool"""
+    if dtype == torch.bool:
+        dtype = torch.int8
+    return triton_type(dtype)
+
+
+def upcast_acc_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Implicit upcasts used for Triton reduction types"""
+    if is_integer_dtype(dtype) and dtype.is_signed and dtype.itemsize <= 4:
+        return torch.int32
+    return upcast_compute_type(dtype)
+
+
+def triton_acc_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with reduction upcasts"""
+    return triton_compute_type(upcast_acc_dtype(dtype))
 
 
 class TritonCSEVariable(CSEVariable):
@@ -1358,11 +1356,13 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
+        override_cooperative_reduction=None,
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        self.cooperative_reduction = (
+        self.cooperative_reduction = override_cooperative_reduction or (
             not override_persistent_reduction
+            and override_cooperative_reduction is None
             and self.should_use_cooperative_reduction(groups)
         )
         if self.cooperative_reduction:
@@ -2376,13 +2376,13 @@ class TritonKernel(SIMDKernel):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, acc_dtype(src_dtype)
+                    result_mean, upcast_acc_dtype(src_dtype)
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, acc_dtype(src_dtype)
+                    result_m2, upcast_acc_dtype(src_dtype)
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, acc_dtype(src_dtype)
+                    result_weight, upcast_acc_dtype(src_dtype)
                 )
                 assert dim == 1
                 self.welford_reduce_final_reduction(
@@ -2397,7 +2397,7 @@ class TritonKernel(SIMDKernel):
                 )
             else:
                 peers = self.codegen_cooperative_reduction_peer_combine(
-                    result_var, acc_dtype(src_dtype)
+                    result_var, upcast_acc_dtype(src_dtype)
                 )
                 self.post_loop_store.writeline(
                     f"{result_var} = {final_reduction(peers)}"
