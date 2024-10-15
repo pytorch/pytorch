@@ -444,6 +444,64 @@ class NullLine(MemoryPlanningLine):
     pass
 
 
+@dataclasses.dataclass
+class CommBufferAllocateLine(WrapperLine):
+    wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
+    node: ir.Buffer
+    comm_buffer_type: str
+
+    @property
+    def size(self):
+        numel = self.node.get_numel()
+        dtype = self.node.get_dtype()
+        return numel * dtype.itemsize
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError
+
+
+@dataclasses.dataclass
+class SymmMemAllocateLine(CommBufferAllocateLine):
+    def __init__(self, wrapper, node):
+        super().__init__(wrapper, node, "symm_mem")
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        assert self.node.get_name() not in V.graph.removed_buffers
+        name = self.node.get_name()
+        device = self.node.get_device()
+        dtype = self.node.get_dtype()
+        shape = tuple(self.node.get_size())
+        stride = tuple(self.node.get_stride())
+        code.writeline(
+            self.make_allocation_line(self.wrapper, name, device, dtype, shape, stride)
+        )
+
+    @staticmethod
+    def make_allocation_line(wrapper, name, device, dtype, shape, stride):
+        import random
+
+        return (
+            f"{name} = empty_strided_p2p("
+            f"{wrapper.codegen_shape_tuple(shape)}, "
+            f"{wrapper.codegen_shape_tuple(stride)}, "
+            f"{dtype}, "
+            f'torch.device("cuda:{device.index}"), '
+            f'group_name="0", '
+            f"alloc_id={random.randint(0, 2**64 - 1)})"
+        )
+
+
+@dataclasses.dataclass
+class CommBufferFreeLine(WrapperLine):
+    wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
+    node: ir.Buffer
+    comm_buffer_type: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        line = self.wrapper.make_buffer_free(self.node)
+        code.writeline(f"{line} # {self.comm_buffer_type} buffer free")
+
+
 BufferName = str
 
 
@@ -580,6 +638,13 @@ class PythonWrapperCodegen(CodeGen):
             """,
             strip=True,
         )
+        if "symm_mem" in V.graph.comm_buffer_type.values():
+            self.header.splice(
+                """
+                empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+                """,
+                strip=True,
+            )
 
     def include_extra_header(self, header: str):
         pass
@@ -1879,6 +1944,19 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    def codegen_comm_buffer_allocation(self, name, buffer):
+        comm_buffer_type = V.graph.comm_buffer_type[name]
+        if comm_buffer_type == "symm_mem":
+            self.writeline(SymmMemAllocateLine(self, buffer))
+        else:
+            raise NotImplementedError(
+                "Unsupported comm buffer type: {comm_buffer_type}"
+            )
+
+    def codegen_comm_buffer_free(self, name, buffer):
+        comm_buffer_type = V.graph.comm_buffer_type[name]
+        self.writeline(CommBufferFreeLine(self, buffer, comm_buffer_type))
+
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
@@ -1904,6 +1982,10 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
             self.codegen_deferred_allocation(name, layout)
+            return
+
+        if name in V.graph.comm_buffer_type:
+            self.codegen_comm_buffer_allocation(name, buffer)
             return
 
         self.writeline(AllocateLine(self, buffer))

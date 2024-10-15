@@ -464,6 +464,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
+        self.comm_buffer_type: Dict[str, str] = {}
+
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
     ) -> bool:
@@ -1115,6 +1117,10 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
+            elif r.get_name() in self.comm_buffer_type:
+                # Active references to persistent comm buffers are not allowed
+                # outside of graphs
+                result_correct_strides.append(ir.ExternKernel.copy_input(r))
             else:
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as

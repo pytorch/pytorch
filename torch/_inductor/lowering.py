@@ -6412,29 +6412,7 @@ try:
 
     _c10d_functional = torch.ops._c10d_functional
 
-    @register_lowering(_c10d_functional.all_reduce)
-    def _all_reduce(inp, reduce_op, group_name):
-        inp = clone(inp)
-        if config.reorder_for_compute_comm_overlap:
-            # The horizontal fusion of this clone often severely delays the
-            # scheduling of the all_reduce_ node. Horizontally fusing this
-            # clone can almost never out-perform scheduling the all_reduce_
-            # earlier. Also in most cases, this clone is eliminated via
-            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
-            inp.realize()
-            V.graph.no_fuse_buffer_names.add(inp.get_name())
-        inp = ir.ExternKernel.require_contiguous(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_)
-    def _all_reduce_(inp, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
+    from .comm_lowering import *  # noqa: F401, F403
 
     @register_lowering(_c10d_functional.all_reduce_coalesced)
     def _all_reduce_coalesced(inputs, reduce_op, group_name):
@@ -6541,11 +6519,6 @@ try:
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.broadcast_.default, inp, src, group_name
         )
-        return inp
-
-    @register_lowering(_c10d_functional.wait_tensor)
-    def _wait_tensor(inp):
-        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 
     @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
