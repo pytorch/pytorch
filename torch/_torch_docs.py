@@ -193,7 +193,7 @@ sparse_support_notes = {
 add_docstr(
     torch.abs,
     r"""
-abs(input, *, out=None) -> Tensor
+abs(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Computes the absolute value of each element in :attr:`input`.
 
@@ -217,7 +217,7 @@ Example::
 add_docstr(
     torch.absolute,
     r"""
-absolute(input, *, out=None) -> Tensor
+absolute(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.abs`
 """,
@@ -226,7 +226,7 @@ Alias for :func:`torch.abs`
 add_docstr(
     torch.acos,
     r"""
-acos(input, *, out=None) -> Tensor
+acos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Computes the inverse cosine of each element in :attr:`input`.
 
@@ -253,7 +253,7 @@ Example::
 add_docstr(
     torch.arccos,
     r"""
-arccos(input, *, out=None) -> Tensor
+arccos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acos`.
 """,
@@ -262,7 +262,7 @@ Alias for :func:`torch.acos`.
 add_docstr(
     torch.acosh,
     r"""
-acosh(input, *, out=None) -> Tensor
+acosh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
@@ -293,7 +293,7 @@ Example::
 add_docstr(
     torch.arccosh,
     r"""
-arccosh(input, *, out=None) -> Tensor
+arccosh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acosh`.
 """,
@@ -302,7 +302,7 @@ Alias for :func:`torch.acosh`.
 add_docstr(
     torch.index_add,
     r"""
-index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
+index_add(input: Tensor, dim: _int, index: Tensor, source: Tensor, *, alpha: Union[Number, _complex] = 1, out: Optional[Tensor]) -> Tensor
 
 See :meth:`~Tensor.index_add_` for function description.
 """,
@@ -998,7 +998,7 @@ Example::
 add_docstr(
     torch.asin,
     r"""
-asin(input, *, out=None) -> Tensor
+asin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the arcsine of the elements of :attr:`input`.
 
@@ -1034,7 +1034,7 @@ Alias for :func:`torch.asin`.
 add_docstr(
     torch.asinh,
     r"""
-asinh(input, *, out=None) -> Tensor
+asinh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic sine of the elements of :attr:`input`.
 
@@ -1542,7 +1542,7 @@ Example::
 add_docstr(
     torch.bitwise_or,
     r"""
-bitwise_or(input, other, *, out=None) -> Tensor
+bitwise_or(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical OR.
@@ -5885,7 +5885,7 @@ Example::
 add_docstr(
     torch.log10,
     r"""
-log10(input, *, out=None) -> Tensor
+log10(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the logarithm to the base 10 of the elements
 of :attr:`input`.
@@ -5947,7 +5947,7 @@ Example::
 add_docstr(
     torch.log2,
     r"""
-log2(input, *, out=None) -> Tensor
+log2(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the logarithm to the base 2 of the elements
 of :attr:`input`.
@@ -6132,7 +6132,7 @@ Example::
 add_docstr(
     torch.logical_xor,
     r"""
-logical_xor(input, other, *, out=None) -> Tensor
+logical_xor(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
 treated as ``True``.
@@ -8190,7 +8190,7 @@ Example::
 add_docstr(
     torch.numel,
     r"""
-numel(input) -> int
+numel(input: Tensor) -> int
 
 Returns the total number of elements in the :attr:`input` tensor.
 
@@ -8529,7 +8529,7 @@ Example::
 add_docstr(
     torch.prod,
     r"""
-prod(input, *, dtype=None) -> Tensor
+prod(input: Tensor, *, dtype: Optional[_dtype]) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
@@ -8602,7 +8602,7 @@ Example::
 add_docstr(
     torch.qr,
     r"""
-qr(input, some=True, *, out=None) -> (Tensor, Tensor)
+qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
 and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
@@ -8686,7 +8686,7 @@ Example::
 add_docstr(
     torch.rad2deg,
     r"""
-rad2deg(input, *, out=None) -> Tensor
+rad2deg(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input`
 converted from angles in radians to degrees.
@@ -9872,7 +9872,7 @@ Example::
 add_docstr(
     torch.msort,
     r"""
-msort(input, *, out=None) -> Tensor
+msort(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Sorts the elements of the :attr:`input` tensor along its first dimension
 in ascending order by value.
@@ -10355,7 +10355,7 @@ Example::
 add_docstr(
     torch.square,
     r"""
-square(input, *, out=None) -> Tensor
+square(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Returns a new tensor with the square of the elements of :attr:`input`.
 
@@ -12608,7 +12608,7 @@ Example::
 add_docstr(
     torch.combinations,
     r"""
-combinations(input, r=2, with_replacement=False) -> seq
+combinations(input: Tensor, r: int = 2, with_replacement: bool = False) -> seq
 
 Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
 python's `itertools.combinations` when `with_replacement` is set to `False`, and
