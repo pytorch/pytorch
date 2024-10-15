@@ -53,6 +53,21 @@ extern "C" {
 
 #endif
 
+// e.g. INSPECT(obj1, obj2)
+// in order to inspect obj1, obj2 at the Python level, in pdb.
+// Alias for torch._dynamo.utils._breakpoint_for_c_dynamo(...)
+// WARNING: makes a Python function call! Make sure eval frame callback is unset!
+#define INSPECT(...) \
+  { \
+    PyObject *torch__dynamo_utils_module = PyImport_ImportModule("torch._dynamo.utils"); \
+    NULL_CHECK(torch__dynamo_utils_module); \
+    PyObject *breakpoint_for_c_dynamo_fn = PyObject_GetAttrString(torch__dynamo_utils_module, "_breakpoint_for_c_dynamo"); \
+    NULL_CHECK(breakpoint_for_c_dynamo_fn); \
+    PyObject_CallFunctionObjArgs(breakpoint_for_c_dynamo_fn, __VA_ARGS__, NULL); \
+    Py_DECREF(breakpoint_for_c_dynamo_fn); \
+    Py_DECREF(torch__dynamo_utils_module); \
+  }
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
