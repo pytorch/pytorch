@@ -1164,7 +1164,7 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<at::Tensor,::std::vector<at::Tensor>>",
     "::std::vector<at::Tensor>",
     # for cslt_sparse_mm_search
-    "::std::tuple<int64_t,int64_t,bool>",
+    "::std::tuple<int64_t,int64_t,bool,int64_t>",
     # Needed for flash attention forw/backward
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,c10::SymInt,c10::SymInt,at::Tensor,at::Tensor,at::Tensor>",
     "at::Scalar",

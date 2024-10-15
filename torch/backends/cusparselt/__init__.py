@@ -25,6 +25,12 @@ if _cusparselt is not None:
         global __MAX_ALG_ID
         if __cusparselt_version is None:
             __cusparselt_version = _cusparselt.getVersionInt()
+
+            # only way to get MAX_ALG_ID is to run a matmul
+            A = torch.zeros(128, 128, dtype=torch.float16).cuda()
+            A = torch._cslt_compress(A)
+            B = torch.zeros(128, 128, dtype=torch.float16).cuda()
+            _, _, _, __MAX_ALG_ID = torch._cslt_sparse_mm_search(A, B)
             if __cusparselt_version == 400:
                 __MAX_ALG_ID = 4
             elif __cusparselt_version == 502:

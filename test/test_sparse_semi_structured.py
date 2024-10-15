@@ -191,7 +191,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = nn.Linear(128, 256)
+                self.linear = nn.Linear(128, 128)
 
             def forward(self, x):
                 x = self.linear(x)
@@ -1155,7 +1155,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id, split_k, split_k_one_kernel = torch._cslt_sparse_mm_search(A_compressed, B.t())
+        alg_id, split_k, split_k_one_kernel, _ = torch._cslt_sparse_mm_search(A_compressed, B.t())
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
 
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
@@ -1170,7 +1170,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
+        alg_id, _, _, _= torch._cslt_sparse_mm_search(A_compressed, B.t())
         assert alg_id in range(torch.backends.cusparselt.get_max_alg_id())
 
     def test_cusparselt_backend(self):
@@ -1180,12 +1180,15 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 11.8 has cuSPARSELt v0.4.0 support
         if version == (11, 8):
             assert torch.backends.cusparselt.version() == 400
+            assert torch.backends.cusparselt.get_max_alg_id() == 4
         # CUDA 12.1 has cuSPARSELt v0.5.2 support
         elif version == (12, 1):
             assert torch.backends.cusparselt.version() == 502
+            assert torch.backends.cusparselt.get_max_alg_id() == 5
         # CUDA 12.4+ has cuSPARSELt v0.6.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
+            assert torch.backends.cusparselt.get_max_alg_id() == 37
         else:
             assert torch.backends.cusparselt.version() is None
 

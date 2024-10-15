@@ -103,7 +103,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<at::Tensor, int64_t, int64_t, bool> _cslt_sparse_mm_impl(
+std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -342,6 +342,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool> _cslt_sparse_mm_impl(
       &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
 
   cusparseLtSplitKMode_t splitKMode;
+  int max_alg_id;
   if (split_k != 1) {
      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
       &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K, &split_k, sizeof(split_k))); 
@@ -393,11 +394,10 @@ std::tuple<at::Tensor, int64_t, int64_t, bool> _cslt_sparse_mm_impl(
         &stream,
         1));
 
-    // get alg_id used
+    // get matmul params used
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
             
-    // get split-k parameters
     TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
                                        CUSPARSELT_MATMUL_SPLIT_K,
                                        &split_k, sizeof(split_k)));
@@ -405,6 +405,11 @@ std::tuple<at::Tensor, int64_t, int64_t, bool> _cslt_sparse_mm_impl(
     TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
                                        CUSPARSELT_MATMUL_SPLIT_K_MODE,
                                        &splitKMode, sizeof(splitKMode)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+                                       &max_alg_id, sizeof(max_alg_id)));
+
 
   }
   else {
@@ -433,7 +438,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool> _cslt_sparse_mm_impl(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
-  return {res, alg_id, split_k, splitKMode == CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL};
+  return {res, alg_id, split_k, splitKMode == CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL, max_alg_id};
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -462,7 +467,7 @@ at::Tensor _cslt_sparse_mm(
     return std::get<0>(result);
 }
 
-std::tuple<int64_t, int64_t, bool> _cslt_sparse_mm_search(
+std::tuple<int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -485,7 +490,7 @@ std::tuple<int64_t, int64_t, bool> _cslt_sparse_mm_search(
         split_k,
         split_k_one_kernel,
         true);
-    return {(int64_t) std::get<1>(result), (int64_t) std::get<2>(result), (bool) std::get<3>(result)};
+    return {(int64_t) std::get<1>(result), (int64_t) std::get<2>(result), (bool) std::get<3>(result), (int64_t) std::get<4>(result)};
 }
 
 

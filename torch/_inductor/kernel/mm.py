@@ -530,7 +530,7 @@ def tuned_sparse_semi_structured_mm(
 def tuned_cslt_sparse_mm(
     mat1_compressed, mat2, bias=None, alpha=None, out_dtype=None, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=False, layout=None
 ):
-    from torch._inductor.select_algorithm import realize_inputs
+    from torch._inductor.select_algorithm import realize_inputs, AlgorithmSelectorCache
     mat1_compressed, mat2 = realize_inputs(mat1_compressed, mat2)
     input_nodes = (mat1_compressed, mat2)
     k, n = mat2.get_size()
@@ -556,10 +556,8 @@ def tuned_cslt_sparse_mm(
         alpha = realize_inputs(alpha)
         input_nodes = input_nodes + (alpha, )
 
-    from torch._inductor.select_algorithm import AlgorithmSelectorCache
-
-    # alg_id search
-    searched_alg_id, searched_split_k, searched_split_k_one_kernel = torch._cslt_sparse_mm_search(
+    # cuSPARSELt alg_id search
+    searched_alg_id, searched_split_k, searched_split_k_one_kernel, _ = torch._cslt_sparse_mm_search(
         AlgorithmSelectorCache.benchmark_example_value(mat1_compressed),
         AlgorithmSelectorCache.benchmark_example_value(mat2),
         AlgorithmSelectorCache.benchmark_example_value(bias) if bias is not None else None,
@@ -568,21 +566,17 @@ def tuned_cslt_sparse_mm(
         transpose_result=transpose_result
     )
 
-    choices = []
-
-    option = aten__cslt_sparse_mm.bind(
-        input_nodes, layout, out_dtype=out_dtype, alg_id=searched_alg_id, split_k=searched_split_k, split_k_one_kernel=searched_split_k_one_kernel, transpose_result=transpose_result,
-    )
-    option.debug_extra=f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"
-    choices.append(option)
-
     baseline = aten__cslt_sparse_mm.bind(
         input_nodes, layout, out_dtype=out_dtype, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=transpose_result,
     )
     baseline.debug_extra=f"ALG_ID: 0 SPLIT_K: 1 SPLIT_K_ONE_KERNEL: True TRANSPOSE_RESULT: {transpose_result}"
-    choices.append(baseline)
-    
-    return autotune_select_algorithm("_cslt_sparse_mm", choices, input_nodes, layout)
+    searched = aten__cslt_sparse_mm.bind(
+        input_nodes, layout, out_dtype=out_dtype, alg_id=searched_alg_id, split_k=searched_split_k, split_k_one_kernel=searched_split_k_one_kernel, transpose_result=transpose_result,
+    )
+    searched.debug_extra=f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"
+    choices = [baseline, searched]
+
+    return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
