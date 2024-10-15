@@ -17,7 +17,7 @@ function install_cusparselt_062 {
 }
 
 function install_124 {
-  echo "Installing CUDA 12.4.1 and cuDNN 9.1 and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
+  echo "Installing CUDA 12.4.1 and cuDNN 9.5 and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
   # install CUDA 12.4.1 in the same container
   wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux_sbsa.run
@@ -28,10 +28,10 @@ function install_124 {
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   mkdir tmp_cudnn && cd tmp_cudnn
-  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-sbsa/cudnn-linux-sbsa-9.1.0.70_cuda12-archive.tar.xz -O cudnn-linux-sbsa-9.1.0.70_cuda12-archive.tar.xz
-  tar xf cudnn-linux-sbsa-9.1.0.70_cuda12-archive.tar.xz
-  cp -a cudnn-linux-sbsa-9.1.0.70_cuda12-archive/include/* /usr/local/cuda/include/
-  cp -a cudnn-linux-sbsa-9.1.0.70_cuda12-archive/lib/* /usr/local/cuda/lib64/
+  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-sbsa/cudnn-linux-sbsa-9.5.0.50_cuda12-archive.tar.xz -O cudnn-linux-sbsa-9.5.0.50_cuda12-archive.tar.xz
+  tar xf cudnn-linux-sbsa-9.5.0.50_cuda12-archive.tar.xz
+  cp -a cudnn-linux-sbsa-9.5.0.50_cuda12-archive/include/* /usr/local/cuda/include/
+  cp -a cudnn-linux-sbsa-9.5.0.50_cuda12-archive/lib/* /usr/local/cuda/lib64/
   cd ..
   rm -rf tmp_cudnn
 
