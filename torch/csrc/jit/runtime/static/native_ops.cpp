@@ -1175,7 +1175,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           p_node->Output(0) = future->value();
           return;
         }
-        auto& elems = future->value().toTupleRef().elements();
+        auto tuple_ref = future->value().toTupleRef();
+        auto& elems = tuple_ref.elements();
         TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
         for (const auto i : c10::irange(elems.size())) {
           p_node->Output(i) = elems[i];
