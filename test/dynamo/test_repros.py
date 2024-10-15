@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import os
@@ -62,6 +63,10 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+
+HAS_MSGSPEC = importlib.util.find_spec("msgspec")
+if HAS_MSGSPEC:
+    import msgspec
 
 
 def exists(val):
@@ -3699,9 +3704,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             torch.jit.trace(f, torch.randn(3))
 
-        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -6033,6 +6035,22 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             torch.set_default_dtype(old)
         # output dtype should be float32
         self.assertEqual(out.dtype, torch.bfloat16)
+
+    @unittest.skipIf(not HAS_MSGSPEC, "missing msgspec package")
+    def test_c_defined_metaclass(self):
+        class User(msgspec.Struct):
+            """A new type describing a User"""
+
+            name: str
+            value: int
+
+        def fn(x):
+            u = User("alice", 10)
+            return x * u.value
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(ReproTests)

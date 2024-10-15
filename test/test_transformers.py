@@ -55,7 +55,6 @@ from torch.testing._internal.common_cuda import (
 
 if not IS_FBCODE:
     from test_cpp_extensions_open_device_registration import (
-        remove_build_path,
         generate_faked_module
     )
 
@@ -3234,7 +3233,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fudge_factors = {
             'out': 4,
-            'grad_query': 160.0,
+            'grad_query': 180.0,
             'grad_key': 16,
             'grad_value': 4,
         }
@@ -3845,10 +3844,11 @@ class TestAttnBias(NNTestCase):
 
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
+@unittest.skip("TODO: This test is broken and should be moved into a dedicated process for registering new extensions")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[

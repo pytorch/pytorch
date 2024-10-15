@@ -312,11 +312,16 @@ def build_collectives(
             if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
                 print(
-                    f"Not all ranks joining collective {record_id} for group {pg_desc} collective {profiling_name} ",
+                    f"Not all ranks joining collective {collective_seq_id} at entry {record_id}",
+                    f" for group {pg_desc} collective {profiling_name} ",
                     f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                     f"\nCollective stack traces: \n{collective_frames}",
                 )
+                candidate_ranks.update(found_ranks)
+                candidate_idx.update(found_idx)
+                found_idx.clear()
+                found_ranks.clear()
             elif len(candidate_ranks) == 1:
                 # case two: alltoall or alltoall_base case.
                 if has_undecided_case:
@@ -334,8 +339,8 @@ def build_collectives(
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
                         print(
-                            f"Input/output mismatch in the collective {record_id} ",
-                            f"for group {pg_desc} collective {profiling_name} ",
+                            f"Input/output mismatch in the collective {collective_seq_id} ",
+                            f"at entry {record_id} for group {pg_desc} collective {profiling_name} ",
                             f"input_numel {input_numel} output_numel {output_numel} ",
                             f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                             f"\nCollective stack traces: \n{collective_frames}",
@@ -362,7 +367,8 @@ def build_collectives(
                     f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
                 )
                 print(
-                    f"Collective {record_id} errors for group {pg_desc} collective {profiling_name} ",
+                    f"Collective {collective_seq_id} at entry {record_id} errors",
+                    f" for group {pg_desc} collective {profiling_name} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                     f"\nFound errors: {error_msg}.\n",
                     f"\nCollective stack traces: \n{collective_frames} ",

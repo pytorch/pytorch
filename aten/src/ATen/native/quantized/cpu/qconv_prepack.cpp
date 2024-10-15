@@ -343,6 +343,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
       "stride should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
   TORCH_CHECK(
+      std::all_of(stride.begin(), stride.end(), [](bool s) { return s > 0; }),
+      "quantized::conv_prepack: stride should be positive.");
+  TORCH_CHECK(
       padding.size() == kSpatialDim,
       "Specify front/top/left padding only. "
       "end/bottom/right padding assumed to be equal to front/top/left");
