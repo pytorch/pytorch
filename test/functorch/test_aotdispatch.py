@@ -6220,12 +6220,14 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_rrelu_noise_mutation(self):
         def fn(x):
-            # 0.
-            # noise = torch.ones_like(x)
-            # result = torch._C._nn.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+            # 0. non-functional op
+            noise = torch.ones_like(x)
+            result = torch._C._nn.rrelu_with_noise(x, noise, 0.2, 0.8, True)
 
             # 1. functional op
-            result, noise = torch.ops.aten._rrelu_with_noise_functional(x, 0.2, 0.8, True)
+            # result, noise = torch.ops.aten._rrelu_with_noise_functional(
+            #     x, 0.2, 0.8, True
+            # )
 
             return result, noise
 

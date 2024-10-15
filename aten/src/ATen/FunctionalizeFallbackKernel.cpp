@@ -23,6 +23,7 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_rrelu_with_noise.h>
 
 #include <utility>
 #endif
@@ -346,6 +347,50 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   return self;
 }
 
+static
+at::Tensor
+rrelu_with_noise_functionalize(
+    const at::Tensor & input,
+    const at::Tensor & noise,
+    const at::Scalar & lower,
+    const at::Scalar & upper,
+    bool training,
+    std::optional<at::Generator> generator) {
+
+      at::Tensor input_;
+      if (at::functionalization::impl::isFunctionalTensor(input)) {
+        at::functionalization::impl::sync(input);
+        input_ = at::functionalization::impl::from_functional_tensor(input);
+      } else {
+        input_ = input;
+      }
+
+      at::Tensor noise_;
+      if (at::functionalization::impl::isFunctionalTensor(noise)) {
+        at::functionalization::impl::sync(noise);
+        noise_ = at::functionalization::impl::from_functional_tensor(noise);
+      } else {
+        noise_ = noise;
+      }
+
+      std::tuple<at::Tensor,at::Tensor> tmp_output;
+      {
+        at::AutoDispatchSkipFunctionalize guard;
+        tmp_output = at::_rrelu_with_noise_functional(input_, lower, upper, training, std::move(generator));
+      }
+      auto output = at::functionalization::impl::to_functional_tensor(std::get<0>(tmp_output));
+
+      auto noise_inner = at::functionalization::impl::from_functional_tensor(noise);
+      at::functionalization::impl::replace_(noise, std::get<1>(tmp_output));
+      at::functionalization::impl::commit_update(noise);
+      at::functionalization::impl::sync(noise);
+
+      auto noise_inner_updated = at::functionalization::impl::from_functional_tensor(noise);
+      at::functionalization::impl::propagate_xla_data_direct(noise_inner, noise_inner_updated);
+
+      return output;
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -360,4 +405,5 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   // The overloads of set_() that take in a storage should never
   // appear with torch.compile, because dynamo graph breaks
   m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
+  m.impl("rrelu_with_noise", TORCH_FN(rrelu_with_noise_functionalize));
 }

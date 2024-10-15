@@ -11953,7 +11953,7 @@
     CPU: rrelu_with_noise_out_cpu
     CUDA: rrelu_with_noise_out_cuda
 
-- func: rrelu_with_noise(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
