@@ -801,6 +801,10 @@ def proxy_call(
             if r is not NotImplemented:
                 return r
 
+    if func is torch.ops.aten.is_nonzero.default:
+        with proxy_mode:
+            return (args[0] != 0).item()  # type: ignore[attr-defined]
+
     tracer = proxy_mode.tracer
     f_flat_args_kwargs = [
         (
@@ -2202,7 +2206,14 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
+    from torch._inductor.bisect_helper import BisectionManager
+
     if op in CURRENT_DECOMPOSITION_TABLE:
+        if BisectionManager.disable_subsystem(
+            "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
+        ):
+            return NotImplemented
+
         with proxy_mode:
             proxy_mode.decomp_layers += 1
             out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)

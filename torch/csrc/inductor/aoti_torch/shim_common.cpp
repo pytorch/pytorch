@@ -47,29 +47,26 @@
 
 #endif
 
-#if __has_include("filesystem")
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #ifndef _WIN32
-#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <climits>
+
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 // HACK for failed builds in ARVR, where it cannot find these symbols within
 // std::experimental::filesystem
 namespace {
 std::string get_current_path() {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::current_path().string();
 #else
-  char currentPath[PATH_MAX];
+  // NOLINTNEXTLINE(*array*)
+  char currentPath[PATH_MAX]{};
   if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
     return std::string(currentPath);
   } else {
@@ -79,16 +76,16 @@ std::string get_current_path() {
 }
 
 bool file_exists(std::string& path) {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
 
 bool create_directories(const std::string& path) {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::create_directories(path);
 #else
   if (mkdir(path.c_str(), 0777) == -1) {
@@ -1055,11 +1052,11 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   if (!file_exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
-        << tmp_folder << std::endl;
+        << tmp_folder << '\n';
 
     if (!create_directories(tmp_folder)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
-                << tmp_folder << std::endl;
+                << tmp_folder << '\n';
       return;
     }
   }
@@ -1068,11 +1065,11 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
-  fout.write(bytes.data(), bytes.size());
+  fout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   fout.close();
 
   std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
-            << tensor_filepath_to_save << std::endl;
+            << tensor_filepath_to_save << '\n';
 #endif // !defined(C10_MOBILE)
 }
 
@@ -1087,7 +1084,7 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     std::cout << "  " << msg;
   }
   std::cout << "  "
-            << "]:" << std::endl;
+            << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
@@ -1096,8 +1093,8 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
   }
 
   // Print summary stats of the tensor
-  std::cout << "Number of elements: " << numel << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
+  std::cout << "Number of elements: " << numel << '\n';
+  std::cout << "Dtype: " << t->dtype() << '\n';
   if (numel > 0) {
     // torch/aten `mean()` function only supports float and complex dtypes
     // See:
@@ -1109,24 +1106,24 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
         at::isComplexType(at::typeMetaToScalarType(t->dtype()));
     at::ScalarType float_dtype =
         is_complex_type ? at::kComplexFloat : at::kFloat;
-    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    std::cout << "Mean value: " << mean_value(float_dtype) << '\n';
     if (!is_complex_type) {
       // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
       // (similar for max) Skip printing min/max value for complex type tensors
       // here If encountered complex dtypes (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->min().item<float>() << std::endl;
-      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+      std::cout << "Min value: " << t->min().item<float>() << '\n';
+      std::cout << "Max value: " << t->max().item<float>() << '\n';
     }
   }
-  std::cout << "Device: " << t->device() << std::endl;
-  std::cout << "Size: " << t->sizes() << std::endl;
-  std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Layout: " << t->layout() << std::endl;
-  std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
-  std::cout << "Requires grad: " << t->requires_grad() << std::endl;
+  std::cout << "Device: " << t->device() << '\n';
+  std::cout << "Size: " << t->sizes() << '\n';
+  std::cout << "Stride: " << t->strides() << '\n';
+  std::cout << "Layout: " << t->layout() << '\n';
+  std::cout << "Is contiguous: " << t->is_contiguous() << '\n';
+  std::cout << "Requires grad: " << t->requires_grad() << '\n';
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 // ProxyExecutor
