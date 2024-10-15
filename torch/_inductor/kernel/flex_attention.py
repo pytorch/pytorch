@@ -596,14 +596,17 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     default_config = None
+    compute_capability = torch.cuda.get_device_capability()
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and compute_capability >= (9, 0):  # H100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
             default_config = (128, 64, 4, 3)
         default_config = _h100_default_config.get((dtype, head_dim), default_config)
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
+    elif compute_capability == (8, 6):
+        return (64, 64, 4, 3)
+    elif head_dim <= 256 and compute_capability >= (8, 0):  # A100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
@@ -621,16 +624,19 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     head_dim = query.get_size()[-1]
     dtype = query.get_dtype()
+    compute_capability = torch.cuda.get_device_capability()
 
     if dtype == torch.float32:
         return (16, 16, 4, 1)
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and compute_capability >= (9, 0):  # H100
         if head_dim == 64:
             return (64, 64, 4, 3)
         elif head_dim == 128:
             return (64, 128, 8, 3)
         else:
             return (64, 64, 4, 2)
+    elif compute_capability == (8, 6):
+        return (64, 64, 4, 4)
     elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         if head_dim == 64:
             return (32, 128, 4, 3)
