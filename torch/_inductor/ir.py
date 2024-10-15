@@ -6566,7 +6566,9 @@ class InvokeSubgraph(ExternKernel):
         outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
         device = operands[0].get_device()
         invoke_subgraph = InvokeSubgraph(
-            subgraph=subgraph, operands=operands, layout=MultiOutputLayout(device)
+            subgraph=subgraph,
+            operands=operands,
+            layout=MultiOutputLayout(device=device),
         )
 
         outputs = [
