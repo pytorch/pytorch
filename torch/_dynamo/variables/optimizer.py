@@ -1,9 +1,11 @@
 # mypy: ignore-errors
 
+import logging
 import weakref
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
+from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_only
 
 from ..guards import GuardBuilder, install_guard
@@ -34,6 +36,27 @@ class ArgMappingException(Exception):
 
 class GuardInstallException(Exception):
     pass
+
+
+perf_hint_log = getArtifactLogger(__name__, "perf_hints")
+
+
+def _is_static_for_cudagraphs(x):
+    from torch._inductor.cudagraph_trees import get_manager
+
+    if x.is_cuda:
+        manager = get_manager(x.device.index, False)
+        is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
+        if manager:
+            return (
+                is_static_address
+                or manager.current_node._is_cuda_graph_recorded_tensor(x)
+            )
+        else:
+            return is_static_address
+    else:
+        # Don't print a warning for non-cuda tensors
+        return True
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
@@ -256,6 +279,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             group_source = group_vt.source
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
+            all_static = True
+            non_static_grads = []
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
@@ -268,8 +293,22 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
+                    if not _is_static_for_cudagraphs(p.grad):
+                        all_static = False
+                        non_static_grads.append(grad_source)
                 else:
                     install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+
+            if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
+                non_static_grads = [src.name() for src in non_static_grads]
+                perf_hint_log.warning(
+                    (
+                        "Grad tensors %s will be copied during cudagraphs execution."
+                        "If using cudagraphs and the grad tensor addresses will be the same across runs,"
+                        " use torch._dynamo.decorators.mark_static_address to elide this copy.",
+                    ),
+                    non_static_grads,
+                )
 
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
