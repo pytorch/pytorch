@@ -91,6 +91,9 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       sourceComm, // wait on parent comm
       std::nullopt);
   if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
     while (!comm->ncclComm_) {
       C10D_SCHED_SLEEP();
     }
