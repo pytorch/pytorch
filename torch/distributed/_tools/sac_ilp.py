@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from torch.distributed._tools.ilp_utils import Graph, is_submodule
 
@@ -32,8 +32,8 @@ def sac_milp(
     graph: Graph,
     memory_budget: float,
     world_size: int = 1,
-    ac_units: List[str] | None = None,
-    fsdp_units: List[str] | None = None,
+    ac_units: Optional[List[str]] = None,
+    fsdp_units: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.
