@@ -36,9 +36,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_ROCM,
     IS_WINDOWS,
-    GFX942_Exact,
 )
-
+from torch.testing._internal.common_cuda import GFX942_Exact
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 import pytest
