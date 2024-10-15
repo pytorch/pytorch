@@ -6,7 +6,7 @@ from torch.utils._pytree import tree_any
 
 log = logging.getLogger(__name__)
 
-from ._device_daemon import daemon
+from ._device_daemon import driver
 from ._meta_parser import prepare_for_sending, to_device_no_copy
 
 
@@ -18,7 +18,7 @@ def _register_same_name(name, with_log=False):
     def _(*args, **kwargs):
         if with_log:
             log.info("Calling hook %s", name)
-        return daemon.exec(name, *args, **kwargs)
+        return driver.exec(name, *args, **kwargs)
 
     _IMPL_REGISTRY[name] = _
 
@@ -29,42 +29,40 @@ _register_same_name("uncheckedSetDevice")
 _register_same_name("exchangeDevice")
 _register_same_name("malloc", True)
 _register_same_name("free", True)
+_register_same_name("isPinnedPtr", True)
+_register_same_name("hostMalloc", True)
+_register_same_name("hostFree", True)
 
-_openreg_lib = torch.library.Library("_", "IMPL")
+
+# TODO: replace it with implementing torch.openreg.device
+class DeviceContext:
+    def __init__(self, device):
+        self.idx = device.index
+
+    def __enter__(self):
+        self.prev = driver.exec("exchangeDevice", self.idx)
+
+    def __exit__(self, *args):
+        driver.exec("uncheckedSetDevice", self.prev)
 
 
 def _openreg_kernel_fallback(op, *args, **kwargs):
-    log.info("Calling kernel %s", op)
+    def get_tensor_device(*args):
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.device.type == "openreg":
+                return arg.device
 
-    # Special ops needed to avoid infinite recursion
-    if op is torch.ops.aten._copy_from.default:
-        from_, to_ = args
-        if from_.device.type == to_.device.type:
-            assert from_.device.type == "openreg"
-            op = torch.ops.aten.copy_.default
-            # handled below as a regular copy
-        elif from_.device.type == "openreg":
-            args, _ = prepare_for_sending((from_,), {})
-            host_mem = daemon.exec("send_data", *args)
-            return to_.copy_(host_mem)
-        elif to_.device.type == "openreg":
-            args, _ = prepare_for_sending((to_,), {})
-            daemon.exec("recv_data", from_, *args)
-            return to_
-        else:
-            raise RuntimeError("Should not happen")
-    elif op is torch.ops.aten.set_.source_Tensor:
-        return torch.ops.aten.set_.source_Storage_storage_offset(
-            args[0],
-            args[1].untyped_storage(),
-            args[1].storage_offset(),
-            args[1].size(),
-            args[1].stride(),
-        )
-    elif op is torch.ops.aten._local_scalar_dense.default:
-        args, _ = prepare_for_sending(args, {})
-        host_mem = daemon.exec("send_data", *args)
-        return host_mem.item()
+    device = get_tensor_device(*args)
+    if device is None:
+        return _kernel_fallback(op, *args, **kwargs)
+
+    # Mimicks the DeviceGuard system we have in aten
+    with DeviceContext(device):
+        return _kernel_fallback(op, *args, **kwargs)
+
+
+def _kernel_fallback(op, *args, **kwargs):
+    log.info("Calling kernel %s", op)
 
     op_name = None
     post_process = None
@@ -125,7 +123,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
             # Slow version for data-dependent functions:
             # Run the op on the device just to get the output shape
             args_, kwargs_ = prepare_for_sending(args, kwargs)
-            shape = daemon.exec(
+            shape = driver.exec(
                 "get_op_output_shape",
                 op.overloadpacket._qualified_op_name,
                 args_,
@@ -142,7 +140,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
 
     # 4. Run the compute and populate the output on the device
     args, kwargs = prepare_for_sending(args, kwargs)
-    daemon.exec("run_op", op_name, args, kwargs)
+    driver.exec("run_op", op_name, args, kwargs)
 
     if post_process is not None:
         post_process()
@@ -150,4 +148,60 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
     return real_res
 
 
+def copy_from_device(from_):
+    with DeviceContext(from_.device):
+        args, _ = prepare_for_sending((from_,), {})
+        return driver.exec("send_data", *args)
+
+
+def copy_from_host_to_device(from_, to_):
+    with DeviceContext(to_.device):
+        args, _ = prepare_for_sending((to_,), {})
+        driver.exec("recv_data", from_, *args)
+    return to_
+
+
+def _copy_from(from_, to_):
+    if from_.device.type == to_.device.type:
+        assert from_.device.type == "openreg"
+        if from_.device.index == to_.device.index:
+            op = torch.ops.aten.copy_.default
+            return _openreg_kernel_fallback(op, to_, from_)
+        else:
+            host_mem = copy_from_device(from_)
+            return copy_from_host_to_device(host_mem, to_)
+    elif from_.device.type == "openreg":
+        host_mem = copy_from_device(from_)
+        return to_.copy_(host_mem)
+    elif to_.device.type == "openreg":
+        return copy_from_host_to_device(from_, to_)
+    else:
+        raise RuntimeError("Should not happen")
+
+
+def _set_source_tensor(ten1, ten2):
+    return torch.ops.aten.set_.source_Storage_storage_offset(
+        ten1,
+        ten2.untyped_storage(),
+        ten2.storage_offset(),
+        ten2.size(),
+        ten2.stride(),
+    )
+
+
+def _local_scalar_dense(ten):
+    host_mem = copy_from_device(ten)
+    return host_mem.item()
+
+
+_openreg_lib = torch.library.Library("_", "IMPL")
 _openreg_lib.fallback(_openreg_kernel_fallback, dispatch_key="PrivateUse1")
+
+_openreg_lib_aten = torch.library.Library("aten", "IMPL")
+_openreg_lib_aten.impl("_copy_from", _copy_from, dispatch_key="PrivateUse1")
+_openreg_lib_aten.impl(
+    "set_.source_Tensor", _set_source_tensor, dispatch_key="PrivateUse1"
+)
+_openreg_lib_aten.impl(
+    "_local_scalar_dense", _local_scalar_dense, dispatch_key="PrivateUse1"
+)

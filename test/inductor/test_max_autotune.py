@@ -21,6 +21,9 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplateCaller,
 )
+
+
+aten = torch.ops.aten
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
@@ -30,14 +33,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    from .mock_cache import global_stats, PatchCaches
+    from .mock_cache import global_stats, PatchCaches, Stats
 except ImportError:
-    from mock_cache import global_stats, PatchCaches  # @manual
+    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 torch.set_float32_matmul_precision("high")
@@ -72,7 +76,10 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
+        return Buffer(
+            name=name,
+            layout=FixedLayout(torch.device("cuda:0"), dtype=torch.float32, size=shape),
+        )
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
@@ -135,7 +142,7 @@ class TestMaxAutotune(TestCase):
             out = AlgorithmSelectorCache.benchmark_example_value(layout)
             expected_out = (mat1 @ mat2) + (mat3 @ mat4)
 
-            choice = FailChoiceCaller("fail_choice_caller", [], None)
+            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
 
             # use a tensor since python list is not synced back
             timings = torch.zeros(3, dtype=torch.float32)
@@ -232,7 +239,7 @@ class TestMaxAutotune(TestCase):
 
         class FakeChoiceCaller(ChoiceCaller):
             def __init__(self) -> None:
-                super().__init__("none", [], Mock())
+                super().__init__("none", [], Mock(), description="")
                 self.thread_id = None
 
             def precompile(self):
@@ -375,6 +382,22 @@ class TestMaxAutotune(TestCase):
         counters.clear()
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @config.patch(search_autotune_cache=True)
+    def test_search_autotune_cache(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile()(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @skipIfRocm
@@ -583,6 +606,72 @@ class TestMaxAutotune(TestCase):
             z = torch.randint(0, 10, (224,)).to(device="cuda")
             f(x, y, z)
 
+    def _test_cat_max_autotune_impl(self, using_triton_mm):
+        def f(x, y):
+            y = torch.cos(y)
+            x = torch.mm(x, x)
+            return torch.cat([x, y])
+
+        f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
+        inps = [torch.randn(32, 32, device="cuda"), torch.randn(32, 32, device="cuda")]
+        out, code = run_and_get_code(f_c, inps[0], inps[1])
+        self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+
+        # mm kernel, and cos kernel
+        count = 2 if using_triton_mm else 1
+        FileCheck().check("call(").check_count(".run", count, exactly=True).run(code[0])
+
+        def f(x, y):
+            y = torch.cos(y)
+            x = torch.mm(x, x)
+            out = torch.cat([x, y])
+            return out, x + 1
+
+        f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
+        out, code = run_and_get_code(f_c, inps[0], inps[1])
+        self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+        FileCheck().check("call(").check_count(".run", 2, exactly=True).run(code[0])
+
+        def f(x, y):
+            y = torch.cos(y)
+            x = torch.mm(x, x)
+            return torch.cat([x, y]), torch.cat([y, x])
+
+        f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
+        self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+
+    @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
+    def test_cat_max_autotune_extern(self):
+        self._test_cat_max_autotune_impl(using_triton_mm=False)
+
+    @config.patch(max_autotune_gemm_backends="TRITON")
+    def test_cat_max_autotune_triton(self):
+        self._test_cat_max_autotune_impl(using_triton_mm=True)
+
+    def test_conv_cat(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 64, kernel_size=3, stride=1, padding=1, bias=False
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                return torch.cat((x, x + 1))
+
+        with torch.no_grad():
+            m = ToyModel().to(device="cuda")
+            input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda")
+
+            # convolution is not currently plannable
+            m = torch.compile(m, mode="max-autotune-no-cudagraphs")
+            out, code = run_and_get_code(m, input_tensor)
+            self.assertEqual(out, m(input_tensor))
+
+            if not TEST_WITH_ROCM:
+                FileCheck().check("triton_poi_fused_cat_2.run").run(code[0])
+
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
         image = torch.randn([1, 3, 8, 16, 32])
@@ -754,9 +843,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     reset()
 
                 global_stats.report()
-                self.assertEqual(global_stats.autotune.num_get_hit, 3)
-                self.assertEqual(global_stats.autotune.num_get_miss, 1)
-                self.assertEqual(global_stats.autotune.num_put, 1)
+                self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
 
             global_stats.reset()
             for _ in range(4):
@@ -764,9 +851,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
             global_stats.report()
-            self.assertEqual(global_stats.autotune.num_get_hit, 3)
-            self.assertEqual(global_stats.autotune.num_get_miss, 1)
-            self.assertEqual(global_stats.autotune.num_put, 1)
+            self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):

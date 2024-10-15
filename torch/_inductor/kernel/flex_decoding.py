@@ -333,8 +333,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
 
@@ -389,6 +389,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_indices,
         ]
     )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
@@ -474,6 +476,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
+    # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function

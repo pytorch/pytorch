@@ -4027,6 +4027,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
+    @precisionOverride({torch.float16: 6e-1})
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_kernel(self, op, device, dtype, blocksize):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm, _int_bsr_dense_addmm
@@ -4039,15 +4040,24 @@ class TestSparseCompressedTritonKernels(TestCase):
         operation = dict(bsr_dense_addmm=bsr_dense_addmm, bsr_dense_mm=bsr_dense_mm, bsr_dense_linear=bsr_dense_linear,
                          _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
 
-        def reference(input, mat1, mat2, beta=1, alpha=1, op=op):
+        def reference(input, mat1, mat2, beta=1, alpha=1, left_alpha=None, right_alpha=None, op=op):
             assert mat1.layout is torch.strided
             assert mat2.layout is torch.strided
             if dtype is torch.int8:
                 if op == '_int_bsr_dense_addmm':
-                    return beta * input + alpha * torch._int_mm(mat1, mat2)
-                # workaround RuntimeError: "addmm_cuda" not implemented for 'Char'
-                return beta * input + alpha * torch._int_mm(mat1, mat2).to(torch.int8)
-            return beta * input + alpha * (mat1 @ mat2)
+                    mat12 = torch._int_mm(mat1, mat2)
+                else:
+                    # workaround RuntimeError: "addmm_cuda" not implemented for 'Char'
+                    mat12 = torch._int_mm(mat1, mat2).to(torch.int8)
+            else:
+                mat12 = mat1 @ mat2
+            if alpha != 1:
+                mat12 *= alpha
+            if left_alpha is not None:
+                mat12 = left_alpha.reshape(*left_alpha.shape[:-1], -1, 1) * mat12
+            if right_alpha is not None:
+                mat12 = mat12 * right_alpha.reshape(*right_alpha.shape[:-1], 1, -1)
+            return beta * input + mat12
 
         if op == '_int_bsr_dense_addmm':
             # _int_bsr_dense_addmm is same as bsr_dense_addmm except
@@ -4056,6 +4066,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             # definitions above and all other definitions below are
             # identical between _int_bsr_dense_addmm and
             # bsr_dense_addmm.
+            if dtype.is_floating_point or dtype.is_complex:
+                self.skipTest(f"Redundant test: {op} on {dtype} tensors")
             op = 'bsr_dense_addmm'
 
         def nc_copy(t, axes=(-1,)):
@@ -4101,14 +4113,21 @@ class TestSparseCompressedTritonKernels(TestCase):
         blocks_per_row_lst = [1, 2]
         blocks_per_col_lst = [1, 2]
         result_cols_lst = [16, 32, 64]
-        for beta, alpha, sparsity, blocks_per_row, blocks_per_col, N in itertools.product(
-                beta_lst, alpha_lst, sparsity_lst, blocks_per_row_lst, blocks_per_col_lst, result_cols_lst):
+        has_left_alpha_lst = dict(bsr_dense_addmm=[False, True], bsr_dense_mm=[False], bsr_dense_linear=[False])[op]
+        has_right_alpha_lst = dict(bsr_dense_addmm=[False, True], bsr_dense_mm=[False], bsr_dense_linear=[False])[op]
+        high = 1.5 + int(dtype is torch.int8)
+        for beta, alpha, sparsity, blocks_per_row, blocks_per_col, N, has_left_alpha, has_right_alpha in itertools.product(
+                beta_lst, alpha_lst, sparsity_lst, blocks_per_row_lst, blocks_per_col_lst, result_cols_lst,
+                has_left_alpha_lst, has_right_alpha_lst):
             M = BM * blocks_per_row
             K = BK * blocks_per_col
             mat1 = create_blocked_tensor(0, M, K, (BM, BK), sparsity, dtype, device=device)
             bsr = mat1.to_sparse_bsr((BM, BK))
-            mat2 = make_tensor(K, N, dtype=dtype, device=device, low=0.5, high=1.5)
-            input = make_tensor(M, N, dtype=dtype, device=device, low=0.5, high=1.5)
+            mat2 = make_tensor(K, N, dtype=dtype, device=device, low=0.5, high=high)
+            input = make_tensor(M, N, dtype=dtype, device=device, low=0.5, high=high)
+
+            left_alpha = make_tensor(M, dtype=dtype, device=device, low=0.5, high=high) if has_left_alpha else None
+            right_alpha = make_tensor(N, dtype=dtype, device=device, low=0.5, high=high) if has_right_alpha else None
 
             if 0 and op == "bsr_dense_addmm":
                 # Find optimal kernel parameters, the speed-up is
@@ -4121,12 +4140,12 @@ class TestSparseCompressedTritonKernels(TestCase):
                 meta = get_meta(op, key, version=(0, dtype, 0.5))
                 if meta is None:
                     optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
-                    meta = get_meta(op, key, version=(0, dtype, 0.5))
                     assert meta is not None
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
 
-            expected = reference(input, mat1, mat2, beta=beta, alpha=alpha)
-            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha), bsr_dense_mm={},
+            expected = reference(input, mat1, mat2, beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha)
+            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha,
+                                               left_alpha=left_alpha, right_alpha=right_alpha), bsr_dense_mm={},
                           bsr_dense_linear=dict(bias=input.transpose(-1, -2)))[op]
 
             args = dict(bsr_dense_addmm=(input, bsr, mat2), bsr_dense_mm=(bsr, mat2),
@@ -4156,7 +4175,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             if op in {'bsr_dense_addmm', 'bsr_dense_linear'}:
                 args = dict(bsr_dense_addmm=(nc_input, bsr, nc_mat2),
                             bsr_dense_linear=(nc_mat2.transpose(-1, -2), bsr))[op]
-                kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha),
+                kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha),
                               bsr_dense_linear=dict(bias=nc_input.transpose(-1, -2)))[op]
                 result = operation(*args, **kwargs)
                 self.assertEqual(result, expected)

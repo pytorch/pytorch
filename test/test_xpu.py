@@ -237,6 +237,9 @@ print(torch.xpu.device_count())
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(xpu_stream, torch.Stream)
+        self.assertTrue(issubclass(type(xpu_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
@@ -262,6 +265,10 @@ print(torch.xpu.device_count())
             NotImplementedError, "elapsedTime is not supported by XPU backend."
         ):
             event1.elapsed_time(event2)
+        xpu_event = torch.xpu.Event()
+        self.assertIsInstance(xpu_event, torch.Event)
+        self.assertTrue(issubclass(type(xpu_event), torch.Event))
+        self.assertTrue(torch.Event in type(xpu_event).mro())
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -390,6 +397,15 @@ print(torch.xpu.device_count())
         self.assertEqual(torch.xpu.memory_allocated(), prev)
         torch.xpu.empty_cache()
         self.assertEqual(torch.xpu.memory_reserved(), 0)
+        torch.xpu.reset_accumulated_memory_stats()
+        # Activate 1kB memory
+        a = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
+        del a
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_device_memory_allocated(self):

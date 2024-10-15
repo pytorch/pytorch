@@ -222,6 +222,8 @@ class EnumVariable(VariableTracker):
         unimplemented("Enum variable is constructed with non constant values")
 
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
     def __str__(self) -> str:

@@ -136,11 +136,9 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.24.3 ; python_version == "3.8"',
     'numpy==1.26.0 ; python_version >= "3.9"',
     'expecttest==0.2.1',
-    'mypy==1.10.0',
-    'sympy==1.12.1 ; python_version == "3.8"',
+    'mypy==1.11.2',
     'sympy==1.13.0 ; python_version >= "3.9"',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
@@ -153,7 +151,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0.1',
-    'optree==0.12.1',
+    'optree==0.13.0',
 ]
 
 [[linter]]
@@ -195,6 +193,7 @@ include_patterns = [
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/cuda/*.cpp',
     'aten/src/ATen/cpu/*.h',
     'aten/src/ATen/cpu/*.cpp',
     'aten/src/ATen/core/*.h',
@@ -215,6 +214,10 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.h',
+    'torch/csrc/distributed/rpc/**/*.cpp',
+    'torch/csrc/distributed/rpc/**/*.h',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
 ]
@@ -224,7 +227,6 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'aten/**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
@@ -246,7 +248,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/lazy/**/*',
 ]
 init_command = [
     'python3',
@@ -1255,7 +1256,6 @@ exclude_patterns = [
     'torch/fx/experimental/refinement_types.py',
     'torch/fx/experimental/rewriter.py',
     'torch/fx/experimental/schema_type_annotation.py',
-    'torch/fx/experimental/symbolic_shapes.py',
     'torch/fx/experimental/unification/__init__.py',
     'torch/fx/experimental/unification/core.py',
     'torch/fx/experimental/unification/dispatch.py',
@@ -1271,7 +1271,6 @@ exclude_patterns = [
     'torch/fx/experimental/unification/utils.py',
     'torch/fx/experimental/unification/variable.py',
     'torch/fx/experimental/unify_refinements.py',
-    'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
     'torch/fx/interpreter.py',
@@ -1584,6 +1583,27 @@ command = [
     '@{{PATHSFILE}}'
 ]
 is_formatter = true
+
+
+[[linter]]
+code = 'META_NO_CREATE_UNBACKED'
+include_patterns = [
+  "torch/_meta_registrations.py"
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=create_unbacked',
+    '--linter-name=META_NO_CREATE_UNBACKED',
+    '--error-name=no create_unbacked in meta registrations',
+    """--error-description=\
+        Data-dependent operators should have their meta \
+        registration in torch/_subclasses/fake_impls.py, \
+        not torch/_meta_registrations.py
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
 
 [[linter]]
 code = 'ATEN_CPU_GPU_AGNOSTIC'
