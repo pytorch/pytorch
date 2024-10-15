@@ -59,7 +59,6 @@ using is_module =
     std::is_base_of<torch::nn::Module, typename std::decay<M>::type>;
 
 template <typename M, typename T = void>
-using enable_if_module_t =
-    typename std::enable_if<is_module<M>::value, T>::type;
+using enable_if_module_t = typename std::enable_if_t<is_module<M>::value, T>;
 } // namespace detail
 } // namespace torch

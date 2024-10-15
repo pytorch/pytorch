@@ -372,7 +372,7 @@ __device__ __inline__ Vec<Alignment> add_vec(
 // performing reduction.
 template <typename T, int alignment, int k_world_size>
 __device__ inline
-    typename std::enable_if<(k_world_size > 0), Vec<alignment>>::type
+    typename std::enable_if_t<(k_world_size > 0), Vec<alignment>>
     load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> vecs[k_world_size];
 #pragma unroll k_world_size
@@ -392,7 +392,7 @@ __device__ inline
 // accumulate on each load.
 template <typename T, int alignment, int k_world_size>
 __device__ inline
-    typename std::enable_if<(k_world_size <= 0), Vec<alignment>>::type
+    typename std::enable_if_t<(k_world_size <= 0), Vec<alignment>>
     load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> acc{};
   for (size_t step = 0; step < world_size; ++step) {
