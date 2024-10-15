@@ -1,5 +1,7 @@
 #include <ATen/ThreadLocalState.h>
+#ifdef USE_CUDA
 #include <ATen/cuda/CUDAGraph.h>
+#endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
