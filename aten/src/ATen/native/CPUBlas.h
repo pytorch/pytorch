@@ -7,6 +7,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 
+
 namespace at::native::cpublas {
 
 namespace internal {
@@ -186,4 +187,40 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-}  // namespace at::native::cpublas
+// Batch-reduce GEMM
+// Operates by the following formula:
+// C = alpha * SUM(A[i] x B[i]) + beta * C, i = 0 to batch size
+// A Base pointer to a tensor A.
+// B Base pointer to a tensor B.
+// C Pointer to a tensor C (accumulation buffer).
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const at::Half* A,
+    const at::Half* B,
+    float* C);
+
+// Release brgemm hardware context
+void brgemm_release();
+
+// Pack B matrix to get better performance if needed
+void pack(
+    int64_t K,
+    int64_t N,
+    int64_t ld_in,
+    int64_t ld_out,
+    ScalarType dt_in,
+    ScalarType dt_out,
+    const void* in,
+    void* out);
+
+// Whether pack is needed in the platform.
+bool need_pack(ScalarType dt_in);
+
+} // namespace at::native::cpublas

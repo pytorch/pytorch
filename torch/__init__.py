@@ -478,6 +478,12 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -1235,6 +1241,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1281,7 +1288,6 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2208,6 +2214,14 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if bisect_changes := BisectionManager.get_config_change("inductor"):
+            options = {} if options is None else options
+            options = (
+                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
+            )
+
         if not options:
             return
 
@@ -2378,8 +2392,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
@@ -2439,6 +2454,12 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    from torch._inductor.bisect_helper import BisectionManager
+
+    if bisect_backend := BisectionManager.get_backend():
+        backend = bisect_backend
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2663,3 +2684,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)

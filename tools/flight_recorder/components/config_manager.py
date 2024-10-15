@@ -17,9 +17,10 @@ class JobConfig:
         self.parser = argparse.ArgumentParser(
             description="PyTorch Flight recorder analyzing script."
         )
-
         self.parser.add_argument(
-            "-d", "--dir", required=True, help="Directory with flight recorder dumps"
+            "trace_dir",
+            nargs="?",
+            help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
         )
         self.parser.add_argument(
             "--selected-ranks",
@@ -33,14 +34,20 @@ class JobConfig:
             default=None,
             nargs="+",
             type=str,
-            help="List of filter strings",
+            help=(
+                "List of filter strings, it could be pg name or pg desc. "
+                "If specified, only show traces for the given pg."
+            ),
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
             "-p",
             "--prefix",
-            help="prefix to strip such that rank can be extracted",
-            default="rank_",
+            help=(
+                "Common filename prefix to strip such that rank can be extracted. "
+                "If not specified, will attempt to infer a common prefix."
+            ),
+            default=None,
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")

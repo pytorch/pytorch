@@ -11,6 +11,7 @@ An aot_dispatch_* function:
 
 import itertools
 import logging
+import time
 import traceback
 from contextlib import nullcontext
 from typing import Any, Callable, List, Optional, Sequence, Tuple
@@ -18,21 +19,26 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
+from torchgen.utils import dataclass_repr
 
 from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
     AOTAutogradCacheEntry,
+    autograd_cache_enabled,
     CompiledBackward,
     CompiledForward,
+    should_use_remote_autograd_cache,
 )
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -140,6 +146,13 @@ def aot_dispatch_base(
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    # Save the forward_graph_str right after aot_dispatch_base_graph,
+    # to save in the cache
+    aot_forward_graph_str = None
+    if autograd_cache_enabled():
+        aot_forward_graph_str = fw_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
 
     fakified_out_wrapper = FakifiedOutWrapper()
     (
@@ -176,6 +189,10 @@ def aot_dispatch_base(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                assert isinstance(fw_module, GraphModule)
+                tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
         if fakified_out_wrapper.needs_post_compile:
@@ -193,19 +210,27 @@ def aot_dispatch_base(
     compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
-
-    if config.enable_autograd_cache and aot_config.cache_key:
+    cache_info = aot_config.cache_info
+    if autograd_cache_enabled() and cache_info:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
+            time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
                 compiled_fw=CompiledForward(fw_key),
                 compiled_bw=None,
+                aot_joint_graph_str=None,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=None,
                 runtime_metadata=fw_metadata,
                 dispatch_wrappers=wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
                 num_fw_outs_saved_for_bw=None,
                 indices_of_inps_to_detach=[],
+                forward_time_taken_ns=time_taken_ns,
+                backward_time_taken_ns=0,
             )
-            AOTAutogradCache.save(aot_config.cache_key, entry)
+            AOTAutogradCache.save(
+                cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
+            )
 
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
@@ -336,7 +361,7 @@ def aot_dispatch_autograd(
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
-
+    joint_graph_str = None
     if aot_config.enable_log:
         aot_joint_log.info(
             "%s",
@@ -349,11 +374,12 @@ def aot_dispatch_autograd(
                 colored=True,
             ),
         )
+        joint_graph_str = fx_g.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: joint_graph_str,
         )
 
     with torch.no_grad():
@@ -379,6 +405,9 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
@@ -512,9 +541,15 @@ def aot_dispatch_autograd(
                     == MutationType.MUTATED_IN_GRAPH
                     and fw_metadata.input_info[i].mutates_storage_metadata
                 )
-                if bw_out is None and not metadata_mutation_in_graph:
+                is_non_leaf = (
+                    fw_metadata.input_info[i].requires_grad
+                    and not fw_metadata.input_info[i].is_leaf
+                )
+                if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
                     _indices_of_inps_to_detach.append(i)
 
+        fw_module_str = None
+        bw_module_str = None
         if aot_config.enable_log:
             aot_graphs_log.info(
                 "%s",
@@ -538,17 +573,38 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
+            fw_module_str = fw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
+            bw_module_str = bw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_forward_graph_fw_metadata",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dataclass_repr(fw_metadata),
+            )
+            if maybe_subclass_meta is not None:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "aot_forward_graph_fw_subclass_metadata",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+                )
+
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: fw_module_str,
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: bw_module_str,
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -727,28 +783,57 @@ def aot_dispatch_autograd(
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     try_save_cache_entry: Optional[Callable] = None
-    if config.enable_autograd_cache:
 
-        def try_save_cache_entry(compiled_bw_func, _fw_metadata):  # noqa: F811
+    if autograd_cache_enabled():
+        cache_info = aot_config.cache_info
+        if cache_info is not None:
+            forward_time_taken_ns = time.time_ns() - cache_info.start_time_ns
+        else:
+            forward_time_taken_ns = None
+
+        def try_save_cache_entry(  # noqa: F811
+            compiled_bw_func, _fw_metadata, aot_config
+        ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-            if aot_config.cache_key and fw_key and bw_key:
+            cache_info = aot_config.cache_info
+            if cache_info is not None and fw_key and bw_key:
+                assert forward_time_taken_ns is not None
+                # TODO: technically, AOTAutograd does a *little* bit of post processing work
+                # in the backward that isn't measured here. But it's small enough that it's not worth
+                # the complexity of threading a bunch of times through the code, so we
+                # use the compiled_bw_func's inductor compile time instead.
+                # It's possible this changes in the future, in which case we should
+                # update backward_time_taken_ns to be more inclusive
+                backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
+
+                aot_forward_graph_str: Optional[str] = fw_module_str
+                aot_backward_graph_str: Optional[str] = bw_module_str
+                aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
                     CompiledForward(fw_key),
                     CompiledBackward(
-                        bw_key, backward_state_indices, num_symints_saved_for_bw
+                        bw_key,
+                        backward_state_indices,
+                        num_symints_saved_for_bw,
                     ),
+                    aot_joint_graph_str,
+                    aot_forward_graph_str,
+                    aot_backward_graph_str,
                     _fw_metadata,
                     wrappers,
                     maybe_subclass_meta,
                     num_fw_outs_saved_for_bw,
                     _indices_of_inps_to_detach,
+                    forward_time_taken_ns,
+                    backward_time_taken_ns,
                 )
-                AOTAutogradCache.save(aot_config.cache_key, entry)
+                remote = should_use_remote_autograd_cache()
+                AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func, fw_metadata)
+            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(

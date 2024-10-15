@@ -9,7 +9,6 @@ import logging
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 import torch
-import torch.export
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core, _onnx_program
 
@@ -133,6 +132,7 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
+    optimize: bool = False,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -204,7 +204,8 @@ def export_compat(
     onnx_program.model = onnxscript_apis.convert_version(
         onnx_program.model, opset_version
     )
-    onnx_program.model = onnxscript_apis.optimize(onnx_program.model)
+    if optimize:
+        onnx_program.optimize()
 
     if f is not None:
         onnx_program.save(

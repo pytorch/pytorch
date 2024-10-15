@@ -17,7 +17,7 @@ import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
@@ -45,7 +45,7 @@ from torch.utils import _pytree as pytree
 
 
 if HAS_CUDA:
-    import triton
+    import triton  # @manual
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -76,14 +76,20 @@ try:
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import AOTIRunnerUtil
-        from test_control_flow import (
+        from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
+            AOTIRunnerUtil,
+        )
+        from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
             prepend_counters,
             prepend_predicates,
             WhileLoopModels,
         )
-        from test_torchinductor import copy_tests, requires_multigpu, TestFailure
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            copy_tests,
+            requires_multigpu,
+            TestFailure,
+        )
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -367,7 +373,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_conv_freezing(self):
-        for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype, groups in itertools.product(dtypes, [1, 2]):
             iC = 2
             oC = 3
 
@@ -421,7 +428,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_linear_freezing(self):
-        for dtype in [torch.float32, torch.bfloat16]:
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype in dtypes:
 
             class LinearModel(torch.nn.Module):
                 def __init__(self, device):
@@ -712,6 +720,10 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
@@ -1055,6 +1067,25 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @config.patch({"triton.autotune_at_compile_time": None})
+    def test_stride_with_unbacked_expr(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = x.item()
+                torch._check(u0 >= 1)
+                s0 = y.size(0)
+                expr = u0 * s0
+                sevens = torch.empty_strided(
+                    size=(10, expr, 32), stride=(expr * 32, 32, 1), device=x.device
+                ).fill_(7)
+                return sevens * 3
+
+        example_inputs = (
+            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
+            torch.ones(8, device=self.device),
+        )
+        self.check_model(Repro(), example_inputs)
+
     def test_large_grid(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1336,15 +1367,19 @@ class AOTInductorTestsTemplate:
                 return x + b
 
         example_inputs = (
-            x := torch.randn((3, 2), device=self.device),
+            torch.randn((3, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
         )
-        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
+        dynamic_shapes = {
+            "x": {0: Dim("dx"), 1: Dim.STATIC},
+            "b": None,
+        }
 
         # Compile & run model where dynamic dim size > 0.
         so_path: str = AOTIRunnerUtil.compile(
             Repro(),
             example_inputs,
+            dynamic_shapes=dynamic_shapes,
         )
         aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
         aot_inductor_module(*example_inputs)
@@ -1531,6 +1566,41 @@ class AOTInductorTestsTemplate:
                 optimized = AOTIRunnerUtil.load("cuda", so_path)
                 result_cuda = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
+
+    @requires_multigpu()
+    def test_on_cuda_device1(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        try:
+            torch.cuda.get_device_properties(1)
+        except AssertionError:
+            raise unittest.SkipTest("CUDA device 1 is not available") from None
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(16, 1)
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.fc2(x)
+                x = self.sigmoid(x)
+                return x
+
+        device = "cuda:1"
+        model = Model().to(device)
+        example_inputs = (torch.randn(8, 10, device=device),)
+        expected = model(*example_inputs)
+
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(device, so_path)
+        actual = optimized(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
     def test_pytree_inputs(self):
         class M(torch.nn.Module):
@@ -1740,12 +1810,12 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10).to(self.device),
         )
         with self.assertRaisesRegex(
-            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
+            CppWrapperCodegenError, "Unsupported input dtype torch.float32"
         ):
             torch._export.aot_compile(Model(), example_inputs)
 
         supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device == "cuda"
+            torch.float32, self.device
         )
 
     def test_consecutive_compiles(self):
@@ -2883,23 +2953,33 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
-                return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+            if SM80OrLater:
+
+                def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
+            else:
+
+                def forward(self, x0, x1, x2, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x4, x5, x6, x7, x8, x9)
 
         inputs = []
-        for dtype in (
+        dtypes = [
             torch.float16,
             torch.float32,
             torch.float64,
-            torch.bfloat16,
             torch.bool,
             torch.int8,
             torch.int16,
             torch.int32,
             torch.int64,
             torch.uint8,
-        ):
+        ]
+        if SM80OrLater:
+            dtypes.append(torch.bfloat16)
+        for dtype in dtypes:
             inputs.append(torch.ones(4, 8, 10, dtype=dtype, device=self.device))
+
         dim0 = Dim("s0", min=2, max=1024)
         dim1 = Dim("s1", min=2, max=512)
         dim2 = Dim("s2", min=2, max=128)
@@ -2907,7 +2987,6 @@ class AOTInductorTestsTemplate:
             "x0": {0: dim0},
             "x1": {0: dim0},
             "x2": {0: dim0},
-            "x3": {1: dim1},
             "x4": {1: dim1},
             "x5": {1: dim1},
             "x6": {},
@@ -2915,6 +2994,9 @@ class AOTInductorTestsTemplate:
             "x8": {2: dim2},
             "x9": {2: dim2},
         }
+        if SM80OrLater:
+            dynamic_shapes["x3"] = {1: dim1}
+
         m = Model()
         inputs = tuple(inputs)
         with torch.no_grad(), config.patch(
@@ -2928,22 +3010,28 @@ class AOTInductorTestsTemplate:
             src_code = cpp.read()
             FileCheck().check_count(
                 "unmatched dtype",
-                10,
+                10 if SM80OrLater else 9,
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21,  # we have 9 dynamic dims for which we generate different checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18,  # we have 9 dynamic dims for which we generate two checks
+                18
+                if SM80OrLater
+                else 16,  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21,  # we have 9 symbolic strides for which we don't generate checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
@@ -2954,33 +3042,32 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     def test_runtime_checks_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3):
-                t = (
-                    x0.to(torch.float)
-                    + x1.to(torch.float)
-                    + x2.to(torch.float)
-                    + x3.to(torch.float)
-                )
+            def forward(self, x0, x1):
+                t = x0.to(torch.float) + x1.to(torch.float)
                 return t
 
         inputs = []
         for dtype in (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
+            # FP8 funz are for AMD
+            # see https://github.com/pytorch/pytorch/issues/126734
+            # torch.float8_e4m3fnuz,
+            # torch.float8_e5m2fnuz,
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "x0": {0: dim0},
             "x1": {0: dim0},
-            "x2": {0: dim0},
-            "x3": {0: dim0},
         }
         with torch.no_grad(), config.patch(
             {
@@ -3265,7 +3352,7 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    @common_utils.parametrize("max_autotune", [False, True])
+    @common_utils.parametrize("max_autotune", [True, False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -3293,6 +3380,40 @@ class AOTInductorTestsTemplate:
         self.check_model(
             Model(), example_inputs, options=dict(max_autotune=max_autotune)
         )
+
+    @skip_if_no_torchvision
+    def test_torchvision_transforms_functional_tensor_resize(self):
+        import torchvision
+
+        # https://fb.workplace.com/groups/1075192433118967/permalink/1501860707118802/
+        class A(torch.nn.Module):
+            def forward(self, image: torch.Tensor, target_size: torch.Tensor):
+                target_h, target_w = target_size.tolist()
+                torch._check(target_h > 0)
+                torch._check(target_w > 0)
+                torch._check(target_h <= 4000)
+                torch._check(target_w <= 4000)
+
+                return torchvision.transforms._functional_tensor.resize(
+                    image,
+                    size=[target_h, target_w],
+                    interpolation="bilinear",
+                    antialias=False,
+                )
+
+        model = A()
+        example_inputs = (
+            torch.ones([3, 800, 600], device=self.device),
+            torch.tensor([448, 336], device=self.device),
+        )
+        dynamic_shapes = {
+            "image": {
+                1: torch.export.Dim("height", min=1, max=4000),
+                2: torch.export.Dim("width", min=1, max=4000),
+            },
+            "target_size": None,
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
@@ -3400,17 +3521,13 @@ class AOTInductorTestsTemplate:
             ("add_kernel_0", 3),
         ]
 
-        # test the default debug printing codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, Model(), example_inputs
             )
-
             # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
             self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
-
             # check the codegen for debug printing around the actual kernel call is expected
-
             for kernel_call, count in kernel_calls:
                 FileCheck().check_count(
                     f"before_launch - {kernel_call}",
@@ -3420,6 +3537,96 @@ class AOTInductorTestsTemplate:
                     f"after_launch - {kernel_call}",
                     count,
                 ).run(code)
+
+    def test_aoti_debug_printer_cpp_kernel(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("cpu test case only")
+
+        # a simple cpp kernel test case for testing the debug printer codegen
+        # on cpp kernel cpu device.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                t = torch.tensor(x.size(-1), device="cpu", dtype=torch.float)
+                t = torch.sqrt(t * 3)
+                return x * t
+
+        example_inputs = (torch.randn(4, 4, device="cpu"),)
+
+        kernel_calls = [
+            ("cpp_fused_mul_sqrt_0", 2),
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            # check the codegen for debug printing around the actual kernel call is expected
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"before_launch - {kernel_call}",
+                    count,
+                ).run(code)
+                FileCheck().check_count(
+                    f"after_launch - {kernel_call}",
+                    count,
+                ).run(code)
+
+    def test_aoti_debug_printer_sym_inputs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                maxlen = max(x.item(), 512)
+                a = torch.ones(maxlen, device="cuda")
+                b = torch.ones(maxlen, device="cuda")
+                out = torch.zeros_like(a)
+                # unbacked symint in grid
+                add_kernel[(1, 1, maxlen)](a, b, out, maxlen, 32)
+                return out
+
+        example_inputs = (torch.randint(high=1024, size=(1,), device=self.device),)
+
+        expected_scalar_args = [
+            "triton_poi_fused_zeros_like_0_xnumel",
+            "triton_poi_fused_ones_1_xnumel",
+            "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            for scalar in expected_scalar_args:
+                FileCheck().check_count(
+                    f"{scalar}",
+                    2,
+                ).run(code)
+
+    def test_size_from_multi_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                _x, _i = torch.unique(x, sorted=True, return_inverse=True)
+                _x = _x.clone().detach()
+                return self.relu(_x), _i
+
+        example_inputs = (torch.randn(8, device=self.device),)
+        self.check_model(Model(), example_inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -3502,16 +3709,13 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: test_conv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
@@ -3525,12 +3729,8 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_linear_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
@@ -3609,6 +3809,8 @@ CPU_TEST_FAILURES = {
     "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
         is_skip=True
     ),
+    "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -3625,8 +3827,6 @@ CUDA_TEST_FAILURES = {
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quanatized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    # fp8 to be re-enabled for AOTI
-    "test_fp8": fail_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
         is_skip=True
@@ -3641,6 +3841,7 @@ CUDA_TEST_FAILURES = {
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
         is_skip=True
     ),
+    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3691,6 +3892,10 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(
                 is_skip=True
             ),
+            "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
+            "test_aoti_debug_printer_cpp_kernel": fail_with_and_without_stack_allocation(
+                is_skip=True
+            ),
         }
     ),
     # The following test passes internally but fails in OSS CI. To be investigated.
@@ -3700,6 +3905,7 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
                 is_skip=True
             ),
+            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
         }
     )
 
@@ -3815,6 +4021,9 @@ copy_tests(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
         "test_custom_op_with_reinterpret_view_inputs": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
+        "test_aoti_debug_printer_cpp_kernel": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
     },

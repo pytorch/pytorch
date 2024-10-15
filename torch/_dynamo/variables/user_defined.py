@@ -9,6 +9,7 @@ import inspect
 import itertools
 import random
 import sys
+import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -16,6 +17,7 @@ from typing import Dict, Generic, List, TYPE_CHECKING
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
@@ -81,11 +83,6 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
-        # TODO mlazos: Temporary to get this stack to pass
-        # remove in subsequent PR
-        from torch.overrides import BaseTorchFunctionMode
-
-        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -114,9 +111,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def as_python_constant(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_proxy(self):
         return self.value
@@ -199,6 +193,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
+            if isinstance(obj.__func__, property):
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -381,8 +379,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                items = args[0].force_unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
@@ -415,44 +413,56 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            # import here to avoid an unfortunate circular dependency.
+            from torch.overrides import TorchFunctionMode
+
             from .ctx_manager import GenericContextWrappingVariable
+            from .torch_function import TorchFunctionModeVariable
+
+            if issubclass(
+                self.value, TorchFunctionMode
+            ) and TorchFunctionModeVariable.is_supported_torch_function_mode(
+                self.value
+            ):
+                var_cls = TorchFunctionModeVariable
+            else:
+                var_cls = GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, GenericContextWrappingVariable, {}
+                self.source, self.value, var_cls, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
-                # create pseudo-defaults from values of the quasi-namedtuple
-                field_defaults = dict(zip(fields, args[0].items))
+                assert len(args) == 1
+                assert not kwargs
+                items = args[0].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults
 
-            items = list(args)
-            items.extend([None] * (len(fields) - len(items)))
+                items = list(args)
+                items.extend([None] * (len(fields) - len(items)))
 
-            var_tracker_kwargs = {}
-            for field_name, var_tracker in zip(fields, items):
-                if var_tracker is None:
-                    if field_name in kwargs:
-                        field_var = kwargs[field_name]
-                    else:
-                        assert field_name in field_defaults
-                        field_var = SourcelessBuilder.create(
-                            tx, field_defaults[field_name]
-                        )
-                    var_tracker_kwargs[field_name] = field_var
+                var_tracker_kwargs = {}
+                for field_name, var_tracker in zip(fields, items):
+                    if var_tracker is None:
+                        if field_name in kwargs:
+                            field_var = kwargs[field_name]
+                        else:
+                            assert field_name in field_defaults
+                            field_var = SourcelessBuilder.create(
+                                tx, field_defaults[field_name]
+                            )
+                        var_tracker_kwargs[field_name] = field_var
 
-            for name, value in var_tracker_kwargs.items():
-                assert name in fields
-                items[fields.index(name)] = value
+                for name, value in var_tracker_kwargs.items():
+                    assert name in fields
+                    items[fields.index(name)] = value
 
-            assert all(x is not None for x in items)
+                assert all(x is not None for x in items)
+
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             from .builder import SourcelessBuilder
@@ -512,7 +522,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in self._in_graph_classes():
+        elif (
+            self.value in self._in_graph_classes()
+            or is_traceable_wrapper_subclass_type(self.value)
+        ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
@@ -710,7 +723,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method):
+            if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             # [NOTE] OrderedDict, dict subtypes must always have source
@@ -748,7 +761,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.unpack_var_sequence(tx):
+                for key in keys.force_unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
                             [key, self.odict_getitem(tx, key)],
@@ -808,7 +821,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self):
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        )
+        ) and not isinstance(self.value, threading.local)
 
     def unpack_var_sequence(self, tx):
         if (
@@ -993,7 +1006,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1018,8 +1031,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                if getattr_fn is unpatched_nn_module_getattr and isinstance(
-                    self, variables.UnspecializedNNModuleVariable
+                if (
+                    getattr_fn is unpatched_nn_module_getattr
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    # prevent against overwriting of params/buffers/submodules
+                    and istype(self.value._parameters, dict)
+                    and istype(self.value._buffers, dict)
+                    and istype(self.value._modules, dict)
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
@@ -1173,7 +1191,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():

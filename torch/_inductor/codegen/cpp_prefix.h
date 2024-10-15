@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <map>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -25,8 +26,9 @@
 #include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -457,7 +459,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
   case 4:
     return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -479,7 +481,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -643,8 +645,39 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
 }
 #endif
 
-void mm_get_thread_blocking(
+std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
+  int count = 0;
+  for (int64_t i = std::sqrt(number); i > 0; --i) {
+    if (number % i == 0) {
+      count += 2;
+    }
+  }
+  auto factors = std::shared_ptr<int64_t[]>(new int64_t[count]);
+  int index = 0;
+  for (int64_t i = std::sqrt(number); i > 0; --i) {
+    if (number % i == 0) {
+      factors[index++] = number / i;
+      factors[index++] = i;
+    }
+  }
+  return std::make_tuple(factors, count);
+}
+
+std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
+  thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>> cache;
+  auto it = cache.find(number);
+  if (it != cache.end()) {
+    return it->second;
+  } else {
+    auto factors = _get_factors(number);
+    cache[number] = factors;
+    return factors;
+  }
+}
+
+void _mm_get_thread_blocking(
     int num_threads,
+    int max_k_slices,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -655,36 +688,18 @@ void mm_get_thread_blocking(
     int64_t& Nt,
     int64_t& Kt) {
   // see NOTE [Thread blocking in Cpp GEMM] for heuristics
-  // TODO(jgong5): cache thread blocking results
   Mt = Nt = Kt = 0;
 
-  auto get_factors = [](int64_t number) {
-    int count = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        count += 2;
-      }
-    }
-    auto factors = std::make_unique<int64_t[]>(count);
-    int index = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        factors[index++] = number / i;
-        factors[index++] = i;
-      }
-    }
-    return std::make_tuple(std::move(factors), count);
-  };
-
-  auto get_blocking = [](int64_t num_threads,
-                         int64_t factor,
+  auto get_blocking = [](int64_t m_factor,
+                         int64_t n_factor,
+                         int64_t k_factor,
                          int64_t m_blocks,
                          int64_t n_blocks,
                          int64_t k_blocks) {
-    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
-    int64_t cofactor = num_threads / factor;
-    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
-    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+    int64_t thread_block_k = (k_blocks + k_factor - 1) / k_factor;
+    int64_t thread_block_n = (n_blocks + n_factor - 1) / n_factor;
+    int64_t thread_block_m = (m_blocks + m_factor - 1) / m_factor;
+    return std::make_tuple(thread_block_m, thread_block_n, thread_block_k);
   };
 
   auto is_better_blocking = [=](int64_t Mt_,
@@ -693,7 +708,7 @@ void mm_get_thread_blocking(
                               int64_t Mt,
                               int64_t Nt,
                               int64_t Kt) {
-    return Mt == 0 || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
+    return Mt == 0 || Kt_ < Kt || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
   };
 
   int64_t m_blocks = (M + Mr - 1) / Mr;
@@ -704,11 +719,11 @@ void mm_get_thread_blocking(
   assert(count > 0);
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    if (n_blocks >= factor &&
-        m_blocks >= num_threads / factor) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor && m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
@@ -720,11 +735,33 @@ void mm_get_thread_blocking(
   }
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    int64_t cofactor = num_threads / factor;
-    if (n_blocks >= factor || m_blocks >= cofactor) {
+    int64_t k_factor = factors[i];
+    if (k_blocks >= k_factor && (max_k_slices == 0 || k_factor <= max_k_slices)) {
+      auto [mxn_factors, mxn_count] = get_factors(num_threads / k_factor);
+      for (int j = 0; j < mxn_count; ++j) {
+        int64_t n_factor = mxn_factors[j];
+        int64_t m_factor = num_threads / (k_factor * n_factor);
+        if (n_blocks >= n_factor && m_blocks >= m_factor) {
+          auto [Mt_, Nt_, Kt_] = get_blocking(
+              m_factor, n_factor, k_factor, m_blocks, n_blocks, k_blocks);
+          if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+            std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+          }
+        }
+      }
+    }
+  }
+
+  if (Mt != 0) {
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor || m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
@@ -734,30 +771,118 @@ void mm_get_thread_blocking(
   assert(Mt != 0);
 }
 
-inline void mm_get_thread_blocks(
-    int thread_id,
-    int64_t M_blocks,
-    int64_t N_blocks,
-    int64_t K_blocks,
+void mm_get_thread_blocking(
+    int num_threads,
+    int max_k_slices,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  thread_local std::map<
+    std::tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
+    std::tuple<int64_t, int64_t, int64_t>> cache;
+  auto key = std::make_tuple(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    std::tie(Mt, Nt, Kt) = it->second;
+    return;
+  } else {
+    _mm_get_thread_blocking(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr, Mt, Nt, Kt);
+    cache[key] = std::make_tuple(Mt, Nt, Kt);
+  }
+}
+
+template<typename X_t, typename W_t>
+void _mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
     int64_t Mt_blocks,
     int64_t Nt_blocks,
     int64_t Kt_blocks,
-    int64_t& m_block_start,
-    int64_t& m_block_end,
-    int64_t& n_block_start,
-    int64_t& n_block_end,
-    int64_t& k_block_start,
-    int64_t& k_block_end) {
-  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  k_block_start = (thread_id % num_Kt) * Kt_blocks;
-  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
-  thread_id /= num_Kt;
-  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  n_block_start = (thread_id % num_Nt) * Nt_blocks;
-  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
-  thread_id /= num_Nt;
-  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
-  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks,
+    uint32_t L1_cache_size,
+    uint32_t L2_cache_size) {
+  // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
+  // TODO(jgong5): cache cache blocking results
+  // TODO: tune the factor here
+  float L1_limit_factor = 0.8;
+  float L2_limit_factor = 0.5;
+
+  auto L1 = L1_cache_size * L1_limit_factor;
+  auto L2 = L2_cache_size * L2_limit_factor;
+
+  constexpr size_t num_byte_A = sizeof(X_t);
+  constexpr size_t num_byte_B = sizeof(W_t);
+
+  int64_t size_cache_B = Kr * Kt_blocks * Nr * num_byte_B;
+  Kc_blocks = Kt_blocks;
+  if (size_cache_B > L1) {
+      Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
+  }
+
+  float min_Mc_ratio = 2;
+  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
+  if (min_Mc_blocks * Mr * Kt_bytes < L2) {
+    Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
+    Nc_blocks = 1;
+  } else {
+    Mc_blocks = Mt_blocks;
+    Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+    auto Nc_bytes = Nc_blocks * Nr * 4;
+    auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
+    if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
+      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+      if (M_max < Mc_blocks * Mr) {
+        Mc_blocks = (int64_t)std::floor(M_max / Mr);
+        Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+      }
+    }
+  }
+}
+
+template<typename X_t, typename W_t>
+void mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks,
+    uint32_t L1_cache_size,
+    uint32_t L2_cache_size) {
+  thread_local std::map<
+    std::tuple<int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
+    std::tuple<int64_t, int64_t, int64_t>> cache;
+  auto key = std::make_tuple(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, L1_cache_size, L2_cache_size);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
+    return;
+  } else {
+    _mm_get_cache_blocking<X_t, W_t>(
+        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size);
+    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+  }
 }
 
 struct amx_tilecfg {

@@ -12,6 +12,7 @@ import torch
 from torch.utils._triton import has_triton_package
 
 from ..remote_cache import (
+    create_cache,
     JsonDataTy,
     RemoteCache,
     RemoteCacheBackend,
@@ -81,7 +82,7 @@ class AutotuneCache:
             return
 
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        local_cache = RemoteCache(_LocalAutotuneCacheBackend(), RemoteCacheJsonSerde())
+        local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
     # Set up remote caching information
@@ -91,12 +92,24 @@ class AutotuneCache:
         if not _should_use_remote_autotune_cache(inductor_meta):
             return
 
-        remote_cache = _create_cache(
-            inductor_meta,
-            self.configs_hash,
+        if (backend_hash := inductor_meta.get("backend_hash", None)) is None:
+            log.debug(
+                "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
+            )
+            return
+        assert isinstance(backend_hash, str)
+
+        is_fbcode = bool(inductor_meta.get("is_fbcode", False))
+
+        salt = "autotune-best-config-v2"
+        key = backend_hash + self.configs_hash + salt
+        key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+        remote_cache = create_cache(
+            key,
+            is_fbcode,
             "FbRemoteAutotuneCache",
             "RemoteAutotuneCache",
-            "autotune-best-config-v2",
         )
         if not remote_cache:
             return
@@ -131,7 +144,7 @@ class AutotuneCache:
             cache.put(key, data)
 
 
-def _should_use_remote_autotune_cache(inductor_meta: Dict[str, object]) -> bool:
+def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
     if (config := inductor_meta.get("autotune_remote_cache")) is not None:
         return bool(config)
     if not inductor_meta.get("is_fbcode"):
@@ -155,7 +168,7 @@ def _load_cached_autotuning(
     best_config: Dict[str, JsonDataTy],
     configs_hash: str,
     configs: List[Config],
-    inductor_meta: Dict[str, object],
+    inductor_meta: _InductorMetaTy,
 ) -> Optional[Config]:
     if best_config is None:
         return None
@@ -187,44 +200,9 @@ def _load_cached_autotuning(
     return matching_configs[0]
 
 
-def _create_cache(
-    inductor_meta: Dict[str, object],
-    configs_hash: str,
-    fb_cache_cls: str,
-    oss_cache_cls: str,
-    salt: str,
-) -> Optional[RemoteCache[JsonDataTy]]:
-    backend_hash = inductor_meta.get("backend_hash", None)
-    if backend_hash is None:
-        log.debug(
-            "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
-        )
-        return None
-
-    assert isinstance(backend_hash, str)
-
-    key = backend_hash + configs_hash + salt
-    key = hashlib.sha256(key.encode("utf-8")).hexdigest()
-
-    try:
-        if inductor_meta.get("is_fbcode"):
-            import torch._inductor.fb.remote_cache
-
-            cache_cls = getattr(torch._inductor.fb.remote_cache, fb_cache_cls)
-            return cache_cls(key)
-        else:
-            import torch._inductor.remote_cache
-
-            cache_cls = getattr(torch._inductor.remote_cache, oss_cache_cls)
-            return cache_cls(key)
-    except Exception:
-        log.warning("Unable to create a remote cache", exc_info=True)
-        return None
-
-
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
-    def get(self, key: str) -> Optional[bytes]:
+    def _get(self, key: str) -> Optional[bytes]:
         try:
             with open(key, "rb") as fd:
                 return fd.read()
@@ -232,6 +210,14 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
     @override
-    def put(self, key: str, data: bytes) -> None:
+    def _put(self, key: str, data: bytes) -> None:
+        os.makedirs(os.path.dirname(key), exist_ok=True)
         with open(key, "wb") as fd:
             fd.write(data)
+
+
+class LocalAutotuneCache(RemoteCache[JsonDataTy]):
+    def __init__(self) -> None:
+        backend = _LocalAutotuneCacheBackend()
+        serde = RemoteCacheJsonSerde()
+        super().__init__(backend, serde)

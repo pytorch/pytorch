@@ -27,7 +27,7 @@ concurrency:
 jobs:
   get-label-type:
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -51,7 +51,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -169,7 +169,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash

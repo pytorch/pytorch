@@ -3,6 +3,17 @@ import functools
 import math
 import operator
 import sys
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    SupportsFloat,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import sympy
 from sympy import S
@@ -18,6 +29,8 @@ from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
 
+
+_T = TypeVar("_T", bound=SupportsFloat)
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -76,10 +89,10 @@ __all__ = [
 ]
 
 
-def _keep_float(f):
+def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args):
-        r = f(*args)
+    def inner(*args: Any) -> Union[_T, sympy.Float]:
+        r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
@@ -89,13 +102,13 @@ def _keep_float(f):
     return inner
 
 
-def fuzzy_eq(x, y):
+def fuzzy_eq(x: Optional[bool], y: Optional[bool]) -> Optional[bool]:
     if None in (x, y):
         return None
     return x == y
 
 
-def simple_floordiv_gcd(p, q):
+def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     """
     Fast path for sympy.gcd, using a simple factoring strategy.
 
@@ -112,27 +125,31 @@ def simple_floordiv_gcd(p, q):
     might be necessary to fall back on sympy.gcd.
     """
 
-    def integer_coefficient(x):
-        integer_coefficients = [
+    def integer_coefficient(x: sympy.Basic) -> int:
+        integer_coefficients: List[int] = [
             abs(int(arg))
             for arg in sympy.Mul.make_args(x)
             if isinstance(arg, (int, sympy.Integer))
         ]
         return math.prod(integer_coefficients)
 
-    def integer_factor(expr):
-        integer_factors = map(integer_coefficient, sympy.Add.make_args(expr))
+    def integer_factor(expr: sympy.Basic) -> int:
+        integer_factors: Iterable[int] = map(
+            integer_coefficient, sympy.Add.make_args(expr)
+        )
         return functools.reduce(math.gcd, integer_factors)
 
-    gcd = math.gcd(integer_factor(p), integer_factor(q))
-    p, q = p / gcd, q / gcd
+    gcd: int = math.gcd(integer_factor(p), integer_factor(q))
+    p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
-    base_splits = list(map(sympy.Mul.make_args, sympy.Add.make_args(p)))
-    divisor_split = sympy.Mul.make_args(q)
+    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+        map(sympy.Mul.make_args, sympy.Add.make_args(p))
+    )
+    divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
-            gcd = gcd * x
-    return gcd
+            gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
+    return gcd  # type: ignore[return-value]  # remove in py3.12
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -162,20 +179,19 @@ class FloorDiv(sympy.Function):
     NB: This is Python-style floor division, round to -Inf
     """
 
-    nargs = (2,)
-    precedence = 50  # precedence of mul  # noqa: F811
-
-    is_integer = True
+    nargs: Tuple[int, ...] = (2,)
+    precedence: int = 50  # precedence of mul  # noqa: F811
+    is_integer: bool = True
 
     @property
-    def base(self):
+    def base(self) -> sympy.Basic:
         return self.args[0]
 
     @property
-    def divisor(self):
+    def divisor(self) -> sympy.Basic:
         return self.args[1]
 
-    def _sympystr(self, printer):
+    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
@@ -183,7 +199,9 @@ class FloorDiv(sympy.Function):
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
-    def eval(cls, base, divisor):
+    def eval(
+        cls, base: sympy.Integer, divisor: sympy.Integer
+    ) -> Union[sympy.Basic, None]:
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
         # Assert triggered by inequality solver
         # assert base.is_integer, base
@@ -252,17 +270,21 @@ class FloorDiv(sympy.Function):
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
+        return None
+
 
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
-    nargs = (3,)
-    is_integer = True
+    nargs: Tuple[int, ...] = (3,)
+    is_integer: bool = True
 
     @classmethod
-    def eval(cls, base, divisor, modulus):
+    def eval(
+        cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
+    ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
 
@@ -286,8 +308,8 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms = []
-            all_positive = True
+            new_terms: List[sympy.Integer] = []
+            all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
                     if (isinstance(term, sympy.Integer) and term < 0) or (
@@ -310,11 +332,13 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
-    def _eval_is_nonnegative(self):
+        return None
+
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
@@ -324,37 +348,40 @@ class Where(sympy.Function):
     Good ol' ternary operator
     """
 
-    nargs = (3,)
+    nargs: Tuple[int, ...] = (3,)
 
-    def _eval_is_integer(self):
+    def _eval_is_integer(self) -> Optional[bool]:
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         return (
             True
             if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
             else None
         )
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self) -> Optional[bool]:
         return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
 
     @classmethod
-    def eval(cls, c, p, q):
+    def eval(
+        cls, c: sympy.Basic, p: sympy.Basic, q: sympy.Basic
+    ) -> Optional[sympy.Basic]:
         if c == sympy.true:
             return p
         elif c == sympy.false:
             return q
+        return None
 
 
 # Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
-    nargs = (2,)
+    nargs: Tuple[int, ...] = (2,)
 
-    is_integer = True
+    is_integer: bool = True
 
     @classmethod
-    def eval(cls, p, q):
+    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> Optional[sympy.Expr]:
         # python test/dynamo/test_export.py -k ExportTests.test_trivial_constraint
         # Triggered by sympy.solvers.inequalities.reduce_inequalities
         # assert p.is_integer, p
@@ -396,11 +423,13 @@ class PythonMod(sympy.Function):
         if sympy.Mod(p, q) == 0:
             return S.Zero
 
+        return None
+
     # NB: args[1] for PythonMod
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonpositive(self):
+    def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
 
@@ -548,6 +577,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             args = cls._collapse_arguments(args, **assumptions)
             # find local zeros
             args = cls._find_localzeros(args, **assumptions)
+
         args = frozenset(args)
 
         if not args:
@@ -732,49 +762,44 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         When a value is identified as being more extreme than another member it
         replaces that member; if this is never true, then the value is simply
         appended to the localzeros.
+
+        Unlike the sympy implementation, we only look for zero and one, we don't
+        do generic is connected test pairwise which is slow
         """
-        localzeros = set()  # type: ignore[var-annotated]
-        for v in values:
-            is_newzero = True
-            localzeros_ = list(localzeros)
-            for z in localzeros_:
-                if id(v) == id(z):
-                    is_newzero = False
+
+        # First, collapse all numeric arguments
+        other_values = set()
+        num_value = None
+        for arg in values:
+            if arg.is_Number:
+                if num_value is None:
+                    num_value = arg
                 else:
-                    con = cls._is_connected(v, z)
-                    if con:
-                        is_newzero = False
-                        if con is True or con == cls:
-                            localzeros.remove(z)
-                            localzeros.update([v])
-            if is_newzero:
-                localzeros.update([v])
-        return localzeros
-
-    @classmethod
-    def _is_connected(cls, x, y):
-        """
-        Check if x and y are connected somehow.
-        """
-        if x == y:
-            return True
-        t, f = Max, Min
-        for op in "><":
-            for j in range(2):
-                try:
-                    if op == ">":
-                        v = x >= y
+                    if cls is Max:
+                        num_value = max(num_value, arg)
+                    elif cls is Min:
+                        num_value = min(num_value, arg)
                     else:
-                        v = x <= y
-                except TypeError:
-                    return False  # non-real arg
-                if not v.is_Relational:
-                    return t if v else f
-                t, f = f, t  # type: ignore[assignment]
-                x, y = y, x
-            x, y = y, x  # run next pass with reversed order relative to start
+                        raise AssertionError(f"impossible {cls}")
+            else:
+                other_values.add(arg)
 
-        return False
+        # Special cases when there is only one symbolic value
+        if num_value is None:
+            return other_values
+
+        if len(other_values) == 0:
+            return {num_value}
+
+        if len(other_values) == 1:
+            other_value = next(iter(other_values))
+            if num_value in (0.0, 0) and other_value.is_nonnegative:
+                return other_values if cls is Max else {num_value}
+            if num_value == 1 and other_value.is_positive:
+                return other_values if cls is Max else {num_value}
+
+        other_values.add(num_value)
+        return other_values
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
@@ -823,13 +848,13 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.Infinity
     identity = S.NegativeInfinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -841,13 +866,13 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.NegativeInfinity
     identity = S.Infinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
 
 
@@ -1129,7 +1154,7 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):

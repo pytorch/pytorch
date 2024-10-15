@@ -4223,8 +4223,8 @@ class TestQuantizedLinear(TestCase):
         ret_ref = qlinear.dequantize()
         self.assertEqual(ret, ret_ref)
 
-    """Tests the correctness of the _quantized::wrapped_linear_prepack and
-    _quantized::wrapped_quantized_linear_prepacked ops."""
+    """Tests the correctness of the _quantized::_wrapped_linear_prepack and
+    _quantized::_wrapped_quantized_linear_prepacked ops."""
     @skipIfNoFBGEMM
     @given(
         m=st.integers(2, 6),
@@ -4243,13 +4243,13 @@ class TestQuantizedLinear(TestCase):
         output_zero_point = torch.tensor(0)
         out_channel = n
 
-        ret_1 = torch.ops._quantized.wrapped_linear_prepack(
+        ret_1 = torch.ops._quantized._wrapped_linear_prepack(
             weight,
             weight_scale,
             weight_zero_point,
             bias
         )
-        ret_2 = torch.ops._quantized.wrapped_quantized_linear_prepacked(
+        ret_2 = torch.ops._quantized._wrapped_quantized_linear_prepacked(
             input,
             input_scale,
             input_zero_point,
