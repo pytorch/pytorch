@@ -76,6 +76,7 @@ def _rocm_compiler_options() -> List[str]:
         "-amdgpu-function-calls=false",
         "-mllvm",
         "-enable-post-misched=0",
+        "-ggdb",
     ]
     if config.rocm.is_debug:
         opts += ["-DDEBUG_LOG=1", "-g"]
