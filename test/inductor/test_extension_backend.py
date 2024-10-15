@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
-import tempfile
 import unittest
 
 import torch
@@ -22,6 +21,8 @@ except ImportError:
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
+
+from filelock import FileLock, Timeout
 
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
@@ -51,13 +52,22 @@ TestCase = test_torchinductor.TestCase
 
 class BaseExtensionBackendTests(TestCase):
     module = None
-    # Use a temp dir as build root as there might be multiple tests trying to
-    # build the same extension at the same time
-    build_directory = tempfile.mkdtemp()
+
+    # Use a lock file so that only one test can build this extension at a time
+    lock_file = os.path.join(
+        torch.utils.cpp_extension.get_default_build_root(), "extension_device.lock"
+    )
+    lock = FileLock(lock_file)
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
+        try:
+            cls.lock.acquire(timeout=600)
+        except Timeout:
+            # This shouldn't happen, still attempt to build the extension anyway
+            pass
 
         # Build Extension
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
@@ -71,7 +81,6 @@ class BaseExtensionBackendTests(TestCase):
                 str(source_file),
             ],
             extra_cflags=["-g"],
-            build_directory=cls.build_directory,
             verbose=True,
         )
 
@@ -81,6 +90,7 @@ class BaseExtensionBackendTests(TestCase):
         super().tearDownClass()
 
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        cls.lock.release()
 
     def setUp(self):
         torch._dynamo.reset()
