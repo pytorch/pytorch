@@ -9990,17 +9990,19 @@ class DistributedTest:
                 b = model(inp)
                 loss = a.sum() + b.sum()
                 loss.backward()
-                # Grads should be equal to a local model that ran through inp twice and averaged grads
+                # Grads should be equal to a local model that ran through inp
+                # `world_size` times and averaged grads
                 if self.rank == 0:
                     inp_clone = inp.clone()
-                    for _ in range(2):
+                    iters = dist.get_world_size()
+                    for _ in range(iters):
                         a = local_model(inp_clone)
                         b = local_model(inp_clone)
                         loss = a.sum() + b.sum()
                         loss.backward()
 
                     for p in local_model.parameters():
-                        p.grad.data = p.grad / 2
+                        p.grad.data = p.grad / iters
 
                     for p_ddp, p_local in zip(
                         model.parameters(),
