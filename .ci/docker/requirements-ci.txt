@@ -128,6 +128,8 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
+numpy==1.26.2; python_version < 3.13
+numpy==2.1.2; python_version == 3.13
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
