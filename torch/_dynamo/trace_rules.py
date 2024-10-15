@@ -423,6 +423,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -612,6 +613,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_graph_executor_optimize",
         "torch._C._get_linalg_preferred_backend",
         "torch._C._get_math_sdp_enabled",
+        "torch._C._get_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._get_max_operator_version",
         "torch._C._get_mem_efficient_sdp_enabled",
         "torch._C._get_mkldnn_enabled",
@@ -1147,6 +1149,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_qengine",
         "torch._C._set_sdp_use_flash",
         "torch._C._set_sdp_use_math",
+        "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
         "torch._C._set_should_use_format_with_string_table",
         "torch._C._set_storage_access_error_msg",
@@ -2400,11 +2403,13 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.can_use_cudnn_attention",
         "torch.backends.cuda.enable_flash_sdp",
         "torch.backends.cuda.enable_math_sdp",
+        "torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp",
         "torch.backends.cuda.enable_mem_efficient_sdp",
         "torch.backends.cuda.flash_sdp_enabled",
         "torch.backends.cuda.is_built",
         "torch.backends.cuda.is_flash_attention_available",
         "torch.backends.cuda.math_sdp_enabled",
+        "torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
         "torch.backends.cuda.enable_cudnn_sdp",
@@ -2443,6 +2448,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch.cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -2539,6 +2545,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory._snapshot",
         "torch.cuda.memory.caching_allocator_alloc",
         "torch.cuda.memory.caching_allocator_delete",
+        "torch.cuda.memory.caching_allocator_enable",
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
@@ -2909,6 +2916,9 @@ def get_tensor_method():
             method, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             s.add(method)
+
+    # mlazos: this is a function which we handle specially in TensorVariable
+    s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
     return frozenset(s)
 
 
@@ -3265,6 +3275,7 @@ MOD_INLINELIST = [
     "torch.nn",
     "torch.overrides",
     "torch.random",
+    "torch.return_types",
     "torch.sparse",
     "torch.testing",
     "torch.utils._content_store",

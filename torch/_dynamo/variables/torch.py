@@ -11,10 +11,8 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
-from torch._streambase import _StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
@@ -97,7 +95,6 @@ supported_ctx_manager_classes = dict.fromkeys(
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
-        torch.onnx.operators.shape_as_tensor,
         torch._shape_as_tensor,
     ]
 )
@@ -279,7 +276,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
             return wrap_fx_proxy_cls(
@@ -313,7 +310,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         #     assert len(args) == 2
         #     return VmapIncrementNestingCtxManagerVariable.create(
         #         tx,
-        #         [guard_if_dyn(x) for x in args],
+        #         args,
         #     )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
@@ -903,6 +900,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        if self.is_tensor_method():
+            return self.call_tensor_method(tx, args, kwargs)
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1174,6 +1174,16 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             source
         )
         return result
+
+    def call_tensor_method(self, tx, args, kwargs):
+        return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
+
+    def is_tensor_method(self):
+        return (
+            inspect.ismethoddescriptor(self.get_function())
+            and hasattr(self.get_function(), "__objclass__")
+            and self.get_function().__objclass__ == torch._C.TensorBase
+        ) or self.get_function() is torch.Tensor.__contains__
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
