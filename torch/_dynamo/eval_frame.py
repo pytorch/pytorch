@@ -126,6 +126,14 @@ _stance = DynamoStance()
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
     global _stance
+
+    from torch._C._dynamo.eval_frame import get_eval_frame_callback
+
+    callback = get_eval_frame_callback()
+
+    if callback is not False and callback is not None:
+        raise RuntimeError("attempted to set_stance in a torch.compile region")
+
     prior = _stance
     _stance = stance
     return prior
@@ -140,7 +148,7 @@ def _callback_from_stance(callback):
         if _stance.backend is not None:
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
-                convert_frame.convert_frame(
+                convert_frame.convert_frame(  # type: ignore[arg-type]
                     get_compiler_fn(_stance.backend),
                     hooks,
                 ),
@@ -148,11 +156,7 @@ def _callback_from_stance(callback):
             )
 
         return callback
-
-    if _stance.backend is not None:
-        raise RuntimeError("non-default stance cannot have force_backend set")
-
-    if _stance.stance == "force_eager":
+    elif _stance.stance == "force_eager":
         # disable
         return None
     elif _stance.stance == "eager_on_recompile":

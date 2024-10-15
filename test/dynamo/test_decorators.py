@@ -736,6 +736,25 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ):
             f(torch.ones(3))
 
+        @torch.compile(backend="eager")
+        def g(x):
+            # cause a skipped frame
+            try:
+                torch._dynamo.graph_break()
+            except Exception:
+                pass
+            # NOTE: torch._dynamo.is_compiling() will get traced
+            # and return true. torch.compiler.is_compiling() is skipped
+            # and will return false.
+            if torch.compiler.is_compiling():
+                raise RuntimeError("Expect this frame to be skipped")
+            # should not be traced, but eval frame callback is still set
+            with torch.compiler.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "set_stance in a torch.compile"):
+            g(torch.ones(3))
+
     def test_set_stance_force_backend(self):
         @torch.compile
         def a(x):
@@ -758,12 +777,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # just make sure this doesn't crash
         c(torch.ones(3))
 
-        @torch.compiler.set_stance("force_eager", force_backend="eager")
-        def d(x):
-            return a(x)
-
         with self.assertRaisesRegex(RuntimeError, "force_backend"):
-            d(torch.ones(3))
+
+            @torch.compiler.set_stance("force_eager", force_backend="eager")
+            def d(x):
+                pass
 
 
 if __name__ == "__main__":
