@@ -161,14 +161,14 @@ C10_DEFINE_REGISTRY_WITHOUT_WARNING(
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
-    auto ifnameEnv = c10::utils::get_env(kSocketIfnameEnvVar.c_str());
-    if (ifnameEnv.has_value()) {
+    char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+    if (ifnameEnv != nullptr) {
       auto [error, result] =
-          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv.value());
+          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
       if (error) {
         LOG(WARNING) << "Failed to look up the IP address for interface "
-                     << ifnameEnv.value() << " (" << error.what()
-                     << "), defaulting to " << kDefaultUvAddress;
+                     << ifnameEnv << " (" << error.what() << "), defaulting to "
+                     << kDefaultUvAddress;
         return kDefaultUvAddress;
       }
       return result;
