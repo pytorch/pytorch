@@ -3686,21 +3686,7 @@ def fail_minimal_arrayref_interface(is_skip=False):
 
 def fail_cuda(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cuda", "non_abi_compatible_cuda"),
-        is_skip=is_skip,
-    )
-
-
-def fail_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("abi_compatible_cuda",),
-        is_skip=is_skip,
-    )
-
-
-def fail_non_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("non_abi_compatible_cuda",),
+        ("abi_compatible_cuda"),
         is_skip=is_skip,
     )
 
@@ -3816,32 +3802,10 @@ CPU_TEST_FAILURES = {
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
-    # no runtime checks for non_abi_compatible mode
-    "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_normal_functional": fail_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quanatized_int8_linear": fail_cuda(is_skip=True),
-    "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
-    # non-abi compatible mode aoti debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3971,86 +3935,6 @@ copy_tests(
     "abi_compatible_cuda",
     CUDA_TEST_FAILURES,
 )
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCpu(AOTITestCase):
-    device = "cpu"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCpu,
-    "non_abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_duplicate_constant_folding": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        # no runtime checks for non_abi_compatible mode
-        "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_runtime_checks_dtype_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_runtime_checks_shape_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_aoti_debug_printer_codegen": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_all_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_missing_arg_with_default_value": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_concat_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_multiple_outputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_reinterpret_view_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_aoti_debug_printer_cpp_kernel": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-    },
-)
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCuda(AOTITestCase):
-    device = "cuda"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCuda,
-    "non_abi_compatible_cuda",
-    CUDA_TEST_FAILURES,
-)
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
