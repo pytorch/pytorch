@@ -143,6 +143,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
+          python3 -m pip install boto3==1.19.12
           # Fetch aws credential from IMDs
           eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           export SHARD_NUMBER=0
