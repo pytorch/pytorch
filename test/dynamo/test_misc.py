@@ -11560,6 +11560,7 @@ fn
         actual = torch.compile(f, backend="eager")(a)
 
         self.assertEqual(expected, actual)
+        self.assertTrue(len(counters["graph_break"]) > 0)
         counters.clear()
 
     class AssertNumOutputBackend:
