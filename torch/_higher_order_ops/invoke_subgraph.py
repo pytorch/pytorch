@@ -225,29 +225,21 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
     with ctx.redispatch_to_next() as m:
         # TODO(anijain2305) - Long term, it might be a bit restrictive to ban
         # mutation/aliasing. Investigate if there is a way to support this.
-        skip_check = False
-        invoke_subgraph_cache = get_invoke_subgraph_cache()
-        if invoke_subgraph_cache:
-            if invoke_subgraph_cache.get_functional_tensor_entry(identifier):
-                skip_check = True
-
-        if not skip_check:
-            pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-            if _has_potential_branch_input_mutation(
-                subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of invoke_subgraph hop might be modifying the input!"
-                )
-            if _has_potential_branch_input_alias(
-                subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of invoke_subgraph hop might be aliasing the input!"
-                )
-            if invoke_subgraph_cache:
-                invoke_subgraph_cache.add_functional_tensor_entry(identifier, True)
-
+        # TODO(anijain2305) - Short term, improve compilation time by
+        # skipping this check if the identifier has been seen before.
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        if _has_potential_branch_input_mutation(
+            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "One of invoke_subgraph hop might be modifying the input!"
+            )
+        if _has_potential_branch_input_alias(
+            subgraph, unwrapped_operands, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "One of invoke_subgraph hop might be aliasing the input!"
+            )
         functionalized_subgraph = ctx.functionalize(subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
@@ -266,20 +258,27 @@ def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
 def invoke_subgraph_proxy_torch_dispatch_mode(
     proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands
 ):
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
-    example_out = invoke_subgraph(subgraph, identifier, operands)
-    graph = proxy_mode.has_traced_invoke_subgraph_before(identifier)
+    # Check if we have already traced the subgraph.
+    graph = None
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    if invoke_subgraph_cache:
+        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
+
     if graph is None:
         graph = reenter_make_fx(subgraph)(*operands)
-        proxy_mode.add_traced_invoke_subgraph(identifier, graph)
-        qualname = proxy_mode.tracer.get_fresh_qualname("invoke_subgraph")
+        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
         proxy_mode.tracer.root.register_module(qualname, graph)
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
     node_args = (graph, identifier, operands)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
+
+    example_out = invoke_subgraph(graph, identifier, operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

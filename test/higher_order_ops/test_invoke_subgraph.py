@@ -188,7 +188,7 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-    def test_multiple(self):
+    def test_dedupe(self):
         def gn(x, y):
             return (torch.mul(x, y),)
 

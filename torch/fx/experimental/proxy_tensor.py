@@ -1311,7 +1311,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         from torch._inductor import config
 
         self.emulate_precision_casts = config.emulate_precision_casts
-        self.seen_invoke_subgraphs: Dict[str, torch.fx.GraphModule] = dict()
 
     @count
     def __torch_dispatch__(
@@ -1403,16 +1402,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out
-
-    def has_traced_invoke_subgraph_before(
-        self, identifier: str
-    ) -> Optional[torch.fx.GraphModule]:
-        return self.seen_invoke_subgraphs.get(identifier, None)
-
-    def add_traced_invoke_subgraph(
-        self, identifier: str, graph: torch.fx.GraphModule
-    ) -> None:
-        self.seen_invoke_subgraphs[identifier] = graph
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):

@@ -578,17 +578,17 @@ class HopSubgraphCache:
     def get_autograd_key_entry(self, identifier: str):
         raise NotImplementedError
 
-    def add_functional_tensor_entry(self, identifier: str, key: bool):
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
         raise NotImplementedError
 
-    def get_functional_tensor_entry(self, identifier: str):
+    def get_proxy_dispatch_entry(self, identifier: str):
         raise NotImplementedError
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: Dict[str, Callable] = {}
-        self.functional_tensor_cache: Dict[str, bool] = {}
+        self.proxy_dispatch_cache: Dict[str, Callable] = {}
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
         self.autograd_cache[identifier] = key
@@ -596,12 +596,11 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_autograd_key_entry(self, identifier: str):
         return self.autograd_cache.get(identifier, None)
 
-    def add_functional_tensor_entry(self, identifier: str, key: bool):
-        # key ignored
-        self.functional_tensor_cache[identifier] = True
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
 
-    def get_functional_tensor_entry(self, identifier: str):
-        return self.functional_tensor_cache.get(identifier, False)
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
