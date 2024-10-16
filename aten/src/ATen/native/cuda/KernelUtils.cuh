@@ -2,9 +2,7 @@
 #include <ATen/cuda/Atomic.cuh>
 
 #if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
-#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-#endif
 #endif
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
