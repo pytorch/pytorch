@@ -253,6 +253,14 @@ class Match:
             replacement = trace_fn(
                 replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])  # type: ignore[arg-type]
             )
+            if len(self.nodes) > 0:
+                for n in replacement.graph.nodes:
+                    n.meta.update(
+                        (k, v)
+                        for k, v in self.nodes[0].meta.items()
+                        if k not in {"val", "tensor_meta"}
+                    )
+
             ReplacementPatternEntry.replace_with_graph(
                 self,
                 self.ctx.graph,
@@ -1054,6 +1062,11 @@ class ReplacementPatternEntry(PatternEntry):
                         if isinstance(node.meta["val"], torch.Tensor):
                             assert "tensor_meta" in node.meta
                             result.meta["tensor_meta"] = node.meta["tensor_meta"]
+                    result.meta.update(
+                        (k, v)
+                        for k, v in node.meta.items()
+                        if k not in {"val", "tensor_meta"}
+                    )
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
