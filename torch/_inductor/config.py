@@ -1041,6 +1041,11 @@ class aot_inductor:
     # TODO: Move this somewhere else, since it's no longer really a config
     metadata: Dict[str, str] = {}
 
+    # fbcode only. Whether to raise error if C++ codegen is too big to optimize
+    raise_error_on_ignored_optimization: bool = (
+        os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
+    )
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
