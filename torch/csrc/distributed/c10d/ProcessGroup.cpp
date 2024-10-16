@@ -1,6 +1,4 @@
 #include <ATen/ThreadLocalState.h>
-#include <ATen/cuda/CUDAContextLight.h>
-#include <ATen/cuda/CUDAGraph.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
