@@ -90,6 +90,18 @@ class TORCH_API Context {
     }
   }
 
+  at::Allocator* getDeviceAllocator(Device device) {
+    at::Allocator* allocator = nullptr;
+    if (device.is_cpu()) {
+      allocator = GetAllocator(kCPU);
+    } else if (device.is_meta()) {
+      allocator = GetAllocator(kMeta);
+    } else {
+      allocator = getAcceleratorHooksInterface(device.type()).getDeviceAllocator();
+    }
+    return allocator;
+  }
+
   bool isPinnedPtr(
       const void* data,
       std::optional<c10::DeviceType> device_type = std::nullopt) {
