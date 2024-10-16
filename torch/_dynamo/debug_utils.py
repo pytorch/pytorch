@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import weakref
 from collections import Counter
 from importlib import import_module
 from typing import Any, Callable, Dict, List, Optional, TypeVar
@@ -24,7 +25,6 @@ import torch._subclasses.meta_utils
 from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
@@ -623,7 +623,7 @@ class InputWriter:
     #
     # If we had a FakeTensor, device_hint tells us what device should be
     def storage(self, untyped_storage, *, dtype_hint=None, device_hint=None) -> str:
-        ws = StorageWeakRef(untyped_storage)
+        ws = weakref.ref(untyped_storage)
         v = self.seen_storages.get(ws)
         if v is not None:
             return v

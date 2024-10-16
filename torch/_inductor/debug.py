@@ -473,7 +473,13 @@ class DebugFormatter:
         inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_dir = None
+            if torch._inductor.config.trace.save_real_tensors:
+                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
+                save_dir = os.path.dirname(fd.name) + "/input_dir/"
+
+            with torch._inductor.utils.maybe_get_suppress_shape_guards_ctx(), torch.utils._python_dispatch._disable_current_modes():
+                save_graph_repro(fd, gm, inputs, "inductor", save_dir=save_dir)
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))

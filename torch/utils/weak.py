@@ -320,3 +320,22 @@ class TensorWeakRef:
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out
+
+
+class StorageWeakRefWrapper:
+    """Wrapper around a weak ref of a Storage that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
+
+    ref: WeakRef[torch.storage.UntypedStorage]
+
+    def __init__(self, stor: torch.storage.UntypedStorage):
+        assert isinstance(stor, torch.storage.UntypedStorage)
+        self.ref = weakref.ref(stor)
+
+    def __call__(self):
+        out = self.ref()
+        if out is None:
+            return out
+        assert isinstance(out, torch.storage.UntypedStorage)
+        # TODO, add _fix_weakref type binding
+        out._fix_weakref()  # type: ignore[attr-defined]
+        return out

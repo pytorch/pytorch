@@ -277,6 +277,7 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
     fd.write(
         generate_compiler_repro_string(
             gm,
