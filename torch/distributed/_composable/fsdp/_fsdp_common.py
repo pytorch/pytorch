@@ -16,9 +16,8 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    from torch.distributed.utils import FakeCompiledAutogradModule
-
-    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 @dataclass
@@ -125,7 +124,7 @@ def _from_local_no_grad(
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
 
-    if not ca.local.enabled():
+    if not ca.compiled_autograd_enabled:
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
