@@ -26,6 +26,8 @@ from .cpp_utils import (
 
 log = logging.getLogger(__name__)
 
+
+# TODO<Leslie>: We should merge this with GEMM Template to save redundant code
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
 
@@ -40,23 +42,26 @@ inline void silu_mul_epilogue_fusion(
     int64_t N,
     int64_t in_lda,
     int64_t out_lda) {
+    int64_t n_scalar_start = 0;
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
     using Vectorized_fp32 = at::vec::Vectorized<float>;
     using Vectorized_bf16 = at::vec::Vectorized<bfloat16>;
     int64_t N1 = N / 32 * 32;
     int64_t N2 = N / 16 * 16;
+    n_scalar_start = N2;
+#endif
     for (int64_t m = 0; m < M; m += 1) {
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
         for (int64_t n = 0; n < N1; n += 32) {
-            Vectorized_fp32 tmp = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
-            Vectorized_fp32 tmp_1 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n + 16));
+            Vectorized_fp32 tmp0 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
+            Vectorized_fp32 tmp0_1 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n + 16));
             Vectorized_fp32 tmp1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n));
             Vectorized_fp32 tmp1_1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n + 16));
-            // Bias add
             if constexpr (has_gate_bias) {
                 const auto inp_bf16_vec = Vectorized_bf16::loadu(inp0 + n);
                 at::vec::VectorizedN<float, 2> inp_fp32_vecs = at::vec::convert<float, 2, bfloat16, 1>(inp_bf16_vec);
-                tmp = tmp + Vectorized_fp32(inp_fp32_vecs[0]);
-                tmp_1 = tmp_1 + Vectorized_fp32(inp_fp32_vecs[1]);
+                tmp0 = tmp0 + Vectorized_fp32(inp_fp32_vecs[0]);
+                tmp0_1 = tmp0_1 + Vectorized_fp32(inp_fp32_vecs[1]);
             }
             if constexpr (has_up_bias) {
                 const auto inp_bf16_vec = Vectorized_bf16::loadu(inp1 + n);
@@ -64,78 +69,51 @@ inline void silu_mul_epilogue_fusion(
                 tmp1 = tmp1 + Vectorized_fp32(inp_fp32_vecs[0]);
                 tmp1_1 = tmp1_1 + Vectorized_fp32(inp_fp32_vecs[1]);
             }
-            // Silu
-            tmp = tmp * (decltype(tmp)(1)/(decltype(tmp)(1) + tmp.neg().exp()));
-            tmp_1 = tmp_1 * (decltype(tmp_1)(1)/(decltype(tmp_1)(1) + tmp_1.neg().exp()));
-            // Mul
-            tmp = tmp * tmp1;
-            tmp_1 = tmp_1 * tmp1_1;
-            // Store output
-            at::vec::VectorizedN<float, 2> out_fp32_vec(tmp, tmp_1);
+            tmp0 = tmp0 * (decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp()));
+            tmp0_1 = tmp0_1 * (decltype(tmp0_1)(1)/(decltype(tmp0_1)(1) + tmp0_1.neg().exp()));
+            tmp0 = tmp0 * tmp1;
+            tmp0_1 = tmp0_1 * tmp1_1;
+            at::vec::VectorizedN<float, 2> out_fp32_vec(tmp0, tmp0_1);
             Vectorized_bf16 out_bf16_vec = at::vec::convert<bfloat16, 1, float, 2>(out_fp32_vec);
             out_bf16_vec.store(out_ptr + (m * out_lda + n));
         }
-
         for (int64_t n = N1; n < N2; n += 16) {
-            Vectorized_fp32 tmp = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
+            Vectorized_fp32 tmp0 = Vectorized_fp32::loadu(in_ptr0 + (m * in_lda + n));
             Vectorized_fp32 tmp1 = Vectorized_fp32::loadu(in_ptr1 + (m * in_lda + n));
-            // Bias add
             if constexpr (has_gate_bias) {
                 const auto inp_bf16_vec = Vectorized_bf16::loadu(inp0 + n, 16);
                 Vectorized_fp32 inp_fp32_vec = at::vec::convert<float, 1, bfloat16, 1>(inp_bf16_vec);
-                tmp = tmp + inp_fp32_vec;
+                tmp0 = tmp0 + inp_fp32_vec;
             }
             if constexpr (has_up_bias) {
                 const auto inp_bf16_vec = Vectorized_bf16::loadu(inp1 + n, 16);
                 Vectorized_fp32 inp_fp32_vec = at::vec::convert<float, 1, bfloat16, 1>(inp_bf16_vec);
                 tmp1 = tmp1 + inp_fp32_vec;
             }
-            // Silu
-            tmp = tmp * (decltype(tmp)(1)/(decltype(tmp)(1) + tmp.neg().exp()));
-            // Mul
-            tmp = tmp * tmp1;
-            // Store output
-            Vectorized_bf16 out_bf16_vec = at::vec::convert<bfloat16, 1, float, 1>(tmp);
+            tmp0 = tmp0 * (decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp()));
+            tmp0 = tmp0 * tmp1;
+            Vectorized_bf16 out_bf16_vec = at::vec::convert<bfloat16, 1, float, 1>(tmp0);
             out_bf16_vec.store(out_ptr + (m * out_lda + n), 16);
         }
-
-        for (int64_t n = N2; n < N; n += 1) {
-            float tmp = in_ptr0[m * in_lda + n];
-            float tmp1 = in_ptr1[m * in_lda + n];
-            // Bias add
-            if constexpr (has_gate_bias) {
-                tmp = tmp + (float)inp0[n];
-            }
-            if constexpr (has_up_bias) {
-                tmp1 = tmp1 + (float)inp1[n];
-            }
-            // Silu
-            tmp = tmp * (1.0 / ( 1.0 + std::exp(-tmp)));
-            // Mul
-            float out = tmp * tmp1;
-            out_ptr[m * out_lda + n] = (bfloat16)out;
-        }
-    }
-#else
-    for (int64_t m = 0; m < M; m += 1) {
-        for (int64_t n = 0; n < N; n += 1) {
-            float tmp = in_ptr0[m * in_lda + n];
-            float tmp1 = in_ptr1[m * in_lda + n];
-            // Bias add
-            if constexpr (has_gate_bias) {
-                tmp = tmp + (float)inp0[n];
-            }
-            if constexpr (has_up_bias) {
-                tmp1 = tmp1 + (float)inp1[n];
-            }
-            // Silu
-            tmp = tmp * (1.0 / ( 1.0 + std::exp(-tmp)));
-            // Mul
-            float out = tmp * tmp1;
-            out_ptr[m * out_lda + n] = (bfloat16)out;
-        }
-    }
 #endif
+        for (int64_t n = n_scalar_start; n < N; n += 1) {
+            float tmp0 = in_ptr0[m * in_lda + n];
+            float tmp1 = in_ptr1[m * in_lda + n];
+            // Bias add
+            if constexpr (has_gate_bias) {
+                tmp0 = tmp0 + (float)inp0[n];
+            }
+            if constexpr (has_up_bias) {
+                tmp1 = tmp1 + (float)inp1[n];
+            }
+            // Silu
+            tmp0 = tmp0 * (1.0 / ( 1.0 + std::exp(-tmp0)));
+            // Mul
+            tmp0 = tmp0 * tmp1;
+            // Store output
+            out_ptr[m * out_lda + n] = (bfloat16)tmp0;
+        }
+    }
 }
 
 {{micro_gemm.codegen_define(kernel)}}
@@ -343,9 +321,6 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             has_bias,
             epilogue_creator,
         )
-
-    def maybe_k_slicing(self):
-        return False
 
     @staticmethod
     def add_choices(
@@ -652,7 +627,6 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             export_declaration=get_export_declaration(),
             Y_2d=Y_2d,
             use_local_acc=use_local_acc,
-            maybe_k_slicing=self.maybe_k_slicing(),
             acc_buf_dtype=torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
