@@ -404,7 +404,7 @@ class SACEstimator(TorchDispatchMode):
             # 6. Find the first occurence of a tensor corresponding to each module that
             # shares the same storage as the current tensor
             past_output_ids = d.output_ids
-            if output_ids in past_output_ids:
+            if set(output_ids).issubset(set(past_output_ids)):
                 for mod_fqn, op_parent_idx in mod_op_parent_idxs.items():
                     if op_parent_idx == -1:
                         if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):

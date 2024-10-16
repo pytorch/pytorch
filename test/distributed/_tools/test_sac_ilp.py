@@ -163,7 +163,7 @@ class TestSACILP(TestCase):
         self.assertAlmostEqual(sorted_discard_ratio[1], 0.55, delta=0.05)
         self.assertAlmostEqual(sorted_discard_ratio[2], 0.55, delta=0.05)
         self.assertAlmostEqual(sum(sorted_discard_ratio), 2.35, delta=0.05)
-        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.5232, delta=0.05)
+        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.55, delta=0.05)
 
         # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
         # Since runtime is device_flops dependent, so we only check the ratio

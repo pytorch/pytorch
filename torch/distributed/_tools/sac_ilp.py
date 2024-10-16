@@ -271,7 +271,6 @@ def get_optimal_checkpointing_policy_per_module(
         if op != op_parent:
             prob += x[op] == x[op_parent]
         else:
-            # TODO(xuanzh): is this correct? since this means all inplace ops are saved.
             prob += x[op] == SACDecision.SAVE.value
 
     # [Constraint] saved memory should be under the ``memory_budget``
