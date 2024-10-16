@@ -538,7 +538,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        from .misc import InlinedClosureVariable
+        # Avoid circular import
+        from .misc import ClosureVariable, NewCellVariable
 
         code = self.get_code()
         func = types.FunctionType(
@@ -559,23 +560,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         for idx, name in enumerate(code.co_freevars):
             cell = self.closure.items[idx]
             assert name not in result
-            if isinstance(cell, InlinedClosureVariable):
-                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
-                # InliningInstructionTranslators when the variable name is not found in closure_cells.
-                # They should remain outside of closure_cells, so that our callee (the
-                # InliningInstructionTranslator that traces `func`) handles
-                # the cell correctly - that is, the cell's contents are treated as if they
-                # are local variables, like in UserFunctionVariable's bind_args for freevars.
-                cand = parent
-                while cand and name not in cand.symbolic_locals:
-                    cand = cand.parent
-                if cand is None:
-                    raise RuntimeError(
-                        f"Couldn't find {name} in the symbolic_locals of the inline interpreter stack"
-                    )
-                result[name] = cand.symbolic_locals[name]
+            # In the regular case, a cell is either a `ClosureVariable` or
+            # `NewCellVariable`.
+            if isinstance(cell, (ClosureVariable, NewCellVariable)):
+                closure_cells[name] = cell
             else:
-                closure_cells[name] = self.closure.items[idx]
+                # We model unmodified cells captured by `UserFunctionVariable` as
+                # their contents, in tracer's `symbolic_locals`. See
+                # `UserFunctionVariable::bind_args`.
+                result[name] = cell
 
         return result, closure_cells
 
@@ -738,6 +731,12 @@ class SkipFunctionVariable(VariableTracker):
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)
+            if self.value.__qualname__ == "allow_in_graph":
+                msg = (
+                    "Found an allow_in_graph decorator to a function which "
+                    "is created inside the parent function that is getting "
+                    "compiled. This is not supported for now."
+                )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
