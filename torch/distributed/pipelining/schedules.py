@@ -59,11 +59,9 @@ class _ComputationType(Enum):
     RECV_F = 7
     SEND_B = 8
     RECV_B = 9
-    SEND_F_RECV_B = 10
-    SEND_B_RECV_F = 11
-    # TODO- probably want to reconsider naming backward_input 'B' and having 'FULL_BACKWARD'.
-    # instead, B = full backward, Bx, Bw are the partials?
-    FULL_BACKWARD = 12
+    FULL_BACKWARD = 10
+    SEND_F_RECV_B = 11
+    SEND_B_RECV_F = 12
 
     def __str__(self):
         str_map = {
@@ -76,9 +74,9 @@ class _ComputationType(Enum):
             _ComputationType.RECV_F: "RECV_F",
             _ComputationType.SEND_B: "SEND_B",
             _ComputationType.RECV_B: "RECV_B",
+            _ComputationType.FULL_BACKWARD: "BW",
             _ComputationType.SEND_F_RECV_B: "SEND_F_RECV_B",
             _ComputationType.SEND_B_RECV_F: "SEND_B_RECV_F",
-            _ComputationType.FULL_BACKWARD: "BW",
         }
         return str_map[self]
 
@@ -102,12 +100,12 @@ class _ComputationType(Enum):
             return _ComputationType.SEND_B
         elif action == "RECV_B":
             return _ComputationType.RECV_B
+        elif action == "BW":
+            return _ComputationType.FULL_BACKWARD
         elif action == "SEND_F_RECV_B":
             return _ComputationType.SEND_F_RECV_B
         elif action == "SEND_B_RECV_F":
             return _ComputationType.SEND_B_RECV_F
-        elif action == "BW":
-            return _ComputationType.FULL_BACKWARD
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -121,9 +119,9 @@ SEND_F = _ComputationType.SEND_F
 RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
+FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 SEND_F_RECV_B = _ComputationType.SEND_F_RECV_B
 SEND_B_RECV_F = _ComputationType.SEND_B_RECV_F
-FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
