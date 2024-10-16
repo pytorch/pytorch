@@ -2366,10 +2366,6 @@ Call this whenever a new thread is created in order to propagate values from
       "DisableTorchFunction",
       (PyObject*)THPModule_DisableTorchFunctionType(),
       /* incref= */ false));
-  ASSERT_TRUE(set_module_attr(
-      "EnableTorchFunction",
-      (PyObject*)THPModule_EnableTorchFunctionType(),
-      /* incref= */ false));
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);

@@ -3065,7 +3065,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3201,34 +3201,6 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
-
-
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
-def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
-
-
-def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
-
-
-def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
