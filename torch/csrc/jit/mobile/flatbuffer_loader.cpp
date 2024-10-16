@@ -188,7 +188,7 @@ TypePtr resolveType(
     const std::string& type_string,
     const std::shared_ptr<CompilationUnit>& cu) {
   TypePtr type;
-  c10::string_view type_str(type_string);
+  c10::string_view_ext type_str(type_string);
   if (type_str.starts_with(kCustomClassPrefix)) {
     type = getCustomClass(type_string);
     TORCH_CHECK(
@@ -607,7 +607,7 @@ ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
   const mobile::serialization::ObjectType* obj_type =
       module_->object_types()->Get(object->type_index());
   if (cls == nullptr) {
-    c10::string_view qn_str(
+    c10::string_view_ext qn_str(
         obj_type->type_name()->c_str(), obj_type->type_name()->size());
     if (qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
       c10::QualifiedName qn(obj_type->type_name()->str());
