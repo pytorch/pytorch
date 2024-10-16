@@ -1112,7 +1112,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             owner_var = UserDefinedClassVariable(type(self.value))
             return variables.UserMethodVariable(
                 subobj.__get__.__func__, descriptor_var, source=get_source
-            ).call_function(tx, [descriptor_var, self, owner_var], {})
+            ).call_function(tx, [self, owner_var], {})
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
