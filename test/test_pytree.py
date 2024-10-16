@@ -748,13 +748,12 @@ class TestPythonPytree(TestCase):
         script = """
 import sys
 import torch
-assert "torch.utils.pytree" in sys.modules
+import torch.utils._pytree
 assert "torch.utils._pytree" in sys.modules
-if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
-    if "torch.utils._cxx_pytree" in sys.modules:
-        raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
-    if "optree" in sys.modules:
-        raise RuntimeError("importing torch.utils._pytree should not import optree")
+if "torch.utils._cxx_pytree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+if "optree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import optree")
 """
         try:
             subprocess.check_output(
@@ -1309,9 +1308,7 @@ class TestCxxPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
-        )
+        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):
@@ -1320,7 +1317,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
         )
 
     @parametrize(

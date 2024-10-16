@@ -48,7 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, Self
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -994,7 +994,6 @@ def tree_map_(
     """
     leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    # TODO: change to deque(iterable, maxlen=0) instead when dynamo supports maxlen for deque
     tuple(map(func, *flat_args))  # consume and exhaust the iterable
     return tree
 
@@ -1456,20 +1455,16 @@ def treespec_loads(serialized: str) -> TreeSpec:
     )
 
 
-class _Asterisk(str):
-    def __new__(cls) -> Self:
-        return super().__new__(cls, "*")
-
+class _DummyLeaf:
     def __repr__(self) -> str:
-        return "*"  # no quotes
-
-
-_asterisk = _Asterisk()
-del _Asterisk
+        return "*"
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
+    dummy_tree = tree_unflatten(
+        [_DummyLeaf() for _ in range(treespec.num_leaves)],
+        treespec,
+    )
     return repr(dummy_tree)
 
 

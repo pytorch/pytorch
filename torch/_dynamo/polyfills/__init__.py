@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         functools as functools,
         itertools as itertools,
         os as os,
-        pytree as pytree,
         sys as sys,
     )
 

@@ -32,9 +32,8 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.onnx.operators
-import torch.utils._pytree as python_pytree
+import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -89,11 +88,9 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = python_pytree._cxx_pytree_exists
+HAS_OPTREE = importlib.util.find_spec("optree")
 if HAS_OPTREE:
-    import torch.utils._cxx_pytree as cxx_pytree
-else:
-    cxx_pytree = None
+    import optree
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -295,9 +292,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_OPTREE, "missing optree package")
     def test_optree_graph_break_message(self):
-        import optree
-
-        @torch.compile(backend="eager")
+        @torch.compile(
+            backend="eager",
+        )
         def fn(x):
             d = {"a": 1}
             optree.tree_flatten(d)
@@ -308,7 +305,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils.pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py",
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
         )
 
     def test_scalar_device_movement(self):
@@ -8434,6 +8431,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8450,6 +8449,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8466,6 +8467,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8502,6 +8505,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -8550,6 +8555,7 @@ def ___make_guard_fn():
         self.assertEqual(cnt.frame_count, 2)
 
     def test_tracing_py_tree_tensor_subclass(self):
+        import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
@@ -8570,6 +8576,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             def mapper(x):
                 return x.clone()
@@ -9900,9 +9908,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -9934,9 +9940,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -9984,9 +9988,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -11531,6 +11533,41 @@ fn
 
         self.assertEqual(expected, actual)
         self.assertGreater(po.call_count, 0)
+
+    def test_data_ptr_graph_break_builtin(self):
+        def f(a, b):
+            # builtin + not implemented for DataPtrVariable
+            return a.data_ptr() + b.data_ptr()
+
+        a = torch.randn(4)
+        b = torch.randn(5)
+
+        # make sure there is a graph break
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(a, b)
+
+        torch._dynamo.reset()
+
+        expected = f(a, b)
+        actual = torch.compile(f, backend="eager")(a, b)
+
+        self.assertEqual(expected, actual)
+
+    def test_data_ptr_graph_break_aten(self):
+        def f(a):
+            # torch.add not implemented for DataPtrVariable
+            return torch.add(a, a.data_ptr())
+
+        a = torch.randn(4)
+
+        counters.clear()
+
+        expected = f(a)
+        actual = torch.compile(f, backend="eager")(a)
+
+        self.assertEqual(expected, actual)
+        self.assertTrue(len(counters["graph_break"]) > 0)
+        counters.clear()
 
     class AssertNumOutputBackend:
         """
