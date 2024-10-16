@@ -10866,6 +10866,9 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.skip("consistently fails internally and causes other tests to appear flaky"),
+                         "TestForeach", "test_parity", dtypes=(torch.complex128,),
+                         active_if=lambda kwargs: IS_FBCODE and not kwargs["noncontiguous"]),
         ),
     ),
     ForeachFuncInfo(
@@ -10886,7 +10889,7 @@ foreach_binary_op_db: List[OpInfo] = [
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.skip("consistently fails internally and causes other tests to appear flaky"),
                          "TestForeach", "test_parity", dtypes=(torch.complex128,),
-                         active_if=lambda kwargs: IS_FBCODE and not kwargs["noncontiguous"] and not kwargs["inplace"]),
+                         active_if=lambda kwargs: IS_FBCODE and not kwargs["noncontiguous"]),
         ),
     ),
     ForeachFuncInfo(
