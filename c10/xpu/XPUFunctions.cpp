@@ -51,20 +51,10 @@ inline void initGlobalDevicePoolState() {
     return;
   }
 
-#ifdef _WIN32
-  // default context feature is disabled by default on Windows.
-  std::vector<sycl::device> deviceList;
-  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
-       ++it) {
-    deviceList.push_back(*(*it));
-  }
-  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
-#else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   gDevicePool.context = std::make_unique<sycl::context>(
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
-#endif
 }
 
 inline void initDevicePoolCallOnce() {
