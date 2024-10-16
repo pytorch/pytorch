@@ -316,11 +316,9 @@ class DTensorTestBase(MultiProcessTestCase):
 
         device = None
         if "nccl" in self.backend:
-            if eager_init:
-                device = torch.device(f"{self.device_type}:{self.rank}")
-            else:
-                # set device for nccl pg for collectives
-                torch.cuda.set_device(self.rank)
+            # set device for nccl pg for collectives
+            torch.cuda.set_device(self.rank)
+            device = torch.device(f"{self.device_type}:{self.rank}") if eager_init else device
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
