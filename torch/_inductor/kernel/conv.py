@@ -407,17 +407,21 @@ def conv_layout(
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
     with V.graph.fake_mode:
+        input_tensor = ir.ir_node_to_tensor(x, guard_shape=True)
+        weight_tensor = ir.ir_node_to_tensor(weight, guard_shape=True)
+        bias_tensor = ir.ir_node_to_tensor(bias, guard_shape=True)
+        memory_format = torch.channels_last if input_tensor.is_contiguous(memory_format=torch.channels_last) else torch.contiguous_format
         output = torch.ops.aten.convolution(
-            ir.ir_node_to_tensor(x, guard_shape=True),
-            ir.ir_node_to_tensor(weight, guard_shape=True),
-            ir.ir_node_to_tensor(bias, guard_shape=True),
+            input_tensor,
+            weight_tensor,
+            bias_tensor,
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
             transposed,
             V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,
-        )
+        ).to(memory_format=memory_format)
         sizes = ir.convert_shape_to_inductor(output.size())
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
@@ -469,6 +473,8 @@ def convolution(
     transposed: bool,
     output_padding: List[int],
     groups: int,
+    *,
+    layout=None
 ):
     # import pdb; pdb.set_trace()
     stride = tuple(stride)
@@ -557,7 +563,9 @@ def convolution(
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
-    layout = conv_layout(x, weight, None, **kwargs)
+    # import pdb; pdb.set_trace()
+    if layout is None:
+        layout = conv_layout(x, weight, None, **kwargs)
     ordered_kwargs_for_cpp_kernel = [
         "stride",
         "padding",
