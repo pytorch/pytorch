@@ -210,7 +210,6 @@ def register_decomposition(
 def get_decompositions(
     aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
     type: str = "post_autograd",
-    ignore_cia: bool = False,
 ) -> Dict[torch._ops.OperatorBase, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
@@ -223,8 +222,6 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
-    from torch._export.utils import _is_cia_op
-
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     registry = global_decomposition_table[type]
@@ -236,15 +233,9 @@ def get_decompositions(
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
-                if ignore_cia and _is_cia_op(op_overload):
-                    continue
-                else:
-                    decompositions[op_overload] = registry[op_overload]
+                decompositions[op_overload] = registry[op_overload]
         elif isinstance(op, (torch._ops.OperatorBase)) and op in registry:
-            if ignore_cia and _is_cia_op(op):
-                continue
-            else:
-                decompositions[op] = registry[op]
+            decompositions[op] = registry[op]
     return decompositions
 
 
@@ -285,10 +276,36 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     )
     from torch._inductor import config
 
-    if config.is_fbcode():
-        return _core_aten_decompositions_post_autograd(ignore_cia=False)
+    aten = torch.ops.aten
 
-    decomp_table = _core_aten_decompositions_post_autograd(ignore_cia=True)
+    # Entry without functional CIA ops
+    decomp_table = _core_aten_decompositions_post_autograd()
+    if config.is_fbcode():
+        decomp_table_for_functional_cia_ops_legacy = get_decompositions(
+            [
+                aten.all.dimname,
+                aten.index_add.dimname,
+                aten.index_copy.dimname,
+                aten.index_fill.Dimname_Scalar,
+                aten.index_fill.Dimname_Tensor,
+                aten.norm.names_ScalarOpt_dim_dtype,
+                aten.norm.names_ScalarOpt_dim,
+                aten.silu_backward.default,
+                aten.std.default,
+                aten.std.dim,
+                aten.std.names_dim,
+                aten.std.correction_names,
+                aten.std_mean.default,
+                aten.std_mean.dim,
+                aten.std_mean.names_dim,
+                aten.std_mean.correction_names,
+                aten.upsample_bilinear2d.vec,
+                aten.upsample_trilinear3d.vec,
+            ]
+        )
+
+        decomp_table.update(decomp_table_for_functional_cia_ops_legacy)
+        return decomp_table
 
     for op in _collect_all_valid_cia_ops_for_aten_namespace():
         decomp_table[op] = _get_decomp_for_cia(op)
@@ -312,11 +329,10 @@ def _decomp_table_to_post_autograd_aten():
     return decomp_table
 
 
-def _core_aten_decompositions_post_autograd(
-    ignore_cia,
-) -> Dict[torch._ops.OperatorBase, Callable]:
+def _core_aten_decompositions_post_autograd() -> (
+    Dict[torch._ops.OperatorBase, Callable]
+):
     aten = torch.ops.aten
-    # TODO Delete all mutating or CIA ops from this list
     return get_decompositions(
         [
             aten.addcdiv,
@@ -388,11 +404,16 @@ def _core_aten_decompositions_post_autograd(
             aten.huber_loss,
             aten.huber_loss_backward,
             aten.im2col,
-            aten.index_add,
+            aten.index_add.out,
+            aten.index_add.default,
             aten.index_add_,
-            aten.index_copy,
+            aten.index_copy.out,
+            aten.index_copy.default,
             aten.index_copy_,
-            aten.index_fill,
+            aten.index_fill.int_Scalar,
+            aten.index_fill.int_Tensor,
+            aten.index_fill.int_Scalar_out,
+            aten.index_fill.int_Tensor_out,
             aten.index_fill_,
             aten.isin,
             aten.isneginf,
@@ -444,7 +465,16 @@ def _core_aten_decompositions_post_autograd(
             aten.nll_loss2d_backward,
             aten.nll_loss_backward,
             aten.nll_loss_forward,
-            aten.norm,
+            aten.norm.ScalarOpt_dtype,
+            aten.norm.Scalar,
+            aten.norm.ScalarOpt_dim_dtype,
+            aten.norm.ScalarOpt_dim,
+            aten.norm.dtype_out,
+            aten.norm.out,
+            aten.norm.names_dtype_out,
+            aten.norm.names_out,
+            aten.norm.ScalarOpt_dtype_out,
+            aten.norm.Scalar_out,
             aten.ones,
             aten.ones_like,
             aten.pixel_shuffle,
@@ -481,7 +511,7 @@ def _core_aten_decompositions_post_autograd(
             aten.sigmoid_backward,
             aten.silu,
             aten.silu_,
-            aten.silu_backward,
+            aten.silu_backward.grad_input,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
@@ -501,8 +531,13 @@ def _core_aten_decompositions_post_autograd(
             aten.squeeze_copy,
             aten.squeeze.default,
             aten.squeeze.dim,
-            aten.std,
-            aten.std_mean,
+            aten.std.correction,
+            aten.std.out,
+            aten.std.correction_out,
+            aten.std.names_out,
+            aten.std.correction_names_out,
+            aten.std_mean.correction,
+            aten.std_mean.correction_out,
             aten.stack,
             aten.sum.default,
             aten.sum.out,
@@ -532,8 +567,8 @@ def _core_aten_decompositions_post_autograd(
             aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
-            aten.upsample_bilinear2d,
-            aten.upsample_trilinear3d,
+            aten.upsample_bilinear2d.out,
+            aten.upsample_trilinear3d.out,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
             aten.xlogy,
@@ -544,6 +579,5 @@ def _core_aten_decompositions_post_autograd(
             aten.zeros_like,
             aten._chunk_cat,
             aten._weight_norm_interface,
-        ],
-        ignore_cia=ignore_cia,
+        ]
     )
