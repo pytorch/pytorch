@@ -15,7 +15,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -27,7 +27,12 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
-from .autotune_process import TensorMeta, TritonBenchmarkRequest
+from .autotune_process import (
+    TensorMeta,
+    TritonBenchmarkRequest,
+    TritonCPUBenchmarkRequest,
+    TritonGPUBenchmarkRequest,
+)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
@@ -577,6 +582,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
+                gpu="cpu" not in V.graph.device_types,
             )
 
 
@@ -640,7 +646,7 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
-        fake_out = ir.Buffer("buf_out", layout)
+        fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
@@ -746,7 +752,12 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
-        bmreq = TritonBenchmarkRequest(
+        bmreq_cls: Type[TritonBenchmarkRequest]
+        if layout.device.type == "cpu":
+            bmreq_cls = TritonCPUBenchmarkRequest
+        else:
+            bmreq_cls = TritonGPUBenchmarkRequest
+        bmreq = bmreq_cls(
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
@@ -847,16 +858,15 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         input_nodes,
         layout,
         make_kernel_render,
-        debug_extra,
+        description,
         bmreq,
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
-        self.debug_extra = debug_extra
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
             log_info = {}
@@ -880,7 +890,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.bmreq.precompile()
 
     def __str__(self) -> str:
-        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"
@@ -899,7 +909,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
-                debug_extra=self.debug_extra,
                 mutated_inputs=self.mutated_inputs,
             )
         )
@@ -935,7 +944,7 @@ class ExternKernelCaller(ChoiceCaller):
         *,
         has_out_variant=True,
     ) -> None:
-        super().__init__(choice.name, input_nodes, layout)
+        super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
@@ -1396,6 +1405,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     layout,
                     input_nodes,
                     get_timings,
+                    choices,
                 )
             )
 
@@ -1637,11 +1647,9 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
-                kernel_info = (
-                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
-                )
+                kernel_description = choice.description
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_description}\n"
                 )
             else:
                 sys.stderr.write(
@@ -1653,7 +1661,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            " seconds precompiling\n"
+            f" seconds precompiling for {len(timings)} choices\n"
         )
 
     @staticmethod
@@ -1663,7 +1671,7 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmarking.
         """
         if isinstance(node, ir.Layout):
-            node = ir.Buffer("fake", node)
+            node = ir.Buffer(name="fake", layout=node)
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
