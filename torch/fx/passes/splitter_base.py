@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import argparse
 import copy
@@ -53,8 +52,8 @@ class _SplitterSettingBase:
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(
-            "--max-acc_splits",
-            "--max-acc_splits",
+            "--max-acc-splits",
+            "--max_acc_splits",
             required=False,
             type=int,
             help="Enforce a maximum number of split subgraphs.",
@@ -869,7 +868,7 @@ class _SplitterBase:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):
                     del node.tag
-        return split_module
+        return split_module  # type: ignore[return-value]
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()

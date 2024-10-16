@@ -287,12 +287,12 @@ void listAdd(Stack& stack) {
   c10::List<IValue> ret = make_result_list<IValue>(a.elementType());
 
   if (a.use_count() == 1) {
-    ret = std::move(a);
+    ret = a;
   } else {
     ret = a.copy();
   }
 
-  ret.append(std::move(b));
+  ret.append(b);
 
   push(stack, std::move(ret));
 }
@@ -300,7 +300,7 @@ void listAdd(Stack& stack) {
 void listInplaceAdd(Stack& stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
-  a.append(std::move(b));
+  a.append(b);
   push(stack, std::move(a));
 }
 
@@ -311,8 +311,7 @@ void listMulIntLeftInPlace(Stack& stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (const auto i : c10::irange(1, n)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(1, n)) {
       for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
@@ -330,8 +329,7 @@ void listMulIntLeft(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -348,8 +346,7 @@ void listMulIntRight(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -382,8 +379,7 @@ void listSlice(Stack& stack) {
   sliced_list.reserve(num_values);
 
   int i = start;
-  for (const auto j : c10::irange(num_values)) {
-    (void)j; // Suppress unused variable warning
+  for (C10_UNUSED const auto j : c10::irange(num_values)) {
     sliced_list.push_back(list.get(i));
     i += step;
   }

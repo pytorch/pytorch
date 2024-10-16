@@ -111,6 +111,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     buf_to_fx_node = {}
+    node_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
 
@@ -144,7 +145,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
@@ -162,10 +163,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
-        if isinstance(snode, FusedSchedulerNode):
-            for x in snode.snodes:
-                buf_to_fx_node[x.get_name()] = fx_node
-        buf_to_fx_node[name] = fx_node
+        node_to_fx_node[name] = fx_node
+        for buf in snode.get_outputs():
+            buf_to_fx_node[buf.get_name()] = fx_node
 
         if first_node is None:
             first_node = fx_node
@@ -175,7 +175,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         name = snode.get_name()
         deps = snode.read_writes.reads
 
-        fx_node = buf_to_fx_node[name]
+        fx_node = node_to_fx_node[name]
         new_args = []
         for dep in deps:
             if dep.name in buf_to_fx_node:
@@ -184,6 +184,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)
                     buf_to_fx_node[dep.name] = dep_node
+            if dep_node == fx_node:  # to avoid cycles
+                continue
             new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)

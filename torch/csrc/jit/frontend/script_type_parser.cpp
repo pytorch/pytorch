@@ -38,9 +38,10 @@ TypePtr ScriptTypeParser::subscriptToType(
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
       if (!tup_literal.inputs().empty()) {
-        throw ErrorReport(tup_literal.range())
+        throw(
+            ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
-            << "have any elements!";
+            << "have any elements!");
       }
       return TupleType::create({});
     }
@@ -123,7 +124,8 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   // Alias torch.nn._common_types._size_?_t to BroadcastingList?[int]
   if (expr.kind() == TK_VAR) {
     auto var = Var(expr);
-    auto& name = var.name().name();
+    auto var_name = var.name();
+    auto& name = var_name.name();
     constexpr auto _size_prefix = "_size_";
     constexpr auto _size_suffix = "_t";
     constexpr auto _size_n_len = 9; // strlen("_size_X_t")
@@ -179,12 +181,12 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  char* end;
+  char* end = nullptr;
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
-    throw ErrorReport(subscript.subscript_exprs().range())
-        << "subscript of Broadcastable list must be a positive integer";
+    throw(
+        ErrorReport(subscript.subscript_exprs().range())
+        << "subscript of Broadcastable list must be a positive integer");
   }
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
@@ -205,7 +207,8 @@ std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     }
     case '.': {
       auto select = Select(expr);
-      const std::string& name = select.selector().name();
+      auto selector = select.selector();
+      const std::string& name = selector.name();
       // Special case for torch.Tensor and its' subclasses
       const std::unordered_set<std::string> tensor_subtypes = {
           "Tensor",
@@ -261,7 +264,8 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     return subscriptToType(*value_name, subscript);
 
   } else if (expr.kind() == TK_STRINGLITERAL) {
-    const auto& type_name = StringLiteral(expr).text();
+    auto literal = StringLiteral(expr);
+    const auto& type_name = literal.text();
 
     // Check if the type is a custom class. This is done by checking
     // if type_name starts with "torch.classes."
@@ -362,7 +366,16 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // XXX: We need to turn optimization off here because otherwise we try to
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
-  cu.get_function(def.name().name()).run(stack);
+  auto& f = cu.get_function(def.name().name());
+  auto* gf = dynamic_cast<GraphFunction*>(&f);
+  TORCH_INTERNAL_ASSERT(gf);
+  // 2024.08.14: Since we are starting to deprecate Torchscript usages,
+  // we are going to log all the calls for GraphFunction::run. The logging was
+  // noisy we also call GraphFunction::run for the default value evaluation
+  // which generates a lot of useless log samples. Therefore as a workaround we
+  // just directly use the executor API which avoids this placing producing
+  // un-necessary log entries.
+  gf->get_executor().run(stack);
   return stack.at(0).toTupleRef().elements().vec();
 }
 

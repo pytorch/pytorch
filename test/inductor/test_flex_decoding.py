@@ -3,7 +3,7 @@
 
 import functools
 from collections import namedtuple
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple, Union
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
@@ -13,12 +13,15 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
+    BlockMask,
     create_block_mask,
     flex_attention,
+    noop_mask,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.utils._triton import has_triton
 
 
@@ -184,6 +187,20 @@ test_Hq_Hkv = [
     (16, 16),
 ]
 
+test_Bq_Bkv = [
+    (3, 1),
+    (5, 1),
+    (8, 1),
+    (16, 1),
+]
+
+test_block_size = [
+    64,
+    128,
+    (1, 64),
+    (128, 64),
+]
+
 (Hq, Hkv) = (16, 8)
 
 
@@ -252,7 +269,7 @@ class TestFlexDecoding(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Callable,
+        score_mod: Optional[Callable],
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = Hq,
@@ -261,8 +278,12 @@ class TestFlexDecoding(InductorTestCase):
         KV_B: int = B,
         KV_H: int = Hkv,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
     ):
+        assert (
+            score_mod is not None or block_mask is not None
+        ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D),
@@ -271,27 +292,31 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=False
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        block_mask = None
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
         compiled_sdpa = torch.compile(sdpa_partial)
-        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
-        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
-        compiled_out = compiled_sdpa(q, k, v)
+        golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+        compiled_out, compiled_lse = compiled_sdpa(q, k, v, return_lse=True)
 
         self._check_out(
             golden_out,
             ref_out,
             compiled_out,
+        )
+        self._check_out(
+            gold_lse,
+            ref_lse,
+            compiled_lse,
         )
 
     def run_test_with_call(
@@ -306,7 +331,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_B: int = B,
         KV_H: int = Hkv,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         if not golden_call:
             golden_call = sdpa_call
@@ -317,10 +342,10 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=False
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -376,6 +401,19 @@ class TestFlexDecoding(InductorTestCase):
         Hq, Hkv = head_dims
         assert Hq % Hkv == 0
         self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, 1, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     def input_strides_1(B, H, S, D):
         return ((H * S * D, S * D, D, 1), 997)  # offset
@@ -437,6 +475,37 @@ class TestFlexDecoding(InductorTestCase):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        head_dims: Tuple[int, int],
+        batch_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            1,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
         )
 
     @supported_platform
@@ -519,6 +588,7 @@ class TestFlexDecoding(InductorTestCase):
 
         self.run_test(bias_mod, dtype)
 
+    @skipIfRocm
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):
@@ -535,6 +605,14 @@ class TestFlexDecoding(InductorTestCase):
             return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
+        qk_d, v_d = head_dims
+        self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -763,6 +841,38 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
+    def test_fully_masked_out_rows_0_check_gqa(self):
+        # Ensure fully masked out rows won't cause NaNs.
+        query = torch.randn(
+            (B, Hq, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (B, Hkv, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (B, Hkv, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+
+        flex = torch.compile(flex_attention, dynamic=False)
+
+        out, lse = flex(
+            query, key, value, block_mask=block_mask, enable_gqa=True, return_lse=True
+        )
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+        self.assertTrue((lse[:, :, M:] == -float("inf")).all())
+
+        loss = out.sum() + lse.sum()
+        loss.backward()
+        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
+
+    @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
         attention = functools.partial(flex_attention, score_mod=score_mod)
@@ -892,6 +1002,57 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check_count(".run(primals_1, primals_2, primals_3", 1, True).run(
             code[0]
         )
+
+    @supported_platform
+    def test_non_sparse_mulitple_block_size(self):
+        def generate_causal_offset(offset: torch.Tensor):
+            def causal_offset_mask(b, h, q_idx, kv_idx):
+                return (offset + q_idx) >= kv_idx
+
+            return causal_offset_mask
+
+        def noop(score, b, h, q_idx, kv_idx):
+            return score
+
+        mod = generate_causal_offset(
+            torch.tensor(192, device="cuda", dtype=torch.int32)
+        )
+        block_mask = create_block_mask(mod, 1, 1, 1, 65)
+
+        self.run_test(
+            score_mod=None,
+            dtype=torch.float32,
+            block_mask=block_mask,
+            Q_B=1,
+            Q_H=1,
+            Q_S=1,
+            Q_D=16,
+            KV_B=1,
+            KV_H=1,
+            KV_S=65,
+            V_D=16,
+        )
+
+    @supported_platform
+    def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self):
+        torch._dynamo.reset()
+        H = Hq
+        q = torch.randn(B, H, 1, D, device="cuda")
+        for i in range(5):
+            k = torch.randn(B, H, S + i, D, device="cuda")
+            v = torch.randn(B, H, S + i, D, device="cuda")
+            compiled_flex_attention = torch.compile(flex_attention)
+            ref = flex_attention(q, k, v)
+            res = compiled_flex_attention(q, k, v)
+            tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+            torch.testing.assert_close(
+                ref, res, atol=tolerance.atol, rtol=tolerance.rtol
+            )
+            # Ensure no more re-compilation after the second automatic dynamic shape version.
+            if i == 0:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+            else:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexDecoding)
