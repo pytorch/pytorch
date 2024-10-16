@@ -18,6 +18,7 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import (
+    AttrsDescriptorWrapper,
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
@@ -93,8 +94,6 @@ class TestTritonHeuristics(TestCase):
         self._test_artificial_zgrid()
 
     def _get_cos_kernel_caching_autotuner_args(self):
-        from triton.compiler.compiler import AttrsDescriptor  # @manual
-
         @triton.jit
         def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
             xnumel = 16
@@ -110,7 +109,9 @@ class TestTritonHeuristics(TestCase):
             "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
-            "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],
+            "configs": [
+                AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
+            ],
         }
 
         configs = [

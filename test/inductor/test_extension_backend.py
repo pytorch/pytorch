@@ -22,6 +22,8 @@ except ImportError:
         ExtensionWrapperCodegen,
     )
 
+from filelock import FileLock, Timeout
+
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen import cpp_utils
@@ -51,9 +53,19 @@ TestCase = test_torchinductor.TestCase
 class BaseExtensionBackendTests(TestCase):
     module = None
 
+    # Use a lock file so that only one test can build this extension at a time
+    lock_file = "extension_device.lock"
+    lock = FileLock(lock_file)
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
+        try:
+            cls.lock.acquire(timeout=600)
+        except Timeout:
+            # This shouldn't happen, still attempt to build the extension anyway
+            pass
 
         # Build Extension
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
@@ -76,6 +88,10 @@ class BaseExtensionBackendTests(TestCase):
         super().tearDownClass()
 
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+        if os.path.exists(cls.lock_file):
+            os.remove(cls.lock_file)
+        cls.lock.release()
 
     def setUp(self):
         torch._dynamo.reset()

@@ -98,8 +98,11 @@ void Work::abort() {
   TORCH_CHECK(false, "Work::abort not implemented.");
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture() {
-  TORCH_CHECK(false, "Work::getFuture not implemented.")
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
+    TORCH_CHECK(false, "Work::getFuture not implemented.")}
+
+c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
+  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
 }
 
 void Work::finish(std::exception_ptr exception) {

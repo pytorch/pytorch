@@ -506,7 +506,7 @@ def create_placeholder(
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
-    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 

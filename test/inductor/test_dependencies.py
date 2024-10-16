@@ -13,7 +13,10 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 class TestDependencies(InductorTestCase):
     def _create_buffer(self, name, shape, dtype=torch.float32):
-        return Buffer(name, FixedLayout(torch.device(GPU_TYPE), dtype, shape))
+        return Buffer(
+            name=name,
+            layout=FixedLayout(torch.device(GPU_TYPE), dtype=dtype, size=shape),
+        )
 
     def setUp(self):
         super().setUp()

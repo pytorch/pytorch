@@ -11,7 +11,7 @@ custom operators, and extending operators defined with PyTorch's C++ operator
 registration APIs (e.g. aten operators).
 
 For a detailed guide on effectively using these APIs, please see
-:ref:`custom-ops-landing-page`
+`PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_
 for more details on how to effectively use these APIs.
 
 Testing custom ops

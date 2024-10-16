@@ -24,12 +24,14 @@ __all__ = [
     "symbolic_opset19",
     "symbolic_opset20",
     # Enums
+    "ExportTypes",
     "OperatorExportTypes",
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
     # Public functions
     "export",
+    "export_to_pretty_string",
     "is_in_onnx_export",
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
@@ -55,6 +57,7 @@ from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
+from ._exporter_states import ExportTypes
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
@@ -67,6 +70,7 @@ from .errors import OnnxExporterError
 from .utils import (
     _run_symbolic_function,
     _run_symbolic_method,
+    export_to_pretty_string,
     is_in_onnx_export,
     register_custom_op_symbolic,
     select_model_mode_for_export,
@@ -111,6 +115,7 @@ if TYPE_CHECKING:
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
 ExportOptions.__module__ = "torch.onnx"
+ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 ONNXRuntimeOptions.__module__ = "torch.onnx"

@@ -17,7 +17,9 @@ VariableInfo::VariableInfo(const Variable& var, bool use_zeros_like)
       size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false),
-      the_var(use_zeros_like ? std::optional<Variable>(var) : std::nullopt) {}
+      the_var(
+          use_zeros_like ? std::optional<Variable>(var.detach())
+                         : std::nullopt) {}
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 

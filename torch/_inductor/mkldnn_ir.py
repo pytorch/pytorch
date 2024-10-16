@@ -236,7 +236,7 @@ def _create_output_node(packed):
         packed,
         [],
     )
-    packed.layout = MultiOutputLayout(packed.get_device())
+    packed.layout = MultiOutputLayout(device=packed.get_device())
     packed.outputs = [output_ir]
     return output_ir
 
@@ -1932,7 +1932,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         ]
 
         packed = MkldnnRnnLayer(
-            MultiOutputLayout(x.get_device()),
+            MultiOutputLayout(device=x.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )

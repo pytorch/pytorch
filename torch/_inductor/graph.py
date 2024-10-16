@@ -91,6 +91,8 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -743,8 +745,8 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.constants:
             data = V.graph.constants[buffer_name]
             return ir.ConstantBuffer(
-                buffer_name,
-                ir.FixedLayout(
+                name=buffer_name,
+                layout=ir.FixedLayout(
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
@@ -899,8 +901,10 @@ class GraphLowering(torch.fx.Interpreter):
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
-                new_name,
-                FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
+                name=new_name,
+                layout=FixedLayout(
+                    data.device, data.dtype, *self.static_sizes_strides(data)
+                ),
             )
         )
 
@@ -956,8 +960,8 @@ class GraphLowering(torch.fx.Interpreter):
         # TODO(jansel): handle input aliasing
         tensor = TensorBox.create(
             InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+                name=target,
+                layout=FixedLayout(example.device, example.dtype, sizes, strides),
             )
         )
         self.graph_inputs[target] = tensor
@@ -1055,7 +1059,7 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
-            return TorchBindObject(target, value)
+            return TorchBindObject(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -1067,7 +1071,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         with no_dispatch():
             if value.shape == ():
-                return Constant(value.item(), value.dtype, value.device)
+                return Constant(
+                    value=value.item(), dtype=value.dtype, device=value.device
+                )
             if self.can_inline_constant(value):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
@@ -1231,7 +1237,9 @@ class GraphLowering(torch.fx.Interpreter):
             new_stride,
             old_layout.offset,
         )
-        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
+        return ir.TensorBox(
+            torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)
+        )
 
     def propagate_mutation(
         self,
@@ -1909,6 +1917,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)

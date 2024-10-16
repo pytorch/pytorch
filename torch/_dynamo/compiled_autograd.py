@@ -558,7 +558,8 @@ def disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    compiled_autograd_enable = False
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

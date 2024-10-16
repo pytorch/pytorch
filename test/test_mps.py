@@ -95,6 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
+        'i0': None,  # missing `aten::i1`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -318,6 +319,7 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
+        'permute_copy',
         'positive',
         'randn',
         'ravel',
@@ -691,7 +693,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'i0': None,
         'igamma': None,
         'igammac': None,
         'index_copy': None,
@@ -989,9 +990,6 @@ def mps_ops_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
-
-        # TODO: remove these once downstream function 'aten::i0.out' have been implemented
-        'signal.windows.kaiser': [torch.float32],
 
         # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
         'arange': [torch.uint8],

@@ -66,12 +66,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
     CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
-
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-      NUMPY_VERSION=1.24.4
-    else
-      NUMPY_VERSION=1.26.2
-    fi
+    NUMPY_VERSION=1.26.2
   else
     CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
 

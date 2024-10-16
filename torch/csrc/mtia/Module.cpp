@@ -39,7 +39,7 @@ void initModule(PyObject* module) {
   m.def("_mtia_init", []() {
     TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
     poison_fork();
-    at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
+    at::globalContext().lazyInitMTIA();
   });
 
   m.def("_mtia_isBuilt", []() {

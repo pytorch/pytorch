@@ -647,8 +647,8 @@ class CppPackedGemmTemplate(CppTemplate):
             if isinstance(W, ir.IRNode):
                 new_size = [padded_n // block_n, k, block_n]
                 blocked_w = ir.Buffer(
-                    W.get_name(),  # Borrow the registered buffer name
-                    ir.FixedLayout(
+                    name=W.get_name(),  # Borrow the registered buffer name
+                    layout=ir.FixedLayout(
                         W.get_device(),
                         W.get_dtype(),
                         new_size,
@@ -952,7 +952,9 @@ class CppPackedGemmTemplate(CppTemplate):
         #   Y
         if epilogue_creators:
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
+            gemm_output_buffer = ir.Buffer(
+                name=gemm_output_name, layout=template_buffer.layout
+            )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
@@ -971,7 +973,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        buffer_name, template_buffer.layout
+                        name=buffer_name, layout=template_buffer.layout
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
@@ -1035,7 +1037,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 else:
                     assert isinstance(Y, ir.Buffer)
                     storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
+                Y_2d = ir.ReinterpretView(
+                    data=storage, layout=template_buffer.get_layout()
+                )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()

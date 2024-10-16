@@ -43,7 +43,7 @@ std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
-  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+  at::globalContext().lazyInitCUDA();
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
@@ -52,7 +52,7 @@ std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types() {
-  at::globalContext().lazyInitDevice(c10::DeviceType::PrivateUse1);
+  at::globalContext().lazyInitPrivateUse1();
   return allTypesForBackends(
       {Backend::PrivateUse1, Backend::SparsePrivateUse1});
 }

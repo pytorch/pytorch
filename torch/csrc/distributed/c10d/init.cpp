@@ -1075,17 +1075,23 @@ This class does not support ``__members__`` property.)");
           py::arg("sizes"),
           py::arg("dtype"),
           py::arg("storage_offset") = 0)
-      .def("barrier", &SymmetricMemory::barrier, py::arg("channel") = 0)
+      .def(
+          "barrier",
+          &SymmetricMemory::barrier,
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "put_signal",
           &SymmetricMemory::put_signal,
           py::arg("dst_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "stream_write_value32",
           &SymmetricMemory::stream_write_value32,
@@ -2908,6 +2914,11 @@ Example::
       .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
+  py::enum_<::c10d::WorkResult>(module, "WorkResult")
+      .value("SUCCESS", ::c10d::WorkResult::SUCCESS)
+      .value("FAILURE", ::c10d::WorkResult::FAILURE)
+      .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
       .def_readonly("op_type", &::c10d::WorkInfo::opType)
@@ -2992,6 +3003,27 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   However, if timeout is set, it will block the CPU thread until the NCCL work is completed
                   or timed out. If timeout, exception will be thrown.
             )")
+      .def(
+          "get_future_result",
+          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(
+                work.getFutureResult());
+          },
+          R"(
+            Returns:
+                A ``torch.futures.Future`` object of int type which maps to the enum type of WorkResult
+                As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensor).get_future_result()``.
+
+            Example::
+                users can use ``fut.wait()`` to blocking wait for the completion of the work and
+                get the WorkResult by ``fut.value()``.
+                Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
+                when the work is completed, without blocking the current thread.
+
+            .. warning ::
+                ``get_future_result`` API supports NCCL
+           )")
       .def(
           "get_future",
           [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {

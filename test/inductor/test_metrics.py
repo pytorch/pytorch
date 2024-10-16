@@ -18,7 +18,7 @@ example_kernel = """
         'device': 0,
         'device_type': 'GPU_TYPE',
         'constants': {},
-        'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=(), ids_of_folded_args=(), divisible_by_8=(2, 3))]},
+        'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=())]},
     inductor_meta={
         'autotune_hints': set(),
         'kernel_name': 'triton_red_fused_add_sum_2',
