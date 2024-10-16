@@ -1100,8 +1100,8 @@ def parallel_and(*args: BoolLikeType) -> BoolLikeType:
 
 def parallel_and_statically_known_true(*args: BoolLikeType) -> BoolLikeType:
     """
-    Evaluate the logical FALSE of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely False.
+    Like parallel_and except that it does not guard on unbacked SymInts and may return False
+    even if the whole expression is True in some cases.
     """
     if any(statically_known_true(torch.sym_not(a)) for a in args):
         return False
