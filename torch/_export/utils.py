@@ -17,7 +17,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    Set
+    Set,
     TYPE_CHECKING,
 )
 
