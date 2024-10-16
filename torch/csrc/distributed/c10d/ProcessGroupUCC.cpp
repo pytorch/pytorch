@@ -1456,13 +1456,12 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
       "ucc:reduce_scatter");
 }
 
-  c10::intrusive_ptr<Work> ProcessGroupUCC::_reduce_scatter_base(
-      at::Tensor& outputTensor,
-      at::Tensor& inputTensor,
-      const ReduceScatterOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupUCC::_reduce_scatter_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const ReduceScatterOptions& opts) {
   check_tensor({outputTensor});
   check_tensor({inputTensor});
-  // KEEP? Not in allgather_base... check_device(inputTensors.device(), outputTensors.device());
   initComm(outputTensor.device());
 
   auto data = std::make_unique<WorkData>();

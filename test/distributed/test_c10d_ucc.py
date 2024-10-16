@@ -342,9 +342,9 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
     def _test_reduce_scatter_base_basics(self, fn):
         pg = self._create_process_group_ucc()
         n = self.world_size
-        input = fn(torch.ones(n, n, 10) * (self.rank + 1.))
+        input = fn(torch.ones(n, n, 10) * (self.rank + 1.0))
         output = fn(torch.zeros(10))
-        expected_output = fn(torch.ones(10) * (n+1)*n/2)
+        expected_output = fn(torch.ones(10) * (n + 1) * n / 2)
         fut = pg._reduce_scatter_base(output, input).get_future()
         fut.wait()
         result = fut.value()
@@ -352,7 +352,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     def test_reduce_scatter_base_basics(self):
         self._test_reduce_scatter_base_basics(lambda t: t.clone())
-
 
 
 class DistributedDataParallelTest(
