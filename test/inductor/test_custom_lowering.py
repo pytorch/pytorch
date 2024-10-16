@@ -24,15 +24,15 @@ class TestCustomLowering(InductorTestCase):
         cls.test_inductor_ops = torch.library.Library(  # noqa: TOR901
             "test_inductor_ops", "DEF"
         )
-        cls.impl_cuda = torch.library.Library(  # noqa: TOR901
-            "test_inductor_ops", "IMPL", "CUDA"
-        )
-        cls.impl_meta = torch.library.Library(  # noqa: TOR901
-            "test_inductor_ops", "IMPL", "Meta"
-        )
-        cls.impl_xpu = torch.library.Library(  # noqa: TOR901
-            "test_inductor_ops", "IMPL", "XPU"
-        )
+        cls.device_list = ["Meta", "CUDA", "XPU"]
+        for device in cls.device_list:
+            setattr(
+                cls,
+                "impl_" + device.lower(),
+                torch.library.Library(  # noqa: TOR901
+                    "test_inductor_ops", "IMPL", device
+                ),
+            )
         cls._register_jagged_to_padded_dense()
         cls._register_asm_op()
 
@@ -54,19 +54,7 @@ class TestCustomLowering(InductorTestCase):
                 dtype=inp.dtype,
             )
 
-        def j2pd_cuda(inp, offsets, max_seq_len, pad_value):
-            res = torch.full(
-                (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
-                pad_value,
-                device=inp.device,
-                dtype=inp.dtype,
-            )
-            for b in range(offsets.shape[0] - 1):
-                for r in range(offsets[b + 1] - offsets[b]):
-                    res[b][r] = inp[offsets[b] + r]
-            return res
-
-        def j2pd_xpu(inp, offsets, max_seq_len, pad_value):
+        def j2pd_gpu(inp, offsets, max_seq_len, pad_value):
             res = torch.full(
                 (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
                 pad_value,
@@ -115,8 +103,8 @@ class TestCustomLowering(InductorTestCase):
         )(j2pd_lowering)
 
         cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
-        cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_cuda)
-        cls.impl_xpu.impl("jagged_to_padded_dense", j2pd_xpu)
+        cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_gpu)
+        cls.impl_xpu.impl("jagged_to_padded_dense", j2pd_gpu)
 
     @classmethod
     def _register_asm_op(cls):
