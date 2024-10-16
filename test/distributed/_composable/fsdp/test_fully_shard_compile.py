@@ -423,7 +423,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
-                # eager warmup for 1 iteration, so that all FSDP2 lazy-initialization will be done in eager
+                # eager warmup for 1 iteration, so that all FSDP2 lazy-initialization is done in eager
                 torch.compiler.set_stance("force_eager" if i < 1 else "default")
                 inp = input_creation_fn()
                 loss = fwd_bwd_func(inp)
