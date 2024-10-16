@@ -280,6 +280,21 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_masked_scatter(self, device):
+        def fn(value, mask):
+            u0 = mask.count_nonzero()
+            source = torch.ones(u0, dtype=torch.float32, device=device)
+            return torch.masked_scatter(value, mask, source)
+
+        value = make_tensor(10, 10, dtype=torch.float32, device=device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=device)
+        example_inputs = (value, mask)
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
