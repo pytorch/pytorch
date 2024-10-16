@@ -390,7 +390,7 @@ def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
 
 
 # module not available under torch._running_with_deploy()
-class FakeCompiledAutogradModule:
+class _FakeCompiledAutogradModule:
     class FakeLocal:
         def enabled(self) -> bool:
             return False
