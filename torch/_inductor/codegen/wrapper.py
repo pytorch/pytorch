@@ -1795,6 +1795,7 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 f"del {', '.join(arg for arg in tensor_args.values())}\n",
             )
+
             self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):

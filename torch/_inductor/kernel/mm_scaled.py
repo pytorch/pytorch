@@ -16,6 +16,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
+from ..codegen.common import WorkspaceArg
 from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
 from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
@@ -535,7 +536,7 @@ def tuned_scaled_mm(
                     choices,
                     input_nodes=input_nodes,
                     layout=layout,
-                    workspace_size=get_workspace_size(kwargs["NUM_SMS"]),
+                    workspace_arg=WorkspaceArg(kwargs["NUM_SMS"], False),
                     **kwargs,
                 )
 
