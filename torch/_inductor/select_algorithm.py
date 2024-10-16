@@ -137,6 +137,7 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
+        workspace_arg=None,
         *,
         index_dtype,
     ) -> None:
@@ -164,6 +165,9 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
+
+        # Some templates user extra global memory as a workspace
+        self.workspace_arg =  workspace_arg
 
         # The following attributes (body, template_mask, output_val) are all
         # used for triton kernel codegen.
@@ -304,10 +308,13 @@ class TritonTemplateKernel(TritonKernel):
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
             self.args.input(input_node.get_name())
-
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
+            if self.workspace_arg is not None:
+                arg_defs.append("ws_ptr")
+                call_args.append("workspace")
+                precompile_args.append(self.workspace_arg)
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
@@ -556,6 +563,13 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
+
+        # Handle workspace allocation
+        if node.get_workspace_size() > 0:
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            )
+
         _, call_args, _, arg_types = self.args.python_argdefs()
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
@@ -622,6 +636,7 @@ class TritonTemplate(KernelTemplate):
         subgraphs=None,
         mutated_inputs=None,
         call_sizes=None,
+        workspace_size=0,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -673,6 +688,7 @@ class TritonTemplate(KernelTemplate):
             index_dtype="tl.int32",
             subgraphs=subgraphs,
         )
+        workspace_arg = self.args.workspace()
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
@@ -791,6 +807,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
+            workspace_size=workspace_size,
         )
 
 
@@ -864,6 +881,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
+        workspace_size=0,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -880,6 +898,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             }
         )
         self.mutated_inputs = mutated_inputs
+        self.workspace_size = workspace_size
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -910,6 +929,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 mutated_inputs=self.mutated_inputs,
+                workspace_size=self.workspace_size,
             )
         )
 
