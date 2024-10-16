@@ -1084,8 +1084,13 @@ class TestTensorCreation(TestCase):
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
+        refs = 0
+        if dtype == torch.bool:
+            refs = True
+        elif dtype in (torch.int32, torch.int64):
+            refs = torch.iinfo(dtype).min
 
-        self._float_to_int_conversion_helper(vals, device, dtype)
+        self._float_to_int_conversion_helper(vals, device, dtype, (refs, ) * 3)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
