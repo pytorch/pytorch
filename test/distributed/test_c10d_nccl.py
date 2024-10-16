@@ -769,8 +769,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
-        ng1 = c10d.split_group(pg, [[0, 1]])
-        backend1 = pg._get_backend(torch.device(device))
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -782,10 +784,18 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
-        dist.broadcast(tensor, 0, group=ng1)
-        self.assertEqual(tensor, torch.full((1,), 0))
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
 
-        ng2 = c10d.split_group(pg, [[0, 1]])
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
 
@@ -4036,9 +4046,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(
                     t["entries"][p2p_op_idx]["profiling_name"], profiling_name
                 )
-                self.assertEqual(
-                    t["entries"][p2p_op_idx]["collective_seq_id"], expected_seq
-                )
+                # we don't increment collective_seq_id for p2p ops.
+                self.assertEqual(t["entries"][p2p_op_idx]["collective_seq_id"], 0)
+                self.assertEqual(t["entries"][p2p_op_idx]["p2p_seq_id"], expected_seq)
                 self.assertEqual(t["entries"][p2p_op_idx]["op_id"], expected_op_id)
                 expected_op_id += 1
                 self.assertEqual(t["entries"][p2p_op_idx]["input_sizes"], [input_sizes])
@@ -4058,9 +4068,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(
                 t["entries"][coalesced_op]["profiling_name"], "nccl:coalesced"
             )
-            self.assertEqual(
-                t["entries"][coalesced_op]["collective_seq_id"], expected_seq
-            )
+            self.assertEqual(t["entries"][coalesced_op]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][coalesced_op]["state"], "completed")
             self.assertEqual(t["entries"][coalesced_op]["input_sizes"], [])
@@ -4117,6 +4125,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
             self.assertEqual(t["entries"][seq]["profiling_name"], profiling_name)
+            # we don't increment collective_seq_id for p2p ops.
+            self.assertEqual(t["entries"][seq]["collective_seq_id"], 0)
             self.assertEqual(t["entries"][seq]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][seq]["op_id"], expected_op_id)
@@ -4173,10 +4183,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         self.assertEqual(
             len(t["entries"]), 1
-        )  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
+        )  # one for the reduce_scatter_tensor_coalesced
         self.assertEqual(
             t["entries"][0]["profiling_name"], "nccl:reduce_scatter_tensor_coalesced"
         )
+        # collective_seq_id should be incremented once.
         self.assertEqual(t["entries"][0]["collective_seq_id"], 1)
         self.assertEqual(t["entries"][0]["input_sizes"], [[2, 2], [2, 2]])
         self.assertEqual(
@@ -4572,24 +4583,63 @@ class ProcessGroupNCCLMultiDimsTest(MultiProcessTestCase):
     )
     def test_3d_mesh_with_cudaevent_cache(self):
         torch.cuda.set_device(self.rank)
-        print(self.rank)
+        # os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         self._init_process_group_nccl(store)
         from torch.distributed.device_mesh import init_device_mesh
+
         mesh_shape = (2, 2, 2)
         mesh_3d = init_device_mesh(
-            "cuda", mesh_shape, mesh_dim_names=("dp", "tp", "pp")
+            "cuda", mesh_shape, mesh_dim_names=("pp", "dp", "tp")
         )
+        # The mesh is like:
+        # TP: [0, 1], [2, 3], [4, 5], [6, 7]
+        # DP: [0, 2], [1, 3], [4, 6], [5, 7]
+        # PP: [0, 4], [1, 5], [2, 6], [3, 7]
 
-        mesh_3d.get_group("dp")
-        mesh_3d.get_group("tp")
-        mesh_3d.get_group("pp")
         device = torch.device("cuda:%d" % self.rank)
-        tensors = [
-            torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
-            for i in range(5)
-        ]
-        torch.distributed.all_reduce_coalesced(tensors, group=mesh_3d.get_group("dp"))
+        num_tensors = 5000
+        tensors = []
+        expected_tensors = []
+        for i in range(num_tensors):
+            tensor = torch.full(
+                (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
+            )
+            tensors.append((tensor.clone(), tensor.clone(), tensor.clone()))
+            expected_tensors.append(
+                (
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["dp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["tp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["pp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                )
+            )
+        for idx in range(num_tensors):
+            torch.distributed.all_reduce(tensors[idx][0], group=mesh_3d.get_group("dp"))
+            torch.distributed.all_reduce(tensors[idx][1], group=mesh_3d.get_group("tp"))
+            torch.distributed.all_reduce(tensors[idx][2], group=mesh_3d.get_group("pp"))
+            if idx % 1000 == 0:
+                time.sleep(1)
+                torch.cuda.synchronize()
+        for idx in range(num_tensors):
+            self.assertEqual(tensors[idx][0], expected_tensors[idx][0])
+            self.assertEqual(tensors[idx][1], expected_tensors[idx][1])
+            self.assertEqual(tensors[idx][2], expected_tensors[idx][2])
+        
 
 
 if __name__ == "__main__":
