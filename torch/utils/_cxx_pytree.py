@@ -306,11 +306,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"tree_unflatten(values, spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
-        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
@@ -862,12 +857,6 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"treespec_dumps(spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
-        )
-
     dummy_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     orig_treespec = python_pytree.tree_structure(dummy_tree)
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
