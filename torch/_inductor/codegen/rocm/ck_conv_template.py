@@ -369,10 +369,6 @@ class CKConvTemplate(CKTemplate):
             std::cerr << "p_e is nullptr" << std::endl;
             return -1;
         }
-        if (workspace == nullptr) {
-            std::cerr << "workspace is nullptr" << std::endl;
-            return -1;
-        }
 
         // when debugging, do time kernel to serialize launches
         auto stream_config = StreamConfig{stream, /* time kernel */ false, /* log level */ 0};

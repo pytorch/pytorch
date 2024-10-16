@@ -395,7 +395,7 @@ class TestCKBackend(TestCase):
                 return torch.conv2d(x, w)
 
             Y_eager = torch.conv2d(x, w)
-            Y_compiled = conv2d(x, w_cl)
+            Y_compiled = conv2d(x_cl, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
