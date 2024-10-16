@@ -20,7 +20,9 @@ def get_test_prioritizations(
 
     for heuristic in HEURISTICS:
         try:
-            new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(tests)
+            new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(
+                tests
+            )
             aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
             print(f"Results from {heuristic.__class__.__name__}")
