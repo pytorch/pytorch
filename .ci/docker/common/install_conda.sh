@@ -91,7 +91,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
-  pip_install -U scikit-learn
 
   if [ -n "$DOCS" ]; then
     apt-get update
