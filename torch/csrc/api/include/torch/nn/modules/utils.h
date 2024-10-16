@@ -23,8 +23,7 @@ inline std::vector<int64_t> _reverse_repeat_vector(
   std::vector<int64_t> ret;
   ret.reserve(t.size() * n);
   for (auto rit = t.rbegin(); rit != t.rend(); ++rit) {
-    for (const auto i : c10::irange(n)) {
-      (void)i; // Suppress unused variable
+    for (C10_UNUSED const auto i : c10::irange(n)) {
       ret.emplace_back(*rit);
     }
   }
