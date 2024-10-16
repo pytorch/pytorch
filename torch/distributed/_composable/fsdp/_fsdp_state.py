@@ -40,9 +40,9 @@ if TYPE_CHECKING:
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+    from torch.distributed.utils import FakeCompiledAutogradModule
 
+    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 
@@ -125,7 +125,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
@@ -283,7 +283,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
