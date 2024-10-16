@@ -27,7 +27,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, Self
+from typing_extensions import deprecated, Self, TypeGuard
 
 import optree
 from optree import (  # noqa: F401  # direct import for type annotations
@@ -247,6 +247,10 @@ def _private_register_pytree_node(
         )
 
 
+def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[TreeSpec]:
+    return isinstance(obj, TreeSpec)
+
+
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -309,6 +313,11 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
+    if not _is_pytreespec_instance(treespec):
+        raise TypeError(
+            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
@@ -860,6 +869,7 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[List[Any]]:
+    assert _is_pytreespec_instance(treespec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -869,8 +879,12 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
-    if type(treespec).__name__ not in ("TreeSpec", "PyTreeSpec"):
-        raise TypeError("treespec_dumps expects a treespec object.")
+    if not _is_pytreespec_instance(treespec):
+        raise TypeError(
+            f"treespec_dumps(treespec): Expected `treespec` to be instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
+
     dummy_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     orig_treespec = python_pytree.tree_structure(dummy_tree)
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
@@ -906,7 +920,7 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
     def __instancecheck__(self, instance: object) -> bool:
-        return isinstance(instance, TreeSpec) and instance.is_leaf()
+        return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
