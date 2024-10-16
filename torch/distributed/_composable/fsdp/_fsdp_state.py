@@ -287,13 +287,17 @@ class FSDPState(_State):
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
+                fsdp_param_group = state._fsdp_param_group
+                if fsdp_param_group and (
+                    fsdp_param_group.is_unsharded
+                    or not fsdp_param_group.unshard_in_backward
+                ):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
-                    state._fsdp_param_group.post_backward()
+                    fsdp_param_group.post_backward()
                 state._training_state = TrainingState.IDLE
-                if state._fsdp_param_group:
-                    state._fsdp_param_group._training_state = TrainingState.IDLE
+                if fsdp_param_group:
+                    fsdp_param_group._training_state = TrainingState.IDLE
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
