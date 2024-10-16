@@ -14,9 +14,11 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
+    _merge_bw,
     _PipelineSchedule,
     _validate_pipeline_order,
     B,
+    BW,
     F,
     get_schedule_class,
     RECV_F,
@@ -211,6 +213,7 @@ class TestScheduleLowering(TestCase):
             ("1F0", _Action(1, F, 0)),
             ("2B1", _Action(2, B, 1)),
             ("0W3", _Action(0, W, 3)),
+            ("0BW3", _Action(0, BW, 3)),
             ("1UNSHARD", _Action(1, UNSHARD, None)),
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
@@ -249,6 +252,41 @@ class TestScheduleLowering(TestCase):
                 (
                     f"Mismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": [
+                    "0F0",
+                    "0F1",
+                    "0F2",
+                    "0B0",
+                    "0B1",
+                    "0W0",
+                    "0B2",
+                    "0W2",
+                    "0W1",
+                ],
+                "comms": ["0F0", "0F1", "0F2", "0B0", "0B1", "0W0", "0BW2", "0W1"],
+            },
+        ],
+    )
+    def test_merge_bw(self, test_info):
+        """Test the pass that merges adjacent B and W operations into a BW operation."""
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_merged_sch = self._parse_actions(test_info["comms"])
+
+        merged_sch = _merge_bw(compute_sch)
+        for expected, actual in zip(expected_merged_sch, merged_sch):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {merged_sch}"
                 ),
             )
 
@@ -315,6 +353,50 @@ class TestScheduleLowering(TestCase):
                     ),
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
+
+    def test_csv(self):
+        def _dump_csv(pipeline_order_with_comms, filename: str):
+            """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in pipeline_order_with_comms:
+                    writer.writerow(pipeline_order_with_comms[rank])
+
+        import csv
+
+        compute_sch = {}
+        with open("lowered_compute.csv", newline="") as csvfile:
+            for rank, row in enumerate(csv.reader(csvfile)):
+                compute_sch[rank] = [_Action.from_str(s) for s in row]
+        # print(_format_pipeline_order(compute_sch))
+        num_model_chunks = 3
+        pipeline_parallel_size = 8
+        num_stages = num_model_chunks * pipeline_parallel_size
+
+        for rank in compute_sch:
+            compute_sch[rank] = _merge_bw(compute_sch[rank])
+
+        comms_sch = _add_send_recv(
+            compute_sch,
+            stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
+            num_stages=num_stages,
+            enable_batching=True,
+        )
+
+        # _dump_csv(comms_sch, "lowered_comms.csv")
+
+        sch_ref = {}
+        with open("lowered_comms.csv", newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
+        num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
+        # print(_format_pipeline_order(simulated_schedule))
+        self.assertEqual(num_steps, 271)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
