@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
+from typing_extensions import TypeGuard
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES
@@ -216,6 +217,13 @@ if python_pytree._cxx_pytree_exists:
 
     leafspec = PyTreeSpec((), None, None, (), None)
 
+    @substitute_in_graph(  # type: ignore[arg-type]
+        cxx_pytree._is_pytreespec_instance,
+        can_constant_fold_through=True,
+    )
+    def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[PyTreeSpec]:
+        return isinstance(obj, PyTreeSpec)
+
     @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_flatten(
         tree: PyTree,
@@ -265,8 +273,8 @@ if python_pytree._cxx_pytree_exists:
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         if not isinstance(treespec, PyTreeSpec):
             raise TypeError(
-                f"tree_unflatten(values, spec): Expected `spec` to be instance of "
-                f"TreeSpec but got item of type {type(treespec)}."
+                f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
+                f"PyTreeSpec but got item of type {type(treespec)}."
             )
         return treespec.unflatten(leaves)
 
