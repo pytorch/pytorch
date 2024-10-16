@@ -171,7 +171,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_xpu": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_xpu": 3,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
