@@ -17,11 +17,7 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
-    # Try to preserve some known CompositeImplicitAutograd ops
-    to_preserve = _decomp.get_preserve_ops()
-    # We can only preserve implemented ops
-    can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
+    return exported_program.run_decompositions(decomp_table)
 
 
 def insert_type_promotion_nodes(
@@ -39,10 +35,61 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
     """Remove all assertion and check nodes from the FX graph"""
     aten_assertion_targets = {
         torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.default,
         torch.ops.aten._assert_async.msg,
+        torch.ops.aten._assert_scalar.default,
+        torch.ops.aten._assert_tensor_metadata.default,
     }
     for node in graph_module.graph.nodes:
         if node.op == "call_function" and node.target in aten_assertion_targets:
             graph_module.graph.erase_node(node)
     graph_module.recompile()
     return graph_module
+
+
+def insert_contiguous_between_transpose_and_view(
+    exported_program: torch.export.ExportedProgram,
+) -> torch.export.ExportedProgram:
+    """Modifies the module inplace to insert a node 'contiguous' between a node 'transpose' followed by a node 'view'.
+
+    The modification takes place inplace.
+
+    Remove after issue https://github.com/pytorch/pytorch/issues/136543 is fixed.
+    """
+    modified = False
+    graph = exported_program.graph_module.graph
+    for node in graph.nodes:
+        if (
+            node.op != "call_function"
+            or not hasattr(node.target, "name")
+            or node.target.name() != "aten::transpose.int"
+        ):
+            continue
+        insert = False
+        for user in node.users:
+            if (
+                user.op == "call_function"
+                and hasattr(node.target, "name")
+                and user.target.name() == "aten::view"
+            ):
+                insert = True
+                break
+        if not insert:
+            continue
+
+        modified = True
+        with graph.inserting_after(node):
+            new_node = graph.call_function(
+                torch.ops.aten.contiguous.default, args=(node,)
+            )
+            node.replace_all_uses_with(new_node)
+            # new_node is replaced as well so we manually revert the replacement
+            new_node.update_arg(0, node)
+            node.users = {new_node: None}
+
+    if not modified:
+        # no rewrite was done.
+        return exported_program
+
+    graph.lint()
+    return exported_program

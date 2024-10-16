@@ -707,7 +707,12 @@ bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
+bool isBaseTensor(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
+  return unsafeGetFunctionalWrapper(tensor)->isBaseTensor();
 }
 
 bool isFunctionalTensor(const std::optional<Tensor>& t) {

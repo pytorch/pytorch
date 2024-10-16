@@ -14,6 +14,7 @@ from .ctx_manager import (
     GradModeVariable,
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
+    SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -24,6 +25,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -45,7 +47,9 @@ from .iter import (
     CycleIteratorVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (

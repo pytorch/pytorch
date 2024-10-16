@@ -1348,41 +1348,20 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 // Code referred to FBGEMM:
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#LL19C6-L19C6
 template<>
-inline void transpose_mxn<BFloat16, 32, 32>(
-    const BFloat16* src,
-    int64_t ld_src,
-    BFloat16* dst,
-    int64_t ld_dst) {
-  // Load from memory
-  __m512i r[32];
-#ifndef __msvc_cl__
-#pragma unroll(32)
-#endif
-  for (int i = 0; i < 32; ++i) {
-    r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
-  }
-
-  __m512i d[32];
-  _transpose_mxn_half_32_32(r, d);
-
-  // Store to dst
-#ifndef __msvc_cl__
-#pragma unroll(32)
-#endif
-  for (int i = 0; i < 32; ++i) {
-    _mm512_storeu_si512(dst + i* ld_dst, d[i]);
-  }
-}
-
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
-inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst, int M, int N) {
   // load from src
-  __mmask32 src_mask = (1 << N) - 1;
+  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<BFloat16> expects M, N <= 32.");
   __m512i r[32];
   int i;
-  for (i = 0; i < M; ++i) {
-    r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+  if (N == 32) {
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_loadu_si512(&src[i * ld_src]);
+    }
+  } else {
+    __mmask32 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+    }
   }
   for (; i < 32; ++i) {
     r[i] = _mm512_setzero_si512();
@@ -1392,48 +1371,39 @@ inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, in
   _transpose_mxn_half_32_32(r, d);
 
   // store to dst
-  __mmask32 dst_mask = (1 << M) - 1;
-  for (i = 0; i < N; ++i) {
-    _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+  if (M == 32) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
+    }
+  } else {
+    __mmask32 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+    }
   }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+  transpose_mxn<BFloat16>(src, ld_src, dst, ld_dst, M, N);
 }
 
 template<>
-inline void transpose_mxn<Half, 32, 32>(
-    const Half* src,
-    int64_t ld_src,
-    Half* dst,
-    int64_t ld_dst) {
-  // Load from memory
-  __m512i r[32];
-#ifndef __msvc_cl__
-#pragma unroll(32)
-#endif
-  for (int i = 0; i < 32; ++i) {
-    r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
-  }
-
-  __m512i d[32];
-  _transpose_mxn_half_32_32(r, d);
-
-  // Store to dst
-#ifndef __msvc_cl__
-#pragma unroll(32)
-#endif
-  for (int i = 0; i < 32; ++i) {
-    _mm512_storeu_si512(dst + i* ld_dst, d[i]);
-  }
-}
-
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, Half>::value && ((M < 32 && M != 16) || (N < 32 && N != 16)), int> = 0>
-inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
+inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
   // load from src
-  __mmask32 src_mask = (1 << N) - 1;
   __m512i r[32];
   int i;
-  for (i = 0; i < M; ++i) {
-    r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+  if (N == 32) {
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_loadu_si512(&src[i * ld_src]);
+    }
+  } else {
+    __mmask32 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+    }
   }
   for (; i < 32; ++i) {
     r[i] = _mm512_setzero_si512();
@@ -1443,10 +1413,22 @@ inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld
   _transpose_mxn_half_32_32(r, d);
 
   // store to dst
-  __mmask32 dst_mask = (1 << M) - 1;
-  for (i = 0; i < N; ++i) {
-    _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+  if (M == 32) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
+    }
+  } else {
+    __mmask32 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+    }
   }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same<T, Half>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
+  transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }
 
 template <>
