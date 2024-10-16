@@ -464,6 +464,12 @@ def compile_fx_inner(*args, **kwargs):
                 "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
             )
         )
+        # NB: Why is this the dynamo_compile counter?  The rule here is that
+        # if it gets an entry in the dynamo_compile table, we also want to
+        # tick up the wait counter.  We have to displeasingly manually trigger
+        # the counter here because we may dropped into compile_fx directly
+        # from lazy backwards compilation.
+        stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
 
