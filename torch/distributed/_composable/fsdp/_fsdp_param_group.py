@@ -27,8 +27,9 @@ from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 if not torch._running_with_deploy():
     import torch._dynamo.compiled_autograd as ca
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+    from torch.distributed.utils import FakeCompiledAutogradModule
+
+    ca = FakeCompiledAutogradModule()  # type: ignore[assignment]
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -178,6 +179,9 @@ class FSDPParamGroup:
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
         self.unshard_async_op: bool = False
+        # Whether to unshard in backward: can be overridden by the user if the
+        # parameters in this group are not needed for backward (e.g. embedding)
+        self.unshard_in_backward: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -240,6 +244,11 @@ class FSDPParamGroup:
             return
         if self.is_unsharded:
             return  # no-op
+        if (
+            not self.unshard_in_backward
+            and self._training_state == TrainingState.PRE_BACKWARD
+        ):
+            return
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
@@ -313,7 +322,7 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
@@ -323,7 +332,7 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
@@ -341,17 +350,17 @@ class FSDPParamGroup:
     def pre_backward(self, default_prefetch: bool, *unused: Any):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch and not ca.compiled_autograd_enabled:
+            if default_prefetch and not ca.local.enabled():
                 self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
-        if not ca.compiled_autograd_enabled:
+        if not ca.local.enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
@@ -512,7 +521,7 @@ class FSDPParamGroup:
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
-        if (not torch._dynamo.config.skip_fsdp_hooks) or ca.compiled_autograd_enabled:
+        if (not torch._dynamo.config.skip_fsdp_hooks) or ca.local.enabled():
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
@@ -668,7 +677,7 @@ def _get_param_module_infos(
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
     def _assert_not_tracing_fsdp():
-        if ca.compiled_autograd_enabled:
+        if ca.local.enabled():
             # TODO: Find a way to print the offending FSDP2 module.
             msg = """\
 When Traceable FSDP2 is enabled, we rely on `root_post_backward_callback` to call
