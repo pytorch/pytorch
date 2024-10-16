@@ -55,6 +55,9 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   ~Work() override;
 
+  // Returns true if we can check if the work is completed.
+  virtual bool canCheckIsCompleted();
+
   // Checks if request has completed. Non-blocking operation.
   virtual bool isCompleted();
 
@@ -112,6 +115,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual uint64_t getSequencenumber() const;
 
+  virtual std::string getBackendType() const;
+
   OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
@@ -136,6 +141,9 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   // Operation type that this work object refers to.
   OpType opType_;
+
+  // Backend type of this work object.
+  std::string backendType_;
 
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.

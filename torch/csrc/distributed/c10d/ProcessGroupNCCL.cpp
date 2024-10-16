@@ -577,6 +577,10 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
+bool ProcessGroupNCCL::WorkNCCL::canCheckIsCompleted() {
+  return !(at::cuda::CUDAGraph::is_capturing(at::cuda::getCurrentCUDAStream()));
+}
+
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
@@ -2602,6 +2606,10 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
 
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
   return seq_;
+}
+
+std::string ProcessGroupNCCL::WorkNCCL::getBackendType() const {
+  return "nccl";
 }
 
 void ProcessGroupNCCL::assignTimeoutToWork(

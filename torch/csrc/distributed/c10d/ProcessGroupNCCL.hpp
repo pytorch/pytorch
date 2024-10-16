@@ -295,6 +295,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Checks if the NCCL kernel has started to execute.
     bool isStarted();
 
+    // Returns true if we can check if the work is completed.
+    // Checking whether a NCCL work is completed requires querying CUDA event,
+    // which is not always allowed (e.g. it's disallowed during CUDA graph capture).
+    bool canCheckIsCompleted() override;
+
     // Checks if request has completed. In this specific case of NCCL, it checks
     // if the NCCL operation has completed on the GPU in its own NCCL stream.
     // Non-blocking operation.
@@ -329,6 +334,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
+
+    std::string getBackendType() const override;
 
     const std::string& logPrefix() const;
 

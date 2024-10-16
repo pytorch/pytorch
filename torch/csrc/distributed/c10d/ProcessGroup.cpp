@@ -1,8 +1,6 @@
 #include <ATen/ThreadLocalState.h>
-#if defined(USE_CUDA) && !defined(USE_ROCM)
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGraph.h>
-#endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
@@ -209,26 +207,20 @@ class WorkRegistry {
     return works;
   }
 
-  bool can_check_completed_works() {
-    std::unique_lock lock(lock_);
-#if defined(USE_CUDA) && !defined(USE_ROCM)
-    // Checking whether a NCCL work is completed requires querying CUDA event
-    // state, which is disallowed during CUDA graph capture.
-    if (at::cuda::is_available() &&
-        at::cuda::CUDAGraph::is_capturing(at::cuda::getCurrentCUDAStream())) {
-      return false;
-    }
-#endif
-    return true;
-  }
-
   void unregister_completed_works() {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
       std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
       for (const auto& work : it->second) {
-        if (work.defined() && !work->isCompleted()) {
-          uncompleted_works.push_back(work);
+        if (work.defined()) {
+          if (work->canCheckIsCompleted()) {
+            if (!work->isCompleted()) {
+              uncompleted_works.push_back(work);
+            }
+          } else {
+            // if isCompleted() cannot be checked, we assume the work is not completed.
+            uncompleted_works.push_back(work);
+          }
         }
       }
       if (uncompleted_works.empty()) {
@@ -293,9 +285,7 @@ void register_work(
   // Always clean up previously completed work objects, so that even if
   // the user keeps issuing new collectives without waiting on previous ones,
   // the registry size would not grow unbounded.
-  if (RankLocal<WorkRegistry>::get().can_check_completed_works()) {
-    RankLocal<WorkRegistry>::get().unregister_completed_works();
-  }
+  RankLocal<WorkRegistry>::get().unregister_completed_works();
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
