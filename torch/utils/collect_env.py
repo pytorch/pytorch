@@ -47,26 +47,43 @@ SystemEnv = namedtuple('SystemEnv', [
     'cpu_info',
 ])
 
-DEFAULT_CONDA_PATTERNS = {
+COMMON_PATTERNS = [
     "torch",
     "numpy",
+    "triton",
+    "optree",
+]
+
+NVIDIA_PATTERNS = [
+    "cuda-cudart",
+    "cuda-cupti",
+    "cuda-libraries",
+    "cuda-opencl",
+    "cuda-nvrtc",
+    "cuda-runtime",
+    "cublas",
+    "cudnn",
+    "cufft",
+    "curand",
+    "cusolver",
+    "cusparse",
+    "nccl",
+    "nvjitlink",
+    "nvtx",
+]
+
+CONDA_PATTERNS = [
     "cudatoolkit",
     "soumith",
     "mkl",
     "magma",
-    "triton",
-    "optree",
-}
+]
 
-DEFAULT_PIP_PATTERNS = {
-    "torch",
-    "numpy",
+PIP_PATTERNS = [
     "mypy",
     "flake8",
-    "triton",
-    "optree",
     "onnx",
-}
+]
 
 
 def run(command):
@@ -113,7 +130,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda, patterns=None):
     if patterns is None:
-        patterns = DEFAULT_CONDA_PATTERNS
+        patterns = CONDA_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
@@ -395,7 +412,7 @@ def get_libc_version():
 def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
-        patterns = DEFAULT_PIP_PATTERNS
+        patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
