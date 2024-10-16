@@ -144,7 +144,7 @@ def _transfer_meta(new_meta: Dict[str, Any], old_meta: Dict[str, Any]) -> None:
     # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
     # to remain accurate after pattern matching has occurred.
     new_meta.update(
-        (k, v) for k, v in old_meta.items() if k not in {"val", "tensor_meta"}
+        (k, v) for k, v in old_meta.items() if k in torch.fx.proxy._COPY_META_FIELDS
     )
 
 
