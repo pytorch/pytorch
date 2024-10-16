@@ -1,12 +1,13 @@
-from functools import lru_cache
 import glob
 import os
 import time
-from typing import List
 import zipfile
+from functools import lru_cache
 from pathlib import Path
+from typing import List
 
 import requests
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 LAST_UPDATED = 0
@@ -35,10 +36,15 @@ def upload_to_s3_artifacts() -> None:
     workflow_run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT")
     file_suffix = os.environ.get("ARTIFACTS_FILE_SUFFIX")
     if not workflow_id or not workflow_run_attempt or not file_suffix:
-        print("GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading")
+        print(
+            "GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading"
+        )
 
     test_reports_zip_path = f"{REPO_ROOT}/test-reports-{file_suffix}.zip"
-    zip_artifact(test_reports_zip_path, ["test/test-reports/**/*.xml", "test/test-reports/**/*.csv"])
+    zip_artifact(
+        test_reports_zip_path,
+        ["test/test-reports/**/*.xml", "test/test-reports/**/*.csv"],
+    )
     test_logs_zip_path = f"{REPO_ROOT}/logs-{file_suffix}.zip"
     zip_artifact(test_logs_zip_path, ["test/test-reports/**/*.log"])
     jsons_zip_path = f"{REPO_ROOT}/test-jsons-{file_suffix}.zip"
