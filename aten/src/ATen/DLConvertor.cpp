@@ -276,7 +276,6 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   auto strides = src.strides().vec();
   for (int i = 0; i < src.dim(); i++) {
     if (shape[i] < 2) {
-      assert(strides.size() > i);
       strides[i] = 1;
     }
   }
