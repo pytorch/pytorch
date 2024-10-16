@@ -37,7 +37,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch._C._distributed_c10d import OpType
+from torch._C._distributed_c10d import OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -769,8 +769,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
-        ng1 = c10d.split_group(pg, [[0, 1]])
-        backend1 = pg._get_backend(torch.device(device))
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -782,10 +784,18 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
-        dist.broadcast(tensor, 0, group=ng1)
-        self.assertEqual(tensor, torch.full((1,), 0))
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
 
-        ng2 = c10d.split_group(pg, [[0, 1]])
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
 
@@ -2633,6 +2643,46 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         self._test_barrier_error()
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    def test_get_future_result(self):
+        def assert_fut_success(fut):
+            self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
+
+        # test the barrier behavior in the non blocking wait setting
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
+        )
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=2),
+        )
+        barrier_work = process_group.barrier()
+        barrier_work.wait()
+        barrier_result = barrier_work.get_future_result().wait()
+        self.assertEqual(WorkResult(barrier_result), WorkResult.SUCCESS)
+        ar_work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+        ar_work.wait()
+        fut = ar_work.get_future_result()
+        # test adding a callback function
+        fut.then(assert_fut_success)
+        if self.rank == 0:
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            work.wait()
+            result = work.get_future_result().wait()
+            self.assertEqual(WorkResult(result), WorkResult.FAILURE)
+
         if prev_nccl_async_error_handling is not None:
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"

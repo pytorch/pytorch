@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <future>
 #include <iostream>
 #include <list>
@@ -272,12 +273,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
-        const std::string& pgUID,
-        const std::string& pgDesc,
+        std::string pgUID,
+        std::string pgDesc,
         at::Device& device,
         int rank,
         OpType opType,
         uint64_t seq,
+        bool isP2P = false,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
@@ -325,6 +327,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+    // Get a Future result of each work (e.g. success, different error types).
+    // instead of the tensor output.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -362,17 +368,17 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The NCCL communicator used for this work item.
     std::shared_ptr<NCCLComm> ncclComm_;
 
-    // Tensors used for barrier op
-    at::Tensor barrierTensor_;
+    // whether this work is a barrier op
+    bool isBarrierOp_{false};
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
-    bool blockingWait_ = false;
+    bool blockingWait_{false};
 
     // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_ = false;
+    bool avoidRecordStreams_{false};
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
-    std::chrono::milliseconds opTimeout_;
+    std::chrono::milliseconds opTimeout_{};
 
     // Ephemeral timeouts are owned by exactly one work,
     // and reset after that work completes.
@@ -384,8 +390,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
 
-    // Record the collective sequential number.
+    // Record the sequential number of collective or p2p.
     uint64_t seq_;
+    bool isP2P_;
 
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
@@ -439,6 +446,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    // the future result (e.g., success or failure) of the work
+    c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
+
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
@@ -455,10 +465,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
    private:
     std::mutex cacheMutex_;
-    // NOTE: We intentionaly store raw pointers so that
+    // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::vector<at::cuda::CUDAEvent*>
+    std::deque<at::cuda::CUDAEvent*>
         eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
@@ -518,7 +528,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int size,
       const std::string& groupName,
       c10::intrusive_ptr<Options> options = Options::create())
-      : ProcessGroupNCCL(store, rank, size, options) {}
+      : ProcessGroupNCCL(store, rank, size, std::move(options)) {}
 
   ~ProcessGroupNCCL() override;
 
@@ -641,7 +651,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void groupEnd();
 
-  void groupEndNonblocking(std::shared_ptr<NCCLComm> comm);
+  void groupEndNonblocking(const std::shared_ptr<NCCLComm>& comm);
 
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -680,16 +690,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
-      std::optional<std::string> abortReason);
+      const std::optional<std::string>& abortReason);
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
+  // Destroy (shutdown) this backend -- normal exit.
+  void shutdown();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  // return true if abort is successful, otherwise false
-  bool abort(std::optional<std::string> abortReason = std::nullopt);
-
-  void shutdown(std::optional<std::string> reason = std::nullopt);
+  void abort();
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -710,7 +720,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
   // timeout.
   bool verifyWorkTimeoutForTest(
-      const c10::intrusive_ptr<Work> work,
+      const c10::intrusive_ptr<Work>& work,
       const std::chrono::milliseconds& timeout);
 
  protected:
@@ -740,6 +750,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Device& device,
       int rank,
       OpType opType,
+      bool isP2P,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
@@ -749,6 +760,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
   bool dumpDebuggingInfo();
+
+  // Abort all communicators on this rank.
+  bool abortComms(std::optional<std::string> abortReason = std::nullopt);
 
  private:
   int globalRankStart;
@@ -900,7 +914,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
-  virtual void terminateProcess(std::string errMsg);
+  virtual void terminateProcess(const std::string& errMsg);
 
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
@@ -1086,7 +1100,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
+  void workEnqueue(const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>&);
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
