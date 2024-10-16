@@ -6978,6 +6978,14 @@ class TestCompiledDistribution(TestCase):
             return sample, lp, dist.entropy()
         return sample, lp, None
 
+    @staticmethod
+    def sample_from_existing_dist(dist, has_entropy):
+        sample = dist.sample()
+        lp = dist.log_prob(sample)
+        if has_entropy:
+            return sample, lp, dist.entropy()
+        return sample, lp, None
+
     def test_compile_categorical(self):
         import functools
 
@@ -6992,6 +7000,17 @@ class TestCompiledDistribution(TestCase):
         _ = make_dist_and_sample(probs=probs)
         logits = probs.log()
         _ = make_dist_and_sample(logits=logits)
+
+    def test_categorical_query_in_compile(self):
+        # When the dist is already instantiated, the lazy property __get__ fails
+        probs = torch.rand(10)
+        probs = probs / probs.sum()
+        dist = Categorical(probs=probs)
+        func = torch.compile(self.sample_from_existing_dist, fullgraph=True)
+        _ = func(dist=dist, has_entropy=True)
+        logits = probs.log()
+        dist = Categorical(logists=logits)
+        _ = func(dist=dist, has_entropy=True)
 
 
 if __name__ == "__main__" and torch._C.has_lapack:
