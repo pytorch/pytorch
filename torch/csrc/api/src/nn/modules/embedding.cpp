@@ -4,18 +4,15 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <cstddef>
 #include <ostream>
 #include <utility>
-#include <vector>
 
 namespace F = torch::nn::functional;
 
 namespace torch::nn {
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  EmbeddingImpl::reset();
 }
 
 void EmbeddingImpl::reset() {
