@@ -6094,7 +6094,9 @@ def multi_head_attention_forward(
         ), "use_separate_proj_weight is False but in_proj_weight is None"
         in_proj_weight_dim, _ = in_proj_weight.shape
         if isinstance(in_proj_weight_dim, torch.Tensor):
-            qk_proj_dim = in_proj_weight_dim.sub(embed_dim).div(2, rounding_mode='trunc')
+            qk_proj_dim = in_proj_weight_dim.sub(embed_dim).div(
+                2, rounding_mode="trunc"
+            )
         else:
             qk_proj_dim = (in_proj_weight_dim - embed_dim) // 2
     else:
@@ -6103,11 +6105,13 @@ def multi_head_attention_forward(
         ), "use_separate_proj_weight is True but k_proj_weight is None"
         qk_proj_dim, _ = k_proj_weight.shape
     if isinstance(qk_proj_dim, torch.Tensor):
-        head_qk_dim = qk_proj_dim.div(num_heads, rounding_mode='trunc')
+        head_qk_dim = qk_proj_dim.div(num_heads, rounding_mode="trunc")
     else:
         head_qk_dim = qk_proj_dim // num_heads
-    assert head_qk_dim * num_heads == qk_proj_dim, f"qk_proj_dim {qk_proj_dim} not divisible by num_heads {num_heads}"
-    
+    assert (
+        head_qk_dim * num_heads == qk_proj_dim
+    ), f"qk_proj_dim {qk_proj_dim} not divisible by num_heads {num_heads}"
+
     #
     # compute in-projection
     #
@@ -6115,7 +6119,9 @@ def multi_head_attention_forward(
         assert (
             in_proj_weight is not None
         ), "use_separate_proj_weight is False but in_proj_weight is None"
-        q, k, v = _in_projection_packed(query, key, value, qk_proj_dim, in_proj_weight, in_proj_bias)
+        q, k, v = _in_projection_packed(
+            query, key, value, qk_proj_dim, in_proj_weight, in_proj_bias
+        )
     else:
         assert (
             q_proj_weight is not None
