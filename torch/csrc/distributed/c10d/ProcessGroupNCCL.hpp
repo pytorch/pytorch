@@ -11,7 +11,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <deque>
 #include <future>
 #include <iostream>
 #include <list>
@@ -459,7 +458,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionaly store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::deque<at::cuda::CUDAEvent*>
+    std::vector<at::cuda::CUDAEvent*>
         eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
