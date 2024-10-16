@@ -257,6 +257,8 @@
   - test/test_xpu.py
   - third_party/xpu.txt
   - .ci/docker/ci_commit_pins/triton-xpu.txt
+  - cmake/Modules/FindSYCLToolkit.cmake
+  - cmake/public/xpu.cmake
   approved_by:
   - EikanWang
   - jgong5
