@@ -2652,9 +2652,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_get_future_result(self):
-        def print_fut(fut):
-            print("future is ready:")
-            print(fut.value())
+        def assert_fut_success(fut):
+            self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
         # test the barrier behavior in the non blocking wait setting
         prev_nccl_async_error_handling = os.environ.get(
@@ -2677,7 +2676,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         ar_work.wait()
         fut = ar_work.get_future_result()
         # test adding a callback function
-        fut.then(print_fut)
+        fut.then(assert_fut_success)
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
             work.wait()
