@@ -1100,7 +1100,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
-    # @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     def test_separate_tensor_storages_non_view(self):
         x = torch.rand(2, 2, 2)
         y = torch.rand(4, 2)
@@ -1132,7 +1132,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
-    # @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -1174,7 +1174,7 @@ class FakeTensorConverterTest(TestCase):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
 
-    # @xfailIfTorchDynamo
+    @xfailIfTorchDynamo
     def test_no_ref_cycle(self):
         x = torch.rand([4])
         mode = FakeTensorMode()
