@@ -599,6 +599,9 @@ class TritonTemplateKernel(TritonKernel):
                 gpu="cpu" not in V.graph.device_types,
             )
 
+        if self.args.workspace_arg is not None:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+
 
 @functools.lru_cache(None)
 def _jinja2_env():
