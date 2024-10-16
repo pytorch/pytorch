@@ -975,7 +975,7 @@ def cat_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.matmul.default, "self: jt, other: any")
+@register_jagged_func(torch.ops.aten.matmul.default, "self: jt_all, other: any")
 def matmul_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -984,14 +984,45 @@ def matmul_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
+    def _unbind_impl(a, b):
+        return [
+            func(a_comp, b_comp) for (a_comp, b_comp) in zip(a.unbind(), b.unbind())
+        ]
+
+    # TODO: Back these with proper kernels (e.g. grouped GEMM)
+    # NJT x dense
     if inp.is_nested and not other.is_nested:
-        return NestedTensor(
-            func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
-        )
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        if inp.dim() >= 3 and inp.dim() == other.dim():
+            # do unbind for this
+            return torch.nested.nested_tensor(
+                _unbind_impl(inp, other), layout=torch.jagged
+            )
+        # Support broadcasting the dense:
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        # etc.
+        elif other.dim() == 2 and inp.dim() > other.dim():
+            return NestedTensor(
+                func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
+            )
+    # NJT x NJT
     elif inp.is_nested and other.is_nested:
-        # BMM with equivalent ragged dims between the two inputs
+        # Support ragged batch dim:
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F), etc.
         if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
+        # Support reducing over ragged with dense output:
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+        elif (
+            inp.dim() == 3
+            and other.dim() == 3
+            and inp._ragged_idx == 2
+            and other._ragged_idx == 1
+            and inp.size(inp._ragged_idx) == other.size(other._ragged_idx)
+        ):
+            # do unbind for this
+            return torch.stack(_unbind_impl(inp, other))
 
     raise RuntimeError(
         f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"

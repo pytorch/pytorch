@@ -340,6 +340,44 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
             )
 
 
+def sample_inputs_matmul(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    for njt_3d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
+    ):
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        B, D = njt_3d.shape[0], njt_3d.shape[-1]
+        E = D + 2
+        other = torch.randn(B, D, E, device=device, dtype=dtype)
+        # used for slicing in unbind_reference()
+        other._batch_dim = 0
+        yield SampleInput(njt_3d.clone().detach(), kwargs={"other": other})
+
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        yield SampleInput(
+            njt_3d.clone().detach(),
+            kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
+        )
+
+        # TODO (need factory functions):
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+
+    for njt_4d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
+    ):
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        B, E = njt_4d.shape[0], njt_4d.shape[-1]
+        F = E + 2
+        yield SampleInput(
+            njt_4d.clone().detach(),
+            kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
+        )
+
+        # TODO (need factory functions):
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
+
+
 def sample_inputs_masked_select(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
@@ -489,6 +527,7 @@ njt_sample_inputs = {
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
     "to": sample_inputs_to,
+    "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
 }
 
