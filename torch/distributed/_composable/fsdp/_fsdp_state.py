@@ -29,19 +29,12 @@ from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, TrainingState
+from ._fsdp_common import _cast_fp_tensor, compiled_autograd_enabled, TrainingState
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
-
-
-if not torch._running_with_deploy():
-    import torch._dynamo.compiled_autograd as ca
-else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -125,7 +118,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
-        if not ca.compiled_autograd_enabled:
+        if not compiled_autograd_enabled():
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
@@ -283,7 +276,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
-        if not ca.compiled_autograd_enabled:
+        if not compiled_autograd_enabled():
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
