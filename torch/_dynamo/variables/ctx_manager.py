@@ -922,6 +922,13 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         super().__init__(**kwargs)
         self.tensors = tensors
         self.prev_versions = prev_versions
+        # The context manager accepts Union[Tensor, Tuple[Tensor]]
+        if isinstance(self.tensors, variables.TensorVariable):
+            self.tensors = variables.TupleVariable([self.tensors])
+        if isinstance(
+            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
+        ):
+            self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx):
         pass
