@@ -26,7 +26,6 @@ HAS_DOT = True if shutil.which("dot") is not None else False
 
 
 class TestGraphTransformObserver(TestCase):
-    @skipIfRocm
     def test_sdpa_rewriter(self):
         if not (
             HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION and HAS_PYDOT and HAS_DOT
