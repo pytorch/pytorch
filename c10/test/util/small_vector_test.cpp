@@ -128,8 +128,7 @@ class Constructable {
     return c0.getValue() == c1.getValue();
   }
 
-  friend bool C10_UNUSED
-  operator!=(const Constructable& c0, const Constructable& c1) {
+  friend bool operator!=(const Constructable& c0, const Constructable& c1) {
     return c0.getValue() != c1.getValue();
   }
 };
