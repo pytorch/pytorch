@@ -209,8 +209,13 @@ public:
     }
     return vector;
   }
-  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
-                          const Vectorized<T>& mask) {
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
+#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+  static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
+#else
+  static Vectorized<T> blendv(const Vectorized<T>& a,
+#endif
+    const Vectorized<T>& b, const Vectorized<T>& mask) {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
@@ -990,7 +995,7 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>();  // "zero out" mask
+  mask = Vectorized<T>(static_cast<T>(0));  // "zero out" mask
   return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
@@ -1137,13 +1142,18 @@ inline Vectorized<T> flip(const Vectorized<T> & data) {
 
 // Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
 // dimension of `src` and `ld_dst` is the leading dimension of `dst`.
-template <typename T, int M, int N>
-inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+template <typename T>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       dst[j*ld_dst + i] = src[i*ld_src + j];
     }
   }
+}
+
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
 }
 
 }} // namespace at::vec::CPU_CAPABILITY

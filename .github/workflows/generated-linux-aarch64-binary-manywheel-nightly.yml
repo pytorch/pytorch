@@ -39,7 +39,7 @@ concurrency:
 jobs:
   get-label-type:
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -58,7 +58,9 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -81,9 +83,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -103,6 +107,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
     secrets:
@@ -125,7 +130,9 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cuda-aarch64
@@ -149,6 +156,7 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
     secrets:
@@ -170,7 +178,9 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -193,9 +203,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -215,6 +227,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
@@ -237,7 +250,9 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64
@@ -261,6 +276,7 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
     secrets:
@@ -282,7 +298,9 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -305,9 +323,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -327,6 +347,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
@@ -349,7 +370,9 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64
@@ -373,6 +396,7 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
     secrets:
@@ -394,7 +418,9 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -417,9 +443,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -439,6 +467,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
@@ -461,7 +490,9 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64
@@ -485,6 +516,7 @@ jobs:
       GPU_ARCH_TYPE: cuda-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
     secrets:
