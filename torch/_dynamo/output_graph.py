@@ -49,9 +49,9 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .pgo import put_automatic_dynamic_frame_state
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
+from .pgo import put_automatic_dynamic_frame_state
 from .side_effects import AttributeMutationExisting, SideEffects
 from .source import (
     AttrSource,
