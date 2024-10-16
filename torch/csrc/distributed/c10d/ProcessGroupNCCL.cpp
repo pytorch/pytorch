@@ -2638,7 +2638,8 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-  // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue the work
+  // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue
+  // the work
   if (!terminateProcessGroup_.load() && !blockingWait_) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
