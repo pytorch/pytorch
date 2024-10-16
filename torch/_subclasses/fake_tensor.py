@@ -520,6 +520,8 @@ def in_kernel_invocation_manager(
 
 # Return if the function allows Python numbers to bind to Tensors
 def should_allow_numbers_as_tensors(func: OpOverload) -> bool:
+    if hasattr(func, "_is_hop_fake_fn"):
+        return False
     return torch._C._should_allow_numbers_as_tensors(
         func.name().split("::")[-1].split(".")[0]
     )
@@ -1404,13 +1406,13 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
-        if func in self.supported_hops:
+        if hasattr(func, "_is_hop_fake_fn"):
             # For invoke_subgraph, ignore the subgraph arg. We rely on
             # identifier as a hash for the subgraph. It is Dynamo responsibility
             # to use same identifier for identical subgraphs. For non-Dynamo
             # use cases, we will always generate unique identifiers (even if the
             # subgraphs are identical).
-            if func is torch._higher_order_ops.invoke_subgraph:
+            if func._original_hop._name == "invoke_subgraph":
                 args = args[1:]
 
         # Translate any FakeTensor args to metadata.
@@ -1434,7 +1436,7 @@ class FakeTensorMode(TorchDispatchMode):
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
 
-        if func in self.supported_hops:
+        if hasattr(func, "_is_hop_fake_fn"):
             return
 
         if torch.Tag.data_dependent_output in func.tags:
@@ -1924,15 +1926,6 @@ class FakeTensorMode(TorchDispatchMode):
         )
         del args, kwargs  # Invalidated
 
-        if func in self.supported_hops:
-            # For invoke_subgraph, we just call subgraph with the operands
-            if func is torch._higher_order_ops.invoke_subgraph:
-                # Signature is (subgraph, identifier, operands)
-                subgraph = flat_args[0]
-                operands = flat_args[2:]
-                assert callable(subgraph)
-                return subgraph(*operands)
-
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
@@ -1945,7 +1938,8 @@ class FakeTensorMode(TorchDispatchMode):
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
-            torch.Tag.nondeterministic_seeded not in func.tags
+            not hasattr(func, "_is_hop_fake_fn")
+            and torch.Tag.nondeterministic_seeded not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and all_constant
             and len(flat_arg_fake_tensors) != 0
@@ -2091,7 +2085,7 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if func not in meta_table and not self.cpp_meta_supports_symint(func) and not hasattr(func, "_is_hop_fake_fn"):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2122,7 +2116,8 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         # TODO - fix prims complex ops
         if (
-            "prims::" in func._schema.name
+            not hasattr(func, "_is_hop_fake_fn")
+            and "prims::" in func._schema.name
             and hasattr(func, "prim_meta_impl")
             and not stride_incorrect_op(func)
         ):
@@ -2138,14 +2133,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_fake_impl = torch._library.simple_registry.singleton.find(
-            func.name()
-        ).fake_impl.kernel
-        if maybe_fake_impl:
-            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_fake_impl(*args, **kwargs)
-                return maybe_propagate_real_tensors(result)
+        if not hasattr(func, "_is_hop_fake_fn"):
+            maybe_fake_impl = torch._library.simple_registry.singleton.find(
+                func.name()
+            ).fake_impl.kernel
+            if maybe_fake_impl:
+                ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                    result = maybe_fake_impl(*args, **kwargs)
+                    return maybe_propagate_real_tensors(result)
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
@@ -2354,18 +2350,13 @@ class FakeTensorMode(TorchDispatchMode):
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:
+        if hasattr(func, "_is_hop_fake_fn"):
+            return False
         if torch.Tag.view_copy in func.tags:
             return True
         return func in self._cpp_meta_supports_symint
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
-
-    @property
-    def supported_hops(self) -> Dict[torch._ops.HigherOrderOperator, Literal[True]]:
-        # Delayed import to avoid circular dependency
-        return ordered_set(
-            torch._higher_order_ops.invoke_subgraph,
-        )
 
     def may_turn_const(self, t: Tensor) -> bool:
         return (
@@ -2382,6 +2373,8 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> None:
+        if hasattr(func, "_is_hop_fake_fn"):
+            return
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():

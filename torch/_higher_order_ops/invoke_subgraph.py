@@ -13,6 +13,7 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    register_hop_fake,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -227,14 +228,17 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
 
+@register_hop_fake(invoke_subgraph)
+def invoke_subgraph_fake(subgraph, identifier, operands):
+    return subgraph(*operands)
 
-@invoke_subgraph.py_impl(FakeTensorMode)
-def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
-    # Redirect to the torch_dispatch of fake tensor mode. This enables us to use
-    # the caching infra of fake tensor mode.
-    return mode.__torch_dispatch__(
-        invoke_subgraph, [], (subgraph, identifier, operands)
-    )
+# @invoke_subgraph.py_impl(FakeTensorMode)
+# def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
+#     # Redirect to the torch_dispatch of fake tensor mode. This enables us to use
+#     # the caching infra of fake tensor mode.
+#     return mode.__torch_dispatch__(
+#         invoke_subgraph, [], (subgraph, identifier, operands)
+#     )
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)

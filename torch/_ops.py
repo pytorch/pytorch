@@ -295,6 +295,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # that are named "self".
     def dispatch(self, /, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
+        from torch._higher_order_ops.utils import registered_hop_fake_fns
 
         if dispatch_key in self._dispatch_cache:
             kernel = self._dispatch_cache[dispatch_key]
@@ -337,6 +338,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # "natural" calling convention: (mode, *args, **kwargs)
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
+                elif type(curr_mode) is torch._subclasses.FakeTensorMode and self in registered_hop_fake_fns:
+                    handler = registered_hop_fake_fns[self]
+                    with _pop_mode_temporarily() as mode:
+                        result = mode.__torch_dispatch__(handler, *args, **kwargs)
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
