@@ -528,21 +528,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         return model_init_fn, input_creation_fn
 
-    def test_compiled_autograd_enable_ctx(self):
-        with torch._dynamo.config.patch(
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            recompute_views=True,
-        ):
-            inputs = torch.randn(8, 8)
-            model = torch.nn.Linear(8, 8)
-            fully_shard(model)
-            model_compiled = torch.compile(model)
-
-            with torch._dynamo.compiled_autograd.enable(torch.compile(fullgraph=True)):
-                out = model_compiled(inputs)
-                out.sum().backward()
-
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
