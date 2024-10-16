@@ -143,7 +143,7 @@ class TestSACILP(TestCase):
             g, memory_budget=1.6, world_size=4
         )
 
-        # the solution should AC all four transformer layers --
+        # The solution should AC all four transformer layers --
         # for three of them, the percentage of activation memory to discard is 0.5232;
         # and for the last one, it is 0.7964.
         # Due to symmetry, the layer that has 0.7964 can be any of the first three layers.
@@ -159,8 +159,8 @@ class TestSACILP(TestCase):
         self.assertAlmostEqual(sorted_discard_ratio[3], 0.7964, delta=0.02)
         self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.5232, delta=0.02)
 
-        # on A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms
-        # some runtime is device_flops dependent, so we only check the ratio
+        # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
+        # Since runtime is device_flops dependent, so we only check the ratio
         self.assertAlmostEqual(
             (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.05
         )
