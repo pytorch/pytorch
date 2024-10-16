@@ -271,7 +271,7 @@ Kernel(
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
         {event_tracer_output_logging}
@@ -295,7 +295,7 @@ def gen_unboxing(
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
-        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]
+        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         return item[0].root_name + ":" + item[1][0].to_native_string()
 
@@ -739,7 +739,7 @@ def parse_yaml(
 
         # (2) Return BackendIndices if kernel index is absent
         def map_index(
-            m: dict[OperatorName, BackendMetadata]
+            m: dict[OperatorName, BackendMetadata],
         ) -> dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 
