@@ -18,11 +18,12 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import _decomp_table_to_post_autograd_aten, get_decompositions
+from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
+    _decomp_table_to_post_autograd_aten,
     get_buffer,
     get_param,
     is_buffer,
@@ -4012,11 +4013,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
                 return x
-
-        from torch._decomp import (
-            _decomp_table_to_post_autograd_aten,
-            decomposition_table,
-        )
 
         decomp_table = {**_decomp_table_to_post_autograd_aten(), **decomposition_table}
 

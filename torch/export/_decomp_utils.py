@@ -1,4 +1,3 @@
-import itertools
 from typing import Callable, Dict
 
 import torch
@@ -7,8 +6,6 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops_for_aten_namespace,
     _get_decomp_for_cia,
     _is_aten_op,
-    _is_custom_op,
-    _is_preservable_cia_op,
 )
 
 
@@ -33,85 +30,55 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         from torch._decomp import _core_aten_decompositions_post_autograd
 
         # For aten ops, we load them up in the beginning
-        self.aten_decomp_table = _core_aten_decompositions_post_autograd()
+        self.decomp_table = _core_aten_decompositions_post_autograd()
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
-            self.aten_decomp_table[op] = _get_decomp_for_cia(op)
+            self.decomp_table[op] = _get_decomp_for_cia(op)
 
         # This is to track the *pending* deleted custom ops that haven't been materialized yet
         self.deleted_custom_ops = set()
-        # When we can materialize a custom op, we use this table
-        self.additional_custom_op_decomp = {}
         # When this is true, there shouldn't be any pending operations in the table.
         self.has_materialized = False
 
     def __getitem__(self, key):
         self._materialize_if_needed()
-
-        if _is_aten_op(key):
-            return self.aten_decomp_table[key]
-
-        assert _is_custom_op(key)
-        return self.additional_custom_op_decomp[key]
+        return self.decomp_table.__getitem__(key)
 
     def __setitem__(self, key, value):
-        if _is_aten_op(key):
-            self.aten_decomp_table[key] = value
-            return
-
-        assert _is_custom_op(key)
-
-        self.additional_custom_op_decomp[key] = value
+        self.decomp_table.__setitem__(key, value)
 
         if key in self.deleted_custom_ops:
             self.deleted_custom_ops.remove(key)
 
     def keys(self):
         self._materialize_if_needed()
-
-        return itertools.chain(
-            self.aten_decomp_table.keys(), self.additional_custom_op_decomp.keys()
-        )
+        return self.decomp_table.keys()
 
     def __delitem__(self, key):
         self.pop(key)
 
     def update(self, other_dict):  # type: ignore[override]
         for k, v in other_dict.items():
-            if _is_aten_op(k):
-                self.aten_decomp_table[k] = v
-            else:
-                self.additional_custom_op_decomp[k] = v
-                if not self.has_materialized:
-                    if k in self.deleted_custom_ops:
-                        self.deleted_custom_ops.remove(k)
+            self.decomp_table.__setitem__(k, v)
 
     def __missing__(self, key):
         return not self.__contains__(key)
 
     def __contains__(self, key):
         self._materialize_if_needed()
-        if _is_aten_op(key):
-            return key in self.aten_decomp_table
-
-        if key in self.additional_custom_op_decomp:
-            return True
-
-        return False
+        return self.decomp_table.__contains__(key)
 
     def __len__(self):
         self._materialize_if_needed()
-        return len(self.aten_decomp_table) + len(self.additional_custom_op_decomp)
+        return self.decomp_table.__len__()
 
     def __iter__(self):
         self._materialize_if_needed()
-        return itertools.chain(
-            self.aten_decomp_table.__iter__(),
-            self.additional_custom_op_decomp.__iter__(),
-        )
+        return self.decomp_table.__iter__()
 
     def __reverse__(self):
-        raise RuntimeError("Cannot call reverse() on custom decomp table")
+        self._materialize_if_needed()
+        return self.decomp_table.__reverse__()
 
     def copy(self):
         new_dict = CustomDecompTable()
@@ -124,19 +91,16 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     def pop(self, *args):
         def _pop_if_can(key):
             if _is_aten_op(key):
-                return self.aten_decomp_table.pop(key)
+                return self.decomp_table.pop(key)
 
-            if key in self.additional_custom_op_decomp:
+            if key in self.decomp_table:
                 # Even if we materialized it, we should add it to the deleted
                 # custom ops list so that when we materialize next time,
                 # we should respect user's intention.
                 self.deleted_custom_ops.add(key)
-                return self.additional_custom_op_decomp.pop(key)
+                return self.decomp_table.pop(key)
 
             if key in self.deleted_custom_ops:
-                raise KeyError(f"{key} doesn't exist in the table")
-
-            if not _is_preservable_cia_op(key):
                 raise KeyError(f"{key} doesn't exist in the table")
 
             self.deleted_custom_ops.add(key)
@@ -156,22 +120,20 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
 
     def items(self):
         self._materialize_if_needed()
-        return itertools.chain(
-            self.aten_decomp_table.items(), self.additional_custom_op_decomp.items()
-        )
+        return self.decomp_table.items()
 
     def materialize(self):
         for op in _collect_all_valid_cia_ops():
             if _is_aten_op(op):
                 continue
-            elif op in self.additional_custom_op_decomp:
+            elif op in self.decomp_table:
                 continue
             elif op not in self.deleted_custom_ops:
-                self.additional_custom_op_decomp[op] = _get_decomp_for_cia(op)
+                self.decomp_table[op] = _get_decomp_for_cia(op)
 
         self.has_materialized = True
         self.deleted_custom_ops = set()
-        return {**self.aten_decomp_table, **self.additional_custom_op_decomp}
+        return {**self.decomp_table}
 
     def _materialize_if_needed(self):
         if not self.has_materialized:

@@ -47,6 +47,7 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
+    _decomp_table_to_post_autograd_aten,
     _detect_fake_mode_from_gm,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
@@ -59,8 +60,8 @@ from torch._export.utils import (
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.export._decomp_utils import CustomDecompTable
+from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -1056,7 +1057,6 @@ class ExportedProgram:
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._decomp import _decomp_table_to_post_autograd_aten
         from torch._inductor import config
 
         # FIXME delete this option after PTC, Executorch syncing is

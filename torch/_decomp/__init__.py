@@ -31,7 +31,6 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
-    "_decomp_table_to_post_autograd_aten",
     "_special_op_to_preserve_cia",
 ]
 
@@ -276,56 +275,13 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     )
     from torch._inductor import config
 
-    aten = torch.ops.aten
-
     # Entry without functional CIA ops
     decomp_table = _core_aten_decompositions_post_autograd()
     if config.is_fbcode():
-        decomp_table_for_functional_cia_ops_legacy = get_decompositions(
-            [
-                aten.all.dimname,
-                aten.index_add.dimname,
-                aten.index_copy.dimname,
-                aten.index_fill.Dimname_Scalar,
-                aten.index_fill.Dimname_Tensor,
-                aten.norm.names_ScalarOpt_dim_dtype,
-                aten.norm.names_ScalarOpt_dim,
-                aten.silu_backward.default,
-                aten.std.default,
-                aten.std.dim,
-                aten.std.names_dim,
-                aten.std.correction_names,
-                aten.std_mean.default,
-                aten.std_mean.dim,
-                aten.std_mean.names_dim,
-                aten.std_mean.correction_names,
-                aten.upsample_bilinear2d.vec,
-                aten.upsample_trilinear3d.vec,
-            ]
-        )
-
-        decomp_table.update(decomp_table_for_functional_cia_ops_legacy)
         return decomp_table
 
     for op in _collect_all_valid_cia_ops_for_aten_namespace():
         decomp_table[op] = _get_decomp_for_cia(op)
-    return decomp_table
-
-
-# This table is a stop-gap table which replicates
-# the old behaviour of post-dispatch IR.
-# This table contains all functional CIA ops mapping
-# to their default decomp. In old export, this will
-# be decomposed implicitly.
-def _decomp_table_to_post_autograd_aten():
-    from torch._export.utils import (
-        _collect_all_valid_cia_ops_for_aten_namespace,
-        _get_decomp_for_cia,
-    )
-
-    decomp_table = {}
-    for k in _collect_all_valid_cia_ops_for_aten_namespace():
-        decomp_table[k] = _get_decomp_for_cia(k)
     return decomp_table
 
 
