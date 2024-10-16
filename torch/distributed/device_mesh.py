@@ -523,7 +523,6 @@ else:
                     )
                 )
             else:
-
                 # create sub pgs base on the mesh argument specified
                 for dim in range(self.mesh.ndim):
                     # swap the current dim to the last dim
@@ -541,7 +540,7 @@ else:
                         ) = _mesh_resources.mesh_dim_group_options[dim]
                     else:
                         backend, pg_options = None, None
-                    
+
                     group_desc = (
                         f"mesh_{self.mesh_dim_names[dim]}"
                         if self.mesh_dim_names
