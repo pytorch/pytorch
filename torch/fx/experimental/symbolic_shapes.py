@@ -1098,6 +1098,16 @@ def parallel_and(*args: BoolLikeType) -> BoolLikeType:
     return all(args)
 
 
+def parallel_and_statically_known_true(*args: BoolLikeType) -> BoolLikeType:
+    """
+    Evaluate the logical FALSE of several arguments, avoiding guarding on
+    unbacked SymInts if another argument is definitely False.
+    """
+    if any(statically_known_true(torch.sym_not(a)) for a in args):
+        return False
+    return all(args)
+
+
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
