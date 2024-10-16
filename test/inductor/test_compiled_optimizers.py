@@ -153,7 +153,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_sgd_xpu": 4,
-    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_xpu": 4,
     "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
     "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
@@ -175,7 +174,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
     "test_sgd_tensor_lr_xpu": 2,
-    "test_sgd_tensor_lr_foreach_cuda": 2,
     "test_sgd_tensor_lr_foreach_xpu": 2,
 }
 
