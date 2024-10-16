@@ -1743,6 +1743,7 @@ class PythonWrapperCodegen(CodeGen):
             assert arg_types is not None and len(call_args) == len(
                 arg_types
             ), "call_args and arg_types do not match"
+
             tensor_args = {}
             all_args = []
             if raw_args is None:
@@ -1752,6 +1753,7 @@ class PythonWrapperCodegen(CodeGen):
                 assert len(raw_args) == len(
                     call_args
                 ), "call_args and raw_args do not match"
+
             for i, (arg, arg_type, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_args)
             ):
