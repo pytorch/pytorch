@@ -519,24 +519,32 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    # we need to import this, because user might not have imported it if they directly use this context manager
-    # we need to lazily import it, because of circular dependencies
-    import torch._inductor.cudagraph_trees
+    from torch._dynamo import eval_frame
 
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
-    )
-    if snapshot_verbose_logging_enabled():
-        torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = True
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
-            yield
-    finally:
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+    if eval_frame._stance.stance == "force_eager":
+        # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
+        # to fall back to eager as well.
+        yield
+        return
+    else:
+        # we need to import this, because user might not have imported it if they directly use this context manager
+        # we need to lazily import it, because of circular dependencies
+        import torch._inductor.cudagraph_trees
+
+        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            functools.partial(AutogradCompilerInstance, compiler_fn)
+        )
+        if snapshot_verbose_logging_enabled():
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+        global compiled_autograd_enabled
+        compiled_autograd_enabled = True
+        try:
+            with torch.autograd.set_multithreading_enabled(False):
+                yield
+        finally:
+            if not prior:
+                compiled_autograd_enabled = False
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
