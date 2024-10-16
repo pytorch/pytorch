@@ -1072,6 +1072,15 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
+def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
+    # Currently, inputs can only be all nested or no nested.
+    if query.is_nested != key.is_nested or key.is_nested != value.is_nested:
+        raise ValueError(
+            "FlexAttention does not support mixed nested tensor / non-nested tensor inputs. "
+            "Please file an issue requesting this if it is important to you."
+        )
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -1139,6 +1148,7 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
+    _validate_nestedness(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -1170,6 +1180,17 @@ def flex_attention(
         new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
         new_kv_len = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
         block_mask = block_mask._adjust(new_q_len, new_kv_len)
+    elif query.is_nested and (
+        block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
+        != _round_up_to_multiple(
+            query._values.size(query._ragged_idx - 1), block_mask.BLOCK_SIZE[0]  # type: ignore[attr-defined]
+        )
+    ):
+        # TODO: Maybe we want to auto-adjust for this case as well?
+        raise RuntimeError(
+            f"block_mask of shape {block_mask.shape} is not compatible with nested tensor input "
+            f"with total sequence length of {query._values.size(query._ragged_idx - 1)}"  # type: ignore[attr-defined]
+        )
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 

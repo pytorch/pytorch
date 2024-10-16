@@ -2367,6 +2367,17 @@ class GraphModule(torch.nn.Module):
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
 
+        getattr_1 = l_query_.is_nested;  getattr_1 = None
+        getattr_2 = l_key_.is_nested;  getattr_2 = None
+        getattr_3 = l_key_.is_nested;  getattr_3 = None
+        getattr_4 = l_value_.is_nested;  getattr_4 = None
+
+        getattr_5 = l_query_.is_nested;  getattr_5 = None
+
+        getattr_6 = l_query_.is_nested;  getattr_6 = None
+
+        getattr_7 = l_query_.is_nested;  getattr_7 = None
+
         child_1: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_1 = None
         child_2: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_2 = None
         child_3: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_3 = None

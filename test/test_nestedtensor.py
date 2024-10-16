@@ -6973,12 +6973,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
     # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
-    def _rand_qkv(self, device, dtype):
+    # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have
+    # both offsets and lengths specified).
+    def _rand_qkv(self, device, dtype, noncontig_with_holes=False):
         batch_size = 8
         n_heads = 8
         D = 16
 
-        sentence_lengths = [random.randint(1, 1023) for _ in range(batch_size - 1)]
+        sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
         total = sum(sentence_lengths)
 
         # shape (B, *, D_total) where D_total = n_heads * D
@@ -6989,6 +6991,16 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             ],
             layout=torch.jagged,
         )
+        if noncontig_with_holes:
+            query = torch.nested.nested_tensor_from_jagged(
+                query._values,
+                query._offsets,
+                # -1 to introduce holes
+                lengths=query._offsets.diff() - 1,
+                jagged_dim=query._ragged_idx,
+                min_seqlen=query._min_seqlen,
+                max_seqlen=query._max_seqlen,
+            )
         key = torch.randn_like(query)
         value = torch.randn_like(query)
 
@@ -7006,8 +7018,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @onlyCUDA
     @flex_attention_supported_platform
     @dtypes(torch.float32)
-    def test_flex_attention(self, device, dtype):
-        query, key, value = self._rand_qkv(device, dtype)
+    @parametrize("noncontig_with_holes", [False, True])
+    def test_flex_attention(self, device, dtype, noncontig_with_holes):
+        query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
 
         # Run FlexAttention with a causal mask
         def causal_mask(b, h, q_idx, kv_idx):
