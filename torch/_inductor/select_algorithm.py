@@ -34,7 +34,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -121,7 +121,6 @@ SubgraphInfo = namedtuple(
 
 
 class TritonTemplateKernel(TritonKernel):
-
     def __init__(
         self,
         kernel_name,
@@ -167,7 +166,7 @@ class TritonTemplateKernel(TritonKernel):
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
-        # Some templates user extra global memory as a workspace
+        # Some templates use extra global memory as a workspace
         self.workspace_size = workspace_size
         if self.workspace_size > 0:
             self.args.workspace(workspace_size, False)
@@ -311,6 +310,7 @@ class TritonTemplateKernel(TritonKernel):
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
             self.args.input(input_node.get_name())
+
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
@@ -565,9 +565,9 @@ class TritonTemplateKernel(TritonKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         # Handle workspace allocation
-        if node.get_workspace_size() > 0:
+        if self.workspace_size > 0:
             wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+                self.workspace_size, V.graph.scheduler.current_device, False
             )
 
         if V.graph.cpp_wrapper:

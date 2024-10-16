@@ -8,12 +8,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 
 from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
-from ..lowering import (
-    add_layout_constraint,
-    constrain_to_fx_strides,
-    empty,
-    register_lowering,
-)
+from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -474,7 +469,7 @@ ADD_TMA_DEVICE_KERNELS = True
 
 
 def get_workspace_size(num_sms: int, TMA_SIZE: int = 128, NUM_TMA_DESCRIPTORS=3) -> int:
-    """Device side TMA requires a workspace buffer to be allocated in global memory. """
+    """Device side TMA requires a workspace buffer to be allocated in global memory."""
     return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
 
 
