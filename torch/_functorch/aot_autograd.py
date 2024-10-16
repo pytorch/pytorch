@@ -27,11 +27,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
     autograd_cache_key,
+    should_use_local_autograd_cache,
+    should_use_remote_autograd_cache,
 )
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
@@ -99,6 +100,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
@@ -677,6 +679,7 @@ def _create_aot_dispatcher_function(
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
+                            traced_tangent_memory_formats=fw_metadata.traced_tangent_memory_formats,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
@@ -978,6 +981,10 @@ def aot_module_simplified(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
+        (
+            tracing_context.params_flat_unwrap_subclasses,
+            tracing_context.params_unwrapped_to_flat_index,
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -1045,7 +1052,7 @@ def aot_module_simplified(
         static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
-        cache_key=None,
+        cache_info=None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
@@ -1063,9 +1070,18 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache:
+    remote = should_use_remote_autograd_cache()
+    local = should_use_local_autograd_cache()
+
+    if local or remote:
         compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
+            dispatch_and_compile,
+            mod,
+            fake_flat_args,
+            aot_config,
+            cudagraphs,
+            local,
+            remote,
         )
     else:
         compiled_fn = dispatch_and_compile()
@@ -1255,6 +1271,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         )
     if trace_joint:
 
+        @wraps(functional_call)
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
             # (1) It accepts two arguments (primals, tangents), and pytree_flattens them
@@ -1295,7 +1312,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
 
-        fx_g = make_fx(flattened_joint)(*full_args)
+        fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
@@ -1492,7 +1509,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
     # Do not allow assignment of tensor attributes during export unless
     # the attribute is registered as a buffer.
 
-    STD_ATTRS = {
+    NN_MODULE_STD_ATTRS = [
         "_backward_hooks",
         "_backward_pre_hooks",
         "_buffers",
@@ -1510,14 +1527,32 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         "_state_dict_hooks",
         "_state_dict_pre_hooks",
         "training",
+    ]
+    NN_MODULE_LAZY_STD_ATTRS = [
+        "_initialize_hook",
+        "_load_hook",
+    ]
+    STD_ATTRS = {
+        *NN_MODULE_STD_ATTRS,
+        *NN_MODULE_LAZY_STD_ATTRS,
     }
 
     def _get_attributes(mod):
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
+    def is_leaf(x):
+        # Ideally is_leaf should not be needed when mapping, but it seems that
+        # subclasses of a standard container X may sometimes map to X, which
+        # destroys information and can cause future mapping to fail.
+        known_subclasses_that_lose_info = (
+            torch.Size,
+            # add more here if needed
+        )
+        return isinstance(x, known_subclasses_that_lose_info)
+
     # save state of attributes before enter
-    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod))
+    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod), is_leaf=is_leaf)
     try:
         yield
     finally:

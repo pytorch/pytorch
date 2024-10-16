@@ -21,6 +21,7 @@ import warnings
 from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -98,7 +99,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> list | np.ndarray:
+def _to_numpy(elem) -> list | npt.NDArray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()

@@ -104,6 +104,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
+
+  virtual PyObject* getDeviceCapability(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};

@@ -11,6 +11,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
@@ -180,17 +181,17 @@ uint32_t _getAlignment(uintptr_t address) {
 #endif
 
 static size_t _parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
-  if (!val) {
+  if (!val.has_value()) {
     // accept either env var
-    val = getenv("HIPBLASLT_WORKSPACE_SIZE");
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
 #endif
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-  if (val) {
+  if (val.has_value()) {
     try {
-      workspace_size = std::stoi(val);
+      workspace_size = std::stoi(val.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -1408,7 +1409,6 @@ void scaled_gemm(
     const void *result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr,
     bool use_fast_accum) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
@@ -1421,13 +1421,9 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60200)
-  // Amax support in ROCm as of 6.2
-  if (isFloat8Type(result_dtype)) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+  if (result_scale_ptr != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
-#endif
 #ifndef USE_ROCM
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif
