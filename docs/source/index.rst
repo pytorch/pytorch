@@ -64,6 +64,7 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   accelerator
    cpu
    cuda
    torch.cuda.memory <torch_cuda_memory>
