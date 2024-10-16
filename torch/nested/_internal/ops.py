@@ -233,7 +233,6 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
-        "lengths": arg.lengths(),
         "_metadata_cache": arg._metadata_cache,
         "_ragged_idx": arg._ragged_idx,
     }
@@ -1193,6 +1192,11 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "transpose(): not supported on jagged layout nested tensor with holes"
+        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
