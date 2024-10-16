@@ -1,6 +1,6 @@
 #include <ATen/ThreadLocalState.h>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAContextLight.h>
+#if defined(USE_CUDA) && !defined(USE_ROCM)
+#include "ATen/cuda/CUDAContextLight.h"
 #include <ATen/cuda/CUDAGraph.h>
 #endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>

@@ -147,17 +147,17 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
-  CUDAGraph::is_capturing_ = true;
 }
 
-thread_local bool CUDAGraph::is_capturing_ = false;
-
 bool CUDAGraph::is_capturing() {
-  return CUDAGraph::is_capturing_;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  cudaStreamCaptureStatus status;
+  CaptureId_t capture_id_ = 0;
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
+  return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive;
 }
 
 void CUDAGraph::capture_end() {
-  CUDAGraph::is_capturing_ = false;
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream == capture_stream_,
@@ -274,7 +274,6 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
 }
 
 void CUDAGraph::reset() {
-  is_capturing_ = false;
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
