@@ -17,7 +17,6 @@ POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
     "functools",
     "itertools",
     "os",
-    "pytree",
     "sys",
 )
 POLYFILLED_MODULES: Tuple["ModuleType", ...] = tuple(

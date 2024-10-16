@@ -2086,10 +2086,9 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
-        supports_weakref = (
-            getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
-        )
-        if supports_weakref and not isinstance(guarded_object, enum.Enum):
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
