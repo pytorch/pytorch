@@ -14,10 +14,15 @@ namespace at {
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
 
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
+  }
+
+  // Perserved for BC
   virtual void initXPU() const {
-    TORCH_CHECK(
-        false,
-        "Cannot initialize XPU without ATen_xpu library.");
+    TORCH_WARN_DEPRECATION(
+        "initXPU() is deprecated. Please use init() directly instead.")
+    init();
   }
 
   virtual bool hasXPU() const {
