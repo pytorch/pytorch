@@ -82,6 +82,111 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
+    def capture(self, tensors, sizes, scalars, origins, nodecalls, num_outputs):
+        dynamic_sizes = tuple(s for s in sizes if s is not None)
+
+        counters["compiled_autograd"]["captures"] += 1
+        inputs_origins, sizes_origins, scalars_origins = origins
+
+        self.fx_tracer.root = torch.nn.Module()
+        self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
+        self.fx_tracer.tensor_attrs = {}
+        inputs_proxy, dynamic_sizes_proxy, scalars_proxy, self.hooks_proxy = (
+            self.fx_tracer.create_proxy("placeholder", name, (), {})
+            for name in self.graph_placeholders
+        )
+
+        sizes_proxy = [None] * len(sizes)
+        dynamic_sizes_next = 0
+        for idx in range(len(sizes)):
+            if sizes[idx] is not None:
+                sizes_proxy[idx] = dynamic_sizes[dynamic_sizes_next]
+                dynamic_sizes_next += 1
+
+        graph_outputs = [None] * num_outputs
+
+        self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=torch._compiled_autograd.CA_input_buffers_init,
+            args=(),
+            kwargs={},
+        )
+
+        for node_idx, call in enumerate(nodecalls):
+            inputs_idx = 0
+            sizes_idx = 0
+            scalars_idx = 0
+
+            inputs = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=torch._compiled_autograd.CA_input_buffers_lookup,
+                args=(node_idx,),
+                kwargs={},
+            )
+
+            num_saved_inputs = call.num_saved_tensors
+            num_saved_sizes = call.num_saved_sizes
+            num_saved_scalars = call.num_saved_ivalues
+
+            saved_inputs = inputs_proxy[inputs_idx:inputs_idx + num_saved_inputs]
+            saved_sizes = sizes_proxy[sizes_idx:sizes_idx + num_saved_sizes]
+            saved_scalars = scalars_proxy[scalars_idx:scalars_idx + num_saved_scalars]
+
+            inputs_idx += num_saved_inputs
+            sizes_idx += num_saved_sizes
+            scalars_idx += num_saved_scalars
+
+            for hook_idx, input_idx in call.tensor_pre_hooks:
+                inputs = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=call_hook,
+                    args=(self.hooks_proxy[hook_idx], [inputs[input_idx]]),
+                    kwargs={"hook_type": "pre_hook"},
+                )
+
+            for input_nr, result_idx in call.graph_output:
+                graph_outputs[result_idx] = inputs[input_nr]
+
+            if not call.needed:
+                continue
+
+            if call.node.is_compiled_autograd_traceable():
+                outputs = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=torch._compiled_autograd.CA_apply_with_saved,
+                    args=(node_idx, inputs, saved_inputs, saved_sizes, saved_scalars),
+                    kwargs={},
+                )
+            else:
+                outputs = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=torch._compiled_autograd.CA_apply_with_saved_dynamo_disabled,
+                    args=(node_idx, inputs, saved_inputs, saved_sizes, saved_scalars),
+                    kwargs={},
+                )
+            # self.fx_tracer.create_proxy(
+            #     kind="call_function",
+            #     target=CA_validate_outputs,
+            #     args=(node_idx, outputs),
+            #     kwargs={},
+            # )
+
+            for hook_id in call.post_hooks:
+                outputs = self.fx_tracer.create_proxy(
+                    kind="call_function",
+                    target=call_hook,
+                    args=(self.hooks_proxy[hook_id], outputs, inputs),
+                    kwargs={"hook_type": "post_hook"},
+                )
+
+            self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=torch._compiled_autograd.CA_update_input_buffers,
+                args=(node_idx, outputs),
+                kwargs={},
+            )
+        return self.end_capture(graph_outputs)
+
     def begin_capture(
         self,
         inputs: List[torch.Tensor],
@@ -308,8 +413,8 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        self.rename_aot_dispatcher_nodes()
-        self.reorder_accumulate_grad_nodes()
+        # self.rename_aot_dispatcher_nodes()
+        # self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -317,6 +422,7 @@ class AutogradCompilerInstance:
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
+        graph.print_readable()
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
             "Compiled autograd graph",
@@ -562,3 +668,5 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+
+from torch._compiled_autograd import set_global_nodecalls

@@ -188,16 +188,22 @@ struct CppNode : public Node {
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
 
+  bool is_compiled_autograd_traceable() override {
+    static_assert(
+        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
+    return T::is_traceable;
+  }
+
   void compiled_args(CompiledNodeArgs& args) override {
     static_assert(
         std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    if (!T::is_traceable) {
-      throw std::runtime_error(
-          std::string(
-              "Attempting to trace a potentially unsafe C++ autograd function: ") +
-          name() +
-          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
-    }
+    // if (!T::is_traceable) {
+    //   throw std::runtime_error(
+    //       std::string(
+    //           "Attempting to trace a potentially unsafe C++ autograd function: ") +
+    //       name() +
+    //       ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+    // }
 
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time

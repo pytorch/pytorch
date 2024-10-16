@@ -563,6 +563,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// release variables as they run.
   virtual void will_release_variables() {}
 
+  virtual bool is_compiled_autograd_traceable() {
+    return true;
+  }
+
   /// Returns true if this function is traceable. An op is traceable if all
   /// operations happening within `apply()` are performed on autograd
   /// `Variables` (i.e. apply mostly instantiates and applies other functions).

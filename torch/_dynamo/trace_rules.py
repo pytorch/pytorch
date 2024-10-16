@@ -134,6 +134,11 @@ If you are removing an existing torch level API:
 
 """
 manual_torch_name_rule_map = {
+    "torch._compiled_autograd.CA_apply_with_saved": TorchInGraphFunctionVariable,
+    # "torch._compiled_autograd.CA_apply_with_saved_dynamo_disabled": TorchInGraphFunctionVariable,
+    "torch._compiled_autograd.CA_update_input_buffers": TorchInGraphFunctionVariable,
+    "torch._compiled_autograd.CA_input_buffers_init": TorchInGraphFunctionVariable,
+    "torch._compiled_autograd.CA_input_buffers_lookup": TorchInGraphFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -3237,6 +3242,7 @@ if torch.distributed.is_available():
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
 MOD_INLINELIST = [
+    "torch._compiled_autograd",
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
