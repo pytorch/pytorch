@@ -989,15 +989,49 @@ def matmul_default(func, *args, **kwargs):
             func(a_comp, b_comp) for (a_comp, b_comp) in zip(a.unbind(), b.unbind())
         ]
 
+    def _padded_impl(a, b):
+        assert a.is_nested and not b.is_nested
+        nt, t = a, b
+
+        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+
+        # convert NT -> padded dense
+        min_seqlen = None
+        if nt._min_seqlen_tensor is not None:
+            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
+
+        max_seqlen = None
+        if nt._max_seqlen_tensor is not None:
+            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
+
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *nt.shape[: nt._ragged_idx],
+            padded_max_S,
+            *nt.shape[nt._ragged_idx + 1 :],
+        )
+        padded_nt = nt.to_padded_tensor(0.0, output_size=padded_shape)
+        return nested_from_padded(
+            func(padded_nt, b),
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
     # TODO: Back these with proper kernels (e.g. grouped GEMM)
     # NJT x dense
     if inp.is_nested and not other.is_nested:
         # (B, j1, D) x (B, D, E) => (B, j1, E)
         if inp.dim() >= 3 and inp.dim() == other.dim():
-            # do unbind for this
-            return torch.nested.nested_tensor(
-                _unbind_impl(inp, other), layout=torch.jagged
-            )
+            # convert to padded for this
+            return _padded_impl(inp, other)
         # Support broadcasting the dense:
         # (B, j1, D) x (D, E) => (B, j1, E)
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
@@ -1021,7 +1055,7 @@ def matmul_default(func, *args, **kwargs):
             and other._ragged_idx == 1
             and inp.size(inp._ragged_idx) == other.size(other._ragged_idx)
         ):
-            # do unbind for this
+            # do unbind for this; can't use padded conversion due to j1 in last dim
             return torch.stack(_unbind_impl(inp, other))
 
     raise RuntimeError(

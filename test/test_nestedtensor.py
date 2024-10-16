@@ -7692,9 +7692,6 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
-    # data-dependent error due to use of unbind(); should go away when we back this
-    # with proper kernels
-    "matmul",
     # to(device) allocates a new nested int in compile only.
     # AssertionError: The values for attribute 'shape' do not match:
     # torch.Size([7, j2]) != torch.Size([7, j1]).
