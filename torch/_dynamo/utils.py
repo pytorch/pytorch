@@ -290,9 +290,10 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
-            chromium_log.log_event_start(key, start, None)
             if phase_name:
-                chromium_log.log_event_start(phase_name, start)
+                chromium_log.log_event_start(phase_name, start, {"fn_name": key})
+            else:
+                chromium_log.log_event_start(key, start, {})
             yield
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
@@ -306,16 +307,17 @@ def dynamo_timed(
             chromium_log.log_event_end(
                 phase_name,
                 time.time_ns(),
-                {"cache_stats": get_cache_stats()},
+                {"cache_stats": get_cache_stats(), "fn_name": key},
                 start,
             )
-        chromium_log.log_event_end(
-            key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-        )
+        else:
+            chromium_log.log_event_end(
+                key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
+            )
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
-            # fwd only compilation stages: entire_frame_compile, backend_compile.
+            # fwd only compilation stages: entire_frame_compile, backend_compile, aotdispatch.
             # use frame_key as time aggregation key.
             if fwd_only and fail_type is None:
                 _add_time_spent(frame_key, phase_name, time_spent)
@@ -900,7 +902,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Logs the start of a single event.
@@ -909,20 +911,17 @@ class ChromiumEventLogger:
         :param metadata: Any extra metadata associated with this event
         """
 
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
-
-        event = self._log_timed_event(
+        self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
-        self.get_stack().append(event_name)
+        is_compiler_phase = "fn_name" in metadata
+        if is_compiler_phase:
+            self.get_stack().append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
@@ -935,8 +934,8 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
-        start_time_ns: Optional[int] = None,
+        metadata: Dict[str, Any],
+        start_time_ns: int,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -945,22 +944,8 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
-
-        # These stack health checks currently never happen,
-        # but they're written this way to future proof any weird event
-        # overlaps in the future.
-        stack = self.get_stack()
-        if event_name not in stack:
-            # Something went wrong, we never called start on this event,
-            # or it was skipped due to overlapping events below
-            log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
-            return
-
         event = self._log_timed_event(
             event_name,
             time_ns,
@@ -968,18 +953,33 @@ class ChromiumEventLogger:
             metadata,
         )
 
-        while event_name != stack[-1]:
-            # If the event isn't the most recent one to end, pop
-            # off the stack until it is.
-            # Since event_name in self.stack, this pop is always safe
-            log.warning(
-                "ChromiumEventLogger: Detected overlapping events, fixing stack"
-            )
-            stack.pop()
+        # Only internally log spans for major phases of the compiler
+        is_compiler_phase = "fn_name" in metadata
+        if is_compiler_phase:
+            # These stack health checks currently never happen,
+            # but they're written this way to future proof any weird event
+            # overlaps in the future.
+            stack = self.get_stack()
+            if event_name not in stack:
+                # Something went wrong, we never called start on this event,
+                # or it was skipped due to overlapping events below
+                log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
+                return
 
-        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
-        # Finally pop the actual event off the stack
-        stack.pop()
+            while event_name != stack[-1]:
+                # If the event isn't the most recent one to end, pop
+                # off the stack until it is.
+                # Since event_name in self.stack, this pop is always safe
+                log.warning(
+                    "ChromiumEventLogger: Detected overlapping events, fixing stack"
+                )
+                stack.pop()
+
+            log_chromium_event_internal(
+                event, stack, compile_id, self.id_, start_time_ns
+            )
+            # Finally pop the actual event off the stack
+            stack.pop()
 
     def _log_timed_event(
         self,
@@ -1044,7 +1044,9 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
+        log_chromium_event_internal(
+            event, self.get_stack(), compile_id, self.id_, time_ns
+        )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
