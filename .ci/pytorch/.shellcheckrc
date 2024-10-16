@@ -1,0 +1,4 @@
+source-path=SCRIPTDIR
+
+# we'd like to enable --external-sources here but can't
+# https://github.com/koalaman/shellcheck/issues/1818
