@@ -233,6 +233,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "lengths": arg.lengths(),
         "_metadata_cache": arg._metadata_cache,
         "_ragged_idx": arg._ragged_idx,
     }
@@ -293,17 +294,11 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+        from .nested_tensor import nested_from_padded
 
         # handle broadcasting via padded dense -> jagged conversion
-        min_seqlen = None
-        if nt._min_seqlen_tensor is not None:
-            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
-
-        max_seqlen = None
-        if nt._max_seqlen_tensor is not None:
-            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
-
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
         padded_max_S = max_seqlen
         total_L = nt._values.shape[nt._ragged_idx - 1]
         if padded_max_S is None:
@@ -1198,11 +1193,6 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
-
-    if inp._lengths is not None:
-        raise ValueError(
-            "transpose(): not supported on jagged layout nested tensor with holes"
-        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
