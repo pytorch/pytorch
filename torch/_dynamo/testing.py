@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -243,6 +244,27 @@ class EagerAndRecordGraphs:
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
+
+
+# Equivalent to backend="aot_eager", but also records graphs that
+# we can assert on
+class AOTEagerAndRecordGraphs:
+    def __init__(self) -> None:
+        self.graphs: List[torch.fx.GraphModule] = []
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
+        def save_graph(gm: torch.fx.GraphModule, *args: Any, **kwargs: Any) -> Any:
+            self.graphs.append(gm)
+            return gm.forward
+
+        return aot_eager(
+            gm,
+            example_inputs,
+            fw_compiler=save_graph,
+            bw_compiler=save_graph,
+        )
 
 
 def strip_comment(code: str) -> str:
