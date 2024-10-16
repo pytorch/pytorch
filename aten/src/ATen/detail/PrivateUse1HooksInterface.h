@@ -48,7 +48,15 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  void init() const override {}
+  void init() const override {
+    TORCH_WARN_DEPRECATION(
+        "initPrivateUse1() is deprecated. Please implement init() directly instead.")
+    initPrivateUse1();
+  }
+
+  virtual void initPrivateUse1() const {
+    return;
+  }
 
   virtual void resizePrivateUse1Bytes(
       const c10::Storage& storage,
