@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.distributed.tensor import Shard
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -22,6 +22,13 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -113,6 +120,7 @@ class FSDPParamGroup:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -126,6 +134,7 @@ class FSDPParamGroup:
                 mesh_info,
                 post_forward_mesh_info,
                 device,
+                shard_placement_fn,
                 mp_policy,
                 offload_policy,
             )
@@ -169,6 +178,9 @@ class FSDPParamGroup:
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
         self.unshard_async_op: bool = False
+        # Whether to unshard in backward: can be overridden by the user if the
+        # parameters in this group are not needed for backward (e.g. embedding)
+        self.unshard_in_backward: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -231,6 +243,11 @@ class FSDPParamGroup:
             return
         if self.is_unsharded:
             return  # no-op
+        if (
+            not self.unshard_in_backward
+            and self._training_state == TrainingState.PRE_BACKWARD
+        ):
+            return
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams

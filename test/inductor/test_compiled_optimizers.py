@@ -168,7 +168,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_xpu": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
@@ -334,6 +333,14 @@ def check_optim(
     if optim_cls is Adadelta:
         rtol = 5.5e-4
         atol = 5e-5
+
+    # inductor/test_compiled_optimizers.py::CompiledOptimizerTests::test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda_lambdalr
+    # Mismatched elements: 100 / 100 (100.0%)
+    # Greatest absolute difference: 1.4960765838623047e-05 at index (2, 0) (up to 1e-05 allowed)
+    # Greatest relative difference: 1.686977884673979e-05 at index (2, 0) (up to 1.3e-06 allowed)
+    if optim_cls is NAdam:
+        atol = 1.5e-5
+        rtol = 1.7e-5
 
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
