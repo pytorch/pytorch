@@ -526,7 +526,7 @@ def count_calls(g: fx.Graph) -> int:
     return c
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 
