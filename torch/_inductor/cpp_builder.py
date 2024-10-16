@@ -501,7 +501,12 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            cflags.append("Werror=ignored-optimization-argument")
+            ignored_optimization_argument = (
+                "Werror=ignored-optimization-argument"
+                if config.aot_inductor.raise_error_on_ignored_optimization
+                else "Wno-ignored-optimization-argument"
+            )
+            cflags.append(ignored_optimization_argument)
     return cflags
 
 

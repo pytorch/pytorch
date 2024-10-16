@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <future>
 #include <iostream>
 #include <list>
@@ -297,7 +298,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Returns true if we can check if the work is completed.
     // Checking whether a NCCL work is completed requires querying CUDA event,
-    // which is not always allowed (e.g. it's disallowed during CUDA graph capture).
+    // which is disallowed in some cases (e.g. during CUDA graph capture).
     bool canCheckIsCompleted() override;
 
     // Checks if request has completed. In this specific case of NCCL, it checks
@@ -330,6 +331,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
+    // Get a Future result of each work (e.g. success, different error types).
+    // instead of the tensor output.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
     float getDuration() const override;
 
@@ -448,6 +453,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    // the future result (e.g., success or failure) of the work
+    c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
+
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
@@ -467,7 +475,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::vector<at::cuda::CUDAEvent*>
+    std::deque<at::cuda::CUDAEvent*>
         eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 

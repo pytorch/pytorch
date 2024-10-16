@@ -216,7 +216,8 @@ class WorkRegistry {
               uncompleted_works.push_back(work);
             }
           } else {
-            // if isCompleted() cannot be checked, we assume the work is not completed.
+            // if isCompleted() cannot be checked, we assume the work is not
+            // completed.
             uncompleted_works.push_back(work);
           }
         }
