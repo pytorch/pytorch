@@ -134,8 +134,8 @@ PyTorchStreamReader::PyTorchStreamReader(
 }
 
 void PyTorchStreamReader::init() {
-  AT_ASSERT(in_ != nullptr);
-  AT_ASSERT(ar_ != nullptr);
+  TORCH_INTERNAL_ASSERT(in_ != nullptr);
+  TORCH_INTERNAL_ASSERT(ar_ != nullptr);
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
 
   size_t size = in_->size();
@@ -683,8 +683,8 @@ void PyTorchStreamWriter::writeRecord(
     const void* data,
     size_t size,
     bool compress) {
-  AT_ASSERT(!finalized_);
-  AT_ASSERT(!archive_name_plus_slash_.empty());
+  TORCH_INTERNAL_ASSERT(!finalized_);
+  TORCH_INTERNAL_ASSERT(!archive_name_plus_slash_.empty());
   TORCH_INTERNAL_ASSERT(
       files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
   if (name == kSerializationIdRecordName && serialization_id_.empty()) {
@@ -761,7 +761,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
 
   writeSerializationId();
 
-  AT_ASSERT(!finalized_);
+  TORCH_INTERNAL_ASSERT(!finalized_);
   finalized_ = true;
 
   mz_zip_writer_finalize_archive(ar_.get());

@@ -538,7 +538,7 @@ std::string FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kw
   // positional argument present in the kwargs is duplicated.
   for (const auto& argument : arguments()) {
     if (std::find(kwargs.begin(), kwargs.end(), argument.name()) != kwargs.end()) {
-      AT_ASSERT(!argument.default_value());
+      TORCH_INTERNAL_ASSERT(!argument.default_value());
       return c10::str(
           "Argument '",
           argument.name(),

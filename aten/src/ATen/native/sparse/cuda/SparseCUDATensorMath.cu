@@ -618,7 +618,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       typedef thrust::device_ptr<int64_t> thrust_ptr;
 
       grad_input_values = at::empty_like(input_values, grad_values.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      AT_ASSERT(grad_input_values.is_cuda());
+      TORCH_INTERNAL_ASSERT(grad_input_values.is_cuda());
 
       // get 1D indices
       auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);

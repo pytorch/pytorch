@@ -105,11 +105,11 @@ static std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 
   while (!to_clean.empty()) {
     Node* n = to_clean.back();
-    AT_ASSERT(!n->hasUses());
+    TORCH_INTERNAL_ASSERT(!n->hasUses());
     n->destroy();
     to_clean.pop_back();
   }
-  AT_ASSERT(!self_value->hasUses());
+  TORCH_INTERNAL_ASSERT(!self_value->hasUses());
   g->eraseInput(self_offset);
 
   return std::make_pair(std::move(g), std::move(extra_ivalues));

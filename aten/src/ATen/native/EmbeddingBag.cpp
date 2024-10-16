@@ -451,7 +451,7 @@ index_select_add(const Tensor &select_indices,
 #endif
         });
   } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
+    TORCH_INTERNAL_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
@@ -505,7 +505,7 @@ index_select_scale_add(
     Tensor& bag_size,
     index_t padding_idx,
     _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
-  AT_ASSERT(select_indices.numel() == add_indices.numel());
+  TORCH_INTERNAL_ASSERT(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.const_data_ptr<index_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
@@ -689,7 +689,7 @@ index_select_scale_add(
         });
 #endif
   } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
+    TORCH_INTERNAL_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<data_t>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
@@ -826,7 +826,7 @@ index_select_scale_add(const Tensor &select_indices,
 #endif
         });
   } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
+    TORCH_INTERNAL_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
@@ -1447,7 +1447,7 @@ static Tensor _embedding_bag_dense_backward_cpu_max(
     const Tensor& bag_size,
     const Tensor& max_indices,
     int64_t num_weights) {
-  AT_ASSERT(max_indices.defined());
+  TORCH_INTERNAL_ASSERT(max_indices.defined());
   auto index_grad_weight =
       at::zeros({num_weights, grad.sizes()[1]}, grad.options());
   auto nonempty_max_indices = max_indices.index_select(0, bag_size.nonzero().view(-1));
@@ -1561,7 +1561,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
             index_t source = offset2bag_data[j];
             double scale = 1.0;
             if (per_sample_weights) {
-              AT_ASSERT(mode == EmbeddingBagMode::SUM);
+              TORCH_INTERNAL_ASSERT(mode == EmbeddingBagMode::SUM);
               scale = per_sample_weights_data[*per_sample_weights_stride * j];
             }
             if (scale_grad_by_freq) {
@@ -1614,7 +1614,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
     return _embedding_bag_dense_backward_cpu_max(
         grad_, bag_size_, max_indices_, num_weights);
   }
-  AT_ASSERT(mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM);
+  TORCH_INTERNAL_ASSERT(mode == EmbeddingBagMode::MEAN || mode == EmbeddingBagMode::SUM);
 
   auto index_grad_weight =
       at::zeros({num_weights, grad.sizes()[1]}, grad.options());
@@ -1653,18 +1653,18 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       mode == EmbeddingBagMode::SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
-  AT_ASSERT(grad.dim() == 2);
+  TORCH_INTERNAL_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
 
   auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
   const auto& indices = *indicesMaybeOwned;
   const auto& offsets = *offsetsMaybeOwned;
 
-  AT_ASSERT(indices.dim() == 1);
+  TORCH_INTERNAL_ASSERT(indices.dim() == 1);
   auto num_samples = indices.size(0);
 
-  AT_ASSERT(weight.dim() == 2);
-  AT_ASSERT(weight.sizes()[1] == embedding_features);
+  TORCH_INTERNAL_ASSERT(weight.dim() == 2);
+  TORCH_INTERNAL_ASSERT(weight.sizes()[1] == embedding_features);
 
   auto output = at::zeros({num_samples}, grad.options());
 
@@ -1768,7 +1768,7 @@ Tensor _embedding_bag_sparse_backward_symint(
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);
 
   if (per_sample_weights.defined()) {
-    AT_ASSERT(mode == EmbeddingBagMode::SUM);
+    TORCH_INTERNAL_ASSERT(mode == EmbeddingBagMode::SUM);
     index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,

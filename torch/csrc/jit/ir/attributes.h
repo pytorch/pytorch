@@ -49,7 +49,7 @@ static inline const char* toString(AttributeKind kind) {
       "ty",
       "tys",
       "ival"};
-  AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(*names));
+  TORCH_INTERNAL_ASSERT(size_t(kind) < sizeof(names) / sizeof(*names));
   return names[int(kind)];
 }
 

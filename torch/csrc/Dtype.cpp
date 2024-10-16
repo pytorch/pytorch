@@ -14,7 +14,7 @@
 
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   HANDLE_TH_ERRORS
-  AT_ASSERT(name.length() < DTYPE_NAME_LEN);
+  TORCH_INTERNAL_ASSERT(name.length() < DTYPE_NAME_LEN);
   auto type = (PyTypeObject*)&THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)

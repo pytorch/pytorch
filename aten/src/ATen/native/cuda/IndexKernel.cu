@@ -54,8 +54,8 @@ static void launch_kernel(const int64_t N, const func_t& f) {
 template <typename func_t>
 void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f) {
   const auto num_indices = index_size.size();
-  AT_ASSERT(num_indices == index_stride.size());
-  AT_ASSERT(static_cast<int64_t>(num_indices) == iter.ntensors() - 2);
+  TORCH_INTERNAL_ASSERT(num_indices == index_stride.size());
+  TORCH_INTERNAL_ASSERT(static_cast<int64_t>(num_indices) == iter.ntensors() - 2);
 
   if (iter.numel() == 0) {
     return;

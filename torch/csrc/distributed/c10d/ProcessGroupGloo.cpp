@@ -1140,22 +1140,22 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     explicit SparseTensorMetadata(at::Tensor metadata)
         : metadata_(std::move(metadata)),
           data_(metadata_.mutable_data_ptr<int64_t>()) {
-      AT_ASSERT(metadata_.scalar_type() == at::kLong);
-      AT_ASSERT(metadata_.dim() == 1);
-      AT_ASSERT(metadata_.size(0) == dim);
+      TORCH_INTERNAL_ASSERT(metadata_.scalar_type() == at::kLong);
+      TORCH_INTERNAL_ASSERT(metadata_.dim() == 1);
+      TORCH_INTERNAL_ASSERT(metadata_.size(0) == dim);
     }
 
     // Populate the metadata.
     void populate_from_sparse_tensor(const at::Tensor& tensor) {
       const auto sparse_dim = tensor.sparse_dim();
-      AT_ASSERT(sparse_dim <= 4);
+      TORCH_INTERNAL_ASSERT(sparse_dim <= 4);
       for (const auto i : c10::irange(4)) {
         if (i < sparse_dim) {
           data_[i] = tensor.size(i);
         }
       }
       const auto dense_dim = tensor.dense_dim();
-      AT_ASSERT(dense_dim <= 4);
+      TORCH_INTERNAL_ASSERT(dense_dim <= 4);
       for (const auto i : c10::irange(4)) {
         if (i < dense_dim) {
           data_[i + 4] = tensor.size(sparse_dim + i);
@@ -1235,8 +1235,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto values = allgather_values(input, metadata);
 
     // Perform global reduction.
-    AT_ASSERT(static_cast<int>(indices.size()) == context->size);
-    AT_ASSERT(static_cast<int>(values.size()) == context->size);
+    TORCH_INTERNAL_ASSERT(static_cast<int>(indices.size()) == context->size);
+    TORCH_INTERNAL_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
     for (const auto i : c10::irange(1, context->size)) {

@@ -1136,7 +1136,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
 template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
-  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+  TORCH_INTERNAL_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
@@ -1214,7 +1214,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  AT_ASSERT(can_use_32bit_indexing);
+  TORCH_INTERNAL_ASSERT(can_use_32bit_indexing);
   auto output_calc = make_output_calculator<uint32_t>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
   auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>(
@@ -1242,7 +1242,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 template <char const* name, typename scalar_t, typename out_scalar_t, int vt0=4, typename ident_t=double>
 inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& func, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
-  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+  TORCH_INTERNAL_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   //TODO - this will be different for more complicated reductions, but for now reductions using
   //func_wrapper all have arg_t = opmath
@@ -1324,7 +1324,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  AT_ASSERT(can_use_32bit_indexing);
+  TORCH_INTERNAL_ASSERT(can_use_32bit_indexing);
   auto output_calc = make_output_calculator<uint32_t>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
   auto reduce = ReduceJitOp<scalar_t, out_scalar_t>(

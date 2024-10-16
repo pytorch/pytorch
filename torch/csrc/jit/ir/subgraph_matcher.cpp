@@ -329,7 +329,7 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
   }
 
   for (const Value* output : pattern_.outputs()) {
-    AT_ASSERT(values_map_.count(output));
+    TORCH_INTERNAL_ASSERT(values_map_.count(output));
   }
 
   GRAPH_UPDATE("Pattern matched!\n");
@@ -340,7 +340,7 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
 
 // Main entry point for the subgraph matching.
 std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
-  AT_ASSERT(patternGraphIsValid(pattern));
+  TORCH_INTERNAL_ASSERT(patternGraphIsValid(pattern));
   GRAPH_DUMP("Pattern graph: ", &pattern);
   GRAPH_DUMP("Target graph: ", &graph);
 

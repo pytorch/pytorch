@@ -152,8 +152,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
 // This function may be too conservative for general use.
 // Do NOT support g/gs attributes.
 bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
-  AT_ASSERT(lhs != nullptr);
-  AT_ASSERT(rhs != nullptr);
+  TORCH_INTERNAL_ASSERT(lhs != nullptr);
+  TORCH_INTERNAL_ASSERT(rhs != nullptr);
   // One has attributes, the other does not.
   if (lhs->hasAttributes() != rhs->hasAttributes())
     return false;
@@ -216,7 +216,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 // Makes a hash that hashes the input Value, the output type
 // as well as the node attributes
 size_t HashNode::operator()(const Node* k) const {
-  AT_ASSERT(k != nullptr);
+  TORCH_INTERNAL_ASSERT(k != nullptr);
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();

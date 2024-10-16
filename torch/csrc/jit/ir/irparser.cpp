@@ -329,27 +329,27 @@ void IRParser::parseAttr(Node* n) {
       switch (r.k) {
         case AttributeKind::s:
           ss.push_back(r.s);
-          AT_ASSERT(!elem_num++ || k == AttributeKind::ss);
+          TORCH_INTERNAL_ASSERT(!elem_num++ || k == AttributeKind::ss);
           k = AttributeKind::ss;
           break;
         case AttributeKind::i:
           is.push_back(r.i);
-          AT_ASSERT(!elem_num++ || k == AttributeKind::is);
+          TORCH_INTERNAL_ASSERT(!elem_num++ || k == AttributeKind::is);
           k = AttributeKind::is;
           break;
         case AttributeKind::f:
           fs.push_back(r.f);
-          AT_ASSERT(!elem_num++ || k == AttributeKind::fs);
+          TORCH_INTERNAL_ASSERT(!elem_num++ || k == AttributeKind::fs);
           k = AttributeKind::fs;
           break;
         case AttributeKind::c:
           cs.push_back(r.c);
-          AT_ASSERT(!elem_num++ || k == AttributeKind::cs);
+          TORCH_INTERNAL_ASSERT(!elem_num++ || k == AttributeKind::cs);
           k = AttributeKind::cs;
           break;
         case AttributeKind::ty:
           tys.push_back(r.ty);
-          AT_ASSERT(!elem_num++ || k == AttributeKind::tys);
+          TORCH_INTERNAL_ASSERT(!elem_num++ || k == AttributeKind::tys);
           k = AttributeKind::tys;
           break;
         default:

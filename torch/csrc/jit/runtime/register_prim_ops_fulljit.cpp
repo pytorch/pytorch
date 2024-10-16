@@ -154,7 +154,7 @@ RegisterOperators reg({
                   (shape[dim] + split_size - 1) / split_size, 1);
               last_shape[dim] =
                   split_size - (split_size * num_splits - shape[dim]);
-              AT_ASSERT(last_shape[dim] >= 0);
+              TORCH_INTERNAL_ASSERT(last_shape[dim] >= 0);
             }
             push(stack, std::move(regular_shape));
             push(stack, std::move(last_shape));

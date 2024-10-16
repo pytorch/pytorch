@@ -1905,7 +1905,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     const char* fname, Tensor& result1, Tensor& result2, const Tensor& self,
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
-  AT_ASSERT(result1.defined() && result2.defined());
+  TORCH_INTERNAL_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
               fname, " supports tensors on a CPU, CUDA, or XPU device only, got: ",
               self.device().type());

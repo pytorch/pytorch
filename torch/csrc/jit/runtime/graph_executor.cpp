@@ -527,7 +527,7 @@ struct DifferentiableGraphOp {
 };
 
 Gradient getGradient(const Node* n) {
-  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
   grad.df = n->g(attr::ReverseSubgraph);
@@ -877,7 +877,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
-  AT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
+  TORCH_INTERNAL_ASSERT(dnode->kind() == prim::DifferentiableGraph);
   dnode->g_(attr::Subgraph, gradient.f)
       ->g_(attr::ReverseSubgraph, gradient.df)
       ->i_(attr::f_real_outputs, gradient.f_real_outputs)

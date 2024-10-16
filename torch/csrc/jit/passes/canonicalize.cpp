@@ -52,13 +52,13 @@ std::shared_ptr<Graph> Canonicalize(
 // Which index in b's owning Node is b
 static size_t blockIndex(const Block* b) {
   auto n = b->owningNode();
-  AT_ASSERT(n);
+  TORCH_INTERNAL_ASSERT(n);
   for (size_t i = 0; i < n->blocks().size(); ++i) {
     if (n->blocks()[i] == b) {
       return i;
     }
   }
-  AT_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 /*
@@ -74,7 +74,7 @@ static size_t blockIndex(const Block* b) {
  */
 static bool isBefore(Node* n1, Node* n2) {
   // Invalid to call with the same node as both args
-  AT_ASSERT(n1 != n2);
+  TORCH_INTERNAL_ASSERT(n1 != n2);
 
   // Set n1 and n2 to be the number of blocks from the Graph block
   size_t d_1 = n1->blocksFromGraphBlock();
@@ -106,8 +106,8 @@ static bool isBefore(Node* n1, Node* n2) {
     auto new_n1 = n1->owningBlock()->owningNode();
     auto new_n2 = n2->owningBlock()->owningNode();
 
-    AT_ASSERT(new_n1 != nullptr);
-    AT_ASSERT(new_n2 != nullptr);
+    TORCH_INTERNAL_ASSERT(new_n1 != nullptr);
+    TORCH_INTERNAL_ASSERT(new_n2 != nullptr);
 
     if (new_n1 == new_n2) {
       // take whichever node is in the earlier block

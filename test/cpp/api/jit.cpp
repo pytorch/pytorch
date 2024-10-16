@@ -61,9 +61,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   too_many_lists.push_back(empty_generic_list);
   try {
     module->run_method("nested_loop", too_many_lists, b);
-    AT_ASSERT(false);
+    TORCH_INTERNAL_ASSERT(false);
   } catch (const c10::Error& error) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         std::string(error.what_without_backtrace())
             .find("nested_loop() Expected a value of type 'List[List[Tensor]]'"
                   " for argument 'a' but instead found type "

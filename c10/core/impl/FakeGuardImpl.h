@@ -25,8 +25,8 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     return T;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == type());
-    AT_ASSERT(d.index() < kFakeGuardImplMaxDevices);
+    TORCH_INTERNAL_ASSERT(d.type() == type());
+    TORCH_INTERNAL_ASSERT(d.index() < kFakeGuardImplMaxDevices);
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       current_device_ = d.index();
@@ -37,9 +37,9 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     return Device(type(), current_device_);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == type());
-    AT_ASSERT(d.index() >= 0);
-    AT_ASSERT(d.index() < kFakeGuardImplMaxDevices);
+    TORCH_INTERNAL_ASSERT(d.type() == type());
+    TORCH_INTERNAL_ASSERT(d.index() >= 0);
+    TORCH_INTERNAL_ASSERT(d.index() < kFakeGuardImplMaxDevices);
     current_device_ = d.index();
   }
   void uncheckedSetDevice(Device d) const noexcept override {
@@ -75,8 +75,8 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     return current_device_;
   }
   static void setDeviceIndex(DeviceIndex i) {
-    AT_ASSERT(i >= 0);
-    AT_ASSERT(i < kFakeGuardImplMaxDevices);
+    TORCH_INTERNAL_ASSERT(i >= 0);
+    TORCH_INTERNAL_ASSERT(i < kFakeGuardImplMaxDevices);
     current_device_ = i;
   }
   static StreamId getCurrentStreamIdFor(DeviceIndex i) {

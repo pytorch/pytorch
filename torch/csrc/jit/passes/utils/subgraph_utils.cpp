@@ -219,7 +219,8 @@ void unmergeSubgraph(Node* subgraphNode) {
   WithInsertPoint guard(subgraphNode);
   const auto subgraphOutputs = insertGraph(
       *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs());
-  AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
+  TORCH_INTERNAL_ASSERT(
+      subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
   }
@@ -283,7 +284,7 @@ void mergeNodeIntoSubgraph(
     Node* toMerge,
     Node* subgraphNode,
     bool destroyNode) {
-  AT_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
+  TORCH_INTERNAL_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
   if (hasSubgraph(toMerge)) {
     return mergeSubgraph(subgraphNode, toMerge);
   }
@@ -293,7 +294,8 @@ void mergeNodeIntoSubgraph(
   // Map from values in the surrounding graph to inputs/outputs in the subgraph
   std::unordered_map<Value*, Value*> externalValuesMap;
 
-  AT_ASSERT(subgraphNode->inputs().size() == subgraph->inputs().size());
+  TORCH_INTERNAL_ASSERT(
+      subgraphNode->inputs().size() == subgraph->inputs().size());
   size_t idx = 0;
   for (auto input : subgraphNode->inputs()) {
     externalValuesMap[input] = subgraph->inputs()[idx];

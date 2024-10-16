@@ -39,7 +39,7 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak
 }
 
 void* DynamicLibrary::sym(const char* name) {
-  AT_ASSERT(handle);
+  TORCH_INTERNAL_ASSERT(handle);
   return checkDL(dlsym(handle, name));
 }
 
@@ -87,7 +87,7 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak
 }
 
 void* DynamicLibrary::sym(const char* name) {
-  AT_ASSERT(handle);
+  TORCH_INTERNAL_ASSERT(handle);
   FARPROC procAddress = GetProcAddress((HMODULE)handle, name);
   if (!procAddress) {
     TORCH_CHECK_WITH(DynamicLibraryError, false, "error in GetProcAddress");
