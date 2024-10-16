@@ -161,9 +161,8 @@ class TestRuntimeEstimator(TestCase):
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}"
             f"\n Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
         )
-        # No accuracy check for benchmark in CI as it is highly variable
-        # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
-        # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
+        self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
+        self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
@@ -190,9 +189,8 @@ class TestRuntimeEstimator(TestCase):
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}\n"
             f"Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
         )
-        # No accuracy check for benchmark in CI as it is highly variable
-        # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
-        # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
+        self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
+        self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
 
 
 if __name__ == "__main__":
