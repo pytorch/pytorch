@@ -7554,6 +7554,21 @@ def forward(self, x, y):
             0,
         )
 
+    def test_constant_output_dup(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.ones(4, 4)
+
+            def forward(self, x):
+                return x + self.constant, self.constant
+
+        ep = export(M(), (torch.ones(4, 4),)).run_decompositions()
+        mod = ep.module()
+        a, b = mod(torch.zeros(4, 4))
+        self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
+        self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
+
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
