@@ -468,7 +468,9 @@ add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 ADD_TMA_DEVICE_KERNELS = True
 
 
-def get_workspace_size(num_sms: int, TMA_SIZE: int = 128, NUM_TMA_DESCRIPTORS=3) -> int:
+def get_workspace_size(
+    num_sms: int, TMA_SIZE: int = 128, NUM_TMA_DESCRIPTORS: int = 3
+) -> int:
     """Device side TMA requires a workspace buffer to be allocated in global memory."""
     return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
 
