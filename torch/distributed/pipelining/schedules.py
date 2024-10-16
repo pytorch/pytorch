@@ -133,7 +133,8 @@ BW = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|BW|B|W|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B){0,1}(\d*)(_(\d+)(RECV_B|RECV_F)(\d+)){0,1}"
+    # TODO discrepancy
+    r"(\d+)(F|BW|B|W|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B){0,1}(\d*)(_(\d*)(RECV_B|RECV_F)(\d)){0,1}"
 )
 
 
@@ -1140,6 +1141,7 @@ def _batch_send_recv(ops, peer_ops):
         )
 
     # no more batches. just deal with single ops now
+    # TODO - this is bad, i need to match them so they are ordered safely
     while ops:
         new_ops.append(ops.pop())
     while peer_ops:
@@ -1151,15 +1153,20 @@ def _add_send_recv(
     compute_actions: Dict[int, List[_Action]],
     stage_to_rank: Callable[[int], int],
     num_stages: int,
-    enable_batching: bool = False,
+    batch_send_recv: bool = False,
 ) -> Dict[int, List[_Action]]:
     comm_actions: Dict[int, List[_Action]] = {rank: [] for rank in compute_actions}
 
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
-            return action.stage_index != num_stages - 1
+            # TODO discrepancy
+            return action.stage_index != num_stages - 1 and stage_to_rank(
+                action.stage_index + 1
+            ) != stage_to_rank(action.stage_index)
         elif action.computation_type in (B, BW):
-            return action.stage_index != 0
+            return action.stage_index != 0 and stage_to_rank(
+                action.stage_index - 1
+            ) != stage_to_rank(action.stage_index)
         return False
 
     def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
@@ -1208,6 +1215,12 @@ def _add_send_recv(
                     and p.other_microbatch_index == action.microbatch_index
                 ):
                     return True
+                elif (
+                    p.computation_type == FORWARD
+                    and p.stage_index == action.stage_index - 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
             return False
         elif (
             action.computation_type in (B, BW)
@@ -1226,6 +1239,12 @@ def _add_send_recv(
                     and p.other_microbatch_index == action.microbatch_index
                 ):
                     return True
+                elif (
+                    p.computation_type == BACKWARD
+                    and p.stage_index == action.stage_index + 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
             return False
         else:
             return True
@@ -1237,6 +1256,9 @@ def _add_send_recv(
             rank: defaultdict(list) for rank in sorted(compute_actions)
         }
         for rank in sorted(compute_actions):
+            if rank not in compute_actions:
+                continue
+
             assert len(compute_actions[rank]) > 0
             action = compute_actions[rank][0]
             if not _ready_to_schedule(action, comm_actions[rank]):
@@ -1284,23 +1306,18 @@ def _add_send_recv(
                     ), f"ops was empty but peer_ops was not, {peer_ops}"
 
                 # batched_ops lists include both batched ops and unbatchable ops
-                if enable_batching:
+                if batch_send_recv:
                     batched_ops, batched_peer_ops = _batch_send_recv(ops, peer_ops)
                 else:
-                    batched_ops = list(ops)
-                    batched_peer_ops = list(peer_ops)
+                    batched_ops = [o for o in ops]
+                    batched_peer_ops = [o for o in peer_ops]
                     # TODO - refactor so that it is not necessary to consume/clear ops/peer_ops
                     ops.clear()
                     peer_ops.clear()
-
-                # now we have consumed ops from this rank and matching ops from peer.
-                # peer will be empty and we will not do anything when we iterate to it
-                assert (
-                    len(ops) == 0 and len(peer_ops) == 0
-                ), f"Expected to process all ops, {ops}, {peer_ops}"
                 comm_actions[rank].extend(batched_ops)
                 comm_actions[peer].extend(batched_peer_ops)
 
+    # TODO optimization passes
     return comm_actions
 
 
@@ -1479,9 +1496,11 @@ def _dump_chrometrace(schedule, filename):
             events.append(
                 {
                     "name": str(action),
-                    "cat": "computation"
-                    if action.computation_type in (F, B, W)
-                    else "communication",
+                    "cat": (
+                        "computation"
+                        if action.computation_type in (F, B, W)
+                        else "communication"
+                    ),
                     "ph": "X",
                     "pid": rank,
                     "tid": rank,
