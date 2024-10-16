@@ -1624,7 +1624,7 @@ Tensor inverse(const Tensor& A) {
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos) {
 #if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 

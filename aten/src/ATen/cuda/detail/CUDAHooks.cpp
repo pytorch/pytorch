@@ -300,7 +300,7 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
 }
 
@@ -408,7 +408,7 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  AT_ERROR(
+  TORCH_CHECK(false,
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
 }

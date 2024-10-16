@@ -34,7 +34,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // but shape inference is not possible.
     if (self.numel() == 0) {
         if (num_classes <= 0) {
-            AT_ERROR("Can not infer total number of classes from empty tensor.");
+            TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
             shape.push_back(num_classes);
             return at::empty(shape, self.options());

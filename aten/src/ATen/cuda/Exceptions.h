@@ -164,9 +164,9 @@ constexpr const char* _cusolver_backend_suggestion =            \
       const char* err_str;                                                                                       \
       CUresult get_error_str_err C10_UNUSED = at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str);  \
       if (get_error_str_err != CUDA_SUCCESS) {                                                                   \
-        AT_ERROR("CUDA driver error: unknown error");                                                            \
+        TORCH_CHECK(false, "CUDA driver error: unknown error");                                                            \
       } else {                                                                                                   \
-        AT_ERROR("CUDA driver error: ", err_str);                                                                \
+        TORCH_CHECK(false, "CUDA driver error: ", err_str);                                                                \
       }                                                                                                          \
     }                                                                                                            \
   } while (0)
@@ -177,7 +177,7 @@ constexpr const char* _cusolver_backend_suggestion =            \
   do {                                                                            \
     CUresult __err = EXPR;                                                        \
     if (__err != CUDA_SUCCESS) {                                                  \
-      AT_ERROR("CUDA driver error: ", static_cast<int>(__err));                   \
+      TORCH_CHECK(false, "CUDA driver error: ", static_cast<int>(__err));                   \
     }                                                                             \
   } while (0)
 
@@ -197,9 +197,9 @@ constexpr const char* _cusolver_backend_suggestion =            \
     nvrtcResult __err = EXPR;                                                                       \
     if (__err != NVRTC_SUCCESS) {                                                                   \
       if (static_cast<int>(__err) != 7) {                                                           \
-        AT_ERROR("CUDA NVRTC error: ", at::globalContext().getNVRTC().nvrtcGetErrorString(__err));  \
+        TORCH_CHECK(false, "CUDA NVRTC error: ", at::globalContext().getNVRTC().nvrtcGetErrorString(__err));  \
       } else {                                                                                      \
-        AT_ERROR("CUDA NVRTC error: NVRTC_ERROR_BUILTIN_OPERATION_FAILURE");                        \
+        TORCH_CHECK(false, "CUDA NVRTC error: NVRTC_ERROR_BUILTIN_OPERATION_FAILURE");                        \
       }                                                                                             \
     }                                                                                               \
   } while (0)

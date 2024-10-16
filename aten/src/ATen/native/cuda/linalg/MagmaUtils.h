@@ -59,7 +59,7 @@ struct MAGMAQueue {
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<magma_int_t>(value);
   if (static_cast<int64_t>(result) != value) {
-    AT_ERROR("magma: The value of ", varname, "(", (long long)value,
+    TORCH_CHECK(false, "magma: The value of ", varname, "(", (long long)value,
              ") is too large to fit into a magma_int_t (", sizeof(magma_int_t), " bytes)");
   }
   return result;

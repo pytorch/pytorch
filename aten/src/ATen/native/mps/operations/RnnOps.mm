@@ -97,7 +97,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   // Projections are not currently supported, raise an error if needed
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (has_projections) {
-    AT_ERROR("LSTM with projections is not currently supported with MPS.");
+    TORCH_CHECK(false, "LSTM with projections is not currently supported with MPS.");
   }
 
   std::vector<Tensor> kernel_weights;

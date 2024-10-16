@@ -113,7 +113,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
       batch_sizes,
       dropout_state);
 #else // AT_CUDNN_ENABLED()
-  AT_ERROR("autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
   return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // never reached, placates the compiler
 #endif // AT_CUDNN_ENABLED()
 }

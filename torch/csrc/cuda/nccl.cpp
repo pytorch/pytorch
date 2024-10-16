@@ -502,7 +502,7 @@ void get_unique_id(ncclUniqueId& id) {
   using namespace torch::cuda::nccl::detail;
   NCCL_CHECK(ncclGetUniqueId(to_nccl_unique_id(&id)));
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -617,7 +617,7 @@ void broadcast(
         stream));
   }
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -666,7 +666,7 @@ void reduce(
         stream));
   }
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -717,7 +717,7 @@ void all_reduce(
         stream));
   }
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -759,7 +759,7 @@ void reduce_scatter(
         stream));
   }
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -809,7 +809,7 @@ void all_gather(
 #endif
   }
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -854,10 +854,10 @@ void all2all_single_equal_split(
 #endif
 #endif
 #else
-  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -924,10 +924,10 @@ void all2all_single_unequal_split(
 #endif
 #endif
 #else
-  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -1015,10 +1015,10 @@ void all2all(
 #endif
 #endif
 #else
-  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -1051,10 +1051,10 @@ void send(
       comm);
 #endif
 #else
-  AT_ERROR("Send is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "Send is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -1087,10 +1087,10 @@ void recv(
       comm);
 #endif
 #else
-  AT_ERROR("Recv is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "Recv is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -1136,10 +1136,10 @@ void gather(
 #endif
 
 #else
-  AT_ERROR("gather is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "gather is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 
@@ -1189,10 +1189,10 @@ void scatter(
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
 #endif
 #else
-  AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");
+  TORCH_CHECK(false, "scatter is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  AT_ERROR("PyTorch built without NCCL support");
+  TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
 }
 

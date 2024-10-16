@@ -227,7 +227,7 @@ void dictIndex(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(key);
   if (value == dict.end()) {
-    AT_ERROR("KeyError: ", key);
+    TORCH_CHECK(false, "KeyError: ", key);
   }
   push(stack, value->value());
 }

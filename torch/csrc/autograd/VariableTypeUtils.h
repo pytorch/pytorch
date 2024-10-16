@@ -93,7 +93,8 @@ inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
 }
 
 inline void throw_error_out_requires_grad(const char* name) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       name,
       "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");

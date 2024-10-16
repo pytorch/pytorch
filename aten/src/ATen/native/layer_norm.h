@@ -39,7 +39,7 @@ C10_ALWAYS_INLINE void _check_rms_norm_inputs_symint(
       ss << ", " << size;
     }
     ss << "], but got input of size" << input_shape;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 
@@ -83,7 +83,7 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
       ss << ", " << size;
     }
     ss << "], but got input of size" << input_shape;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   const int axis = input_ndim - normalized_ndim;

@@ -454,7 +454,7 @@ struct PythonPrintImpl {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Python printer expected 2 lists of same size");
+      TORCH_CHECK(false, "Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
