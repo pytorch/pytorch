@@ -987,7 +987,7 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        if self.choice.use_fallback_kernel:
+        if config.abi_compatible and self.choice.use_fallback_kernel:
             assert (
                 self.choice.op_overload is not None
             ), "Please provide an op_overload to use ir.FallbackKernel"

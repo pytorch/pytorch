@@ -4547,7 +4547,11 @@ class ExternKernel(InputsKernel):
 
     def get_kernel_name(self):
         return (
-            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+            (
+                V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
+                if config.abi_compatible
+                else self.cpp_kernel_name
+            )
             if V.graph.cpp_wrapper
             else self.python_kernel_name
         )
@@ -5147,7 +5151,11 @@ class ExternKernelOut(ExternKernel):
             and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
         ):
             # For https://github.com/pytorch/pytorch/issues/128474
-            kernel_name = "aoti_torch__mm_plus_mm_out"
+            kernel_name = (
+                "aoti_torch__mm_plus_mm_out"
+                if config.abi_compatible
+                else "torch::inductor::_mm_plus_mm_out"
+            )
         else:
             kernel_name = self.get_kernel_name()
         wrapper.generate_extern_kernel_out(
@@ -5203,7 +5211,9 @@ class RandomSeeds(ExternKernelOut):
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
-            cpp_kernel_name="at::_ops::randint_low_out::call",
+            cpp_kernel_name="at::_ops::randint_low_out::call"
+            if config.abi_compatible
+            else "at::randint_out",
             op_overload=aten.randint.low_out,
         )
 
@@ -5385,7 +5395,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
 
-        if V.graph.cpp_wrapper:
+        if V.graph.cpp_wrapper and config.abi_compatible:
             # Inductor doesn't really support aten Generator, so the Generator kwarg is always NULL here,
             # which needs to be explicitly generated for cpp wrapper
             wrapper.writeline(
@@ -5416,6 +5426,9 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+        if not config.abi_compatible:
+            # TODO: this should be simplified once we switch to ABI-compatible only
+            self.cpp_kernel_name = "at::native::bernoulli_"
 
 
 # Used to deal with torch.complex types
@@ -5449,7 +5462,9 @@ class InplaceCopyFallback(ExternKernel):
             inputs,
             constant_args,
             python_kernel_name="aten.copy_",
-            cpp_kernel_name="aoti_torch_copy_",
+            cpp_kernel_name=(
+                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
+            ),
         )
         V.graph.mark_buffer_mutated(inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
@@ -5640,7 +5655,9 @@ class IndexPutFallback(ExternKernel):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
-        cpp_kernel_name = "aoti_torch_index_put_out"
+        cpp_kernel_name = (
+            "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
+        )
         super().__init__(
             None,
             NoneLayout(x.get_device()),  # type: ignore[arg-type]
@@ -5767,6 +5784,26 @@ class AssertScalar(ExternKernel):
 class ExternKernelNode:
     name: str
     node: export_schema.Node
+
+
+has_c_shim = OrderedSet(
+    [
+        aten._embedding_bag.default,
+        aten._fft_c2c.default,
+        aten._scaled_dot_product_efficient_attention.default,
+        aten._scaled_dot_product_flash_attention.default,
+        aten._scaled_dot_product_cudnn_attention.default,
+        aten._scaled_mm.default,
+        aten.addmm.out,
+        aten.bmm.out,
+        aten.copy_.default,
+        aten.mm.out,
+        aten.repeat_interleave.Tensor,
+        aten.nonzero.default,
+        aten.view.dtype,
+        aten.view_as_real.default,
+    ]
+)
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -5935,7 +5972,7 @@ class FallbackKernel(ExternKernelAlloc):
                     raise AssertionError(f"unrecognized keypath {keypath}")
 
             def go_outer():
-                if V.graph.cpp_wrapper:
+                if V.graph.cpp_wrapper and config.abi_compatible:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
@@ -6106,7 +6143,7 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if str(kernel) not in inductor_fallback_ops:
+                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
                     # If you do hit a missed op, please update fallback_ops.py.
                     log.warning(
@@ -6117,6 +6154,9 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
+            if V.graph.cpp_wrapper:
+                if not config.abi_compatible:
+                    self.use_runtime_dispatch = True
         else:
             # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
@@ -6127,7 +6167,10 @@ class FallbackKernel(ExternKernelAlloc):
 
             exported_args = None
             args = None
-            exported_args = self.export_extern_kernel_node()
+            if config.abi_compatible:
+                exported_args = self.export_extern_kernel_node()
+            else:
+                args = [*self.codegen_args(), *self.codegen_kwargs()]
 
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),

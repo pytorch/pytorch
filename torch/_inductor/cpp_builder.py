@@ -779,6 +779,11 @@ def _get_torch_related_args(
     if _IS_WINDOWS:
         libraries.append("sleef")
 
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.abi_compatible:
+        libraries.append("c10")
+        libraries_dirs.append(TORCH_LIB_PATH)
+
     return include_dirs, libraries_dirs, libraries
 
 
