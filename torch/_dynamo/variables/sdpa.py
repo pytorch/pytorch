@@ -26,7 +26,7 @@ class SDPAParamsVariable(VariableTracker):
         from .torch import TorchInGraphFunctionVariable
 
         params = [
-            VariableTracker.create(tx, getattr(value, p), AttrSource(source, p))
+            VariableTracker.build(tx, getattr(value, p), AttrSource(source, p))
             for p in PARAM_NAMES
         ]
         return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})

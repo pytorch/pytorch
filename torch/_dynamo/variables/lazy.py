@@ -28,7 +28,7 @@ class LazyCache:
         else:
             source = self.source
 
-        self.vt = VariableTracker.create(tx, self.value, source)
+        self.vt = VariableTracker.build(tx, self.value, source)
         del self.value
         del self.source
 
@@ -38,7 +38,7 @@ class LazyVariableTracker(VariableTracker):
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
 
-    The `realize` function invokes VariableTracker.create() to produce the real object.
+    The `realize` function invokes VariableTracker.build() to produce the real object.
     Once a LazyVariableTracker has been realized, internal bookkeeping will
     prevent double realization.
 

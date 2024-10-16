@@ -806,7 +806,7 @@ class BuiltinVariable(VariableTracker):
                         )
                     except Exception as exc:
                         unimplemented(f"constant fold exception: {repr(exc)}")
-                    return VariableTracker.create(tx, res)
+                    return VariableTracker.build(tx, res)
 
             else:
 
@@ -822,7 +822,7 @@ class BuiltinVariable(VariableTracker):
                             )
                         except Exception as exc:
                             unimplemented(f"constant fold exception: {repr(exc)}")
-                        return VariableTracker.create(tx, res)
+                        return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
 
@@ -1394,7 +1394,7 @@ class BuiltinVariable(VariableTracker):
                         )
 
                     new_dict = dict(arg.value.items())
-                    return VariableTracker.create(tx, new_dict)
+                    return VariableTracker.build(tx, new_dict)
                 else:
                     func_var = arg.var_getattr(tx, "items")
                     if not isinstance(func_var, variables.UserFunctionVariable):
@@ -1667,14 +1667,14 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(value, type):
                     if name == "__bases__":
                         tuple_args = [
-                            VariableTracker.create(
+                            VariableTracker.build(
                                 tx, b, source and GetItemSource(source, i)
                             )
                             for i, b in enumerate(value.__bases__)
                         ]
                         return variables.TupleVariable(tuple_args, source=source)
                     if name == "__base__":
-                        return VariableTracker.create(tx, value.__base__, source)
+                        return VariableTracker.build(tx, value.__base__, source)
                     if name == "__flags__":
                         return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
@@ -1713,7 +1713,7 @@ class BuiltinVariable(VariableTracker):
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
-            return VariableTracker.create(tx, member, source)
+            return VariableTracker.build(tx, member, source)
 
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
@@ -1870,7 +1870,7 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
-        return VariableTracker.create(tx, py_type, source)
+        return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):

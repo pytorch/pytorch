@@ -987,7 +987,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         try:
             attr_value = getattr(self.obj, name)
             source = self.source and AttrSource(self.source, name)
-            return VariableTracker.create(tx, attr_value, source)
+            return VariableTracker.build(tx, attr_value, source)
 
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
@@ -1055,7 +1055,7 @@ class PythonSysModulesVariable(VariableTracker):
 
         if has_key:
             source = self.source and GetItemSource(self.source, k)
-            return VariableTracker.create(tx, sys.modules[k], source)
+            return VariableTracker.build(tx, sys.modules[k], source)
 
         if default is not None:
             return default
@@ -1065,4 +1065,4 @@ class PythonSysModulesVariable(VariableTracker):
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         k, has_key = self._contains_helper(tx, key)
         source = self.source and GetItemSource(self.source, k)
-        return VariableTracker.create(tx, sys.modules[k], source)
+        return VariableTracker.build(tx, sys.modules[k], source)

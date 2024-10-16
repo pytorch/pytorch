@@ -292,7 +292,7 @@ class NNModuleVariable(VariableTracker):
             return variables.UserDefinedClassVariable(base.__class__, source=source)
 
         if object_member:
-            out = VariableTracker.create(tx, subobj, NNModuleSource(source))
+            out = VariableTracker.build(tx, subobj, NNModuleSource(source))
 
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
@@ -328,7 +328,7 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
-                return VariableTracker.create(tx, subobj, NNModuleSource(source))
+                return VariableTracker.build(tx, subobj, NNModuleSource(source))
             else:
                 unimplemented(
                     f"class property {name} - {typestr(base)} {typestr(subobj)}"
@@ -1078,7 +1078,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         )
                     return variables.ConstDictVariable({})
 
-        # For non-empty hook dicts, one way is to just fallback to VariableTracker.create() and create a ConstDictVariable.
+        # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
         # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a

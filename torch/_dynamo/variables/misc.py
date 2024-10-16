@@ -210,7 +210,7 @@ class SuperVariable(VariableTracker):
             key = args[0].as_python_constant()
             value = collections.OrderedDict.__getitem__(self.objvar.value, key)
             source = ODictGetItemSource(self.objvar.source, key)
-            return VariableTracker.create(tx, value, source)
+            return VariableTracker.build(tx, value, source)
         elif inner_fn in (
             collections.OrderedDict.__setitem__,
             object.__setattr__,
@@ -468,7 +468,7 @@ class InspectParameterVariable(VariableTracker):
         try:
             attr_value = getattr(self.value, name)
             source = self.source and AttrSource(self.source, name)
-            return VariableTracker.create(tx, attr_value, source)
+            return VariableTracker.build(tx, attr_value, source)
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
 
@@ -900,7 +900,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 return variables.ConstantVariable.create(self.needs_input_grad)
             if self.source:
                 source = AttrSource(self.source, "needs_input_grad")
-                return VariableTracker.create(tx, self.value.needs_input_grad, source)
+                return VariableTracker.build(tx, self.value.needs_input_grad, source)
 
         return super().var_getattr(tx, name)
 
@@ -1107,7 +1107,7 @@ class GetSetDescriptorVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "__get__" and self.source:
             source = AttrSource(self.source, "__get__")
-            return VariableTracker.create(tx, self.desc.__get__, source)
+            return VariableTracker.build(tx, self.desc.__get__, source)
         else:
             return super().var_getattr(tx, name)
 
@@ -1153,7 +1153,7 @@ class PythonModuleVariable(VariableTracker):
             attr_value = self.value.__dict__[name]
 
         source = self.source and AttrSource(self.source, name)
-        return VariableTracker.create(tx, attr_value, source)
+        return VariableTracker.build(tx, attr_value, source)
 
 
 class TypingVariable(VariableTracker):

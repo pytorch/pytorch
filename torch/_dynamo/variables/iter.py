@@ -173,7 +173,7 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             return tx.inline_user_function_return(
-                VariableTracker.create(tx, polyfills.repeat), args, kwargs
+                VariableTracker.build(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())

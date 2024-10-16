@@ -497,7 +497,7 @@ class OutputGraph:
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        result = VariableTracker.create(self.root_tx, example_value, source)
+        result = VariableTracker.build(self.root_tx, example_value, source)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -766,8 +766,8 @@ class OutputGraph:
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
             # Instead of returning UnspecializedNNModuleVariable, call
-            # VariableTracker.create so that it is tracked for mutation.
-            return VariableTracker.create(self.current_tx, target, **options)
+            # VariableTracker.build so that it is tracked for mutation.
+            return VariableTracker.build(self.current_tx, target, **options)
 
         options = dict(options)
         assert "source" in options
@@ -859,7 +859,7 @@ class OutputGraph:
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
-                return VariableTracker.create(
+                return VariableTracker.build(
                     self, target, ConstantSource(source_name=module_key)
                 )
 

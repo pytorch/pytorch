@@ -475,7 +475,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return var.class_type_var(tx)
     elif isinstance(var, UserDefinedObjectVariable):
         source = var.source and TypeSource(var.source)
-        return VariableTracker.create(tx, var.python_type(), source)
+        return VariableTracker.build(tx, var.python_type(), source)
 
 
 def _is_attr_overidden(tx: "InstructionTranslator", var, name):
@@ -500,8 +500,8 @@ def call_torch_function(
         torch_function_type,
         fn,
         types,
-        VariableTracker.create(tx, tuple(args)),
-        VariableTracker.create(tx, kwargs),
+        VariableTracker.build(tx, tuple(args)),
+        VariableTracker.build(tx, kwargs),
     )
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
@@ -515,7 +515,7 @@ def build_torch_function_fn(tx: "InstructionTranslator", value, source):
         unimplemented("Builtin/C++ torch function implementations NYI")
 
     source = source and AttrSource(AttrSource(source, "__torch_function__"), "__func__")
-    return VariableTracker.create(tx, func, source)
+    return VariableTracker.build(tx, func, source)
 
 
 def can_dispatch_torch_function(tx: "InstructionTranslator", args, kwargs):
@@ -630,7 +630,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                         GuardBuilder.FUNCTION_MATCH
                     )
                 )
-            get_fn = VariableTracker.create(tx, getattr(torch.Tensor, name).__get__)
+            get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
@@ -681,7 +681,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             else:
                 source = None
                 value = getattr(torch.Tensor, name)
-            func_var = VariableTracker.create(tx, value, source)
+            func_var = VariableTracker.build(tx, value, source)
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)

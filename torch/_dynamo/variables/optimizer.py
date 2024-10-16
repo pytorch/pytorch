@@ -168,7 +168,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
-            VariableTracker.create(tx, self.value.param_groups, source)
+            VariableTracker.build(tx, self.value.param_groups, source)
         )
         for ind, param_group_vt in enumerate(param_groups_vt.items):
             key = ConstDictVariable._HashableTracker(
@@ -233,11 +233,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # optim.param_groups, which recursively install the necessary guards.
         params_groups_source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
-            VariableTracker.create(tx, self.value.param_groups, params_groups_source)
+            VariableTracker.build(tx, self.value.param_groups, params_groups_source)
         )
 
         state_source = self.source and AttrSource(self.source, "state")
-        state_vt = VariableTracker.create(tx, self.value.state, state_source)
+        state_vt = VariableTracker.build(tx, self.value.state, state_source)
 
         # We need to realize the top level state dict to populate
         # the guard locals
@@ -260,7 +260,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                                 break
                         if key_index:
                             LazyVariableTracker.realize_all(
-                                VariableTracker.create(
+                                VariableTracker.build(
                                     tx,
                                     self.value.state[param],
                                     GetItemSource(
@@ -342,7 +342,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             source = GlobalWeakRefSource(global_name)
             self.static_tensor_names.add(tx.output.module_key_name(source.name))
 
-        return VariableTracker.create(tx, tensor_value, source)
+        return VariableTracker.build(tx, tensor_value, source)
 
     def update_list_args(
         self, tx: "InstructionTranslator", args, kwargs, py_args, py_kwargs
@@ -359,7 +359,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         arg.items.append(self.wrap_tensor(tx, val))
                     else:
                         source = arg.source and GetItemSource(arg.source, i)
-                        arg.items.append(VariableTracker.create(tx, val, source))
+                        arg.items.append(VariableTracker.build(tx, val, source))
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names

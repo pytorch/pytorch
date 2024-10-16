@@ -122,7 +122,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     VariableTracker instances are immutable and should be copied in
     order to change them.
 
-    Prefer the factory function VariableTracker.create() over VariableTracker.__init__().
+    Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -364,11 +364,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
     @staticmethod
-    def create(
+    def build(
         tx: "InstructionTranslatorBase",
         value: Any,
         source: Optional[Source] = None,
     ) -> Any:
+        """Create a new VariableTracker from a value and optional Source"""
         from . import builder
 
         if source is None:

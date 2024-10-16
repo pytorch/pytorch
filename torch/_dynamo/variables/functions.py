@@ -46,7 +46,7 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
     if isinstance(val, VariableTracker):
         return val
     elif not source:
-        return VariableTracker.create(tx, val)
+        return VariableTracker.build(tx, val)
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
@@ -249,7 +249,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             closure_cell, "cell_contents"
                         )
                         try:
-                            contents_var = VariableTracker.create(
+                            contents_var = VariableTracker.build(
                                 parent, cell.cell_contents, closure_cell_contents
                             )
                         except ValueError:
@@ -282,7 +282,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    result[name] = VariableTracker.create(tx, cell.cell_contents)
+                    result[name] = VariableTracker.build(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -297,7 +297,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.GetAttrVariable(self, name, source=source)
         if source:
             return variables.LazyVariableTracker.create(subobj, source)
-        return VariableTracker.create(tx, subobj)
+        return VariableTracker.build(tx, subobj)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = hasattr(self.fn, name)
@@ -749,7 +749,7 @@ class WrapperUserFunctionVariable(VariableTracker):
         if name == self.attr_to_trace:
             val = getattr(self.wrapper_obj, self.attr_to_trace)
             source = self.source and AttrSource(self.source, name)
-            return VariableTracker.create(tx, val, source)
+            return VariableTracker.build(tx, val, source)
 
         return super().var_getattr(tx, name)
 
@@ -993,9 +993,9 @@ class PolyfilledFunctionVariable(VariableTracker):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
             )
-            return VariableTracker.create(tx, result)
+            return VariableTracker.build(tx, result)
 
-        traceable_function_variable = VariableTracker.create(tx, self.traceable_fn)
+        traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)
 
     def call_method(

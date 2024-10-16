@@ -1060,7 +1060,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    VariableTracker.create(
+                    VariableTracker.build(
                         tx,
                         leaf.size
                         if leaf.size is not None
@@ -1070,8 +1070,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": VariableTracker.create(tx, leaf.dtype),
-                    "requires_grad": VariableTracker.create(tx, leaf.requires_grad),
+                    "dtype": VariableTracker.build(tx, leaf.dtype),
+                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(xs.items, xs.items)
@@ -1193,7 +1193,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    VariableTracker.create(
+                    VariableTracker.build(
                         tx,
                         ini.size
                         if ini.size is not None
@@ -1207,9 +1207,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": VariableTracker.create(tx, ini.dtype),
-                    "device": VariableTracker.create(tx, ini.device),
-                    "requires_grad": VariableTracker.create(tx, ini.requires_grad),
+                    "dtype": VariableTracker.build(tx, ini.dtype),
+                    "device": VariableTracker.build(tx, ini.device),
+                    "requires_grad": VariableTracker.build(tx, ini.requires_grad),
                 },
             )
             for ini in init.items
@@ -1231,11 +1231,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             inp.call_method(
                 tx,
                 "new_empty",
-                args=(VariableTracker.create(tx, inp_sh),),
+                args=(VariableTracker.build(tx, inp_sh),),
                 kwargs={
-                    "dtype": VariableTracker.create(tx, inp.dtype),
-                    "device": VariableTracker.create(tx, inp.device),
-                    "requires_grad": VariableTracker.create(tx, inp.requires_grad),
+                    "dtype": VariableTracker.build(tx, inp.dtype),
+                    "device": VariableTracker.build(tx, inp.device),
+                    "requires_grad": VariableTracker.build(tx, inp.requires_grad),
                 },
             )
             for inp, inp_sh in zip(xs.items, sub_args_inp_shapes)
@@ -2006,9 +2006,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return query.call_method(
                 tx,
                 "new_empty",
-                (VariableTracker.create(tx, []),),
+                (VariableTracker.build(tx, []),),
                 {
-                    "dtype": VariableTracker.create(tx, torch.int32),
+                    "dtype": VariableTracker.build(tx, torch.int32),
                 },
             )
 
@@ -2018,8 +2018,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             score = query.call_method(
                 tx,
                 "new_empty",
-                (VariableTracker.create(tx, []),),
-                {"requires_grad": VariableTracker.create(tx, scores_require_grad)},
+                (VariableTracker.build(tx, []),),
+                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
             )
             new_args = [score, *bhmn]
         else:
