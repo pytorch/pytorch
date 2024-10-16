@@ -5094,8 +5094,7 @@ else:
             s = t.untyped_storage()
             s_cpu = s.to(device='cpu', non_blocking=non_blocking)
             if non_blocking:
-                event = torch.cuda.current_stream().record_event()
-                event.wait()
+                torch.cuda.synchronize()
                 self.assertTrue(s_cpu.is_pinned())
             else:
                 self.assertFalse(s_cpu.is_pinned())

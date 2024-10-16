@@ -73,7 +73,7 @@ def _to(self, device, non_blocking=False):
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
-            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=non_blocking
+            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=pin_memory
         ).untyped_storage()
         untyped_storage.copy_(self, non_blocking)
         return untyped_storage
