@@ -46,7 +46,7 @@ miopenHandle_t getMiopenHandle() {
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
-  MIOPEN_CHECK(miopenSetStream(handle, at::cuda::getCurrentCUDAStream()));
+  MIOPEN_CHECK(miopenSetStream(handle, at::hip::getCurrentHIPStream()));
   return handle;
 }
 

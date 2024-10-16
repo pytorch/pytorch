@@ -435,7 +435,7 @@ static MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
   return outputTensor;
 }
 
-static std::vector<int64_t> getViewShape(const Tensor& src, MPSShape* mpsShape, const bool squeeze) {
+static std::vector<int64_t> getViewShape(const TensorBase& src, MPSShape* mpsShape, const bool squeeze) {
   bool hasMPSShape = (mpsShape != nil);
   std::vector<int64_t> src_view_shape;
   if (hasMPSShape) {
@@ -481,7 +481,7 @@ static std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef 
   return src_base_shape;
 }
 
-bool canSliceViewTensor(const Tensor& src, MPSShape* mpsShape) {
+bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape) {
   if (!src.is_contiguous()) {
     return false;
   }
@@ -503,7 +503,9 @@ bool canSliceViewTensor(const Tensor& src, MPSShape* mpsShape) {
   return true;
 }
 
-MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mpsShape, const MPSDataType mpsDataType) {
+MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
+                                                 MPSShape* mpsShape,
+                                                 const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
   size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
