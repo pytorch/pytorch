@@ -34,7 +34,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate
+from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -137,7 +137,7 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
-        workspace_size=0,
+        workspace_arg: Optional[WorkspaceArg] = None,
         *,
         index_dtype,
     ) -> None:
@@ -167,9 +167,8 @@ class TritonTemplateKernel(TritonKernel):
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
         # Some templates use extra global memory as a workspace
-        self.workspace_size = workspace_size
-        if self.workspace_size > 0:
-            self.args.workspace(workspace_size, False)
+        if workspace_arg is not None:
+            self.args.workspace(workspace_arg.nbytes, workspace_arg.zero_fill)
 
         # The following attributes (body, template_mask, output_val) are all
         # used for triton kernel codegen.
@@ -637,7 +636,7 @@ class TritonTemplate(KernelTemplate):
         subgraphs=None,
         mutated_inputs=None,
         call_sizes=None,
-        workspace_size=0,
+        workspace_arg: Optional[WorkspaceArg] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -695,7 +694,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            workspace_size=workspace_size,
+            workspace_arg=workspace_arg,
             use_jit=False,
             **kernel_options,
         ) as kernel:
@@ -750,7 +749,7 @@ class TritonTemplate(KernelTemplate):
             kernel = TritonTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
-                workspace_size=workspace_size,
+                workspace_arg=workspace_arg,
                 use_jit=False,
                 **kernel_options,
             )
@@ -809,7 +808,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
-            workspace_size=workspace_size,
+            workspace_arg=workspace_arg,
         )
 
 
@@ -883,7 +882,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
-        workspace_size=0,
+        workspace_arg: Optional[WorkspaceArg] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -900,7 +899,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             }
         )
         self.mutated_inputs = mutated_inputs
-        self.workspace_size = workspace_size
+        self.workspace_arg = workspace_arg
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -931,7 +930,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 mutated_inputs=self.mutated_inputs,
-                workspace_size=self.workspace_size,
             )
         )
 
