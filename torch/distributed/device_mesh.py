@@ -548,24 +548,27 @@ else:
                         else f"mesh_dim_{dim}"
                     )
 
-                    if (bound_device_id := getattr(default_group, "bound_device_id", None)) is not None:
-                        print(f"rank: {get_rank()=}, {bound_device_id=}")
+                    if (
+                        bound_device_id := getattr(
+                            default_group, "bound_device_id", None
+                        )
+                    ) is not None:
                         dim_group = split_group(
-                            parent_pg=default_pg,
+                            parent_pg=default_group,
                             pg_options=pg_options,
-                            pg_ranks_by_dim=pg_ranks_by_dim.to_list(),
+                            split_ranks=pg_ranks_by_dim.tolist(),
                             group_desc=group_desc,
                         )
 
-                    else:
-                        # multi-dim mesh, create subgroups by looping over the pg_ranks
-                        # for each dim and append the groups
-                        for dim_mesh in pg_ranks_by_dim:
-                            subgroup_ranks = dim_mesh.tolist()
+                    # multi-dim mesh, create subgroups by looping over the pg_ranks
+                    # for each dim and append the groups
+                    for dim_mesh in pg_ranks_by_dim:
+                        subgroup_ranks = dim_mesh.tolist()
 
-                            # We temporarily revert the re-use subgroup, since it breaks two internal tests.
-                            # Temporarily reverting to resolve test timeout while root-causing.
-                            # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                        # Temporarily reverting to resolve test timeout while root-causing.
+                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        if bound_device_id is None:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
                                 backend=backend,
@@ -573,20 +576,20 @@ else:
                                 group_desc=group_desc,
                             )
 
-                            # only add to dim_groups if the current rank in the subgroup
-                            if self.get_rank() in subgroup_ranks:
-                                if len(dim_group_infos) > dim:
-                                    raise RuntimeError(
-                                        f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
-                                        f"in {subgroup_ranks}!"
-                                    )
-                                dim_group_infos.append(
-                                    (
-                                        _get_group_tag(not_none(dim_group)),
-                                        subgroup_ranks,
-                                        dim_group.group_name,
-                                    )
+                        # only add to dim_groups if the current rank in the subgroup
+                        if self.get_rank() in subgroup_ranks:
+                            if len(dim_group_infos) > dim:
+                                raise RuntimeError(
+                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
+                                    f"in {subgroup_ranks}!"
                                 )
+                            dim_group_infos.append(
+                                (
+                                    _get_group_tag(not_none(dim_group)),
+                                    subgroup_ranks,
+                                    dim_group.group_name,
+                                )
+                            )
             self._dim_group_infos = dim_group_infos
 
         def __enter__(self) -> "DeviceMesh":
