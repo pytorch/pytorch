@@ -367,7 +367,8 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
-    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
+    @parametrize("channels_last_input", (True, False))
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends, channels_last_input):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         tensor_options = {"device": "cuda", "dtype": torch.float32}
@@ -395,7 +396,10 @@ class TestCKBackend(TestCase):
                 return torch.conv2d(x, w)
 
             Y_eager = torch.conv2d(x, w)
-            Y_compiled = conv2d(x_cl, w_cl)
+            if channels_last_input:
+                Y_compiled = conv2d(x_cl, w_cl)
+            else:
+                Y_compiled = conv2d(x, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
