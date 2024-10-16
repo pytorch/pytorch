@@ -1304,197 +1304,6 @@ def _add_send_recv(
     return comm_actions
 
 
-def _simulate_comms_compute(
-    pipeline_order, stage_to_rank: Callable[[int], int], num_stages: int
-):
-    pipeline_order = {
-        rank: [a for a in pipeline_order[rank] if a is not None]
-        for rank in sorted(pipeline_order)
-    }
-    schedule: Dict[int, List[_Action | None]] = {
-        rank: [] for rank in sorted(pipeline_order)
-    }
-
-    def _prev_ops(stage_idx):
-        rank = stage_to_rank(stage_idx)
-        ops = copy.deepcopy(schedule[rank])
-        if len(pipeline_order[rank]):
-            # batched comm ops may need to be jointly scheduled (e.g. send_f_recv_b depends on and is a dep of send_b_recv_f)
-            # assuming we iterate in sorted rank order, peeking at the next unscheduled action for later ranks should unblock us
-            ops.append(pipeline_order[rank][0])
-
-        return ops
-
-    def _ready_to_schedule(action: Optional[_Action]) -> bool:
-        if action is None:
-            return True
-
-        stage_idx = action.stage_index
-        if action.computation_type == F:
-            if action.stage_index == 0:
-                return True
-            for p in _prev_ops(stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == RECV_F
-                    and p.stage_index == action.stage_index
-                    and p.microbatch_index == action.microbatch_index
-                ):
-                    return True
-                elif (
-                    p.computation_type == SEND_B_RECV_F
-                    and p.other_stage_index == action.stage_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-        elif action.computation_type in (B, BW):
-            if action.stage_index == num_stages - 1:
-                return True
-            for p in _prev_ops(stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == RECV_B
-                    and p.stage_index == action.stage_index
-                    and p.microbatch_index == action.microbatch_index
-                ):
-                    return True
-                elif (
-                    p.computation_type == SEND_F_RECV_B
-                    and p.other_stage_index == action.stage_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-        elif action.computation_type == W:
-            return True
-        elif action.computation_type == SEND_F:
-            expected_f = _Action(action.stage_index, F, action.microbatch_index)
-            return expected_f in _prev_ops(stage_idx)
-        elif action.computation_type == RECV_F:
-            peer_stage_idx = stage_idx - 1
-            expected_send = _Action(peer_stage_idx, SEND_F, action.microbatch_index)
-            return expected_send in _prev_ops(peer_stage_idx)
-        elif action.computation_type == SEND_B:
-            expected_b = _Action(action.stage_index, B, action.microbatch_index)
-            expected_bw = _Action(action.stage_index, BW, action.microbatch_index)
-            return expected_b in _prev_ops(stage_idx) or expected_bw in _prev_ops(
-                stage_idx
-            )
-        elif action.computation_type == RECV_B:
-            peer_stage_idx = stage_idx + 1
-            expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
-            return expected_send in _prev_ops(peer_stage_idx)
-        elif action.computation_type == SEND_F_RECV_B:
-            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
-            peer_stage_idx = stage_idx + 1
-            for p in _prev_ops(peer_stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == SEND_B_RECV_F
-                    and action.other_stage_index is not None
-                    and p.stage_index == action.other_stage_index + 1
-                    and p.other_stage_index is not None
-                    and p.other_stage_index == action.stage_index + 1
-                    and p.microbatch_index == action.other_microbatch_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-        elif action.computation_type == SEND_B_RECV_F:
-            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
-            peer_stage_idx = action.stage_index - 1
-            for p in _prev_ops(peer_stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == SEND_F_RECV_B
-                    and p.stage_index + 1 == action.other_stage_index
-                    and p.other_stage_index + 1 == action.stage_index
-                    and p.microbatch_index == action.other_microbatch_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-
-        else:
-            raise ValueError(f"Unsupported action type {action}")
-
-    while pipeline_order:
-        progress = False
-        for rank in sorted(pipeline_order):
-            if len(pipeline_order[rank]) == 0:
-                continue
-
-            action = pipeline_order[rank][0]
-            if _ready_to_schedule(action):
-                if action is not None:
-                    schedule[rank].append(action)
-                pipeline_order[rank].pop(0)
-                progress = True
-            else:
-                schedule[rank].append(None)
-
-        for i in sorted(pipeline_order, reverse=True):
-            if len(pipeline_order[i]) == 0:
-                del pipeline_order[i]
-
-        # hacky, but do a second pass to replace any 'none' at this timestep with a real action, if it got unblocked
-        # by one of the later ranks
-        for rank in sorted(pipeline_order):
-            if len(pipeline_order[rank]) == 0:
-                continue
-
-            if schedule[rank][-1] is not None:
-                continue
-
-            action = pipeline_order[rank][0]
-            if _ready_to_schedule(action):
-                if action is not None:
-                    schedule[rank][-1] = action
-                pipeline_order[rank].pop(0)
-
-        for i in sorted(pipeline_order, reverse=True):
-            if len(pipeline_order[i]) == 0:
-                del pipeline_order[i]
-
-        if not progress:
-            print("WIP comms schedule:\n", _format_pipeline_order(schedule))
-            for rank in pipeline_order:
-                print(f"{rank=} next action= {pipeline_order[rank][0]}")
-            raise ValueError("Schedule is not progressing")
-
-    return schedule
-
-
-def _dump_chrometrace(schedule, filename):
-    events = []
-    for rank in sorted(schedule):
-        for timestep, action in enumerate(schedule[rank]):
-            if action is None:
-                continue
-            events.append(
-                {
-                    "name": str(action),
-                    "cat": "computation"
-                    if action.computation_type in (F, B, W)
-                    else "communication",
-                    "ph": "X",
-                    "pid": rank,
-                    "tid": rank,
-                    "ts": timestep,
-                    "dur": 1,
-                }
-            )
-    import json
-
-    with open(filename, "w") as f:
-        json.dump({"traceEvents": events}, f)
-
-
 class PipelineScheduleMulti(_PipelineSchedule):
     """
     Base class for multi-stage schedules.
@@ -1572,6 +1381,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
             writer = csv.writer(csvfile)
             for rank in self.pipeline_order:
                 writer.writerow(self.pipeline_order[rank])
+
+    def _simulate(self):
+        return _simulate_comms_compute(
+            self.pipeline_order_with_comms,
+            lambda s: self.stage_index_to_group_rank[s],
+            self._num_stages,
+        )
 
     def _validate_schedule(self):
         # TODO(whc) this should be merged with the logic in test_schedule.py#L453-L554
@@ -2612,3 +2428,193 @@ def get_schedule_class(schedule_name: str):
             f"Unknown schedule name '{schedule_name}'. The valid options are {list(schedule_map.keys())}"
         )
     return schedule_map[lowercase_keys[lowercase_schedule_name]]
+
+
+def _simulate_comms_compute(
+    pipeline_order, stage_to_rank: Callable[[int], int], num_stages: int
+):
+    pipeline_order = {
+        rank: [a for a in pipeline_order[rank] if a is not None]
+        for rank in sorted(pipeline_order)
+    }
+    schedule: Dict[int, List[_Action | None]] = {
+        rank: [] for rank in sorted(pipeline_order)
+    }
+
+    def _prev_ops(stage_idx):
+        rank = stage_to_rank(stage_idx)
+        ops = copy.deepcopy(schedule[rank])
+        if len(pipeline_order[rank]):
+            # batched comm ops may need to be jointly scheduled (e.g. send_f_recv_b depends on and is a dep of send_b_recv_f)
+            # assuming we iterate in sorted rank order, peeking at the next unscheduled action for later ranks should unblock us
+            ops.append(pipeline_order[rank][0])
+
+        return ops
+
+    def _ready_to_schedule(action: Optional[_Action]) -> bool:
+        if action is None:
+            return True
+
+        stage_idx = action.stage_index
+        if action.computation_type == F:
+            if action.stage_index == 0:
+                return True
+            for p in _prev_ops(stage_idx):
+                if p is None:
+                    continue
+                elif (
+                    p.computation_type == RECV_F
+                    and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type == SEND_B_RECV_F
+                    and p.other_stage_index == action.stage_index
+                    and p.other_microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
+        elif action.computation_type == B:
+            if action.stage_index == num_stages - 1:
+                return True
+            for p in _prev_ops(stage_idx):
+                if p is None:
+                    continue
+                elif (
+                    p.computation_type == RECV_B
+                    and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type == SEND_F_RECV_B
+                    and p.other_stage_index == action.stage_index
+                    and p.other_microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
+        elif action.computation_type == W:
+            return True
+        elif action.computation_type == SEND_F:
+            expected_f = _Action(action.stage_index, F, action.microbatch_index)
+            return expected_f in _prev_ops(stage_idx)
+        elif action.computation_type == RECV_F:
+            peer_stage_idx = stage_idx - 1
+            expected_send = _Action(peer_stage_idx, SEND_F, action.microbatch_index)
+            return expected_send in _prev_ops(peer_stage_idx)
+        elif action.computation_type == SEND_B:
+            expected_b = _Action(action.stage_index, B, action.microbatch_index)
+            return expected_b in _prev_ops(stage_idx)
+        elif action.computation_type == RECV_B:
+            peer_stage_idx = stage_idx + 1
+            expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
+            return expected_send in _prev_ops(peer_stage_idx)
+        elif action.computation_type == SEND_F_RECV_B:
+            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
+            peer_stage_idx = stage_idx + 1
+            for p in _prev_ops(peer_stage_idx):
+                if p is None:
+                    continue
+                elif (
+                    p.computation_type == SEND_B_RECV_F
+                    and action.other_stage_index is not None
+                    and p.stage_index == action.other_stage_index + 1
+                    and p.other_stage_index is not None
+                    and p.other_stage_index == action.stage_index + 1
+                    and p.microbatch_index == action.other_microbatch_index
+                    and p.other_microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
+        elif action.computation_type == SEND_B_RECV_F:
+            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
+            peer_stage_idx = action.stage_index - 1
+            for p in _prev_ops(peer_stage_idx):
+                if p is None:
+                    continue
+                elif (
+                    p.computation_type == SEND_F_RECV_B
+                    and p.stage_index + 1 == action.other_stage_index
+                    and p.other_stage_index + 1 == action.stage_index
+                    and p.microbatch_index == action.other_microbatch_index
+                    and p.other_microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
+
+        else:
+            raise ValueError(f"Unsupported action type {action}")
+
+    while pipeline_order:
+        progress = False
+        for rank in sorted(pipeline_order):
+            if len(pipeline_order[rank]) == 0:
+                continue
+
+            action = pipeline_order[rank][0]
+            if _ready_to_schedule(action):
+                if action is not None:
+                    schedule[rank].append(action)
+                pipeline_order[rank].pop(0)
+                progress = True
+            else:
+                schedule[rank].append(None)
+
+        for i in sorted(pipeline_order, reverse=True):
+            if len(pipeline_order[i]) == 0:
+                del pipeline_order[i]
+
+        # hacky, but do a second pass to replace any 'none' at this timestep with a real action, if it got unblocked
+        # by one of the later ranks
+        for rank in sorted(pipeline_order):
+            if len(pipeline_order[rank]) == 0:
+                continue
+
+            if schedule[rank][-1] is not None:
+                continue
+
+            action = pipeline_order[rank][0]
+            if _ready_to_schedule(action):
+                if action is not None:
+                    schedule[rank][-1] = action
+                pipeline_order[rank].pop(0)
+
+        for i in sorted(pipeline_order, reverse=True):
+            if len(pipeline_order[i]) == 0:
+                del pipeline_order[i]
+
+        if not progress:
+            print("WIP comms schedule:\n", _format_pipeline_order(schedule))
+            for rank in pipeline_order:
+                print(f"{rank=} next action= {pipeline_order[rank][0]}")
+            raise ValueError("Schedule is not progressing")
+
+    return schedule
+
+
+def _dump_chrometrace(schedule, filename):
+    events = []
+    for rank in sorted(schedule):
+        for timestep, action in enumerate(schedule[rank]):
+            if action is None:
+                continue
+            events.append(
+                {
+                    "name": str(action),
+                    "cat": (
+                        "computation"
+                        if action.computation_type in (F, B, W)
+                        else "communication"
+                    ),
+                    "ph": "X",
+                    "pid": rank,
+                    "tid": rank,
+                    "ts": timestep,
+                    "dur": 1,
+                }
+            )
+    import json
+
+    with open(filename, "w") as f:
+        json.dump({"traceEvents": events}, f)
