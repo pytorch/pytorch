@@ -206,7 +206,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
+def generate_compiler_repro_string(
+    gm, args, *, stable_output=False, save_dir=None, stable_hash=False
+):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -238,7 +240,7 @@ isolate_fails_code_str = None
     def hint_if_symint(x):
         return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
-    writer = InputWriter(save_dir)
+    writer = InputWriter(save_dir, stable_hash=stable_hash)
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
@@ -268,6 +270,7 @@ def save_graph_repro(
     accuracy=None,
     tracing_mode=None,
     check_str=None,
+    stable_hash=False,
 ):
     if any(
         isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
@@ -277,12 +280,14 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
     fd.write(
         generate_compiler_repro_string(
             gm,
             args,
             stable_output=stable_output,
             save_dir=save_dir,
+            stable_hash=stable_hash,
         )
     )
     if accuracy is None:

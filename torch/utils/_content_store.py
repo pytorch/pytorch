@@ -41,7 +41,7 @@ import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
 from torch._C import default_generator
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRefWrapper
 
 
 def lazy_compile(**compile_kwargs):
@@ -98,6 +98,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
+    breakpoint()
     if stable_hash or not is_compile_supported(device_type):
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
@@ -193,7 +194,7 @@ class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
         self.storage_cache: Optional[
-            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+            Dict[Optional[torch.device], Dict[str, StorageWeakRefWrapper]]
         ] = None
         if cache:
             self.storage_cache = defaultdict(dict)
@@ -208,7 +209,7 @@ class ContentStoreReader:
         )
         s: Optional[torch.UntypedStorage]
         if ws is not None:
-            s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
+            s = ws()
             if s is not None:
                 return s
         s = torch.load(
@@ -218,7 +219,7 @@ class ContentStoreReader:
         )._untyped_storage
         assert s is not None
         if self.storage_cache is not None:
-            self.storage_cache[device][h] = StorageWeakRef(s)
+            self.storage_cache[device][h] = StorageWeakRefWrapper(s)
         return s
 
     def read_tensor_metadata(self, name: str):
