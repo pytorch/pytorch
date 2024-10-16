@@ -1,6 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #if defined(USE_CUDA) && !defined(USE_ROCM)
-#include "ATen/cuda/CUDAContextLight.h"
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGraph.h>
 #endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -212,7 +212,10 @@ class WorkRegistry {
   bool can_unregister_completed_works() {
     std::unique_lock lock(lock_);
 #if defined(USE_CUDA) && !defined(USE_ROCM)
-    if (at::cuda::is_available() && !at::cuda::CUDAGraph::is_capturing()) {
+    // Checking whether a NCCL work is completed requires querying CUDA event
+    // state, which is disallowed during CUDA graph capture.
+    if (at::cuda::is_available() &&
+        at::cuda::CUDAGraph::is_capturing(at::cuda::getCurrentCUDAStream())) {
       return false;
     }
 #endif
