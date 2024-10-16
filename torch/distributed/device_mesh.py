@@ -530,29 +530,31 @@ else:
                     pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                         -1, self.mesh.size(dim)
                     )
+
+                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                    # Inherit from the parent group if no options are specified for the group.
+                    if dim in _mesh_resources.mesh_dim_group_options:
+                        (
+                            backend,
+                            pg_options,
+                        ) = _mesh_resources.mesh_dim_group_options[dim]
+                    else:
+                        backend, pg_options = None, None
+
+                    group_desc = (
+                        f"mesh_{self.mesh_dim_names[dim]}"
+                        if self.mesh_dim_names
+                        else f"mesh_dim_{dim}"
+                    )
+
                     # multi-dim mesh, create subgroups by looping over the pg_ranks
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
-                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                        # Inherit from the parent group if no options are specified for the group.
-                        if dim in _mesh_resources.mesh_dim_group_options:
-                            (
-                                backend,
-                                pg_options,
-                            ) = _mesh_resources.mesh_dim_group_options[dim]
-                        else:
-                            backend, pg_options = None, None
-
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        group_desc = (
-                            f"mesh_{self.mesh_dim_names[dim]}"
-                            if self.mesh_dim_names
-                            else f"mesh_dim_{dim}"
-                        )
                         dim_group = new_group(
                             ranks=subgroup_ranks,
                             backend=backend,
