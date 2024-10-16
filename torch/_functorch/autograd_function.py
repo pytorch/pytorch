@@ -2,7 +2,7 @@
 from typing import Any, NamedTuple, Tuple
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._C._functorch import (
     _unwrap_for_grad,
     _wrap_for_grad,
@@ -167,8 +167,8 @@ NO_OUT_DIMS = "not specified"
 def wrap_outputs_maintaining_identity(
     outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=NO_OUT_DIMS
 ):
-    flat_unwrapped_inputs = pytree.arg_tree_leaves(*unwrapped_inputs)
-    flat_orig_inputs = pytree.arg_tree_leaves(*orig_inputs)
+    flat_unwrapped_inputs = pytree.tree_leaves(unwrapped_inputs)
+    flat_orig_inputs = pytree.tree_leaves(orig_inputs)
 
     unwrapped_input_to_orig_input = {
         id(unwrapped): orig
@@ -185,12 +185,13 @@ def wrap_outputs_maintaining_identity(
         # _broadcast_to_and_flatten returns None if it is unable to broadcast.
         # TODO: update following link from master to stable once that's out
         if flat_out_dims is None:
+            out_dims_spec = pytree.tree_structure(out_dims)
             raise RuntimeError(
                 f"The autograd.Function's vmap staticmethod returned an "
                 f"incompatible (output, out_dims) tuple. "
                 f"Expected out_dims={out_dims} "
                 f"to be compatible with the structure of `output`. "
-                f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
+                f"out_dims has structure {pytree.treespec_pprint(out_dims_spec)} "
                 f"but output has structure {spec}. "
                 f"For more details, please see "
                 f"https://pytorch.org/docs/main/notes/extending.func.html"
@@ -275,10 +276,7 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
-    if any(
-        isinstance(val, torch.Tensor)
-        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
-    ):
+    if pytree.tree_any(torch.is_tensor, kwargs):
         raise NotImplementedError(
             f"Run vmap on autograd.Function with kwarg-only Tensor args. "
             f"Please do not pass kwarg-only Tensors to autograd.Function. "
@@ -505,7 +503,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 # the corresponding in_dims with None.
 def get_tangents_in_dims(input_dims, tangents):
     flat_in_dims, spec = pytree.tree_flatten(input_dims)
-    flat_tangents = pytree.arg_tree_leaves(*tangents)
+    flat_tangents = pytree.tree_leaves(tangents)
     result = [
         None if tangent is None else in_dim
         for in_dim, tangent in zip(flat_in_dims, flat_tangents)

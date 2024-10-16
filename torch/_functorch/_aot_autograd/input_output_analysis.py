@@ -11,10 +11,9 @@ In particular, the following analyses are provided:
 """
 
 import itertools
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -30,6 +29,10 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
+
+
+if TYPE_CHECKING:
+    from torch.utils.pytree import PyTreeSpec
 
 
 zip = strict_zip
@@ -421,8 +424,8 @@ def _graph_output_names(gm):
 def create_graph_signature(
     fx_g: torch.fx.GraphModule,
     fw_metadata: ViewAndMutationMeta,
-    in_spec: pytree.TreeSpec,
-    out_spec: pytree.TreeSpec,
+    in_spec: "PyTreeSpec",
+    out_spec: "PyTreeSpec",
     *,
     user_args_flat: List[Tensor],
     params_and_buffers_flat: List[Tensor],
