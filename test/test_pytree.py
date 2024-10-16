@@ -1374,12 +1374,14 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
-        cxx_pytree.register_pytree_node(
-            GlobalDummyType,
-            lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: GlobalDummyType(*xs),
-            serialized_type_name="GlobalDummyType",
-        )
+        if not hasattr(GlobalDummyType, "__registered__"):
+            cxx_pytree.register_pytree_node(
+                GlobalDummyType,
+                lambda dummy: ([dummy.x, dummy.y], None),
+                lambda xs, _: GlobalDummyType(*xs),
+                serialized_type_name="GlobalDummyType",
+            )
+            GlobalDummyType.__registered__ = True
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)

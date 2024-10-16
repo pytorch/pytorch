@@ -1009,5 +1009,8 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 with python_pytree._NODE_REGISTRY_LOCK:
     python_pytree._cxx_pytree_imported = True
+    args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:
         _private_register_pytree_node(*args, **kwargs)
+    python_pytree._cxx_pytree_pending_imports.clear()
+    del args, kwargs
