@@ -97,7 +97,8 @@ class TORCH_API Context {
     } else if (device.is_meta()) {
       allocator = GetAllocator(kMeta);
     } else {
-      allocator = getAcceleratorHooksInterface(device.type()).getDeviceAllocator();
+      allocator =
+          getAcceleratorHooksInterface(device.type()).getDeviceAllocator();
     }
     return allocator;
   }

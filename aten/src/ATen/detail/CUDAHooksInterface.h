@@ -134,6 +134,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
+  // deprecated use device-agnostic API getDeviceAllocator()
   virtual Allocator* getCUDADeviceAllocator() const {
     TORCH_CHECK(false, "CUDADeviceAllocator requires CUDA. ", CUDA_HELP);
   }
