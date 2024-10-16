@@ -829,7 +829,7 @@ def broadcast_prefix(
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
-    result: list[Any] = []
+    result: List[Any] = []
 
     def add_leaves(x: Any, subtree: PyTree) -> None:
         subtreespec = tree_structure(subtree, is_leaf=is_leaf)
