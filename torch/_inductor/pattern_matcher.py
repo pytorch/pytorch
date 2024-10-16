@@ -139,6 +139,15 @@ class Multiple:
 MULTIPLE = Multiple()
 
 
+def _transfer_meta(new_meta: Dict[str, Any], old_meta: Dict[str, Any]) -> None:
+    # transfer metadata after pattern matching occurs.
+    # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
+    # to remain accurate after pattern matching has occurred.
+    new_meta.update(
+        (k, v) for k, v in old_meta.items() if k not in {"val", "tensor_meta"}
+    )
+
+
 class Match:
     """
     Represents a successfully matched pattern.
@@ -255,11 +264,7 @@ class Match:
             )
             if len(self.nodes) > 0:
                 for n in replacement.graph.nodes:
-                    n.meta.update(
-                        (k, v)
-                        for k, v in self.nodes[0].meta.items()
-                        if k not in {"val", "tensor_meta"}
-                    )
+                    _transfer_meta(new_meta=n.meta, old_meta=self.nodes[0].meta)
 
             ReplacementPatternEntry.replace_with_graph(
                 self,
@@ -1057,16 +1062,12 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
+                    _transfer_meta(new_meta=result.meta, old_meta=node.meta)
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
                             assert "tensor_meta" in node.meta
                             result.meta["tensor_meta"] = node.meta["tensor_meta"]
-                    result.meta.update(
-                        (k, v)
-                        for k, v in node.meta.items()
-                        if k not in {"val", "tensor_meta"}
-                    )
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
