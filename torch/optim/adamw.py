@@ -18,6 +18,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _maybe_copy_beta,
+    _params_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -286,8 +287,7 @@ AdamW.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
