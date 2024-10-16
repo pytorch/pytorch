@@ -161,6 +161,30 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
+@contextmanager
+def register_aten_to_copy_py_functionalize_impl(enable: bool):
+    func = torch.ops.aten._to_copy.default
+
+    if enable:
+        # Register the decorator when entering the context
+        @func.py_functionalize_impl
+        def aten_to_copy_functionalize(ctx, x, *args, **kwargs):
+            # args_unwrapped = ctx.unwrap_tensors(args)
+            with ctx.redispatch_to_next():
+                return x
+
+    try:
+        yield
+    finally:
+        if enable:
+            # Remove the registration when exiting the context
+            del func.py_kernels[torch._C.DispatchKey.Functionalize]
+            del func.python_key_table[
+                torch._subclasses.functional_tensor.FunctionalTensorMode
+            ]
+            del func.functorch_table[torch._C._functorch.TransformType.Functionalize]
+
+
 def _fixup_key(x):
     return "L__self__" + _strip_root(x)
 
