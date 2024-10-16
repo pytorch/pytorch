@@ -1849,7 +1849,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 )
 
                     # Get the number of tangents after unwrapping
-                    len_tangents = len(  # noqa: F841
+                    len_tangents = len(
                         unwrap_tensor_subclasses(
                             tangents,
                             is_joint_structure=False,
@@ -1915,7 +1915,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if lazy_backward_info is None:
                             raise RuntimeError(
                                 """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
                             )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph

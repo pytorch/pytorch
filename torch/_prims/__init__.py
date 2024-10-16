@@ -1945,16 +1945,19 @@ convert_element_type = _make_prim(
 
 
 def _device_put_meta(
-    a: TensorLikeType, device: Union[str, torch.device]
+    a: TensorLikeType, device: Union[str, torch.device], non_blocking=False
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
+    assert isinstance(non_blocking, bool)
 
     return TensorMeta(a, device=utils.canonicalize_device(device))
 
 
-def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
-    return a.to(device)
+def _device_put_aten(
+    a: Tensor, device: Union[str, torch.device], non_blocking=False
+) -> Tensor:
+    return a.to(device, non_blocking=non_blocking)
 
 
 _device_put_doc = """
@@ -1962,7 +1965,7 @@ _device_put_doc = """
   """
 
 device_put = _make_prim(
-    schema="device_put(Tensor a, Device device) -> Tensor",
+    schema="device_put(Tensor a, Device device, bool non_blocking=False) -> Tensor",
     meta=_device_put_meta,
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,

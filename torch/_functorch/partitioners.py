@@ -862,6 +862,14 @@ def solve_min_cut(
             return True
         if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
+        if (
+            a.target is operator.getitem
+            and a.args[0].target
+            is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            # if a is the output of a user triton kernel,
+            # then (by default) we will not be able to fuse b into it
+            return False
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
     try:
@@ -1892,14 +1900,12 @@ def min_cut_rematerialization_partition(
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
 
-        storages = {get_node_storage(node) for node in saved_values}  # noqa: F841
+        storages = {get_node_storage(node) for node in saved_values}
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
         )
-        sorted_sizes = sorted(  # noqa: F841
-            [(_size_of(i), str(i)) for i in saved_values]
-        )
+        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }

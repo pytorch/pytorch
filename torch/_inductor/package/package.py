@@ -210,6 +210,7 @@ class AOTICompiledModel:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 

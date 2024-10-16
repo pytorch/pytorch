@@ -50,6 +50,10 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
     return nullptr;
   }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
 };
 
 } // namespace at

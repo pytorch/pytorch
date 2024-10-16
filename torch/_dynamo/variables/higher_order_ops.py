@@ -623,7 +623,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "auto_functionalized":
+        elif (
+            value.__name__ == "auto_functionalized"
+            or value.__name__ == "auto_functionalized_v2"
+        ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
@@ -1482,25 +1485,6 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if not torch._dynamo.config.capture_func_transforms:
-            name = self.get_name()
-            fn = {
-                "grad_impl": "grad",
-                "vmap_impl": "vmap",
-                "vjp": "vjp",
-                "jvp": "jvp",
-                "jacrev": "jacrev",
-                "jacfwd": "jacfwd",
-                "hessian": "hessian",
-                "linearize": "linearize",
-                "functional_call": "functional_call",
-            }.get(name)
-            assert name is not None
-            unimplemented(
-                f"torch.func.{fn} capture is disabled, "
-                "it can be turned on by setting "
-                "`torch._dynamo.config.capture_func_transforms=True`"
-            )
         return super().call_function(tx, args, kwargs)
 
 
@@ -2017,8 +2001,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn: "VariableTracker",
         fn_name: str,
     ):
-        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
-
+        from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -2216,6 +2199,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             source_target="autograd.Function",
         )
 
+        fwd_src = AttrSource(self.parent_source, member="forward")
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph)
@@ -2236,7 +2220,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
@@ -2455,10 +2438,13 @@ def maybe_positional_arg_names(func):
     if not hasattr(func, "get_function"):
         return None
     try:
-        sig = inspect.signature(func.get_function())
-    except (Unsupported, NotImplementedError, ValueError):
+        fn = func.get_function()
+    except (Unsupported, NotImplementedError):
         return None
-
+    try:
+        sig = inspect.signature(fn)
+    except ValueError:
+        return None
     for name, param in sig.parameters.items():
         if param.kind is inspect.Parameter.VAR_POSITIONAL:
             return None

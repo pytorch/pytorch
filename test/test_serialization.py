@@ -4144,7 +4144,8 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
 
-    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
+    @parametrize('dtype',
+                 (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
         """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
@@ -4155,9 +4156,13 @@ class TestSerialization(TestCase, SerializationMixin):
             y = torch.load(f, weights_only=weights_only)
             self.assertEqual(y['x'], x)
             # Check that views are actually views
-            y['odd'][0] = torch.tensor(0.25, dtype=dtype)
-            y['even'][0] = torch.tensor(-0.25, dtype=dtype)
-            self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+            if dtype.is_signed:
+                val1, val2, check_dtype = 0.25, -0.25, torch.float32
+            else:
+                val1, val2, check_dtype = 1, 2, torch.int64
+            y['odd'][0] = torch.tensor(val1, dtype=dtype)
+            y['even'][0] = torch.tensor(val2, dtype=dtype)
+            self.assertEqual(y['x'][:2].to(dtype=check_dtype), torch.tensor([val2, val1]))
 
     @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
     @parametrize('weights_only', (True, False))
@@ -4302,6 +4307,35 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.save(torch.randn(2, 3), f)
                 f.seek(0)
                 torch.load(f, weights_only=True)
+
+    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
+    @parametrize("compute_crc32", (True, False))
+    @parametrize("filename", (True, False))
+    def test_crc32_options(self, compute_crc32, filename):
+        # test both path and buffer case
+        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
+        sd = torch.nn.Linear(3, 5).state_dict()
+        with file_creation_func() as f:
+            try:
+                torch.serialization.set_crc32_options(compute_crc32)
+                torch.save(sd, f)
+                if not filename:
+                    f.seek(0)
+                sd_loaded = torch.load(f, weights_only=True)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                torch.serialization.set_crc32_options(True)
+
+            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
+            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
+
+            if not filename:
+                f.seek(0)
+            # zip_file.extractall() will raise BadZipFile if CRC32 is not populated
+            # we use the context manager to check whether CRC32 was populated
+            with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(f) as zip_file:
+                    zip_file.extractall(path=temp_dir)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

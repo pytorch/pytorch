@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -16,6 +17,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -24,6 +26,7 @@ from typing import (
 import sympy
 
 import torch
+import torch._inductor.metrics as metrics
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -37,10 +40,10 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
+from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -102,6 +105,8 @@ def gen_attr_descriptor_import():
 
     import triton.compiler.compiler
 
+    # Note: this works because triton.compiler.compiler imports AttrsDescriptor from triton.backends.compiler
+    # When support for the legacy AttrsDescriptor is removed then this import path should be changed.
     if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
         return "from triton.compiler.compiler import AttrsDescriptor"
     else:
@@ -124,7 +129,7 @@ def gen_common_triton_imports():
         """
         from torch._inductor.runtime import triton_helpers, triton_heuristics
         from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, instance_descriptor, DeviceProperties
+        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
         """
     )
     return imports.getvalue()
@@ -191,9 +196,9 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     order: List[int]
     mask_vars: OrderedSet[str]
-    broadcast_shape: List[sympy.Expr]
+    broadcast_shape: Sequence[sympy.Expr]
     broadcasting_dims: List[bool]
-    final_shape: List[sympy.Expr]
+    final_shape: Sequence[sympy.Expr]
 
     @property
     def shape(self) -> List[sympy.Expr]:
@@ -214,8 +219,8 @@ class BlockPtrOptions:
     def codegen_broadcast_and_reshape(
         self,
         value: str,
-        initial_shape: List[sympy.Expr],
-        final_shape: List[sympy.Expr],
+        initial_shape: Sequence[sympy.Expr],
+        final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
     ) -> str:
         """
@@ -442,33 +447,29 @@ class BlockPtrOptions:
 
 
 def triton_reshape(
-    value: str, old_shape: List[sympy.Expr], new_shape: List[sympy.Expr]
+    value: str, old_shape: Sequence[sympy.Expr], new_shape: Sequence[sympy.Expr]
 ):
     """Workaround https://github.com/openai/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
-    def shape_to_str(shape: List[sympy.Expr]) -> List[str]:
-        return [str(dim) for dim in shape]
+    old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
+    new_shape_str = [V.kernel.index_to_str(shape) for shape in new_shape]
 
-    old_shape, new_shape = tuple(
-        shape_to_str(shape) for shape in (old_shape, new_shape)
-    )
-
-    if old_shape == new_shape:
+    if old_shape_str == new_shape_str:
         return value
-    if [s for s in new_shape if s != "1"] != old_shape:
-        return f"tl.reshape({value}, [{', '.join(new_shape)}])"
+    if [s for s in new_shape_str if s != "1"] != old_shape_str:
+        return f"tl.reshape({value}, [{', '.join(new_shape_str)}])"
     # rewrite to [:, None] syntax, which is less buggy
     idx = 0
     expand = []
-    for size in new_shape:
-        if idx < len(old_shape) and size == old_shape[idx]:
+    for size in new_shape_str:
+        if idx < len(old_shape_str) and size == old_shape_str[idx]:
             expand.append(":")
             idx += 1
         else:
             assert size == "1"
             expand.append("None")
-    assert idx == len(old_shape)
+    assert idx == len(old_shape_str)
     return f"{value}[{', '.join(expand)}]"
 
 
@@ -638,60 +639,64 @@ class TritonPrinter(PythonPrinter):
 
 texpr = TritonPrinter().doprint
 
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_triton_type_re = re.compile(r"^.*[.]")
 
-def triton_compute_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    elif (
-        triton_type_name in ("float16", "bfloat16")
-        and config.triton.codegen_upcast_to_fp32
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_compute_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
+    return triton_type(upcast_compute_type(dtype))
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype == torch.float16 or dtype == torch.bfloat16
     ):
-        # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2fnuz":
-        triton_type_name = "float8e5b16"
-    return f"tl.{triton_type_name}"
+        return torch.float32
+    return dtype
 
 
-def _get_primitive_bitwidth(dtype):
-    if hasattr(dtype, "is_floating_point"):
-        if dtype.is_floating_point:
-            # triton_compute_type changes the bitwidth
-            if (
-                dtype in [torch.bfloat16, torch.float16]
-                and config.triton.codegen_upcast_to_fp32
-            ):
-                return 32
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
+def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
+    """Number of bits of triton_compute_type()"""
+    dtype = upcast_compute_type(dtype)
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize:
+        return itemsize * 8
     else:
         return -1
 
 
-def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
+def triton_store_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with fix for storing tl.bool"""
+    if dtype == torch.bool:
+        dtype = torch.int8
+    return triton_type(dtype)
 
 
-def triton_acc_type(dtype):
-    if is_integer_dtype(dtype) and dtype.is_signed:
-        nbits = 64 if dtype == torch.int64 else 32
-        return f"tl.int{nbits}"
-    return triton_compute_type(dtype)
+def upcast_acc_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Implicit upcasts used for Triton reduction types"""
+    if is_integer_dtype(dtype) and dtype.is_signed and dtype.itemsize <= 4:
+        return torch.int32
+    return upcast_compute_type(dtype)
+
+
+def triton_acc_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with reduction upcasts"""
+    return triton_compute_type(upcast_acc_dtype(dtype))
 
 
 class TritonCSEVariable(CSEVariable):
@@ -1944,10 +1949,12 @@ class TritonKernel(SIMDKernel):
     def bucketize(
         self,
         values: CSEVariable,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -1959,9 +1966,13 @@ class TritonKernel(SIMDKernel):
         # autotuning config with num_elements_per_warp=(warp_size) exists.
         self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
 
-        offsets_ptr = self.args.input(offsets_name)
+        boundaries_ptr = self.args.input(boundaries[0])
+        boundary_size = self.index_to_str(boundaries[1])
+        boundaries_underlying_numel = self.index_to_str(boundaries[2])
+        boundary_stride = self.index_to_str(boundaries[3])
+        sorter_ptr = self.args.input(sorter[0]) if sorter else "None"
+        sorter_stride = self.index_to_str(sorter[1]) if sorter else "None"
         block_size = self.dense_size_str()
-        offsets_size_str = self.index_to_str(offsets_size)
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -1974,7 +1985,15 @@ class TritonKernel(SIMDKernel):
 
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size_str}, {block_size})",  # noqa: B950 line too long
+            f"triton_helpers.bucketize_binary_search({values}, "
+            f"{boundaries_ptr}, {boundary_size}, {boundaries_underlying_numel}, {boundary_stride}, "
+            f"{boundary_indices}, "
+            f"{triton_dtype}, "
+            f"{right}, "
+            f"{sorter_ptr}, {sorter_stride}, "
+            f"{sorter_indices}, "
+            f"{block_size}, "
+            ")",
         )
 
         return result
@@ -2678,6 +2697,11 @@ class TritonKernel(SIMDKernel):
 
         if name is None:
             code.splice(gen_common_triton_imports())
+            device_type = V.graph.scheduler.get_current_device_or_throw().type
+            if device_type == "cpu":
+                code.splice("triton_helpers.set_driver_to_cpu()")
+            else:
+                code.splice("triton_helpers.set_driver_to_gpu()")
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -2733,10 +2757,16 @@ class TritonKernel(SIMDKernel):
             "constants": {},
         }
 
+        # Skip memory optimization for forward of the training loop where we expect
+        # every new node will increase the peak memory and our greedy approach would
+        # introduce a lot of unnecessary cpu copies.
+        optimize_mem = V.graph.is_inference or V.graph.is_backward
+
         inductor_meta = {
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
+            "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
             "num_reduction": self.num_reduction,
@@ -2915,7 +2945,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            gpu=True,
+            gpu=current_device.type != "cpu",
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn_str(),
@@ -3065,6 +3095,14 @@ class TritonScheduling(SIMDScheduling):
             )
         )
 
+    def __init__(self, scheduler: Scheduler) -> None:
+        super().__init__(scheduler)
+        if scheduler is None or not hasattr(scheduler, "nodes"):
+            return
+        for node in scheduler.nodes:
+            if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
+                node.debug_device_str = debug_triton_code
+
     @classmethod
     def get_backend_features(cls, device: torch.device):
         return cls.backend_features
@@ -3141,8 +3179,8 @@ class TritonScheduling(SIMDScheduling):
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if
             # padding helps with the perf kernel by kernel.
-            if is_metric_table_enabled("kernel_metadata"):
-                log_kernel_metadata(kernel_name, kernel_path, src_code)
+            if metrics.is_metric_table_enabled("kernel_metadata"):
+                metrics.log_kernel_metadata(kernel_name, kernel_path, src_code)
 
         return kernel_name
 
@@ -3313,3 +3351,33 @@ class TritonScheduling(SIMDScheduling):
         V.graph.removed_buffers = removed_buffers_orig
         V.graph.inplaced_to_remove = inplaced_to_remove_orig
         return total_ms, total_clone_ms, file_list
+
+
+def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
+    lines = []
+    multi_template = node.get_template_node()
+    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
+    if multi_template and multi_template.make_kernel_render is None:
+        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
+    else:
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        device = node.get_device()
+        backend = node.scheduler.get_backend(device)
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        V.graph.scheduler.current_device = device
+
+        # Don't increment kernel count when generating debug string.
+        # This will confuse some unit tests that check the number of
+        # generated kernels.
+        old_generated_kernel_count = metrics.generated_kernel_count
+        triton_code = backend.generate_kernel_code_from_nodes(node.get_nodes()).strip()
+        metrics.generated_kernel_count = old_generated_kernel_count
+
+        lines.append(f"{node.get_name()} Triton code:")
+        lines.append(textwrap.indent(triton_code, "    "))
+    return lines

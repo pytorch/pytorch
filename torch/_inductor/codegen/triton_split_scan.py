@@ -115,7 +115,6 @@ class TritonSplitScanKernel(TritonKernel):
 
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
         value = cse_compute(f"{value}.to({compute_type})")
