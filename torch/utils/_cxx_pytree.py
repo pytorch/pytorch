@@ -869,7 +869,7 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
-    if "treespec" not in type(treespec).__name__:
+    if type(treespec).__name__ not in ("TreeSpec", "PyTreeSpec"):
         raise TypeError("treespec_dumps expects a treespec object.")
     dummy_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     orig_treespec = python_pytree.tree_structure(dummy_tree)
