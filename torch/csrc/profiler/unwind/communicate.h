@@ -1,15 +1,16 @@
 #pragma once
 #include <ext/stdio_filebuf.h>
-#include <sys/wait.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
 #include <unistd.h>
+#include <array>
 #include <memory>
 
 namespace torch::unwind {
 // helper to open a process with stdin/stdout/stderr streams.
 struct Communicate {
   Communicate(const char* command, const char** args) {
-    if (pipe(inpipe_) < 0 || pipe(outpipe_) < 0 || pipe(errpipe_) < 0) {
+    if (pipe(inpipe_.data()) < 0 || pipe(outpipe_.data()) < 0 ||
+        pipe(errpipe_.data()) < 0) {
       throw UnwindError("pipe() failed");
     }
     pid_t pid = fork();
@@ -56,12 +57,9 @@ struct Communicate {
   }
 
  private:
-  // NOLINTNEXTLINE(*array*)
-  int inpipe_[2]{-1, -1};
-  // NOLINTNEXTLINE(*array*)
-  int outpipe_[2]{-1, -1};
-  // NOLINTNEXTLINE(*array*)
-  int errpipe_[2]{-1, -1};
+  std::array<int, 2> inpipe_{-1, -1};
+  std::array<int, 2> outpipe_{-1, -1};
+  std::array<int, 2> errpipe_{-1, -1};
   std::unique_ptr<__gnu_cxx::stdio_filebuf<char>> outbuf_, inbuf_, errbuf_;
   std::unique_ptr<std::istream> in_;
   std::unique_ptr<std::ostream> out_;
