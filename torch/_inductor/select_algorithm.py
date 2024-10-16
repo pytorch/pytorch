@@ -34,7 +34,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate
+from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -121,6 +121,7 @@ SubgraphInfo = namedtuple(
 
 
 class TritonTemplateKernel(TritonKernel):
+
     def __init__(
         self,
         kernel_name,
@@ -137,7 +138,7 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
-        workspace_arg=None,
+        workspace_size=0,
         *,
         index_dtype,
     ) -> None:
@@ -167,7 +168,9 @@ class TritonTemplateKernel(TritonKernel):
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
         # Some templates user extra global memory as a workspace
-        self.workspace_arg =  workspace_arg
+        self.workspace_size = workspace_size
+        if self.workspace_size > 0:
+            self.args.workspace(workspace_size, False)
 
         # The following attributes (body, template_mask, output_val) are all
         # used for triton kernel codegen.
@@ -311,10 +314,6 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
-            if self.workspace_arg is not None:
-                arg_defs.append("ws_ptr")
-                call_args.append("workspace")
-                precompile_args.append(self.workspace_arg)
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
@@ -563,6 +562,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
+        _, call_args, _, arg_types = self.args.python_argdefs()
 
         # Handle workspace allocation
         if node.get_workspace_size() > 0:
@@ -570,7 +570,6 @@ class TritonTemplateKernel(TritonKernel):
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
 
-        _, call_args, _, arg_types = self.args.python_argdefs()
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
@@ -674,27 +673,27 @@ class TritonTemplate(KernelTemplate):
         if call_sizes is None:
             call_sizes = layout.size
 
-        kernel_options = dict(
-            input_nodes=input_nodes,
-            defines=defines,
-            num_stages=num_stages,
-            num_warps=num_warps,
-            grid_fn=self.grid,
-            meta=kwargs,
-            call_sizes=call_sizes,
-            prefix_args=prefix_args,
-            suffix_args=suffix_args,
-            epilogue_fn=epilogue_fn,
-            index_dtype="tl.int32",
-            subgraphs=subgraphs,
-        )
-        workspace_arg = self.args.workspace()
+        kernel_options = {
+            "input_nodes": input_nodes,
+            "defines": defines,
+            "num_stages": num_stages,
+            "num_warps": num_warps,
+            "grid_fn": self.grid,
+            "meta": kwargs,
+            "call_sizes": call_sizes,
+            "prefix_args": prefix_args,
+            "suffix_args": suffix_args,
+            "epilogue_fn": epilogue_fn,
+            "index_dtype": "tl.int32",
+            "subgraphs": subgraphs,
+        }
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
+            workspace_size=workspace_size,
             use_jit=False,
             **kernel_options,
         ) as kernel:
@@ -749,6 +748,7 @@ class TritonTemplate(KernelTemplate):
             kernel = TritonTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
+                workspace_size=workspace_size,
                 use_jit=False,
                 **kernel_options,
             )
