@@ -69,7 +69,7 @@ struct CacheKey {
   const uint8_t* key;
 };
 
-struct NodeCall {
+struct TORCH_API NodeCall {
   NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
@@ -84,6 +84,9 @@ struct NodeCall {
   std::vector<int> post_hooks;
   std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
+  int num_saved_tensors = 0;
+  int num_saved_sizes = 0;
+  int num_saved_ivalues = 0;
   bool needed = true;
 };
 
@@ -137,15 +140,17 @@ struct TensorArgs {
       : active_node_call_idx(active_node_call_idx) {}
 
   TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
+    // unconditionally add the tensor to inputs... Dynamo will de-dupe them later
+    inputs.emplace_back(tensor);
     if (!tensor.defined()) {
       return _undefined;
     }
     auto impl = tensor.unsafeGetTensorImpl();
     auto it = _args.find(impl);
     if (it == _args.end()) {
-      TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);
+      // TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
-      inputs.emplace_back(tensor);
+      // inputs.emplace_back(tensor);
       if (active_node_call_idx.has_value()) {
         input_origins.emplace_back(active_node_call_idx.value());
       }
@@ -208,6 +213,11 @@ struct LiftedIValueArgs {
     return iv_arg.proxy;
   }
 
+  at::IValue& next_proxy() {
+    auto& iv_arg = args.at(next++);
+    return iv_arg.proxy;
+  }
+
   void add(const at::IValue* iv) {
     args.emplace_back(iv);
     if (active_node_call_idx.has_value()) {
@@ -266,6 +276,7 @@ class CompiledNodeArgs {
   // key.
  public:
   void collect(const TensorArg& t) {
+    _node_call.num_saved_tensors++;
     collect_size(t.id);
     if (t.defined()) {
       const at::Tensor& tensor = _compiler.tensor_args.inputs[t.index()];
@@ -366,6 +377,7 @@ class CompiledNodeArgs {
         !nested &&
         (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
       // can't lift ivalues nested in collections
+      _node_call.num_saved_ivalues++;
       _compiler.lifted_ivalue_args.add(&iv);
     } else {
       try {
@@ -550,6 +562,7 @@ class CompiledNodeArgs {
   // -Wunknown-pragmas
   template <typename T>
   std::enable_if_t<std::is_unsigned_v<T>, void> collect_size(T s) {
+    _node_call.num_saved_sizes++;
     // we expect sizes to be small, so try to cram them into a single byte
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
@@ -629,17 +642,93 @@ struct TraceState {
   variable_list outputs;
 };
 
+struct TORCH_API SwapInterface {
+  virtual ~SwapInterface() = default;
+  virtual std::optional<at::Tensor> tensor(const at::Tensor& tensor);
+  virtual std::optional<at::Tensor> tensor(const SavedVariable& tensor);
+  virtual std::optional<c10::SymInt> next_size();
+  virtual c10::IValue next_ivalue();
+};
+
+struct SwapWithProxies : public SwapInterface {
+  explicit SwapWithProxies(AutogradCompilerCall& compiler, TraceState& state): compiler_(compiler), state_(state) {}
+
+  std::optional<at::Tensor> tensor(const at::Tensor& tensor)  override {
+    TensorArg& arg = compiler_.tensor_args.lookup(tensor);
+    if (arg.defined()) {
+      TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
+      return arg.proxy_tensor;
+    }
+    return std::nullopt;
+  }
+
+  std::optional<at::Tensor> tensor(const SavedVariable& t)  override {
+    TensorArg& arg = compiler_.tensor_args.lookup(t);
+    if (arg.defined()) {
+      return arg.proxy_tensor;
+    }
+    return std::nullopt;
+  }
+
+  std::optional<c10::SymInt> next_size() override {
+    return state_.next_sym_size();
+  }
+  c10::IValue next_ivalue() override {
+    return compiler_.lifted_ivalue_args.next_proxy();
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  AutogradCompilerCall& compiler_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  TraceState& state_;
+};
+
+struct  SwapWithReal : public SwapInterface {
+  explicit SwapWithReal(std::vector<at::Tensor> tensors, std::vector<c10::SymInt> sizes, std::vector<c10::IValue> ivalues)
+    : tensors_(std::move(tensors)), sizes_(std::move(sizes)), ivalues_(std::move(ivalues)) {}
+
+  std::optional<at::Tensor> tensor(const at::Tensor& _ignored) override {
+    auto result = tensors_[tensors_idx];
+    tensors_idx++;
+    return result;
+  }
+
+  std::optional<at::Tensor> tensor(const SavedVariable& _ignored) override {
+    auto result = tensors_[tensors_idx];
+    tensors_idx++;
+    return result;
+  }
+
+  std::optional<c10::SymInt> next_size() override {
+    auto result = sizes_[sizes_idx];
+    sizes_idx++;
+    return result;
+  }
+
+  c10::IValue next_ivalue() override {
+    auto result = ivalues_[ivalues_idx];
+    ivalues_idx++;
+    return result;
+  }
+  
+  std::vector<at::Tensor> tensors_;
+  int64_t tensors_idx = 0;
+  std::vector<c10::SymInt> sizes_;
+  int64_t sizes_idx = 0;
+  std::vector<c10::IValue> ivalues_;
+  int64_t ivalues_idx = 0;
+};
+
 class SwapSavedVariables {
   // SwapSavedVariables is used during the tracing/compilation phase after a
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
   void before(at::Tensor& t) {
-    TensorArg& arg = compiler.tensor_args.lookup(t);
+    auto replacement = state->tensor(t);
     stashed_tensors.save(&t, std::move(t));
-    if (arg.defined()) {
-      TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
-      t = arg.proxy_tensor;
+    if (replacement.has_value()) {
+      t = *replacement;
     }
   }
   void after(at::Tensor& t) {
@@ -647,12 +736,11 @@ class SwapSavedVariables {
   }
 
   void before(SavedVariable& t) {
-    TensorArg& arg = compiler.tensor_args.lookup(t);
+    auto replacement = state->tensor(t);
     stashed_variables.save(&t, std::move(t));
-    if (arg.defined()) {
+    if (replacement.has_value()) {
       bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
-      TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
-      t = SavedVariable(arg.proxy_tensor, false);
+      t = SavedVariable(replacement.value(), false);
       at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
@@ -662,7 +750,7 @@ class SwapSavedVariables {
 
   void before(c10::SymInt& t) {
     stashed_symints.save(&t, c10::SymInt(t));
-    auto opt_value = state.next_sym_size();
+    auto opt_value = state->next_size();
     if (opt_value.has_value()) {
       t = *opt_value; // dynamic shape
     }
@@ -677,7 +765,7 @@ class SwapSavedVariables {
     } else {
       stashed_ivalues.save(&iv, at::IValue(iv));
       if (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
-        iv = compiler.lifted_ivalue_args.next_proxy(&iv);
+        iv = state->next_ivalue();
       }
     }
   }
@@ -824,7 +912,17 @@ class SwapSavedVariables {
       TraceState& s,
       PyObject* p,
       const NodeCall& n)
-      : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
+      : py_compiler(p), curr_node_call(n) {
+        state = std::make_shared<SwapWithProxies>(c, s);
+  }
+
+  SwapSavedVariables(
+      std::vector<at::Tensor> a,
+      std::vector<at::SymInt> b,
+      std::vector<at::IValue> c,
+      PyObject* p,
+      const NodeCall& n)
+      : state(std::static_pointer_cast<SwapInterface>(std::make_shared<SwapWithReal>(std::move(a), std::move(b), std::move(c)))), py_compiler(p), curr_node_call(n) {}
 
   PyObject* get_py_compiler() {
     return py_compiler;
@@ -875,9 +973,10 @@ class SwapSavedVariables {
   };
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  AutogradCompilerCall& compiler;
+  // AutogradCompilerCall& compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  TraceState& state;
+  std::shared_ptr<SwapInterface> state;
+  // TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
   // it's lifecycle is entirely longer than this objects.
   PyObject* py_compiler;

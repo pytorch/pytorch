@@ -451,6 +451,32 @@ void set_ivalue_proxies(
   }
 }
 
+static PyObject* call_capture(
+    PyObject* self,
+    CacheNode& cache,
+    AutogradCompilerCall& compiler_call,
+    size_t num_outputs,
+    PyObject* nodecalls) {
+  static PyObject* method_name = PyUnicode_InternFromString("capture");
+  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
+  THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
+  THPObjectPtr pyivalueargsinput(
+      wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
+  THPObjectPtr pynodeorigins(
+      wrap_node_origins(compiler_call, PyTuple_GET_SIZE(pysizeinput.get())));
+  PyObject* py_num_outputs = THPUtils_packUInt32(num_outputs);
+  return check(PyObject_CallMethodObjArgs(
+      self,
+      method_name,
+      pyinput.get(),
+      pysizeinput.get(),
+      pyivalueargsinput.get(),
+      pynodeorigins.get(),
+      nodecalls,
+      py_num_outputs,
+      nullptr));
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -600,112 +626,10 @@ CacheNode* _compiled_autograd_impl(
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
-    TraceState state = call_begin_capture(
-        py_compiler, *cache, compiler_call, output_edges.size());
-    InputBuffers input_buffers;
+    // nodes
+    py::object nodecalls = py::cast(calls);
+    PyObject* res = call_capture(py_compiler, *cache, compiler_call, output_edges.size(), nodecalls.ptr());
 
-    for (size_t i = 0; i < calls.size(); i++) {
-      NodeCall& call = *calls[i];
-      // TODO(jansel): consider adding some of this stuff:
-      // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
-      // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-      // c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
-      // CheckpointValidGuard cpvguard(graph_task);
-      // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
-      // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
-
-      variable_list inputs =
-          std::move(input_buffers.lookup(call.node.get()).buffer);
-      input_buffers.erase(call.node.get());
-
-      if (!call.tensor_pre_hooks.empty()) {
-        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
-        for (const auto& hook : call.tensor_pre_hooks) {
-          pyinputs = check(PyObject_CallMethod(
-              py_compiler,
-              "tensor_pre_hook",
-              "Oii",
-              pyinputs.get(),
-              hook.first,
-              hook.second));
-        }
-        inputs = THPVariable_UnpackList(pyinputs);
-      }
-      for (const auto& graph_output : call.graph_output) {
-        int input_nr = graph_output.first;
-        int output_index = graph_output.second;
-        TORCH_INTERNAL_ASSERT(
-            output_index < static_cast<int>(state.outputs.size()));
-        TORCH_INTERNAL_ASSERT(!state.outputs[output_index].defined());
-        state.outputs[output_index] = inputs[input_nr];
-      }
-      if (!call.needed) {
-        continue;
-      }
-      if (!call.pre_hooks.empty()) {
-        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
-        for (const auto hook : call.pre_hooks) {
-          pyinputs = check(PyObject_CallMethod(
-              py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
-        }
-        inputs = THPVariable_UnpackList(pyinputs);
-      }
-
-      std::string _node_name = call.node->name();
-      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
-      TORCH_INTERNAL_ASSERT(node_name != nullptr);
-      THPObjectPtr set_node_origin(
-          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-
-      PyObject* pyobj = Py_None;
-      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
-        pyobj = pynode->obj;
-      }
-
-      check(PyObject_CallFunction(
-          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
-
-      SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      variable_list outputs = call.node->apply_with_saved(inputs, saved);
-
-      saved.debug_asserts();
-      saved.before(call.node->next_edges());
-      validate_outputs(
-          call.node->next_edges(), outputs, [&](const std::string& msg) {
-            std::ostringstream ss;
-            ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
-               << msg;
-            return ss.str();
-          });
-      saved.after(call.node->next_edges());
-      saved.debug_asserts();
-
-      if (!call.post_hooks.empty()) {
-        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
-        THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
-        for (const auto hook : call.post_hooks) {
-          pyoutputs = check(PyObject_CallMethod(
-              py_compiler.get(),
-              "post_hook",
-              "OOi",
-              pyoutputs.get(),
-              pyinputs.get(),
-              hook));
-        }
-        outputs = THPVariable_UnpackList(pyoutputs);
-      }
-      for (const auto i : c10::irange(outputs.size())) {
-        auto& output = outputs[i];
-        const auto& next = call.node->next_edge(i);
-        if (next.is_valid() && output.defined()) {
-          input_buffers.lookup(next.function.get())
-              .add(
-                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
-        }
-      }
-    }
-
-    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
     TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
     TORCH_CHECK(
         PyTuple_Size(res) == 2,
@@ -718,15 +642,19 @@ CacheNode* _compiled_autograd_impl(
     TORCH_CHECK(
         PyCallable_Check(cache->compiled_fn),
         "Expected end_capture to return compiled_fn");
-    state.debug_asserts();
+    // TODO(rzou): what is this?
+    // state.debug_asserts();
   } // End cache miss region
 
+  // TODO(rzou): need some mechanism to release the variables when we're ready.
   // TODO(jansel): clear grads we will overwrite below
-  if (!graph_task.keep_graph_) {
-    for (auto& call : calls) {
-      call->node->release_variables();
-    }
-  }
+  // if (!graph_task.keep_graph_) {
+  //   for (auto& call : calls) {
+  //     call->node->release_variables();
+  //   }
+  // }
+  auto ca = py::module::import("torch._dynamo.compiled_autograd");
+  ca.attr("set_global_nodecalls")(calls);
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);

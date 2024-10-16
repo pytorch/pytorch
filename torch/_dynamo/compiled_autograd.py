@@ -82,6 +82,77 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
+    def capture(self, inputs, sizes, scalars, origins, nodecalls, num_outputs):
+        counters["compiled_autograd"]["captures"] += 1
+        inputs_origins, sizes_origins, scalars_origins = origins
+
+        self.fx_tracer.root = torch.nn.Module()
+        self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
+        self.fx_tracer.tensor_attrs = {}
+        inputs_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+            self.fx_tracer.create_proxy("placeholder", name, (), {})
+            for name in self.graph_placeholders
+        )
+
+        graph_outputs = [None] * num_outputs
+
+        self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=CA_input_buffers_init,
+            args=(),
+            kwargs={},
+        )
+
+        for node_idx, call in enumerate(nodecalls):
+            inputs_idx = 0
+            sizes_idx = 0
+            scalars_idx = 0
+
+            input_buffer = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=CA_input_buffers_lookup,
+                args=(node_idx,),
+                kwargs={},
+            )
+
+            num_saved_inputs = call.num_saved_tensors
+            num_saved_sizes = call.num_saved_sizes
+            num_saved_scalars = call.num_saved_ivalues
+
+            saved_inputs = inputs_proxy[inputs_idx:inputs_idx + num_saved_inputs]
+            saved_sizes = sizes_proxy[sizes_idx:sizes_idx + num_saved_sizes]
+            saved_scalars = scalars_proxy[scalars_idx:scalars_idx + num_saved_scalars]
+
+            inputs_idx += num_saved_inputs
+            sizes_idx += num_saved_sizes
+            scalars_idx += num_saved_scalars
+
+            for input_nr, result_idx in call.graph_output:
+                graph_outputs[result_idx] = input_buffer[input_nr]
+
+            if not call.needed:
+                continue
+
+            outputs = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=CA_apply_with_saved,
+                args=(node_idx, input_buffer, saved_inputs, saved_sizes, saved_scalars),
+                kwargs={},
+            )
+            self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=CA_validate_outputs,
+                args=(node_idx, outputs),
+                kwargs={},
+            )
+            self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=CA_update_input_buffers,
+                args=(node_idx, outputs),
+                kwargs={},
+            )
+        return self.end_capture(graph_outputs)
+
     def begin_capture(
         self,
         inputs: List[torch.Tensor],
@@ -308,8 +379,8 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        self.rename_aot_dispatcher_nodes()
-        self.reorder_accumulate_grad_nodes()
+        # self.rename_aot_dispatcher_nodes()
+        # self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -562,3 +633,106 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+
+
+global_input_buffers = None
+global_nodecalls = None
+
+def get_node(idx):
+    return global_nodecalls[idx].node
+
+def set_global_nodecalls(nodecalls):
+    global global_nodecalls
+    global_nodecalls = nodecalls
+
+# @torch._dynamo.allow_in_graph
+@torch.fx.wrap
+def CA_input_buffers_init():
+    global global_input_buffers
+    global_input_buffers = InputBuffers()
+
+# @torch._dynamo.allow_in_graph
+@torch.fx.wrap
+def CA_input_buffers_lookup(node_idx):
+    node = get_node(node_idx)
+    result = global_input_buffers.lookup(node).buffer
+    breakpoint()
+    return result
+
+import torch._C._autograd as _ca
+
+# @torch._dynamo.allow_in_graph
+@torch.fx.wrap
+def CA_apply_with_saved(node_idx, inputs, saved_tensors, saved_sizes, saved_scalars):
+    node = get_node(node_idx)
+    swap_saved_variables = _ca.SwapSavedVariables(_ca.SwapWithReal(saved_tensors, saved_sizes, saved_scalars), None, global_nodecalls[node_idx])
+    outputs = node.apply_with_saved(inputs, swap_saved_variables)
+    breakpoint()
+    return outputs
+
+# @torch._dynamo.allow_in_graph
+@torch.fx.wrap
+def CA_validate_outputs(node_idx, outputs):
+    breakpoint()
+    pass
+
+# @torch._dynamo.allow_in_graph
+@torch.fx.wrap
+def CA_update_input_buffers(node_idx, outputs):
+    node = get_node(idx)
+    for output_idx, output in enumerate_outputs:
+        next_edge = node.next_edges(output_idx)
+        if next_edge.is_valid() and output is not None:
+            global_input_bufferes.lookup(next_edge.function.get()).add(next_edge.input_nr, output)
+
+
+class InputBuffers:
+    def __init__(self):
+        self.dct = {}
+
+    def lookup(self, node):
+        self.dct[node] = InputBuffer(node.num_inputs())
+        return self.dct[node]
+
+    def get(self, node):
+        return self.dct[node]
+
+
+class InputBuffer:
+    def __init__(self, size):
+        self.buffer = [None] * size
+
+    def __getitem__(self, pos):
+        return self.buffer[pos]
+
+    def add(self, pos, var):
+        if var is None:
+            return
+        old_var = self.buffer[pos]
+        if old_var is None:
+            self.buffer[pos] = old_var
+        else:
+            accumulate(self.buffer, pos, var)
+
+
+def accumulate(buffer, pos, var):
+    # TODO(rzou): some more stuff here
+    buffer[pos] = buffer[pos] + var
+
+
+def validate_outputs(edges, grads, format_error):
+    if len(grads) != len(edges):
+        raise ValueError(f"Invalid number of gradients - expected {len(edges)}, but got {len(grads)}")
+
+    # TODO(rzou): some more stuff here
+
+    for idx, grad in enumerate(grads):
+        edge = edges[idx]
+        if not edge.is_valid():
+            continue
+        metadata = edge.function.input_metadata(edge.input_nr)
+        if grad is None:
+            continue
+        grads[idx] = metadata.maybe_reduce(idx, grad, format_error)
+    
+    # TODO(rzou): some more stuff here

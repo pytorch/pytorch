@@ -1,4 +1,5 @@
 #include <torch/csrc/python_headers.h>
+#include <memory>
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
@@ -35,6 +36,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <set>
 #include <unordered_set>
@@ -42,6 +44,7 @@
 
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
+using namespace torch::dynamo::autograd;
 
 namespace {
 
@@ -78,6 +81,51 @@ struct EnablePythonDispatcher {
   }
   c10::impl::PyInterpreter* old_;
 };
+
+variable_list apply_with_saved314(
+    const NodeCall& nodecall,
+    const variable_list& inputs,
+    const std::vector<at::Tensor>& saved_tensors,
+    const std::vector<at::SymInt>& saved_sizes,
+    const std::vector<at::IValue>& saved_ivalues) {
+  auto swap_saved_variable = SwapSavedVariables(saved_tensors, saved_sizes, saved_ivalues, nullptr, nodecall);
+  return nodecall.node->apply_with_saved(inputs, swap_saved_variable);
+}
+
+/*
+struct PySwapInterface : public SwapInterface {
+public:
+    using SwapInterface::SwapInterface; // Inherit constructors
+    std::optional<at::Tensor> tensor(const at::Tensor& tensor) override {
+        PYBIND11_OVERRIDE_PURE(
+            std::optional<at::Tensor>, // Return type
+            SwapInterface, // Parent class
+            tensor, // Function name
+        );
+    }
+    std::optional<at::Tensor> tensor(const SavedVariable& sv) override {
+        PYBIND11_OVERRIDE_PURE(
+            std::optional<at::Tensor>, // Return type
+            SwapInterface, // Parent class
+            tensor, // Function name
+        );
+    }
+    std::optional<c10::SymInt> next_size() override {
+        PYBIND11_OVERRIDE_PURE(
+            std::optional<at::SymInt>, // Return type
+            SwapInterface, // Parent class
+            tensor, // Function name
+        );
+    }
+    c10::IValue next_ivalue() override {
+        PYBIND11_OVERRIDE_PURE(
+            c10::IValue, // Return type
+            SwapInterface, // Parent class
+            tensor, // Function name
+        );
+    }
+};
+*/
 
 struct EnablePreDispatch {
   EnablePreDispatch() : guard_(c10::DispatchKey::PreDispatch) {}
@@ -490,6 +538,32 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode");
     }
   });
+
+  // compiled_autograd stuff
+  py::class_<torch::autograd::Node, std::shared_ptr<torch::autograd::Node>>(m, "Node")
+    .def("compiled_args", &torch::autograd::Node::compiled_args)
+    .def("num_inputs", &torch::autograd::Node::num_inputs);
+  py::class_<torch::dynamo::autograd::NodeCall>(m, "NodeCall")
+    .def_readonly("node", &NodeCall::node)
+    .def_readonly("num_saved_tensors", &NodeCall::num_saved_tensors)
+    .def_readonly("num_saved_sizes", &NodeCall::num_saved_sizes)
+    .def_readonly("num_saved_ivalues", &NodeCall::num_saved_ivalues)
+    .def_readonly("graph_output", &NodeCall::graph_output)
+    .def_readonly("needed", &NodeCall::needed)
+    ;
+  py::class_<torch::dynamo::autograd::CompiledNodeArgs>(m, "CompiledNodeArgs")
+    .def(py::init<AutogradCompilerCall&,NodeCall&>());
+  py::class_<torch::dynamo::autograd::AutogradCompilerCall>(m, "AutogradCompilerCall")
+    .def(py::init<>())
+    ;
+  _C_m.def("apply_with_saved", &apply_with_saved314);
+  //py::class_<SwapInterface,PySwapInterface>(m, "SwapInterface");
+  // py::class_<SwapWithReal,SwapInterface>(m, "SwapWithReal")
+  //   .def(py::init<std::vector<at::Tensor>,std::vector<c10::SymInt>,std::vector<c10::IValue>>())
+  //   ;
+  // py::class_<SwapSavedVariables>(m, "SwapSavedVariables")
+  //   .def(py::init<std::vector<at::Tensor>,std::vector<c10::SymInt>,std::vector<c10::IValue>,PyObject*,const NodeCall&>())
+  //   ;
 
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
 
