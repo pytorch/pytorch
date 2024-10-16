@@ -423,14 +423,7 @@ def _pipelined_produce_and_all2all(
     symm_mem.barrier(channel=0)
 
 
-lib = torch.library.Library("symm_mem", "FRAGMENT")  # noqa: TOR901
-
-
-@torch.library.impl(lib, "one_shot_all_reduce", "Meta")
-def _one_shot_all_reduce_meta(
-    input: torch.Tensor, reduce_op: str, group_name: str
-) -> torch.Tensor:
-    return torch.empty_like(input)
+lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 
 
 lib.define(
@@ -461,6 +454,16 @@ lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor"
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
+
+
+lib_impl = torch.library.Library("symm_mem", "IMPL")  # noqa: TOR901
+
+
+@torch.library.impl(lib_impl, "one_shot_all_reduce", "Meta")
+def _one_shot_all_reduce_meta(
+    input: torch.Tensor, reduce_op: str, group_name: str
+) -> torch.Tensor:
+    return torch.empty_like(input)
 
 
 class _ScaleMode(Enum):
