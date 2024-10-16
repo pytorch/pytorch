@@ -250,14 +250,17 @@ else:
             return None
 
         @staticmethod
-        def num_devices_per_host(device_type: str) -> int:
-            return _get_device_handle(device_type).device_count()
+        def num_devices_per_host() -> int:
+            if torch.acc.is_available():
+                return torch.acc.device_count()
+            # For CPU devices
+            return 1
 
         @staticmethod
-        def num_hosts(device_type: str) -> int:
+        def num_hosts() -> int:
             # ProcessGroup can't tell us this info so we have to infer it, assume
             # homogeneous hardware for now
-            return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
+            return get_world_size() // _MeshEnv.num_devices_per_host()
 
         def get_mesh_dim_by_name(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
@@ -473,21 +476,21 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
 
-            device_handle = _get_device_handle(self.device_type)
             # TODO: if user want to pass pg_options, offer a way to do it
-            if not default_initialized and device_handle:
+            if not default_initialized:
                 # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogeneous hardware.
-                num_devices_per_host = device_handle.device_count()
-                if (
-                    world_size > num_devices_per_host
-                    and world_size % num_devices_per_host != 0
-                ):
-                    raise RuntimeError(
-                        f"DeviceMesh only support homogeneous hardware, but found "
-                        f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                    )
-                device_handle.set_device(get_rank() % num_devices_per_host)
+                if torch.acc.is_available():
+                    num_devices_per_host = torch.acc.device_count()
+                    if (
+                        world_size > num_devices_per_host
+                        and world_size & num_devices_per_host != 0
+                    ):
+                        raise RuntimeError(
+                            f"DeviceMesh only support homogeneous hardware, but found "
+                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                        )
+                    torch.acc.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
