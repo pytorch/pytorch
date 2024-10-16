@@ -156,9 +156,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             for nelem in [1024, 2048, 4096]:
-                # CI (Tesla T4) does not support bfloat16 compilation natively,
-                # using float
-                x = torch.randn(nelem, device="cuda", dtype=torch.float)
+                x = torch.randn(nelem, device="cuda", dtype=torch.bfloat16)
                 golden_out = eager_func(x)
 
                 for _ in range(3):
