@@ -258,7 +258,7 @@ def tree_flatten(
     The flattening order (i.e., the order of elements in the output list) is deterministic,
     corresponding to a left-to-right depth-first tree traversal.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(1)
@@ -266,7 +266,7 @@ def tree_flatten(
     >>> tree_flatten(None)
     ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> from collections import OrderedDict
-    >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
+    >>> tree = OrderedDict([("b", (2, [3, 4])), ("a", 1), ("c", None), ("d", 5)])
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
 
@@ -295,7 +295,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
 
     The inverse of :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> leaves, treespec = tree_flatten(tree)
     >>> tree == tree_unflatten(leaves, treespec)
     True
@@ -320,7 +320,7 @@ def tree_iter(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> list(tree_iter(tree))
     [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
@@ -355,7 +355,7 @@ def tree_leaves(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_leaves(tree)
     [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
@@ -390,7 +390,7 @@ def tree_structure(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_structure(tree)
     PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
     >>> tree_structure(1)
@@ -427,9 +427,9 @@ def tree_map(
 
     See also :func:`tree_map_`.
 
-    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64)})
+    >>> tree_map(lambda x: x + 1, {"x": 7, "y": (42, 64)})
     {'x': 8, 'y': (43, 65)}
-    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
+    >>> tree_map(lambda x: x is None, {"x": 7, "y": (42, 64), "z": None})
     {'x': False, 'y': (False, False), 'z': True}
 
     If multiple inputs are given, the structure of the tree is taken from the first input;
@@ -522,33 +522,32 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
-def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
-    ...
+def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]: ...
 
 
 @overload
-def map_only(__type_or_types_or_pred: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
+def map_only(
+    __type_or_types_or_pred: Type3[T, S, U],
+) -> MapOnlyFn[Fn3[T, S, U, Any]]: ...
 
 
 @overload
-def map_only(__type_or_types_or_pred: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
-    ...
+def map_only(__type_or_types_or_pred: Type[T]) -> MapOnlyFn[Fn[T, Any]]: ...
 
 
 # This specialization is needed for the implementations below that call
 @overload
-def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]:
-    ...
+def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 @overload
-def map_only(__type_or_types_or_pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
-    ...
+def map_only(
+    __type_or_types_or_pred: Callable[[Any], bool],
+) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 def map_only(
-    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
 ) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
@@ -599,8 +598,7 @@ def tree_map_only(
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -609,8 +607,7 @@ def tree_map_only(
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -619,8 +616,7 @@ def tree_map_only(
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -629,8 +625,7 @@ def tree_map_only(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 def tree_map_only(
@@ -648,8 +643,7 @@ def tree_map_only_(
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -658,8 +652,7 @@ def tree_map_only_(
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -668,8 +661,7 @@ def tree_map_only_(
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -678,8 +670,7 @@ def tree_map_only_(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 def tree_map_only_(
@@ -715,8 +706,7 @@ def tree_all_only(
     pred: Fn[T, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -725,8 +715,7 @@ def tree_all_only(
     pred: Fn2[T, S, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -735,8 +724,7 @@ def tree_all_only(
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 def tree_all_only(
@@ -755,8 +743,7 @@ def tree_any_only(
     pred: Fn[T, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -765,8 +752,7 @@ def tree_any_only(
     pred: Fn2[T, S, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -775,8 +761,7 @@ def tree_any_only(
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 def tree_any_only(
@@ -813,7 +798,7 @@ def broadcast_prefix(
     ValueError: list arity mismatch; expected: 3, got: 4; list: [1, 2, 3, 4].
     >>> broadcast_prefix([1, 2, 3], [1, 2, (3, 4)])
     [1, 2, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
+    >>> broadcast_prefix([1, 2, 3], [1, 2, {"a": 3, "b": 4, "c": (None, 5)}])
     [1, 2, 3, 3, 3, 3]
 
     Args:
@@ -828,13 +813,19 @@ def broadcast_prefix(
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
-    return optree.broadcast_prefix(
+    result: list[Any] = []
+
+    def add_leaves(x: Any, subtree: PyTree) -> None:
+        subtreespec = tree_structure(subtree, is_leaf=is_leaf)
+        result.extend([x] * subtreespec.num_leaves)
+
+    tree_map_(
+        add_leaves,
         prefix_tree,
         full_tree,
         is_leaf=is_leaf,
-        none_is_leaf=True,
-        namespace="torch",
     )
+    return result
 
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
@@ -850,7 +841,6 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[List[Any]]:
-    assert isinstance(treespec, TreeSpec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -860,12 +850,6 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"treespec_dumps(spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
-        )
-
     dummy_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     orig_treespec = python_pytree.tree_structure(dummy_tree)
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
