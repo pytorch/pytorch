@@ -6967,6 +6967,33 @@ class TestJit(DistributionsTestCase):
             )
 
 
+@skipIfTorchDynamo("Testing compiled functions")
+class TestCompiledDistribution(TestCase):
+    @staticmethod
+    def make_dist_and_sample(dist_cls, has_entropy, *args, **kwargs):
+        dist = dist_cls(*args, **kwargs)
+        sample = dist.sample()
+        lp = dist.log_prob(sample)
+        if has_entropy:
+            return sample, lp, dist.entropy()
+        return sample, lp, None
+
+    def test_compile_categorical(self):
+        import functools
+
+        make_dist_and_sample = torch.compile(
+            functools.partial(
+                self.make_dist_and_sample, dist_cls=Categorical, has_entropy=True
+            ),
+            fullgraph=True,
+        )
+        probs = torch.rand(10)
+        probs = probs / probs.sum()
+        _ = make_dist_and_sample(probs=probs)
+        logits = probs.log()
+        _ = make_dist_and_sample(logits=logits)
+
+
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
     run_tests()
