@@ -498,7 +498,9 @@ class TestPoolingNN(NNTestCase):
         input = torch.randn([1, 1, 1, 1, 1])
         input = torch.quantize_per_tensor(input, -0.1, -10, torch.qint32)
         with self.assertRaisesRegex(RuntimeError, "Expected dilation >= 1"):
-            torch.quantized_max_pool3d(input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1))
+            torch.quantized_max_pool3d(
+                input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1)
+            )
 
 
 class TestPoolingNNDeviceType(NNTestCase):
