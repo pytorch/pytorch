@@ -42,7 +42,16 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
   }
 
-  void init() const override {}
+  void init() const override {
+    TORCH_WARN_DEPRECATION(
+        "initPrivateUse1() is deprecated. Please implement init() directly instead.")
+    initPrivateUse1();
+  }
+
+  virtual void initPrivateUse1() const {
+    return;
+  }
+
   virtual void resizePrivateUse1Bytes(
       const c10::Storage& storage,
       size_t newsize) const {
