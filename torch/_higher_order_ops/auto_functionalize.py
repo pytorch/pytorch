@@ -85,7 +85,7 @@ def write_view_information_to_args(
             kwargs[f"{prefix}_base_index"] = None
         else:
             from torch.fx.experimental.symbolic_shapes import (
-                parallel_and_statically_known_true,
+                statically_known_true,
                 sym_eq,
             )
 
@@ -94,10 +94,13 @@ def write_view_information_to_args(
             if base is None:
                 # no need to add anything else other than _base_index
                 return
-            elif parallel_and_statically_known_true(
-                sym_eq(base.storage_offset(), tensor.storage_offset()),
-                sym_eq(base.stride(), tensor.stride()),
-                sym_eq(base.size(), tensor.size()),
+            elif all(
+                statically_known_true(a)
+                for a in [
+                    sym_eq(base.storage_offset(), tensor.storage_offset()),
+                    sym_eq(base.stride(), tensor.stride()),
+                    sym_eq(base.size(), tensor.size()),
+                ]
             ):
                 kwargs[f"{prefix}_alias"] = True
             else:
