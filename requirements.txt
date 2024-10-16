@@ -12,13 +12,12 @@ requests
 setuptools<=72.1.0
 types-dataclasses
 typing-extensions>=4.8.0
-sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 filelock
 networkx
 jinja2
 fsspec
-lintrunner
+lintrunner ; platform_system != "Windows"
 ninja
 packaging
 optree>=0.13.0
