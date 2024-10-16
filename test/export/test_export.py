@@ -6794,8 +6794,6 @@ def forward(self, x, b_t, y):
             gm.code,
         )
 
-    # T203671967
-    @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
             def forward(self, x):
