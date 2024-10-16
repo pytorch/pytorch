@@ -1753,7 +1753,6 @@ class PythonWrapperCodegen(CodeGen):
                 assert len(raw_args) == len(
                     call_args
                 ), "call_args and raw_args do not match"
-
             for i, (arg, arg_type, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_args)
             ):

@@ -78,7 +78,7 @@ def apply_scaling(
 
 
 device_tma = r"""
-{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale", "workspace_ptr")}}
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
@@ -105,7 +105,7 @@ device_tma = r"""
     num_tiles = num_pid_m * num_pid_n
 
     TMA_SIZE: tl.constexpr = 128
-    workspace_base = workspace_ptr + start_pid * 3 * TMA_SIZE
+    workspace_base = ws_ptr + start_pid * 3 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
     c_desc_ptr = workspace_base + 2 * TMA_SIZE
@@ -473,8 +473,9 @@ add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 ADD_TMA_DEVICE_KERNELS = True
 
 
-def build_workspace_buffer(num_sms: int, device: str, TMA_SIZE: int = 128) -> TensorBox:
-    return empty(num_sms * 3 * TMA_SIZE, dtype=torch.uint8, device=device)
+def get_workspace_size(num_sms: int, TMA_SIZE: int = 128, NUM_TMA_DESCRIPTORS=3) -> int:
+    """Device side TMA requires a workspace buffer to be allocated in global memory. """
+    return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
@@ -532,15 +533,12 @@ def tuned_scaled_mm(
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
-
-                workspace = build_workspace_buffer(
-                    kwargs["NUM_SMS"], mat_a.get_device()
-                )
-                input_nodes = (mat_a, mat_b, scale_a, scale_b, workspace)
+                input_nodes = (mat_a, mat_b, scale_a, scale_b)
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
                     input_nodes=input_nodes,
                     layout=layout,
+                    workspace_size=get_workspace_size(kwargs["NUM_SMS"]),
                     **kwargs,
                 )
 
