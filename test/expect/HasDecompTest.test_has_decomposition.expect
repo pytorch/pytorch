@@ -495,6 +495,7 @@ aten::_reshape_copy
 aten::_resize_output
 aten::_resize_output.out
 aten::_resize_output_
+aten::_rrelu_with_noise.out
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_attention_math_for_mps
@@ -1118,6 +1119,9 @@ aten::resize_as_sparse_
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
+aten::rrelu_with_noise
+aten::rrelu_with_noise.out
+aten::rrelu_with_noise_
 aten::scalar_tensor
 aten::scalar_tensor.out
 aten::scatter.reduce
