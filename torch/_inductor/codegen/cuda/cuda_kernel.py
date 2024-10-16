@@ -363,8 +363,9 @@ class CUDATemplateCaller(ChoiceCaller):
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        description: str,
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
