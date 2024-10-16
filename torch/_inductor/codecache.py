@@ -48,7 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypedDict
+from typing_extensions import TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -78,7 +78,7 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .ir import ExternKernelNode
+    from .compile_fx import _CompileFxKwargs
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -1512,19 +1512,6 @@ class FxGraphCache:
 _StrideExprStr: TypeAlias = str
 
 
-class _CompileFxKwargs(TypedDict, total=False):
-    cudagraphs: Optional[BoxedBool]
-    static_input_idxs: Sequence[int]
-    is_backward: bool
-    graph_id: Optional[int]
-    cpp_wrapper: bool
-    aot_mode: bool
-    is_inference: bool
-    user_visible_outputs: Optional[Dict[str, None]]
-    layout_opt: Optional[bool]
-    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
-
-
 @dataclasses.dataclass
 class CompiledFxGraph:
     """
@@ -1594,7 +1581,7 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: List[Any]) -> Any:
+    def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         return self.current_callable(inputs)
 

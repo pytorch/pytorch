@@ -15,8 +15,8 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing_extensions import Unpack
 
 import torch
 import torch.fx as fx
@@ -50,6 +50,8 @@ from .. import config
 
 
 if TYPE_CHECKING:
+    from torch._inductor.codecache import CompiledFxGraph
+    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
     from torch._inductor.utils import InputType
 
 
@@ -63,16 +65,11 @@ use_buck = inductor_config.is_fbcode()
 #                           MAIN ENTRY POINT
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: Callable[
-        Concatenate[torch.fx.GraphModule, Sequence[InputType], _P], _R
-    ],
+    unconfigured_compiler_fn: _CompileFxCallableEx,
     compiler_name: str,
-) -> Callable[Concatenate[torch.fx.GraphModule, Sequence[InputType], _P], _R]:
+) -> _CompileFxCallableEx:
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -85,9 +82,8 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
-        *args: _P.args,
-        **kwargs: _P.kwargs,
-    ) -> _R:
+        **kwargs: Unpack[_CompileFxKwargsEx],
+    ) -> Union[CompiledFxGraph, str]:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -125,14 +121,18 @@ def wrap_compiler_debug(
 
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
-        def deferred_for_real_inputs(*real_inputs: InputType, **_kwargs: object) -> Any:
+        def deferred_for_real_inputs(
+            real_inputs: Sequence[InputType], **_kwargs: object
+        ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
             # we should never hit this branch
+            assert not _kwargs
             if config.repro_after != "aot":
-                return inner_compiled_fn(*real_inputs)  # type: ignore[operator]
+                assert not isinstance(inner_compiled_fn, str)
+                return inner_compiled_fn(real_inputs)
             with config.patch(repro_after=None):
-                return inner_debug_fn(*real_inputs)
+                return inner_debug_fn(real_inputs)
 
         def inner_debug_fn(real_inputs):
             """

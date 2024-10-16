@@ -19,7 +19,6 @@ import torch
 from torch._dynamo.utils import counters, get_chromium_event_logger
 from torch._functorch import config
 from torch._inductor.codecache import (
-    _CompileFxKwargs,
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
     BypassFxGraphCache,
@@ -48,6 +47,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 
 if TYPE_CHECKING:
+    from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node

@@ -23,7 +23,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, ParamSpec, Protocol
+from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -48,7 +48,6 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import (
-    _CompileFxKwargs,
     _StrideExprStr,
     code_hash,
     CompiledFxGraph,
@@ -481,6 +480,19 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         yield
 
 
+class _CompileFxKwargs(TypedDict, total=False):
+    cudagraphs: Optional[BoxedBool]
+    static_input_idxs: Sequence[int]
+    is_backward: bool
+    graph_id: Optional[int]
+    cpp_wrapper: bool
+    aot_mode: bool
+    is_inference: bool
+    user_visible_outputs: Optional[Dict[str, None]]
+    layout_opt: Optional[bool]
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
+
+
 class _CompileFxKwargsEx(_CompileFxKwargs, total=False):
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
@@ -490,20 +502,7 @@ class _CompileFxCallableEx(Protocol):
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
-        *,
-        cudagraphs: Optional[BoxedBool] = None,
-        static_input_idxs: Sequence[int] = (),
-        is_backward: bool = False,
-        graph_id: Optional[int] = None,
-        cpp_wrapper: bool = False,
-        aot_mode: bool = False,
-        is_inference: bool = False,
-        boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-        user_visible_outputs: Optional[Dict[str, None]] = None,
-        layout_opt: Optional[bool] = None,
-        extern_node_serializer: Optional[
-            Callable[[List[ExternKernelNode]], Any]
-        ] = None,
+        **kwargs: Unpack[_CompileFxKwargsEx],
     ) -> Union[CompiledFxGraph, str]:
         ...
 
@@ -555,32 +554,12 @@ def compile_fx_inner(
         )
 
 
-if TYPE_CHECKING:
-
-    def _check(
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        kwargs: _CompileFxKwargsEx,
-    ) -> None:
-        _unused: _CompileFxCallableEx = compile_fx_inner
-        compile_fx_inner(gm, example_inputs, **kwargs)
-
-
 @time_and_log(attr="compilation time (in seconds)")
 def _compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    cudagraphs: Optional[BoxedBool] = None,
-    static_input_idxs: Sequence[int] = (),
-    is_backward: bool = False,
-    graph_id: Optional[int] = None,
-    cpp_wrapper: bool = False,
-    aot_mode: bool = False,
-    is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    user_visible_outputs: Optional[Dict[str, None]] = None,
-    layout_opt: Optional[bool] = None,
-    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
+    **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> Union[CompiledFxGraph, str]:
     """
     Inductor API that compiles a single graph.
@@ -588,6 +567,8 @@ def _compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
+    aot_mode = graph_kwargs["aot_mode"]
+
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
@@ -596,8 +577,7 @@ def _compile_fx_inner(
         _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
-    if static_input_idxs is None:
-        static_input_idxs = ()
+    static_input_idxs = graph_kwargs["static_input_idxs"]
 
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
 
@@ -609,36 +589,14 @@ def _compile_fx_inner(
         save_args_for_compile_fx_inner(
             gm,
             example_inputs,
-            cudagraphs=cudagraphs,
-            static_input_idxs=static_input_idxs,
-            is_backward=is_backward,
-            graph_id=graph_id,
-            cpp_wrapper=cpp_wrapper,
-            aot_mode=aot_mode,
-            is_inference=is_inference,
             boxed_forward_device_index=boxed_forward_device_index,
-            user_visible_outputs=user_visible_outputs,
-            layout_opt=layout_opt,
+            **graph_kwargs,
         )
 
-    if cudagraphs is None:
+    cudagraphs = graph_kwargs.get("cudagraphs")
+    if not cudagraphs:
         cudagraphs = BoxedBool(config.triton.cudagraphs)
-
-    # Inputs to fx_codegen_and_compile
-    # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the dict should be updated accordingly
-    graph_kwargs: _CompileFxKwargs = {
-        "cudagraphs": cudagraphs,
-        "static_input_idxs": static_input_idxs,
-        "is_backward": is_backward,
-        "graph_id": graph_id,
-        "cpp_wrapper": cpp_wrapper,
-        "aot_mode": aot_mode,
-        "is_inference": is_inference,
-        "user_visible_outputs": user_visible_outputs,
-        "layout_opt": layout_opt,
-        "extern_node_serializer": extern_node_serializer,
-    }
+        graph_kwargs["cudagraphs"] = cudagraphs
 
     start = time.time()
 
@@ -772,8 +730,8 @@ def _compile_fx_inner(
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
-        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
-        f"graph {graph_id}",
+        f"{'BACKWARDS' if graph_kwargs['is_backward'] else 'FORWARDS'} "
+        f"graph {graph_kwargs['graph_id']}",
     )
     # aot autograd needs to know to pass in inputs as a list
     compiled_graph._boxed_call = True
