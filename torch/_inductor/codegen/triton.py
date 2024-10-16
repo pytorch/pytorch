@@ -114,6 +114,8 @@ def gen_attr_descriptor_import():
 
     import triton.compiler.compiler
 
+    # Note: this works because triton.compiler.compiler imports AttrsDescriptor from triton.backends.compiler
+    # When support for the legacy AttrsDescriptor is removed then this import path should be changed.
     if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
         return "from triton.compiler.compiler import AttrsDescriptor"
     else:
@@ -1363,6 +1365,8 @@ class TritonKernel(SIMDKernel):
         self.cooperative_reduction = override_cooperative_reduction or (
             not override_persistent_reduction
             and override_cooperative_reduction is None
+            and not pid_cache  # foreach kernels
+            and V.graph.scheduler.get_current_device_or_throw().type != "cpu"
             and self.should_use_cooperative_reduction(groups)
         )
         if self.cooperative_reduction:
@@ -1392,8 +1396,7 @@ class TritonKernel(SIMDKernel):
 
         self.codegen_range_tree()
 
-    @staticmethod
-    def should_use_cooperative_reduction(groups) -> bool:
+    def should_use_cooperative_reduction(self, groups) -> bool:
         """Heuristic to decide self.cooperative_reduction should be used."""
         if len(groups) != 2:
             return False

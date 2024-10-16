@@ -98,13 +98,7 @@ class DeferredGpuDefaultGrid:
         assert (
             params is not None
         ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        block_cfg = {
-            "XBLOCK": params["x_block"],
-            "YBLOCK": params["y_block"],
-            "ZBLOCK": params["z_block"],
-            "RBLOCK": params["r_block"],
-        }
-        return grid_fn(block_cfg)
+        return grid_fn(params["meta"])
 
 
 class DeferredGpuGridLine(DeferredLineBase):

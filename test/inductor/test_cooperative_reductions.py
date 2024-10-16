@@ -24,13 +24,15 @@ class CooperativeReductionTests(TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         torch._dynamo.reset()
 
-    def run_and_check(self, fn, args):
+    def run_and_check(self, fn, args, *, expect_kernel_count=1):
         expected = fn(*args)
         fn = torch.compile(fn, fullgraph=True)
         result, (source_code,) = run_and_get_code(fn, *args)
         self.assertEqual(result, expected)
         self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expect_kernel_count
+        )
         return source_code
 
     @parametrize(
@@ -92,6 +94,18 @@ class CooperativeReductionTests(TestCase):
         source_code = self.run_and_check(fn, args)
         self.assertEqual(source_code.count("triton_helpers.gpu_barrier"), 16)
         self.assertEqual(source_code.count("empty_strided_cuda"), 8)
+
+    def test_reduce_split(self):
+        def fn(a, b):
+            a1 = torch.linalg.vector_norm(a)
+            b1 = torch.sum(b, dim=0)
+            return a1, b1
+
+        inps = [
+            torch.rand(2048, 512, device="cuda"),
+            torch.rand(20, 20, device="cuda"),
+        ]
+        self.run_and_check(fn, inps, expect_kernel_count=2)
 
 
 if __name__ == "__main__":

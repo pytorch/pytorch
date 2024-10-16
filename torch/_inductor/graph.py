@@ -91,6 +91,8 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -475,6 +477,10 @@ class GraphLowering(torch.fx.Interpreter):
         if device in self.semaphores_allocation_prior:
             prior_count, prior_name = self.semaphores_allocation_prior[device]
             if V.graph.sizevars.statically_known_leq(count, prior_count):
+                name = self.wrapper_code.generate_semaphores_allocation(
+                    count, device, is_cached=True
+                )
+                assert name == prior_name
                 return prior_name
         name = self.wrapper_code.generate_semaphores_allocation(count, device)
         self.semaphores_allocation_prior[device] = (count, name)
@@ -1931,6 +1937,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
