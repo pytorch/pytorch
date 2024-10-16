@@ -474,9 +474,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # "randomly" initialize the page table
-        paged_attention = PagedAttention(
-            n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
-        )
+        paged_attention = PagedAttention(n_pages, page_size, max_batch_size)
         batch_reserve(
             paged_attention,
             torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda"),
@@ -3363,8 +3361,8 @@ class TestPagedAttention(InductorTestCase):
             self.assertTrue(False, msg)
 
     def allocate_page_cache(self, n_pages: int, page_size: int):
-        max_batch_size, max_seq_len = 3, 128
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        max_batch_size = 3
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
         return paged_cache
 
     def cdiv(self, x, y):
@@ -3431,8 +3429,8 @@ class TestPagedAttention(InductorTestCase):
 
     @supported_platform
     def test_convert_logical_block_mask(self):
-        n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 2, 512
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        n_pages, page_size, max_batch_size, max_seq_len = 8, 128, 2, 512
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
 
         batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
         batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
@@ -3440,7 +3438,7 @@ class TestPagedAttention(InductorTestCase):
         batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
 
         expected_page_table = torch.tensor(
-            [[0, 3, 5, 7], [2, 1, 4, 6]],
+            [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
             device="cuda",
         )
         self.assertEqual(
@@ -3458,7 +3456,7 @@ class TestPagedAttention(InductorTestCase):
         )
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
-        zeros = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        zeros = [0, 0, 0, 0]
         # Check that the new block mask is correct
         expected_kv_num_blocks = torch.tensor(
             [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device="cuda", dtype=torch.int32
@@ -3517,8 +3515,8 @@ class TestPagedAttention(InductorTestCase):
 
     @supported_platform
     def test_convert_mask_mod(self):
-        n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        n_pages, page_size, max_batch_size = 8, 128, 2
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
 
         batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
         batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
@@ -3526,7 +3524,7 @@ class TestPagedAttention(InductorTestCase):
         batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
 
         expected_page_table = torch.tensor(
-            [[0, 3, 5, 7], [2, 1, 4, 6]],
+            [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
             device="cuda",
         )
         self.assertEqual(
@@ -3536,7 +3534,7 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         expected_physical_to_logical = torch.tensor(
-            [[0, -1, -1, 1, -1, 2, -1, 3, -1], [-1, 1, 0, -1, 2, -1, 3, -1, -1]],
+            [[0, -1, -1, 1, -1, 2, -1, 3], [-1, 1, 0, -1, 2, -1, 3, -1]],
             device="cuda",
         )
         self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
@@ -3561,7 +3559,7 @@ class TestPagedAttention(InductorTestCase):
         dtype = torch.float32
 
         n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
 
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
@@ -3572,7 +3570,7 @@ class TestPagedAttention(InductorTestCase):
         batch_reserve(paged_cache, torch.tensor([6, 6], device="cuda"))
 
         expected_page_table = torch.tensor(
-            [[0, 3, 5], [2, 1, 4]],
+            [[0, 3, 5, -1, -1, -1], [2, 1, 4, -1, -1, -1]],
             device="cuda",
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
@@ -3709,7 +3707,7 @@ class TestPagedAttention(InductorTestCase):
             dtype=torch.float16,
         )
 
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size)
         batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device="cuda"))
         batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device="cuda"))
         batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device="cuda"))

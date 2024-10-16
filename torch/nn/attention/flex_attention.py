@@ -1049,7 +1049,7 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
-    elif (
+    elif (query.requires_grad or key.requires_grad or value.requires_grad) and (
         query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
         or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
     ):

@@ -40,7 +40,6 @@ class PagedAttention:
         n_pages: int,
         page_size: int,
         max_batch_size: int,
-        max_seq_len: int,
         device: str = "cuda",
     ):
         # number of pages
@@ -50,9 +49,8 @@ class PagedAttention:
         self.page_size = page_size
 
         # page table: [batch, logical_block_idx] -> physical_page_idx
-        max_num_pages = _cdiv(max_seq_len, page_size)
         self.page_table = -torch.ones(
-            (max_batch_size, max_num_pages), dtype=torch.int64, device=device
+            (max_batch_size, self.n_pages), dtype=torch.int64, device=device
         )
 
         # capacity: batch_idx -> allocated sequence length
@@ -223,12 +221,10 @@ class PagedAttention:
             )
 
         # Increase the num columns of converted block mask from logical block mask's
-        # num columns to MAX_CACHED_BLOCKS_IN_COL, since a) the converted block mask
+        # num columns to n_pages, since a) the converted block mask
         # may have larger indices values; and b) `_ordered_to_dense` realizes
         # a dense tensor with these converted indices. There would be an IndexError
         # if using the logical block mask's num columns.
-        max_cached_seq_len = self.n_pages * self.page_size
-        MAX_CACHED_BLOCKS_IN_COL = _cdiv(max_cached_seq_len, self.page_size)
 
         device = block_mask.kv_num_blocks.device
 
@@ -239,7 +235,7 @@ class PagedAttention:
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
 
         new_kv_indices = torch.zeros(
-            (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+            (B, H, ROWS, self.n_pages), dtype=torch.int32, device=device
         )
         new_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
             torch.gather(
@@ -254,7 +250,7 @@ class PagedAttention:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.zeros(
-                (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+                (B, H, ROWS, self.n_pages), dtype=torch.int32, device=device
             )
             new_full_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
                 torch.gather(

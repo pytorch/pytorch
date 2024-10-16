@@ -413,9 +413,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # "randomly" initialize the page table
-        paged_attention = PagedAttention(
-            n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
-        )
+        paged_attention = PagedAttention(n_pages, page_size, max_batch_size)
         batch_reserve(
             paged_attention,
             torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda"),
