@@ -822,6 +822,8 @@ def jagged_scaled_dot_product_attention(
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]
         offsets = query.offsets()
         q_lengths = query.lengths()
+        min_seqlen = query._maybe_min_seqlen
+        max_seqlen = query._maybe_max_seqlen
         d1 = query._size[1]
         d2 = value._size[-1]
 
@@ -850,8 +852,8 @@ def jagged_scaled_dot_product_attention(
             attn_out,
             offsets,
             lengths=q_lengths,
-            min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
-            max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
         ).transpose(1, 2)
 
         return attn_out
