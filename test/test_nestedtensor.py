@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import math
@@ -3653,7 +3654,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ["contig", "noncontig_transposed", "noncontig_with_holes"],
         name_fn=lambda c: c,
     )
-    def test_serialization(self, device, dtype, contiguity):
+    @parametrize("weights_only", [True, False])
+    def test_serialization(self, device, dtype, contiguity, weights_only):
         # Test with 3 cases:
         # 1. contiguous
         # 2. non-contiguous transposed
@@ -3689,8 +3691,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
+            safe_globals = [
+                torch.nested._internal.nested_tensor.NestedTensor,
+                torch.nested._internal.nested_tensor._rebuild_njt,
+                set,
+                torch._dynamo.decorators._DimRange,
+            ]
             f.seek(0)
-            nt_loaded = torch.load(f)
+            ctx = (
+                torch.serialization.safe_globals(safe_globals)
+                if weights_only
+                else contextlib.nullcontext()
+            )
+
+            with ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load

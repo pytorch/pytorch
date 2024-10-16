@@ -66,6 +66,7 @@ __all__ = [
     "skip_data",
 ]
 
+IS_FBCODE = not hasattr(torch.version, "git_version")
 
 DEFAULT_PROTOCOL = 2
 
@@ -1159,7 +1160,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = None,
+    weights_only: Optional[bool] = not IS_FBCODE,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1168,7 +1169,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
