@@ -217,7 +217,7 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
-    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) { \
+    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
       return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
     });                                                                                                          \
   }
