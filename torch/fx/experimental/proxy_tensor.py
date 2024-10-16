@@ -801,6 +801,10 @@ def proxy_call(
             if r is not NotImplemented:
                 return r
 
+    if func is torch.ops.aten.is_nonzero.default:
+        with proxy_mode:
+            return (args[0] != 0).item()  # type: ignore[attr-defined]
+
     tracer = proxy_mode.tracer
     f_flat_args_kwargs = [
         (
@@ -1885,12 +1889,15 @@ class _MakefxTracer:
 
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
-                    fake_tensor_mode = FakeTensorMode(
-                        allow_fallback_kernels=True,
-                        allow_non_fake_inputs=self._allow_non_fake_inputs,
-                        shape_env=ShapeEnv(),
-                        static_shapes=True,
-                    )
+                    import torch._functorch.config as _config
+
+                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                        fake_tensor_mode = FakeTensorMode(
+                            allow_fallback_kernels=True,
+                            allow_non_fake_inputs=self._allow_non_fake_inputs,
+                            shape_env=ShapeEnv(),
+                            static_shapes=True,
+                        )
                 self.fake_tensor_mode = fake_tensor_mode
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
@@ -1898,12 +1905,14 @@ class _MakefxTracer:
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
+                    import torch._functorch.config as _config
 
-                    fake_tensor_mode = FakeTensorMode(
-                        allow_fallback_kernels=False,
-                        allow_non_fake_inputs=self._allow_non_fake_inputs,
-                        shape_env=shape_env,
-                    )
+                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                        fake_tensor_mode = FakeTensorMode(
+                            allow_fallback_kernels=False,
+                            allow_non_fake_inputs=self._allow_non_fake_inputs,
+                            shape_env=shape_env,
+                        )
                 assert (
                     fake_tensor_mode.shape_env is not None
                 ), "shape_env should be set if tracing with 'symbolic'"
@@ -2197,7 +2206,14 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
+    from torch._inductor.bisect_helper import BisectionManager
+
     if op in CURRENT_DECOMPOSITION_TABLE:
+        if BisectionManager.disable_subsystem(
+            "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
+        ):
+            return NotImplemented
+
         with proxy_mode:
             proxy_mode.decomp_layers += 1
             out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
