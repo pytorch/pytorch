@@ -88,7 +88,7 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaises(ValueError):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
-    @with_comms
+    @with_comms(eager_init=True)
     def test_get_group_and_get_all_groups(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(

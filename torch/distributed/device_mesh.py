@@ -49,6 +49,7 @@ else:
         is_initialized,
         new_group,
         ProcessGroup,
+        split_group,
     )
 
     logger = logging.getLogger(__name__)
@@ -499,11 +500,11 @@ else:
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
             dim_group_infos: List[Tuple[str, List[int], str]] = []
+            default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
                 # Otherwise, create new pg.
-                default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
@@ -547,35 +548,45 @@ else:
                         else f"mesh_dim_{dim}"
                     )
 
-                    # multi-dim mesh, create subgroups by looping over the pg_ranks
-                    # for each dim and append the groups
-                    for dim_mesh in pg_ranks_by_dim:
-                        subgroup_ranks = dim_mesh.tolist()
-
-                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
-                        # Temporarily reverting to resolve test timeout while root-causing.
-                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(
-                            ranks=subgroup_ranks,
-                            backend=backend,
+                    if (bound_device_id := getattr(default_group, "bound_device_id", None)) is not None:
+                        print(f"rank: {get_rank()=}, {bound_device_id=}")
+                        dim_group = split_group(
+                            parent_pg=default_pg,
                             pg_options=pg_options,
+                            pg_ranks_by_dim=pg_ranks_by_dim.to_list(),
                             group_desc=group_desc,
                         )
 
-                        # only add to dim_groups if the current rank in the subgroup
-                        if self.get_rank() in subgroup_ranks:
-                            if len(dim_group_infos) > dim:
-                                raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
-                                    f"in {subgroup_ranks}!"
-                                )
-                            dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    dim_group.group_name,
-                                )
+                    else:
+                        # multi-dim mesh, create subgroups by looping over the pg_ranks
+                        # for each dim and append the groups
+                        for dim_mesh in pg_ranks_by_dim:
+                            subgroup_ranks = dim_mesh.tolist()
+
+                            # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                            # Temporarily reverting to resolve test timeout while root-causing.
+                            # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                            dim_group = new_group(
+                                ranks=subgroup_ranks,
+                                backend=backend,
+                                pg_options=pg_options,
+                                group_desc=group_desc,
                             )
+
+                            # only add to dim_groups if the current rank in the subgroup
+                            if self.get_rank() in subgroup_ranks:
+                                if len(dim_group_infos) > dim:
+                                    raise RuntimeError(
+                                        f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
+                                        f"in {subgroup_ranks}!"
+                                    )
+                                dim_group_infos.append(
+                                    (
+                                        _get_group_tag(not_none(dim_group)),
+                                        subgroup_ranks,
+                                        dim_group.group_name,
+                                    )
+                                )
             self._dim_group_infos = dim_group_infos
 
         def __enter__(self) -> "DeviceMesh":
