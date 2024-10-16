@@ -38,9 +38,11 @@ def upload_to_s3_artifacts() -> None:
         print("GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading")
 
     test_reports_zip_path = f"{REPO_ROOT}/test-reports-{file_suffix}.zip"
-    zip_artifact(test_reports_zip_path, ["test/**/*.xml", "test/**/*.csv"])
+    zip_artifact(test_reports_zip_path, ["test/test-reports/**/*.xml", "test/test-reports/**/*.csv"])
     test_logs_zip_path = f"{REPO_ROOT}/logs-{file_suffix}.zip"
-    zip_artifact(test_logs_zip_path, ["test/**/*.log"])
+    zip_artifact(test_logs_zip_path, ["test/test-reports/**/*.log"])
+    jsons_zip_path = f"{REPO_ROOT}/test-jsons-{file_suffix}.zip"
+    zip_artifact(jsons_zip_path, ["test/test-reports/**/*.json"])
 
     s3_prefix = f"pytorch/pytorch/{workflow_id}/{workflow_run_attempt}/artifact"
     get_s3_resource().upload_file(
@@ -52,6 +54,11 @@ def upload_to_s3_artifacts() -> None:
         test_logs_zip_path,
         "gha-artifacts",
         f"{s3_prefix}/{Path(test_logs_zip_path).name}",
+    )
+    get_s3_resource().upload_file(
+        test_logs_zip_path,
+        "gha-artifacts",
+        f"{s3_prefix}/{Path(jsons_zip_path).name}",
     )
     get_s3_resource().put_object(
         Body=b"",
