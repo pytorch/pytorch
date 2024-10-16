@@ -1454,7 +1454,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs():
+        def get_inputs(choices: List[TritonTemplateCaller]):
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1483,6 +1483,17 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 for input_node in input_nodes
             ]
+            
+            # Make sure that all workspace sizes for each choice are the same
+            needs_workspace = any(choice.workspace_arg is not None for choice in choices)
+            if needs_workspace:
+                # TODO right now we only support the same workspace arg for all choices
+                workspace: WorkspaceArg = choices[0].workspace_arg
+                assert all(choice.workspace_arg == workspace for choice in choices)
+                # add 
+                size, zero_fill = workspace.nbytes, workspace.zero_fill
+                workspace_tensor = torch.empty_strided((size,), (1,), dtype=torch.uint8, device="cuda")
+                example_inputs.append(workspace_tensor)            
 
             out = cls.benchmark_example_value(layout)
             out_extern = torch.as_strided(
@@ -1530,7 +1541,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
-            inputs = get_inputs()
+            inputs = get_inputs(choices)
             example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
