@@ -774,7 +774,6 @@ TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
   auto event1 = c10d::ProcessGroupNCCL::CUDAEventCache::get().create(true);
   auto event2 = c10d::ProcessGroupNCCL::CUDAEventCache::get().create(false);
 
-
   auto event1_ptr = event1.get();
   auto event2_ptr = event2.get();
   // Mimic the behavior of the destroy of events.
