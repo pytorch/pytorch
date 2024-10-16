@@ -106,6 +106,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -996,3 +997,23 @@ def adaptive_max_pool2d(
         return aten.max_pool2d_with_indices(x, kernel_size)
 
     return NotImplemented
+
+
+@register_decomposition(aten.searchsorted.Scalar)
+def searchsorted_scalar(
+    sorted_sequence: torch.Tensor,
+    self: torch.types.Number,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    return aten.searchsorted(
+        sorted_sequence,
+        torch.tensor([self], device=sorted_sequence.device),
+        out_int32=out_int32,
+        right=right,
+        side=side,
+        sorter=sorter,
+    )[0]

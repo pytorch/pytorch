@@ -15,6 +15,10 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Callable, Dict
 
+# _thread_safe_fork is needed because the subprocesses in the pool can read
+# justknobs, e.g., in the Triton compiler. For internal, the import installs
+# functionality to destroy singletons before forking and re-enable them after.
+import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
