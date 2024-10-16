@@ -3,10 +3,12 @@ from typing import Callable, Dict
 
 import torch
 from torch._export.utils import (
+    _collect_all_valid_cia_ops,
     _collect_all_valid_cia_ops_for_aten_namespace,
     _get_decomp_for_cia,
     _is_aten_op,
     _is_custom_op,
+    _is_preservable_cia_op,
 )
 
 
@@ -121,8 +123,6 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
 
     def pop(self, *args):
         def _pop_if_can(key):
-            from torch._export.utils import _is_preservable_cia_op
-
             if _is_aten_op(key):
                 return self.aten_decomp_table.pop(key)
 
@@ -140,8 +140,8 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
                 raise KeyError(f"{key} doesn't exist in the table")
 
             self.deleted_custom_ops.add(key)
-            # We would come here when user pops off something that is 
-            # not in the table. In this case, we just pretend that it 
+            # We would come here when user pops off something that is
+            # not in the table. In this case, we just pretend that it
             # was in the table.
             return _get_decomp_for_cia(key)
 
@@ -161,8 +161,6 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         )
 
     def materialize(self):
-        from torch._export.utils import _collect_all_valid_cia_ops, _get_decomp_for_cia
-
         for op in _collect_all_valid_cia_ops():
             if _is_aten_op(op):
                 continue

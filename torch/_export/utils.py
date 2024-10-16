@@ -15,9 +15,9 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Set,
     Tuple,
     Type,
-    Set,
     TYPE_CHECKING,
 )
 
@@ -923,7 +923,7 @@ def _disable_load_state_dict_hooks(mod: torch.nn.Module):
         mod._state_dict_hooks = state_dict_hooks
         mod._state_dict_pre_hooks = state_dict_pre_hooks
 
-        
+
 def _is_cia_op(op: "OperatorBase") -> bool:
     return (
         torch._C._dispatch_has_kernel_for_dispatch_key(
