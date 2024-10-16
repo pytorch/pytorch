@@ -260,7 +260,7 @@ class SubprocMain:
 
         def callback(_: Future[Any]) -> None:
             if not self.running:
-                return None
+                return
             try:
                 result = future.result()
             except Exception as e:
@@ -270,7 +270,7 @@ class SubprocMain:
             with self.write_lock:
                 if self.running:
                     _send_msg(self.write_pipe, job_id, result)
-            return None
+            return
 
         future.add_done_callback(callback)
 
