@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include <c10/core/Allocator.h>
-#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -41,7 +41,8 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
 
-  virtual const Generator& getDefaultMPSGenerator() const {
+  const Generator& getDefaultGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
 
