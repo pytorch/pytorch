@@ -106,7 +106,7 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static typename std::enable_if_t<std::is_same_v<data_t, double>, void>
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -184,7 +184,7 @@ void fbgemm_spmdm_report_error_(
 } // namespace
 
 template <typename data_t, typename index_t>
-typename std::enable_if_t<
+std::enable_if_t<
     std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
     void>
 index_select_add(
@@ -365,7 +365,7 @@ index_select_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if_t<std::is_same_v<data_t, float>, void>
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
@@ -492,7 +492,7 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static typename std::enable_if_t<std::is_same_v<data_t, double>, void>
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -547,7 +547,7 @@ index_select_scale_add(
 }
 
 template <typename data_t, typename index_t>
-typename std::enable_if_t<
+std::enable_if_t<
     std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
     void>
 index_select_scale_add(
@@ -739,7 +739,7 @@ index_select_scale_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if_t<std::is_same_v<data_t, float>, void>
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_scale_add(const Tensor &select_indices,
                                           const Tensor &add_indices,
                                           const Tensor &scale,

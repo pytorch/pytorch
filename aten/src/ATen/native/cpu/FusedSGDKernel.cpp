@@ -12,20 +12,23 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t>
-typename std::
-    enable_if_t<std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>, void> inline sgd_math(
-        scalar_t* param_ptr,
-        scalar_t* grad_ptr,
-        scalar_t* momentum_buf_ptr,
-        const double weight_decay,
-        const double momentum,
-        const double lr,
-        const double dampening,
-        const bool nesterov,
-        const bool maximize,
-        const bool is_first_step,
-        const float* grad_scale_ptr,
-        int64_t size) {
+std::enable_if_t<
+    std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>,
+    void>
+    inline sgd_math(
+  scalar_t* param_ptr,
+  scalar_t* grad_ptr,
+  scalar_t* momentum_buf_ptr,
+  const double weight_decay,
+  const double momentum,
+  const double lr,
+  const double dampening,
+  const bool nesterov,
+  const bool maximize,
+  const bool is_first_step,
+  const float* grad_scale_ptr,
+  int64_t size
+){
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
   int64_t d = 0;
@@ -99,21 +102,25 @@ typename std::
   }
 }
 
+
 template <typename scalar_t, typename opmath_t>
-typename std::
-    enable_if_t<std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>, void> inline sgd_math(
-        scalar_t* param_ptr,
-        scalar_t* grad_ptr,
-        scalar_t* momentum_buf_ptr,
-        const double weight_decay,
-        const double momentum,
-        const double lr,
-        const double dampening,
-        const bool nesterov,
-        const bool maximize,
-        const bool is_first_step,
-        const float* grad_scale_ptr,
-        int64_t size) {
+std::enable_if_t<
+    std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+    void>
+    inline sgd_math(
+  scalar_t* param_ptr,
+  scalar_t* grad_ptr,
+  scalar_t* momentum_buf_ptr,
+  const double weight_decay,
+  const double momentum,
+  const double lr,
+  const double dampening,
+  const bool nesterov,
+  const bool maximize,
+  const bool is_first_step,
+  const float* grad_scale_ptr,
+  int64_t size
+){
   using Vec = at::vec::Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {

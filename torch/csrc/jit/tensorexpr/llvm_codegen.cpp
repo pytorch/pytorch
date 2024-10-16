@@ -1075,14 +1075,14 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
+std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
     llvm::Type* type,
     T value) {
   return llvm::ConstantInt::get(type, value, std::is_signed<T>::value);
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
+std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
     llvm::Type* type,
     T value) {
   return llvm::ConstantFP::get(type, value);

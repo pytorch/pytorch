@@ -84,7 +84,7 @@ struct VecMaskLoad<
     dst_n,
     mask_t,
     dst_n,
-    typename std::enable_if_t<
+    std::enable_if_t<
         std::is_same_v<data_t, BFloat16> ||
         std::is_same_v<data_t, Half>>> {
   static inline VectorizedN<data_t, dst_n> apply(
@@ -151,7 +151,7 @@ struct VecMaskLoad<
     1,
     mask_t,
     1,
-    typename std::enable_if_t<
+    std::enable_if_t<
         std::is_same_v<data_t, int8_t> ||
         std::is_same_v<data_t, uint8_t>>> {
   static inline VectorizedN<data_t, 1> apply(
@@ -173,7 +173,7 @@ struct VecMaskLoad<
     2,
     mask_t,
     1,
-    typename std::enable_if_t<
+    std::enable_if_t<
         std::is_same_v<data_t, int64_t> ||
         std::is_same_v<data_t, double>>> {
   static inline VectorizedN<data_t, 2> apply(

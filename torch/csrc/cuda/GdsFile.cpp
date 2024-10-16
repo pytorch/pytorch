@@ -12,7 +12,7 @@ namespace {
 // filesystem error and a negative CUfileOpError enum value otherwise).
 template <
     class T,
-    typename std::enable_if_t<std::is_integral_v<T>, std::nullptr_t> = nullptr>
+    std::enable_if_t<std::is_integral_v<T>, std::nullptr_t> = nullptr>
 std::string cuGDSFileGetErrorString(T status) {
   status = std::abs(status);
   return IS_CUFILE_ERR(status) ? std::string(CUFILE_ERRSTR(status))
@@ -23,7 +23,7 @@ std::string cuGDSFileGetErrorString(T status) {
 // CUfileError_t
 template <
     class T,
-    typename std::enable_if_t<!std::is_integral_v<T>, std::nullptr_t> = nullptr>
+    std::enable_if_t<!std::is_integral_v<T>, std::nullptr_t> = nullptr>
 std::string cuGDSFileGetErrorString(T status) {
   std::string errStr = cuGDSFileGetErrorString(static_cast<int>(status.err));
   if (IS_CUDA_ERR(status))
