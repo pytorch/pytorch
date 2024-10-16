@@ -7001,6 +7001,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 min_seqlen=query._min_seqlen,
                 max_seqlen=query._max_seqlen,
             )
+        # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
         key = torch.randn_like(query)
         value = torch.randn_like(query)
 
@@ -7018,6 +7019,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @onlyCUDA
     @flex_attention_supported_platform
     @dtypes(torch.float32)
+    # non-contiguous with holes not supported yet
+    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
     @parametrize("noncontig_with_holes", [False, True])
     def test_flex_attention(self, device, dtype, noncontig_with_holes):
         query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
