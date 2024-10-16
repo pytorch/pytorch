@@ -369,7 +369,6 @@ def with_comms(func: TestFunc = None, eager_init: bool = False) -> TestFunc:
     if func is None:
         return partial(with_comms, eager_init=eager_init)
 
-
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
