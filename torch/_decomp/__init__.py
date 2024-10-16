@@ -578,7 +578,6 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.norm,
             aten.ones,
             aten.ones_like,
-            aten.permute_copy,
             aten.pixel_shuffle,
             aten.pixel_unshuffle,
             aten._prelu_kernel,
