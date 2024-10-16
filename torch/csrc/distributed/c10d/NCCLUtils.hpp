@@ -13,7 +13,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/LockGuard.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
@@ -177,14 +176,14 @@ namespace c10d {
 #define DEFINE_CONSTANT(name, value) \
   static c10::IValue name = value;   \
   static std::string name##_str = value;
-DEFINE_CONSTANT(entries_key, "entries");
-DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
-DEFINE_CONSTANT(version_key, "version");
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.3");
+DEFINE_CONSTANT(version_val, "2.4");
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
 DEFINE_CONSTANT(pg_config_key, "pg_config");
 DEFINE_CONSTANT(pg_status_key, "pg_status");
 DEFINE_CONSTANT(record_id_key, "record_id");
@@ -260,18 +259,18 @@ class TORCH_API DebugInfoWriter {
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm),
-        aborted_(false),
+      : aborted_(false),
         ncclAsyncErr_(ncclSuccess),
         commFailureReason_(std::nullopt),
-        initialized_(false) {}
+        initialized_(false),
+        ncclComm_(ncclComm) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
   ~NCCLComm() noexcept {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
@@ -363,7 +362,7 @@ class NCCLComm {
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
-    C10D_LOCK_GUARD(lock, other.mutex_);
+    std::unique_lock<std::mutex> lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
@@ -373,13 +372,13 @@ class NCCLComm {
   ncclComm_t getNcclComm();
 
   std::optional<std::string> getNcclCommFailureReason() const {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return commFailureReason_;
   }
 
   void ncclCommAbort(
       std::optional<std::string> commFailureReason = std::nullopt) {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_ && !initialized_) {
       // Should not abort twice.
@@ -427,7 +426,7 @@ class NCCLComm {
   }
 
   bool isAborted() const {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
   }
 
@@ -436,7 +435,7 @@ class NCCLComm {
   }
 
   ncclResult_t checkForNcclError() {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
@@ -451,7 +450,7 @@ class NCCLComm {
   }
 
   ncclResult_t registerSegment(void* ptr, size_t size) {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     // We register only segments from cache allocator
     // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
@@ -465,15 +464,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle;
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        ncclCommRegister(comm, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -482,7 +483,7 @@ class NCCLComm {
   }
 
   ncclResult_t deregisterSegment(void* ptr) {
-    C10D_LOCK_GUARD(lock, mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     TORCH_CHECK(
         registeredSegmentHandles_.count(ptr) == 1,
@@ -492,15 +493,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(ncclComm_, handle),
+        ncclCommDeregister(comm, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -508,18 +511,21 @@ class NCCLComm {
 #endif
   }
 
+  std::string repr() const {
+    return c10::str((void*)ncclComm_);
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized(int timeoutSecs);
-  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_;
-  mutable std::timed_mutex mutex_;
+  mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
   int rank_;
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
@@ -530,6 +536,9 @@ class NCCLComm {
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
+
+ private:
+  ncclComm_t ncclComm_;
 };
 
 // Helper that automatically cleans up premul sums.
@@ -627,9 +636,9 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int64_t, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
@@ -638,7 +647,7 @@ struct NCCLTraceBuffer {
 
   bool enabled_ = false;
   bool capture_cpp_stack_ = false;
-  std::timed_mutex mutex_;
+  std::mutex mutex_;
   std::vector<Entry> entries_;
   size_t max_entries_ = 0;
   size_t next_ = 0;

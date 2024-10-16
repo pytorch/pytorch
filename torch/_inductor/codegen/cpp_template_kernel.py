@@ -10,6 +10,7 @@ from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
+from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
@@ -106,7 +107,9 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name, call_args, triton=False, gpu=False, arg_types=arg_types
+        )
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -179,7 +182,9 @@ class CppTemplateKernel(CppKernel):
     def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
@@ -239,7 +244,7 @@ class CppTemplateKernel(CppKernel):
                     node.make_loader()(new_args).value,
                 )
 
-            body = ir.LoopBody(
+            body = LoopBody(
                 fn,
                 (list(var_ranges.keys()), ()),
                 var_ranges,
@@ -343,7 +348,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
