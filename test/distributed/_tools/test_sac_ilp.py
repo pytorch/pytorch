@@ -128,15 +128,6 @@ class TestSACILP(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_aggregate_stats_and_baseline_estimation(self):
-        mod_info = self._collect_module_info_with_fake_tensor_mode()
-        g = parse_module_info(mod_info)
-        peak_mem, compute_time = get_peak_memory_runtime_baseline(g)
-        self.assertAlmostEqual(peak_mem / 2583888896, 1, delta=0.05)
-        self.assertAlmostEqual(compute_time / 97.96842366130087, 1, delta=0.05)
-
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -144,6 +135,10 @@ class TestSACILP(TestCase):
         """
         mod_info = self._collect_module_info_with_fake_tensor_mode()
         g = parse_module_info(mod_info)
+
+        peak_mem, compute_time = get_peak_memory_runtime_baseline(g)
+        self.assertAlmostEqual(peak_mem / 2583888896, 1, delta=0.05)
+
         ac_decisions, recomputation_time, _ = sac_milp(
             g, memory_budget=1.6, world_size=4
         )
@@ -163,7 +158,12 @@ class TestSACILP(TestCase):
         self.assertAlmostEqual(sorted_discard_ratio[2], 0.5232, delta=0.02)
         self.assertAlmostEqual(sorted_discard_ratio[3], 0.7964, delta=0.02)
         self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.5232, delta=0.02)
-        self.assertAlmostEqual(recomputation_time, 6.97, delta=0.5)
+
+        # on A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms
+        # some runtime is device_flops dependent, so we only check the ratio
+        self.assertAlmostEqual(
+            (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.05
+        )
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
