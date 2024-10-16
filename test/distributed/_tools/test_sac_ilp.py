@@ -193,7 +193,6 @@ class TestSACILP(TestCase):
         ac_decisions, recomputation_time, peak_mem = sac_milp(
             g, memory_budget=0.8, world_size=4
         )
-        print(ac_decisions, recomputation_time, peak_mem)
         self.assertEqual(ac_decisions, {})
         self.assertEqual(recomputation_time, 0)
         self.assertEqual(peak_mem, -1)
