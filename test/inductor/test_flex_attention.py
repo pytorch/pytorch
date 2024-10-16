@@ -32,17 +32,12 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    flex_attention_supported_platform as supported_platform,
+)
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
-
-# Skip tests if Triton is not available
-supported_platform = skipUnless(
-    torch.cuda.is_available()
-    and has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
-)
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
@@ -2371,6 +2366,17 @@ class GraphModule(torch.nn.Module):
         l_block_mask_q_indices = L_block_mask_q_indices
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
+
+        getattr_1 = l_query_.is_nested;  getattr_1 = None
+        getattr_2 = l_key_.is_nested;  getattr_2 = None
+        getattr_3 = l_key_.is_nested;  getattr_3 = None
+        getattr_4 = l_value_.is_nested;  getattr_4 = None
+
+        getattr_5 = l_query_.is_nested;  getattr_5 = None
+
+        getattr_6 = l_query_.is_nested;  getattr_6 = None
+
+        getattr_7 = l_query_.is_nested;  getattr_7 = None
 
         child_1: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_1 = None
         child_2: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_2 = None
