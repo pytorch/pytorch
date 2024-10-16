@@ -49,6 +49,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .pgo import put_automatic_dynamic_frame_state
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -1269,6 +1270,9 @@ class OutputGraph:
             )
 
     def run_compiler_collective(self, tx):
+        # TODO: maybe we need to rename this function
+        put_automatic_dynamic_frame_state(tx, self.frame_state)
+
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
             compile_pg = ds.compile_pg
             log.info("compiler_collective %s", ds.local_state)

@@ -58,6 +58,7 @@ from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
+from ..pgo import get_automatic_dynamic_initial_frame_state
 from ..source import (
     AttrProxySource,
     AttrSource,
@@ -1743,7 +1744,8 @@ class VariableBuilder:
             name = self.source.name()
 
             def update_frame_state(value):
-                if name not in self.tx.output.frame_state:
+                frame_state_entry = tx.output.frame_state.get(name, get_automatic_dynamic_initial_frame_state(tx, name))
+                if frame_state_entry is None:
                     # Note - this essentially means that if this name gets reused as a tensor,
                     # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                     # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
@@ -1752,7 +1754,6 @@ class VariableBuilder:
                         scalar=value, size=None, stride=None
                     )
                 else:
-                    frame_state_entry = self.tx.output.frame_state[name]
                     if frame_state_entry.scalar != value:
                         log.debug(
                             "automatic dynamic int %s val %s != %s",
@@ -2447,15 +2448,14 @@ def _automatic_dynamic(
         # Intentionally shadow e from parent scope so it is not accidentally
         # called
         e = None
-        frame_state_entry = None
-        if name not in tx.output.frame_state:
+        frame_state_entry = tx.output.frame_state.get(name, get_automatic_dynamic_initial_frame_state(tx, name))
+        if frame_state_entry is None:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
             # E.g., {} -> {"x": [2, 4]}
             frame_state_entry = FrameStateSizeEntry(None, None, None)
             frame_state_entry.size = list(size)
             frame_state_entry.stride = list(stride)
         else:
-            frame_state_entry = tx.output.frame_state[name]
             if frame_state_entry.size is not None:
                 if len(size) != len(frame_state_entry.size):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
