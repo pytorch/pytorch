@@ -1275,6 +1275,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
+
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
 )

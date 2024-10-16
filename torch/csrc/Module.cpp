@@ -888,8 +888,7 @@ PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg)
-{
+PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -901,11 +900,9 @@ PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs){ 
-  if(at::globalContext().allowTF32Mkldnn())
-    Py_RETURN_TRUE;
-  else
-    Py_RETURN_FALSE;
+PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs) {
+  f(at::globalContext().allowTF32Mkldnn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 PyObject* THPModule_deterministicAlgorithms(
@@ -2418,3 +2415,4 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
+ 
