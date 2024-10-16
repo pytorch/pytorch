@@ -205,7 +205,7 @@ class DistributedPatternTests(TestCase):
             x = x.sin()
             v = w._version
             w.copy_(x + 1)
-            torch._C._autograd._unsafe_set_version_counter(w, v)
+            torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return w, v
 
         for v in (3, 0, 1):
