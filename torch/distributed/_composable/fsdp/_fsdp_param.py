@@ -751,7 +751,6 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
-        self._assert_in_states(ShardedState.UNSHARDED)
         return self._unsharded_param
 
     @property
