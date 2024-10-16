@@ -177,6 +177,7 @@ if RUN_CUDA:
             BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
             for dtype in test_torchinductor.test_dtypes
         ],
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
