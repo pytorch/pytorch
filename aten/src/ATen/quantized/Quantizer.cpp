@@ -11,7 +11,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
-#include <ATen/Context.h>
 
 #include <cmath>
 #include <utility>
