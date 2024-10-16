@@ -934,10 +934,10 @@ def compute_unbacked_bindings(
             and rhs in pending
         ):
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[s] = path + (DivideByKey(int(lhs)),)
+            r[rhs] = path + (DivideByKey(int(lhs)),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(s, real // int(lhs))
+                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
             pending.remove(rhs)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
