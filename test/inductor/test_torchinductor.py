@@ -1487,7 +1487,6 @@ class CommonTemplate:
         actual = nested_opt(*example_inputs)
         self.assertEqual(expect, actual)
 
-    @xfail_if_triton_cpu
     def test_index_propagation_flip(self):
         def flip(x):
             i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -1669,7 +1668,6 @@ class CommonTemplate:
             vectorize=False,  # There's no loop to vectorize!
         )
 
-    @xfail_if_triton_cpu
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
@@ -7706,6 +7704,9 @@ class CommonTemplate:
             check_lowp = False
 
         for deterministic in [False, True]:
+            if deterministic and self.device == "xpu":
+                # There is no deterministic implementation for scatter_add on Intel GPU.
+                continue
             with DeterministicGuard(deterministic):
                 self.common(
                     fn,
@@ -10783,7 +10784,6 @@ class CommonTemplate:
             self.common(fn, (inp,), check_lowp=False)
 
     @requires_gpu()
-    @xfail_if_triton_cpu
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
@@ -11538,7 +11538,6 @@ class CommonTemplate:
 
         self.common(forward, ())
 
-    @xfail_if_triton_cpu
     def test_flip_cat(self):
         def forward(unsqueeze, unsqueeze_1):
             cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)

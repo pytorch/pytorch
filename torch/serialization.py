@@ -53,6 +53,8 @@ __all__ = [
     "load",
     "StorageType",
     "LoadEndianness",
+    "get_crc32_options",
+    "set_crc32_options",
     "get_default_load_endianness",
     "set_default_load_endianness",
     "get_default_mmap_options",
@@ -64,6 +66,7 @@ __all__ = [
     "skip_data",
 ]
 
+IS_FBCODE = not hasattr(torch.version, "git_version")
 
 DEFAULT_PROTOCOL = 2
 
@@ -165,6 +168,34 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
+
+
+_compute_crc32: bool = True
+
+
+def get_crc32_options() -> bool:
+    """
+    Get whether :func:`torch.save` computes and writes crc32 for each record.
+
+    Defaults to ``True``.
+    """
+    return _compute_crc32
+
+
+def set_crc32_options(compute_crc32: bool):
+    """
+    Set whether :func:`torch.save` computes and writes crc32 for each record.
+
+    .. note::
+        Setting this to ``False`` may make unzipping of the ``torch.save`` output
+        fail or warn due to corrupted CRC32. However ``torch.load`` will be
+        able to load the file.
+
+    Args:
+        compute_crc32 (bool): set crc32 compuation flag
+    """
+    global _compute_crc32
+    _compute_crc32 = compute_crc32
 
 
 _default_mmap_options: int = MAP_PRIVATE
@@ -682,9 +713,11 @@ class _open_zipfile_writer_file(_opener):
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
-            super().__init__(torch._C.PyTorchFileWriter(self.file_stream))
+            super().__init__(
+                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
+            )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name))
+            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -700,7 +733,7 @@ class _open_zipfile_writer_buffer(_opener):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer))
+        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -1127,7 +1160,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = None,
+    weights_only: Optional[bool] = not IS_FBCODE,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1136,7 +1169,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
