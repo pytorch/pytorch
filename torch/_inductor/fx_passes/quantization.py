@@ -925,7 +925,7 @@ def _register_quantization_binary_fusion():
                             get_dequantize_qconv_pt2e_pattern(1),
                             dequantize_accum_pattern,
                             int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs
+                            swap_inputs=swap_inputs,
                         ),
                     ),
                     BinaryUnaryAttr(
@@ -937,12 +937,12 @@ def _register_quantization_binary_fusion():
                                 get_dequantize_qconv_pt2e_pattern(1),
                                 dequantize_accum_pattern,
                                 int8_mixed_bf16_with_inplace_add,
-                                swap_inputs=swap_inputs
+                                swap_inputs=swap_inputs,
                             ),
                             aten.relu.default,
                         ),
                     ),
-               }
+                }
             )
 
         for binary_unary_attr, patterns in binary_replace_patterns.items():
@@ -958,13 +958,15 @@ def _register_quantization_binary_fusion():
         for swap_inputs in swap_binary_inputs_list:
             binary_replace_float_out_patterns.update(
                 {
-                    BinaryUnaryAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "relu", [], ""
+                    ): generate_pattern_with_unary(
                         generate_pattern_with_binary(
                             aten.add.Tensor,
                             get_dequantize_qconv_pt2e_pattern(1),
                             KeywordArg("accum_after_dequant"),
                             int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs
+                            swap_inputs=swap_inputs,
                         ),
                         aten.relu.default,
                     )
@@ -995,12 +997,14 @@ def _register_quantization_binary_fusion():
         for swap_inputs in swap_binary_inputs_list:
             binary_replace_float_out_patterns.update(
                 {
-                    BinaryUnaryAttr("sum", 1.0, "none", [], ""): generate_pattern_with_binary(
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "none", [], ""
+                    ): generate_pattern_with_binary(
                         aten.add.Tensor,
                         get_dequantize_qconv_pt2e_pattern(1),
                         KeywordArg("accum_after_dequant"),
                         int8_mixed_bf16_with_inplace_add,
-                        swap_inputs=swap_inputs
+                        swap_inputs=swap_inputs,
                     ),
                 }
             )
