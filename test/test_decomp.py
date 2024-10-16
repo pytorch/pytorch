@@ -1231,9 +1231,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

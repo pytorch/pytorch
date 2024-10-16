@@ -60,7 +60,7 @@ from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
-from torch.export.decomp_utils import CustomDecompTable
+from torch.export._decomp_utils import CustomDecompTable
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
