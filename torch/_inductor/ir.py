@@ -3974,7 +3974,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
-        workspace_size: int = 0,
     ):
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -3988,8 +3987,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.mutated_inputs = mutated_inputs
         self.outputs: List[Buffer] = [self]
-        # Global memory (in bytes) needed for this template.
-        self.workspace_size = workspace_size
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
             allowed_set = (
@@ -4004,9 +4001,6 @@ class TritonTemplateBuffer(TemplateBuffer):
             self.outputs += [
                 MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
             ]
-
-    def get_workspace_size(self):
-        return self.workspace_size if self.workspace_size is not None else 0
 
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
