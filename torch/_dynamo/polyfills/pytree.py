@@ -310,7 +310,9 @@ if python_pytree._cxx_pytree_exists:
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree._is_pytreespec_instance,
-        can_constant_fold_through=True,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
     )
     def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
