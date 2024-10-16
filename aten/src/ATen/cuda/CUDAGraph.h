@@ -45,6 +45,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   static std::atomic<int> pending_event_queries;
 
+  // Set to true at end of capture_begin
+  // Set back to false at beginning of capture_end
+  static thread_local bool is_capturing_;
+
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded
   // Set back to false soon after, when graph_ is consumed by cudaGraphInstantiate
