@@ -676,34 +676,35 @@ def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    if not config.is_fbcode():
+    with dynamo_timed("inductor_codecache_torch_key"):
+        if not config.is_fbcode():
 
-        def get_code_hash(root: str) -> bytes:
-            # This function isn't meant to be used outside of torch_key, just a
-            # helper for clarity. Instead, use torch_key() directly when you need
-            # a hash representing the state of the source code.
-            extra_files = (
-                "codegen/aoti_runtime/interface.cpp",
-                "codegen/aoti_runtime/implementation.cpp",
-                "codegen/cpp_prefix.h",
-                "script.ld",
-            )
-            inductor_root = os.path.dirname(__file__)
-            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
-            hasher = hashlib.sha256()
-            hasher.update(torch.__version__.encode("utf-8"))
-            build_code_hash([root], "", hasher)
-            for path in extra_files:
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        hasher.update(f.read())
-            return hasher.digest()
+            def get_code_hash(root: str) -> bytes:
+                # This function isn't meant to be used outside of torch_key, just a
+                # helper for clarity. Instead, use torch_key() directly when you need
+                # a hash representing the state of the source code.
+                extra_files = (
+                    "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/implementation.cpp",
+                    "codegen/cpp_prefix.h",
+                    "script.ld",
+                )
+                inductor_root = os.path.dirname(__file__)
+                extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+                hasher = hashlib.sha256()
+                hasher.update(torch.__version__.encode("utf-8"))
+                build_code_hash([root], "", hasher)
+                for path in extra_files:
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            hasher.update(f.read())
+                return hasher.digest()
 
-        return get_code_hash(_TORCH_PATH)
+            return get_code_hash(_TORCH_PATH)
 
-    from libfb.py import parutil
+        from libfb.py import parutil
 
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
+        return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
 def get_inductor_root() -> str:
@@ -1387,7 +1388,7 @@ class FxGraphCache:
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache hit for key %s", key)
+            log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1401,7 +1402,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache miss for key %s", key)
+            log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
