@@ -302,7 +302,7 @@ Alias for :func:`torch.acosh`.
 add_docstr(
     torch.index_add,
     r"""
-index_add(input: Tensor, dim: _int, index: Tensor, source: Tensor, *, alpha: Union[Number, _complex] = 1, out: Optional[Tensor]) -> Tensor
+index_add(input: Tensor, dim: int, index: Tensor, source: Tensor, *, alpha: Union[Number, _complex] = 1, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 See :meth:`~Tensor.index_add_` for function description.
 """,
