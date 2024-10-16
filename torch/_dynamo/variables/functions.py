@@ -360,15 +360,15 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
         self.vt = vt
         self.inline_tracer = None
 
-    # TODO: the __getattr__ call below should have redirect this call to the
-    # underlying variable tracker
-    def export_freevars(self, parent, child):
-        return self.vt.export_freevars(parent, child)
-
     def __getattr__(self, name):
         if name in self.__class__.__dict__.keys():
             return getattr(self, name)
         return getattr(self.vt, name)
+
+    # TODO: the __getattr__ call above should have redirect this call to the
+    # underlying variable tracker(?)
+    def export_freevars(self, parent, child):
+        return self.vt.export_freevars(parent, child)
 
     def call_function(
         self,
@@ -398,16 +398,13 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
 
         tracer = self.inline_tracer
 
-        # TODO: in case of a graph break, we need to run the finally (if exist) block
-
         try:
             # inline_call_ has a try/except block that does the same thing
             # TODO: figure it out why it is not working for this usecase
-            # TODO: Do we actually need the increment below?
             return tracer.inline_call_().next_variable(tx)
         except exc.ObservedUserStopIteration as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
-            raise
+            raise e
 
 
 class UserMethodVariable(UserFunctionVariable):

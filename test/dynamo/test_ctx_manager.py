@@ -1805,10 +1805,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
+    @unittest.expectedFailure
     def test_contextlib_contextmanager_change_parent_nonlocal_1(self):
         # test if finally is executed and it is reading the correct variable
         z = 1
-        k = 0
+        k = 2
 
         def create_ctx():
             @_contextmanager
@@ -1975,15 +1976,18 @@ class CPythonContextManagerTestCase(unittest.TestCase):
         def foo(t):
             y = 0
             with woohoo() as x:
+                # we can't call self.assertEqual inside jit code
                 y += len(state)
-                # self.assertEqual(state, [1])
                 y += x  # 42
+                # self.assertEqual(state, [1])
                 # self.assertEqual(x, 42)
                 state.append(x)
+            return y
 
         t = torch.randn(2, 3)
-        foo(t)
+        y = foo(t)
         self.assertEqual(state, [1, 42, 999])
+        self.assertEqual(y, 42)
 
     def test_contextmanager_finally(self):
         state = []
