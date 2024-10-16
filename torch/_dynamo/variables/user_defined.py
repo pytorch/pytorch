@@ -436,31 +436,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
-                # create pseudo-defaults from values of the quasi-namedtuple
-                field_defaults = dict(zip(fields, args[0].items))
+                assert len(args) == 1
+                assert not kwargs
+                items = args[0].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults
 
-            items = list(args)
-            items.extend([None] * (len(fields) - len(items)))
+                items = list(args)
+                items.extend([None] * (len(fields) - len(items)))
 
-            var_tracker_kwargs = {}
-            for field_name, var_tracker in zip(fields, items):
-                if var_tracker is None:
-                    if field_name in kwargs:
-                        field_var = kwargs[field_name]
-                    else:
-                        assert field_name in field_defaults
-                        field_var = SourcelessBuilder.create(
-                            tx, field_defaults[field_name]
-                        )
-                    var_tracker_kwargs[field_name] = field_var
+                var_tracker_kwargs = {}
+                for field_name, var_tracker in zip(fields, items):
+                    if var_tracker is None:
+                        if field_name in kwargs:
+                            field_var = kwargs[field_name]
+                        else:
+                            assert field_name in field_defaults
+                            field_var = SourcelessBuilder.create(
+                                tx, field_defaults[field_name]
+                            )
+                        var_tracker_kwargs[field_name] = field_var
 
-            for name, value in var_tracker_kwargs.items():
-                assert name in fields
-                items[fields.index(name)] = value
+                for name, value in var_tracker_kwargs.items():
+                    assert name in fields
+                    items[fields.index(name)] = value
 
-            assert all(x is not None for x in items)
+                assert all(x is not None for x in items)
+
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             from .builder import SourcelessBuilder
@@ -1029,8 +1031,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
-                if getattr_fn is unpatched_nn_module_getattr and isinstance(
-                    self, variables.UnspecializedNNModuleVariable
+                if (
+                    getattr_fn is unpatched_nn_module_getattr
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    # prevent against overwriting of params/buffers/submodules
+                    and istype(self.value._parameters, dict)
+                    and istype(self.value._buffers, dict)
+                    and istype(self.value._modules, dict)
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
