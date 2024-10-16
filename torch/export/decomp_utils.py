@@ -18,9 +18,12 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     op will actually be loaded to the dispatcher. As a result, we need to record the custom ops operations
     until we really need to materialize it (which is when we run decomposition pass.)
 
-    Invariant we hold is:
-    1. If it is read operation on this dict, we always materialize
-    2. If it is write operation, we don't necessarily materialize
+    Invariants we hold are:
+    1. All aten decomp is loaded at the init time
+    2. We materialize ALL ops when user ever reads from the table to make it more likely
+       that dispatcher picks up the custom op.
+    3. If it is write operation, we don't necessarily materialize
+    4. We load the final time during export, right before calling run_decompositions()
     """
 
     def __init__(self):
@@ -42,18 +45,12 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
 
     def __getitem__(self, key):
         self._materialize_if_needed()
-        if key in self.aten_decomp_table:
-            return self.aten_decomp_table[key]
 
         if _is_aten_op(key):
-            raise KeyError(f"Op {key} is not in the decomposition table")
+            return self.aten_decomp_table[key]
 
         assert _is_custom_op(key)
-
-        if key in self.additional_custom_op_decomp:
-            return self.additional_custom_op_decomp[key]
-
-        raise KeyError(f"Op {key} is not in the decomposition table")
+        return self.additional_custom_op_decomp[key]
 
     def __setitem__(self, key, value):
         if _is_aten_op(key):
@@ -63,9 +60,6 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         assert _is_custom_op(key)
 
         self.additional_custom_op_decomp[key] = value
-
-        if self.has_materialized:
-            return
 
         if key in self.deleted_custom_ops:
             self.deleted_custom_ops.remove(key)
@@ -130,8 +124,7 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
             from torch._export.utils import _is_preservable_cia_op
 
             if _is_aten_op(key):
-                if key in self.aten_decomp_table:
-                    return self.aten_decomp_table.pop(key)
+                return self.aten_decomp_table.pop(key)
 
             if key in self.additional_custom_op_decomp:
                 # Even if we materialized it, we should add it to the deleted
@@ -140,9 +133,6 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
                 self.deleted_custom_ops.add(key)
                 return self.additional_custom_op_decomp.pop(key)
 
-            if self.has_materialized:
-                raise KeyError(f"{key} doesn't exist in the table")
-
             if key in self.deleted_custom_ops:
                 raise KeyError(f"{key} doesn't exist in the table")
 
@@ -150,7 +140,10 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
                 raise KeyError(f"{key} doesn't exist in the table")
 
             self.deleted_custom_ops.add(key)
-            return None
+            # We would come here when user pops off something that is 
+            # not in the table. In this case, we just pretend that it 
+            # was in the table.
+            return _get_decomp_for_cia(key)
 
         if len(args) == 1:
             return _pop_if_can(args[0])

@@ -1763,7 +1763,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             table = default_decompositions()
             # Since this table hasn't been materialized yet, we shouldn't error
             val = table.pop(torch.ops.mylib.foo123.default)
-            self.assertIsNone(val)
+            self.assertIsNotNone(val)
 
             with self.assertRaisesRegex(KeyError, "mylib.foo123.default"):
                 table.pop(torch.ops.mylib.foo123.default)
