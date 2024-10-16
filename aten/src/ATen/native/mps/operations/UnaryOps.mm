@@ -249,7 +249,9 @@ TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
       return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
     }
 #endif // __MAC_15_0
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
     return [mpsGraph reverseSquareRootWithTensor:inputTensor name:nil];
+    C10_DIAGNOSTIC_POP()
   });
 }
 
