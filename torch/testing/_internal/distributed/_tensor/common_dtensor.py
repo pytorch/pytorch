@@ -5,7 +5,7 @@
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
 
 import torch
@@ -365,8 +365,10 @@ TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(func: TestFunc, eager_init=False) -> TestFunc:
-    assert func is not None
+def with_comms(func: TestFunc = None, eager_init: bool = False) -> TestFunc:
+    if func is None:
+        return partial(with_comms, eager_init=eager_init)
+
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
