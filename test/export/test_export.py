@@ -7537,7 +7537,7 @@ def forward(self, x, y):
         class M2(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.foo = torch.ones(3, 3)
+                self.foo = torch.ones(3, 3, requires_grad=True)
 
             def forward(self, x):
                 return x + self.foo
