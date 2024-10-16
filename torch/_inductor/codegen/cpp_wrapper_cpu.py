@@ -70,6 +70,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
 
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperCpu()
+
     def generate_kernel_call(
         self,
         kernel_name: str,
@@ -1912,6 +1920,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
 
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        # TODO (desertfire) - This function is the old way of supporting
+        # subgraph codegen by inlining subgraphs in the output code. For python
+        # wrapper, we have moved to lifting subgraphs as functions, supported by
+        # PythonWrapperCode `codegen_subgraph` function. We should perhaps
+        # support lifting of subgraphs as functions for cpp wrapper as well.
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
+                )
+            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+        finally:
+            self.pop_codegened_graph()
+
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
         outer_carried_inputs = [
@@ -1980,7 +2007,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline("}")
 
     def generate_extern_kernel_args_decl_if_needed(
-        self, op_overload, raw_args, output_args
+        self,
+        op_overload,
+        raw_args,
+        output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -2068,13 +2099,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type):
+        def fill_output_arg(arg, return_type, is_mutated_output: bool):
             if isinstance(return_type, torch.TensorType):
-                self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
-                )
-                self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
+                if not is_mutated_output:
+                    self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
+                    )
+                    self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
@@ -2098,13 +2130,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg in output_args:
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):  # type: ignore[arg-type]
             assert output_arg is not None, "Optional return types are not yet supported"
             if isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
-                    fill_output_arg(out, torch.TensorType.get())
+                    fill_output_arg(
+                        out,
+                        torch.TensorType.get(),
+                        isinstance(raw_output_arg, ir.MutationOutput),
+                    )
             else:
-                fill_output_arg(output_arg, torch.TensorType.get())
+                fill_output_arg(
+                    output_arg,
+                    torch.TensorType.get(),
+                    isinstance(raw_output_arg, ir.MutationOutput),
+                )
 
         return new_tensor_args, new_int_args
 
@@ -2126,6 +2166,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
+            elif isinstance(out, ir.MutationOutput):
+                mutated_buf_names = out.get_mutation_names()
+                assert (
+                    isinstance(mutated_buf_names, list) and len(mutated_buf_names) == 1
+                ), "Expect only one mutated buffer in MutationOutput"
+                return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
             else:
@@ -2150,6 +2196,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
         else:
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
@@ -2163,6 +2210,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
@@ -2306,6 +2354,7 @@ if (custom_op_wrapper.get() == NULL) {
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
@@ -2369,11 +2418,19 @@ if (py_{buf_name}.get() == NULL) {{
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
-                if output_arg is not None
-            ]
+            if raw_outputs:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                    if output_arg is not None
+                    and not isinstance(raw_output_arg, ir.MutationOutput)
+                ]
+            else:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg in output_args  # type: ignore[arg-type]
+                    if output_arg is not None
+                ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines
             )
@@ -2385,12 +2442,16 @@ if (py_{buf_name}.get() == NULL) {{
         op_overload,
         raw_args,  # contains both args and flatten kwargs
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,
             int_call_args,
         ) = self.generate_extern_kernel_args_decl_if_needed(
-            op_overload, raw_args, output_args
+            op_overload,
+            raw_args,
+            output_args,
+            raw_outputs,
         )
 
         tensor_call_args_str = ", ".join(tensor_call_args)

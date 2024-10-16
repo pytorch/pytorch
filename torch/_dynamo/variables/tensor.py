@@ -793,7 +793,7 @@ class TensorVariable(VariableTracker):
         unimplemented("Tensor.backward")
 
     def method_data_ptr(self, *args, **kwargs):
-        unimplemented("Tensor.data_ptr")
+        return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
@@ -874,15 +874,6 @@ class TensorVariable(VariableTracker):
             else:
                 return False
 
-        if (
-            has_bool_key(key)
-            and isinstance(value, TensorVariable)
-            and value.requires_grad
-            and torch.is_grad_enabled()
-        ):
-            unimplemented(
-                "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
-            )
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
@@ -1023,7 +1014,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.compiled_autograd_enabled:
+            if not compiled_autograd.local.enabled():
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.
@@ -1447,4 +1438,19 @@ class UntypedStorageVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+
+
+class DataPtrVariable(VariableTracker):
+    def __init__(
+        self,
+        from_tensor: TensorVariable,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs),
+        self.from_tensor = from_tensor
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor, allow_cache=False)
+        codegen.load_method("data_ptr")
         codegen.call_method(0)

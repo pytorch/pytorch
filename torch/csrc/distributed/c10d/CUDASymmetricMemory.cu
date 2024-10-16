@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -360,8 +362,11 @@ at::Tensor CUDASymmetricMemory::get_buffer(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     int64_t storage_offset) {
-  const auto numel =
-      std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      sizes.begin(),
+      sizes.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const auto element_size = c10::elementSize(dtype);
   const auto req_size = (numel + storage_offset) * element_size;
   TORCH_CHECK(
@@ -371,10 +376,11 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       " bytes) exceeds the allocated size (",
       buffer_size_,
       " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+      storage_offset * element_size;
   auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
   auto options = at::TensorOptions().dtype(dtype).device(device);
-  return at::for_blob(buffers_[rank], sizes)
-      .storage_offset(storage_offset)
+  return at::for_blob(data_ptr, sizes)
       .options(options)
       .target_device(device)
       .make_tensor();
@@ -397,50 +403,53 @@ void check_channel(int channel, int world_size) {
       ")");
 }
 
-__device__ __forceinline__ void release_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  volatile uint32_t* signal = addr;
-  uint32_t val;
-  do {
-    val = *signal;
-  } while (val != 0 || atomicCAS_system(addr, 0, 1) != 0);
-#endif
-}
-
-__device__ __forceinline__ void acquire_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  volatile uint32_t* signal = addr;
-  uint32_t val;
-  do {
-    val = *signal;
-  } while (val != 1 || atomicCAS_system(addr, 1, 0) != 1);
-#endif
-}
-
 static __global__ void barrier_kernel(
     uint32_t** signal_pads,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x < world_size) {
     auto target_rank = threadIdx.x;
-    release_signal(signal_pads[target_rank] + world_size * channel + rank);
-    acquire_signal(signal_pads[rank] + world_size * channel + target_rank);
+    if (target_rank == rank) {
+      return;
+    }
+    auto put_success = try_put_signal<MemOpSem::Release>(
+        signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
+    if (!put_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    auto wait_success = try_wait_signal<MemOpSem::Acquire>(
+        signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
   }
 }
 
-void CUDASymmetricMemory::barrier(int channel) {
+void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   barrier_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -449,13 +458,28 @@ static __global__ void put_signal_kernel(
     int dst_rank,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    release_signal(signal_pads[dst_rank] + world_size * channel + rank);
+    bool success = try_put_signal<MemOpSem::Release>(
+        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::put_signal: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu microseconds\n",
+          rank,
+          dst_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
   }
 }
 
-void CUDASymmetricMemory::put_signal(int dst_rank, int channel) {
+void CUDASymmetricMemory::put_signal(
+    int dst_rank,
+    int channel,
+    size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   put_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -463,7 +487,8 @@ void CUDASymmetricMemory::put_signal(int dst_rank, int channel) {
       dst_rank,
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -472,14 +497,33 @@ static __global__ void wait_signal_kernel(
     int src_rank,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    acquire_signal(signal_pads[rank] + world_size * channel + src_rank);
+    bool success = try_wait_signal<MemOpSem::Acquire>(
+        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::wait_signal rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu microseconds\n",
+          rank,
+          src_rank,
+          channel,
+          timeout_ms);
+#if !defined(USE_ROCM)
+      __trap();
+#else
+      assert(0);
+#endif
+    }
   }
   __threadfence_system();
 }
 
-void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
+void CUDASymmetricMemory::wait_signal(
+    int src_rank,
+    int channel,
+    size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   wait_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -487,7 +531,8 @@ void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
       src_rank,
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
