@@ -1112,8 +1112,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
 
             if isinstance(subobj, types.MethodType):
-                if dynamic_subobj.__self__ is not self.value:
-                    unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
             else:
                 assert isinstance(subobj, types.FunctionType)
