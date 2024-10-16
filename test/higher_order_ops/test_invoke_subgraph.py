@@ -9,9 +9,10 @@ import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._higher_order_ops import create_invoke_subgraph_op
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
     def test_simple(self):
         def gn(x, y):
@@ -117,6 +118,7 @@ class TestInvokeSubgraph(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompile(TestCase):
     def test_simple(self):
         def gn(x, y):
