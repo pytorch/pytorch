@@ -565,9 +565,11 @@ class TritonTemplateKernel(TritonKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         # Handle workspace allocation
-        if self.workspace_size > 0:
+        if self.args.workspace_arg is not None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            ws = self.args.workspace_arg
             wrapper.generate_workspace_allocation(
-                self.workspace_size, V.graph.scheduler.current_device, False
+                ws.nbytes, current_device, ws.zero_fill
             )
 
         if V.graph.cpp_wrapper:
