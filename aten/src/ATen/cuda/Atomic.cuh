@@ -7,7 +7,9 @@
 #include <ATen/NumericUtils.h>
 
 #if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
+#endif
 #endif
 
 template <typename T>

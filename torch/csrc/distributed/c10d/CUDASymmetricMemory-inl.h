@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #pragma once
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900) && CUDART_VERSION >= 12010
@@ -6,7 +7,9 @@
 
 #include <ATen/ATen.h>
 
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
+#endif
 
 namespace c10d::symmetric_memory {
 
@@ -311,7 +314,7 @@ __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
 }
 
 #if defined(USE_ROCM)
-using __nv_bfloat162 = uint32_t;
+using __hip_bfloat162 = uint32_t;
 #endif
 
 template <typename T>
@@ -322,8 +325,8 @@ __device__ __inline__ T add_bf16x2(T a, T b) {
   return T{};
 #else
   auto res = __hadd2(
-      *reinterpret_cast<__nv_bfloat162*>(&a),
-      *reinterpret_cast<__nv_bfloat162*>(&b));
+      *reinterpret_cast<__hip_bfloat162*>(&a),
+      *reinterpret_cast<__hip_bfloat162*>(&b));
   return *reinterpret_cast<T*>(&res);
 #endif
 }
