@@ -380,10 +380,13 @@ class TestScheduleLowering(TestCase):
         num_model_chunks = 3
         pipeline_parallel_size = 8
         num_stages = num_model_chunks * pipeline_parallel_size
+<<<<<<< HEAD
 
         for rank in compute_sch:
             compute_sch[rank] = _merge_bw(compute_sch[rank])
 
+=======
+>>>>>>> adade312e0f ([pipelining] Batch send/recv between adjacent ranks)
         comms_sch = _add_send_recv(
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
@@ -391,12 +394,15 @@ class TestScheduleLowering(TestCase):
             enable_batching=True,
         )
 
+<<<<<<< HEAD
+=======
         simulated_schedule = _simulate_comms_compute(
             comms_sch,
             stage_to_rank=lambda s: s % pipeline_parallel_size,
             num_stages=num_stages,
         )
         _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+>>>>>>> adade312e0f ([pipelining] Batch send/recv between adjacent ranks)
         # _dump_csv(comms_sch, "lowered_comms.csv")
 
         sch_ref = {}
@@ -410,7 +416,11 @@ class TestScheduleLowering(TestCase):
 
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         # print(_format_pipeline_order(simulated_schedule))
+<<<<<<< HEAD
         self.assertEqual(num_steps, 271)
+=======
+        self.assertEqual(num_steps, 336)
+>>>>>>> adade312e0f ([pipelining] Batch send/recv between adjacent ranks)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
