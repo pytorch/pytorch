@@ -13,13 +13,20 @@ from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
-def compiled_autograd_enabled():
-    if not torch._running_with_deploy():
-        import torch._dynamo.compiled_autograd as ca
+if torch._running_with_deploy():
 
-        return ca.compiled_autograd_enabled or ca.in_compiled_autograd_region
-    else:
+    def compiled_autograd_enabled():
         return False
+
+else:
+
+    def compiled_autograd_enabled():
+        if torch.compiler.is_compiling():
+            import torch._dynamo.compiled_autograd as ca
+
+            return ca.compiled_autograd_enabled or ca.in_compiled_autograd_region
+        else:
+            return False
 
 
 @dataclass
