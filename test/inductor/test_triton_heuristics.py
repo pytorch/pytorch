@@ -18,6 +18,7 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import (
+    AttrsDescriptorWrapper,
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
@@ -93,8 +94,6 @@ class TestTritonHeuristics(TestCase):
         self._test_artificial_zgrid()
 
     def _get_cos_kernel_caching_autotuner_args(self):
-        from triton.compiler.compiler import AttrsDescriptor  # @manual
-
         @triton.jit
         def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
             xnumel = 16
@@ -110,7 +109,9 @@ class TestTritonHeuristics(TestCase):
             "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
-            "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],
+            "configs": [
+                AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
+            ],
         }
 
         configs = [
@@ -126,6 +127,7 @@ class TestTritonHeuristics(TestCase):
             "configs": configs,
             "save_cache_hook": False,
             "mutated_arg_names": [],
+            "optimize_mem": True,
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
@@ -146,7 +148,7 @@ class TestTritonHeuristics(TestCase):
             autotuner = CachingAutotuner(**args)
 
     def test_autotune_hints_to_configs(self):
-        device_props = DeviceProperties.create(torch.device("cuda"))
+        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
 
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}

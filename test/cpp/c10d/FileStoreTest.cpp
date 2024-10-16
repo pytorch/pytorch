@@ -40,7 +40,7 @@ std::string tmppath() {
 }
 #endif
 
-void testGetSet(std::string path, std::string prefix = "") {
+void testGetSet(const std::string& path, const std::string& prefix = "") {
   // Basic Set/Get on File Store
   {
     auto fileStore = c10::make_intrusive<c10d::FileStore>(path, 2);
@@ -100,7 +100,7 @@ void stressTestStore(std::string path, std::string prefix = "") {
   c10d::test::Semaphore sem1, sem2;
 
   for (C10_UNUSED const auto i : c10::irange(numThreads)) {
-    threads.emplace_back(std::thread([&] {
+    threads.emplace_back([&] {
       auto fileStore =
           c10::make_intrusive<c10d::FileStore>(path, numThreads + 1);
       c10d::PrefixStore store(prefix, fileStore);
@@ -109,7 +109,7 @@ void stressTestStore(std::string path, std::string prefix = "") {
       for (C10_UNUSED const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
-    }));
+    });
   }
 
   sem1.wait(numThreads);

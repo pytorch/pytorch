@@ -547,7 +547,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         )
 
     def test_assign_worker_ranks_indentical(self):
-        os.environ["TORCH_SKIP_STORE_BARRIER"] = "1"
+        os.environ["TORCH_ELASTIC_WORKER_IDENTICAL"] = "1"
         role_infos = [
             _RoleInstanceInfo("trainer", 0, 4),
             _RoleInstanceInfo("trainer", 1, 4),
@@ -597,7 +597,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
                 ],
             ],
         )
-        os.environ["TORCH_SKIP_STORE_BARRIER"] = "0"
+        os.environ["TORCH_ELASTIC_WORKER_IDENTICAL"] = "0"
 
     def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)
