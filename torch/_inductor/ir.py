@@ -342,6 +342,11 @@ def is_cpu(x: object) -> bool:
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
+    # NB: These are kinda weird,
+    origins: OrderedSet[Any] = dataclasses.field(init=False)
+    traceback: str = dataclasses.field(init=False)
+    origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+
     @staticmethod
     @contextlib.contextmanager
     def current_origins(origins: OrderedSet[torch.fx.Node]):
@@ -352,9 +357,18 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
+    def _post_init_setattr(self, attr, value):
+        # Intended for use in __post_init__ for enforcing an invariant on a dataclass
+        # If you must, can also be used for setting provenance info
+        # We would like to try and minimize these usages though
+        object.__setattr__(self, attr, value)
+
     def __post_init__(self):
-        self.origins = OrderedSet(self._current_origins)
-        self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
+        self._post_init_setattr("origins", OrderedSet(self._current_origins))
+        self._post_init_setattr(
+            "traceback", traceback.format_stack() if config.debug_ir_traceback else None
+        )
+        self._post_init_setattr("origin_node", None)
 
     def _post_init_setattr(self, attr, value):
         # Only use in __post_init__ for enforcing an invariant on a dataclass
@@ -365,6 +379,9 @@ class IRNode:
 
     def get_traceback(self):
         return self.traceback
+
+    def get_origin_node(self):
+        return self.origin_node
 
     def get_defining_op(self):
         raise NotImplementedError
@@ -538,7 +555,6 @@ class Loops(IRNode):
 
     def __post_init__(self):
         super().__post_init__()
-        self.origin_node = None
 
     __repr__ = __str__
 
@@ -561,11 +577,14 @@ class Loops(IRNode):
     def create(cls, *args, **kwargs):
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
+        # if "origin_node" in kwargs:
+        #     breakpoint()
         r = cls(*args, **kwargs)
-        r.origin_node = origin_node
-        r.traceback = (
-            tb or traceback.format_stack() if config.debug_ir_traceback else None
-        )
+        # Need to explicitly set origin_node here to propagate it down.
+        # todo(chilli): I think it would be better for IRNode to directly set
+        # origin_node
+        r._post_init_setattr("origin_node", origin_node)
+        r._post_init_setattr("traceback", tb or r.traceback)
         return TensorBox.create(r)
 
     @staticmethod
@@ -3293,10 +3312,9 @@ class NoneLayout(IRNode):
     # If you have an ir.Node with NoneLayout, you probably need to setup
     # dependencies manually in scheduler
 
-    def __init__(self, device):
-        self.device = device
-        self.size = [0]
-        self.stride = [0]
+    device: torch.device
+    size: List[int] = dataclasses.field(default_factory=lambda: [0])
+    stride: List[int] = dataclasses.field(default_factory=lambda: [0])
 
     def storage_size(self):
         return 0
@@ -3397,7 +3415,7 @@ class Buffer(IRNode):
 
     def __post_init__(self):
         super().__post_init__()
-        self.origin_node = None
+        self._post_init_setattr("origin_node", None)
 
     def make_indexer(self):
         return self.layout.make_indexer()
@@ -3408,9 +3426,6 @@ class Buffer(IRNode):
 
     def get_device(self):
         return self.layout.device
-
-    def get_origin_node(self):
-        return self.origin_node
 
     def get_defining_op(self) -> Optional[Operation]:
         return None
@@ -3554,8 +3569,8 @@ class NoneAsConstantBuffer(IRNode):
 
 
 @ir_dataclass
-class ShapeAsConstantBuffer(IRNode):
-    shape: List[Expr]
+class ExprAsConstantBuffer(IRNode):
+    expr: Union[Expr, None]
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -3975,7 +3990,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
             device = self.inputs[0].get_device()
             self.outputs += [
-                MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
             ]
 
     def get_outputs(self) -> List[Buffer]:
@@ -4056,11 +4072,27 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         layout: Layout,
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+        unfiltered_choices: List[ChoiceCaller],
     ):
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
+        self._output_plannable = all(
+            isinstance(choice, TritonTemplateCallerBase)
+            or (
+                isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller)
+                and choice.has_out_variant
+            )
+            for choice in unfiltered_choices
+        )
+
+    @property
+    def output_plannable(self) -> bool:
+        """
+        Are all possible choices TritonTemplates or Extern Kernels with out variants
+        """
+        return self._output_plannable
 
     @property
     def choice_timings(self) -> Dict[ChoiceCaller, float]:
@@ -4281,10 +4313,31 @@ class ConcatKernel(NopKernel):
         return kernel
 
     @classmethod
-    def can_realize_into_without_copy(cls, src):
+    def can_realize_into_without_copy(cls, src, dst=None):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.can_realize_into_without_copy(src.data)
+            return cls.can_realize_into_without_copy(src.data, dst)
+
+        if isinstance(src.data, MultiTemplateBuffer):
+            if (
+                not isinstance(src.data.layout, FixedLayout)
+                or not src.data.output_plannable
+            ):
+                return False
+
+            # we call can_realize_into_without_copy in cat lowering before we've decided
+            # on output format, optimistically assume layout matches
+            if dst is None:
+                return True
+
+            # otherwise, check equality of layouts
+            if not len(src.get_stride()) == len(dst.get_stride()):
+                return False
+
+            return all(
+                V.graph.sizevars.statically_known_equals(s1, s2)
+                for s1, s2 in zip(src.get_stride(), dst.get_stride())
+            )
 
         return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
             src.data, ExternKernelAlloc
@@ -4303,11 +4356,12 @@ class ConcatKernel(NopKernel):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst)
+
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
-            if cls.can_realize_into_without_copy(src):
+            if cls.can_realize_into_without_copy(src, dst):
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
@@ -4420,9 +4474,9 @@ class ExternKernel(InputsKernel):
             # Try to construct cpp_kernel_name from op_overload
             if kernel.namespace == "aten":
                 # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
+                # repeat_interleave(const at::Tensor & repeats, std::optional<int64_t> output_size=std::nullopt)
                 # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
+                #       std::optional<int64_t> dim=std::nullopt, std::optional<int64_t> output_size=std::nullopt)
                 opname = (
                     kernel.__name__.split(".")[0]
                     if kernel._overloadname == "default"
@@ -4650,9 +4704,9 @@ class ExternKernel(InputsKernel):
     @classmethod
     def realize_input(cls, x):
         if x is None:
-            return NoneAsConstantBuffer()
+            return ExprAsConstantBuffer(expr=None)
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
-            return ShapeAsConstantBuffer(x)
+            return ExprAsConstantBuffer(expr=x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -5264,7 +5318,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(self.device),  # type: ignore[arg-type]
+            NoneLayout(device=self.device),  # type: ignore[arg-type]
             inputs,
             tuple(constant_args),
             kwargs,
@@ -5289,7 +5343,7 @@ class UserDefinedTritonKernel(ExternKernel):
         ]
 
         self.mutation_outputs = [
-            MutationOutput(NoneLayout(self.device), buf, self)
+            MutationOutput(NoneLayout(device=self.device), buf, self)
             for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
@@ -5333,7 +5387,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def __init__(self, op_overload, x, *constant_args):
         super().__init__(
             None,
-            NoneLayout(x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([x]),
             constant_args,
             op_overload=op_overload,
@@ -5391,7 +5445,7 @@ class InplaceCopyFallback(ExternKernel):
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
-            NoneLayout(dst.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=dst.get_device()),  # type: ignore[arg-type]
             inputs,
             constant_args,
         )
@@ -5432,7 +5486,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         assert isinstance(new_size, int), "TODO: dynamic shapes"
         super().__init__(
             None,
-            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=variable.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([variable]),
             constant_args=(new_size,),
         )
@@ -5458,8 +5512,8 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         V.graph.never_reuse_buffers.add(self.get_name())
         device = storage_tensor.get_device()
         self.mutation_outputs = [
-            MutationOutput(NoneLayout(device), self_tensor, self),
-            MutationOutput(NoneLayout(device), storage_tensor, self),
+            MutationOutput(NoneLayout(device=device), self_tensor, self),
+            MutationOutput(NoneLayout(device=device), storage_tensor, self),
         ]
 
     def get_inputs_that_alias_output(self):
@@ -5529,7 +5583,7 @@ class ScatterFallback(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
@@ -5580,7 +5634,7 @@ class IndexPutFallback(ExternKernel):
         )
         super().__init__(
             None,
-            NoneLayout(x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             (accumulate,),
             python_kernel_name="aten.index_put_",
@@ -5642,7 +5696,7 @@ class DynamicScalar(ExternKernel):
 
     def __init__(self, sym, keypath, data):
         data.realize()
-        super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
         self.sym = sym
         self.keypath = keypath
 
@@ -5669,7 +5723,7 @@ class AssertScalar(ExternKernel):
         super().__init__(
             # Buffer(name, layotu)
             None,
-            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
+            NoneLayout(device=torch.device("cpu")),  # type: ignore[arg-type]
             # InputsKernel(inputs)
             [],
         )  # type: ignore[arg-type]
@@ -5840,7 +5894,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.alias_names.append(t.get_name())
                 if info.alias_info.is_write:
                     self.mutation_outputs.append(
-                        MutationOutput(NoneLayout(t.get_device()), t, self)
+                        MutationOutput(NoneLayout(device=t.get_device()), t, self)
                     )
 
             if is_list_tensor:
@@ -6024,15 +6078,23 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
+            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
+            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
+            # fix would require changing all the uses of self.mutation_outputs.
             return_type = returns[0].real_type
-            output_arguments = [handle_single_output(return_type, self.outputs)]
+            output_arguments = [
+                handle_single_output(
+                    return_type, [*self.outputs, *self.mutation_outputs]
+                )
+            ]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
-            assert isinstance(self.outputs, tuple)
-            assert len(returns) == len(self.outputs)
+            # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(returns, self.outputs)
+                for return_schema, output in zip(
+                    returns, [*self.outputs, *self.mutation_outputs]
+                )
             ]
 
         node = ExternKernelNode(
@@ -6096,7 +6158,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
-                self.outputs,
+                [*self.outputs, *self.mutation_outputs],
             )
         else:
             self.codegen_comment(wrapper)
@@ -6134,7 +6196,7 @@ class FallbackKernel(ExternKernelAlloc):
         device = cls.find_device(tensor_args, example_output)
         if example_output is None:
             packed = cls(
-                NoneLayout(device),
+                NoneLayout(device=device),
                 kernel,
                 tensor_args,
                 non_tensor_args,
@@ -6454,7 +6516,7 @@ class Conditional(ExternKernel):
         self.false_subgraph = false_subgraph
 
         inputs = []
-        if not isinstance(predicate, ShapeAsConstantBuffer):
+        if not isinstance(predicate, ExprAsConstantBuffer):
             inputs.append(predicate)
         inputs.extend(operands)
 
@@ -6511,7 +6573,7 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ShapeAsConstantBuffer):
+        if not isinstance(predicate, ExprAsConstantBuffer):
             # use predicate device for consistent codegen-ing
             device = predicate.get_device()
         else:
@@ -6789,7 +6851,7 @@ class _CollectiveKernel(FallbackKernel):
 
         device = tensor_args[0].get_device()
         packed = cls(
-            NoneLayout(device),
+            NoneLayout(device=device),
             kernel,
             tensor_args,
             non_tensor_args,
@@ -6798,14 +6860,14 @@ class _CollectiveKernel(FallbackKernel):
 
         inps = pytree.tree_leaves(inputs)
         packed.mutation_outputs.extend(
-            [MutationOutput(NoneLayout(device), buf, packed) for buf in inps]
+            [MutationOutput(NoneLayout(device=device), buf, packed) for buf in inps]
         )
 
         # For inplace collective ops, the input is guaranteed to be alias of the returned value of op.
         packed.alias_names.extend([inp.get_name() for inp in inps])
         if "out" in kwargs:
             packed.mutation_outputs.append(
-                MutationOutput(NoneLayout(device), kwargs["out"], packed)
+                MutationOutput(NoneLayout(device=device), kwargs["out"], packed)
             )
             # For out-variant collective ops, the `out=` arg is guaranteed to be alias of the returned value of op.
             packed.alias_names.append(kwargs["out"].get_name())
@@ -6912,14 +6974,14 @@ class _WaitKernel(_CollectiveKernel):
             ) = cls.process_kernel(kernel, inp)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         packed = cls(
-            layout=NoneLayout(inp.get_device()),
+            layout=NoneLayout(device=inp.get_device()),
             kernel=kernel,
             tensor_args=tensor_args,
             nontensor_args=non_tensor_args,
             unflatten_args=unflatten_args,
         )
         packed.mutation_outputs.append(
-            MutationOutput(NoneLayout(inp.get_device()), inp, packed)
+            MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
         )
 
     def get_read_writes(self):

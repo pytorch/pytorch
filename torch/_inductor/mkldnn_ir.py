@@ -457,8 +457,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 std::optional<c10::string_view> unary_algorithm)"""
 
         self.mutation_outputs = [
-            MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
-            MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
+            MutationOutput(NoneLayout(device=inputs[0].get_device()), inputs[0], self),
+            MutationOutput(NoneLayout(device=inputs[1].get_device()), inputs[1], self),
         ]
 
     def codegen(self, wrapper):
@@ -518,7 +518,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1135,7 +1135,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
-            layout=NoneLayout(qaccum.get_device()),
+            layout=NoneLayout(device=qaccum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1266,7 +1266,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         packed = LinearUnary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1347,7 +1347,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args.insert(0, B)
 
         packed = LinearBinary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1834,7 +1834,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if binary_post_op == "sum":
             V.graph.mark_buffer_mutated(other.get_name())
             packed = QLinearPointwiseBinaryPT2E(
-                layout=NoneLayout(other.get_device()),
+                layout=NoneLayout(device=other.get_device()),
                 inputs=inputs,
                 constant_args=constant_args,
                 has_bias=(bias is not None),
