@@ -66,6 +66,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 SUPPORTED_OPS = {
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor,
+    torch.ops.aten.div.Tensor,
 }
 
 
@@ -210,8 +212,10 @@ def tensorify_python_scalars(
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
                 for a in node.args:
-                    if isinstance(a, fx.Node) and isinstance(
-                        zf := a.meta["val"], torch.SymFloat
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
                         transform = True
                         try:
