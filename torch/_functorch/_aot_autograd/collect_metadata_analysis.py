@@ -225,10 +225,6 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            if not isinstance(arg, Tensor):
-                new_arg = arg
-            else:
-                new_arg = from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -708,7 +704,7 @@ from a multi-output view call"
         traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        if torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
             passed_indices = set(static_input_indices)
             static_input_indices = [
                 i

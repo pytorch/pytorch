@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import functools
 import itertools
 import logging
@@ -15,7 +13,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -322,5 +320,5 @@ class TestException(RuntimeError):
     pass
 
 
-def raise_testexc() -> None:
+def raise_testexc() -> Never:
     raise TestException
