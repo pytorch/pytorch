@@ -98,7 +98,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
-    if stable_hash or not is_compile_supported(device_type):
+    if True or stable_hash or not is_compile_supported(device_type):
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary

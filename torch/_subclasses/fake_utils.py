@@ -2,12 +2,13 @@
 
 import functools
 import warnings
-from typing import Callable, Union
+from typing import Callable, Union, List
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
+    FakeTensor,
     FakeTensorMode,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -73,6 +74,48 @@ def is_sdpa_error(func, idx, e):
     ):
         return True
     return False
+
+
+def try_convert_fake_to_real(ten_list: List[torch.Tensor]) -> List[torch.Tensor]:
+    fake_tensor = next(
+        (item for item in ten_list if isinstance(item, FakeTensor)), None
+    )
+    if fake_tensor is None:
+        return ten_list
+
+    fake_mode = fake_tensor.fake_mode
+    meta_converter = fake_mode.fake_tensor_converter.meta_converter
+    desc = meta_converter.describer
+
+    storage_to_key = {v: k for k, v in meta_converter.storage_memo.items()}
+    key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
+
+    out = []
+    for t in ten_list:
+        if not isinstance(t, FakeTensor) or not t.layout == torch.strided:
+            out.append(t)
+            continue
+
+        key = storage_to_key.get(t.untyped_storage())
+        real_storage = None if key is None else key_to_real_storage.get(key)
+        if real_storage is None:
+            out.append(t)
+            continue
+
+        new_tensor = torch.empty(
+            [],
+            dtype=t.dtype,
+            device=t.device,
+        )
+        new_tensor.set_(
+            real_storage,
+            storage_offset=t.storage_offset(),
+            size=t.shape,
+            stride=t.stride(),
+        )
+        out.append(new_tensor)
+
+    return out
 
 
 class CrossRefFakeMode(TorchDispatchMode):
