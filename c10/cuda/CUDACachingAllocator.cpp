@@ -3658,9 +3658,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         c10::DeviceIndex device,
         std::string& handle,
         const DeviceCachingAllocator& allocator)
-        : device_(device),
-          expandable_segment_(nullptr),
-          cuda_ipc_ptr_(nullptr) {
+        : device_(device) {
       int type = SHAREABLE_CUDA_MALLOC;
       std::istringstream ss(handle);
       if (handle.size() != CUDA_IPC_HANDLE_SIZE) {
@@ -3710,8 +3708,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       }
     }
     c10::DeviceIndex device_;
-    ExpandableSegment* expandable_segment_;
-    void* cuda_ipc_ptr_; // nullptr if expandable_segment_ is not null
+    ExpandableSegment* expandable_segment_{nullptr};
+    void* cuda_ipc_ptr_{nullptr}; // nullptr if expandable_segment_ is not null
     std::weak_ptr<void> wp_;
   };
 

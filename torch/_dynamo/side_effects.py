@@ -427,16 +427,15 @@ class SideEffects:
 
     def codegen_save_tempvars(self, cg: PyCodegen):
         for var in self._get_modified_vars():
-            if isinstance(
-                var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
-            ) and isinstance(var, variables.NewCellVariable):
+            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
+                var, variables.NewCellVariable
+            ):
                 cg.add_push_null(
                     lambda: cg.load_import_from(utils.__name__, "make_cell")
                 )
                 cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
-                if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -629,11 +628,22 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
+                # Needed in the finally block for stack restoration
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "get_torch_function_mode_stack"
+                    )
+                )
+                cg.call_function(0, False)
+                name = variables.torch_function.get_prev_stack_var_name()
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         utils.__name__, "set_torch_function_mode_stack"
                     )
                 )
+
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
