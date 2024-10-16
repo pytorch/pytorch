@@ -828,7 +828,8 @@ void AliasDb::analyzeImpl(Node* node) {
   std::unordered_map<Symbol, Value*> formalToActual;
   for (const auto i : c10::irange(schema.arguments().size())) {
     const at::AliasInfo* formal = schema.arguments()[i].alias_info();
-    const auto& actualValue = node->inputs().at(i);
+    auto node_inputs = node->inputs();
+    const auto& actualValue = node_inputs.at(i);
 
     // Skip if there's no alias annotation
     if (!formal) {
@@ -1757,12 +1758,9 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int direction;
+  auto direction = kNextDirection;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;
-  } else {
-    direction = kNextDirection;
   }
 
   auto curNode = toMove->next_in_graph[direction];

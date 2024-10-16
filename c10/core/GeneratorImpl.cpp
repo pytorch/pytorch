@@ -88,8 +88,7 @@ static uint64_t readURandomLong() {
  *   a 32 bit number to 64 bit.
  */
 uint64_t getNonDeterministicRandom(bool is_cuda) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t s;
+  uint64_t s = 0;
   if (!is_cuda) {
 #ifdef _WIN32
     s = (uint64_t)std::chrono::high_resolution_clock::now()

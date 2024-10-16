@@ -42,6 +42,7 @@ class PThreadPool final {
 
 // Return a singleton instance of PThreadPool for ATen/TH multithreading.
 PThreadPool* pthreadpool();
+PThreadPool* pthreadpool(size_t thread_count);
 
 // Exposes the underlying implementation of PThreadPool.
 // Only for use in external libraries so as to unify threading across
