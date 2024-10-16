@@ -66,6 +66,13 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
+  // Perserved for BC
+  virtual void initCUDA() const {
+    TORCH_WARN_DEPRECATION(
+        "initCUDA() is deprecated. Please use init() directly instead.")
+    init();
+  }
+
   const Generator& getDefaultGenerator(
       C10_UNUSED DeviceIndex device_index = -1) const override {
     TORCH_CHECK(
