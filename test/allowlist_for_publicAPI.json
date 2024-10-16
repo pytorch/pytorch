@@ -2018,6 +2018,7 @@
     "has_hint",
     "is_symbolic",
     "parallel_and",
+    "parallel_and_statically_known_true",
     "parallel_or",
     "safe_expand",
     "uninteresting_files",
