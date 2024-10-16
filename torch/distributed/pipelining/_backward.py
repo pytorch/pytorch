@@ -201,6 +201,10 @@ def stage_backward_input(
                 inp.grad = dinputs[i]
             else:
                 inp.grad += dinputs[i]
+
+        for t in stage_outputs:
+            t.detach_()
+
     else:
         dinputs = None
     return dinputs, param_groups
