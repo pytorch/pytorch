@@ -49,16 +49,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
-  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
   # Conditional jump or move depends on uninitialised value(s)
   #    at 0x40303A: ~optional_base (Optional.h:281)
   #    by 0x40303A: call (Dispatcher.h:448)
-  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:10)
   #    by 0x403700: main (basic.cpp:16)
   #  Uninitialised value was created by a stack allocation
-  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:6)
   #
   # The problem does not appear with gcc or newer versions of clang (we tested
   # clang14).  So we suppress valgrind testing for clang9 specifically.
@@ -72,7 +72,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # using namespace at;
   #
-  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
   #   auto op = c10::Dispatcher::singleton()
   #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
   #       .typed<at::_ops::as_strided::schema>();
@@ -233,8 +233,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
 
-    # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
+    LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
+    export LD_PRELOAD
     # Disable valgrind for asan
     export VALGRIND=OFF
 
@@ -318,6 +318,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
@@ -403,7 +404,7 @@ pr_time_benchmarks() {
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
-  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "$TEST_REPORTS_DIR/new_expected_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -748,7 +749,8 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+    # Allow 1% variance for CPU perf to accommodate perf fluctuation
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99
   done
 
   # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
