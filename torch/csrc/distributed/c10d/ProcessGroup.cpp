@@ -209,7 +209,7 @@ class WorkRegistry {
     return works;
   }
 
-  bool can_unregister_completed_works() {
+  bool can_check_completed_works() {
     std::unique_lock lock(lock_);
 #if defined(USE_CUDA) && !defined(USE_ROCM)
     // Checking whether a NCCL work is completed requires querying CUDA event
@@ -293,7 +293,7 @@ void register_work(
   // Always clean up previously completed work objects, so that even if
   // the user keeps issuing new collectives without waiting on previous ones,
   // the registry size would not grow unbounded.
-  if (RankLocal<WorkRegistry>::get().can_unregister_completed_works()) {
+  if (RankLocal<WorkRegistry>::get().can_check_completed_works()) {
     RankLocal<WorkRegistry>::get().unregister_completed_works();
   }
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
