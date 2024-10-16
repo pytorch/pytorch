@@ -1537,6 +1537,8 @@ def forward(self, pred_1, x_1):
     def test_associative_scan_dim(self, combine_mode, reverse, device):
         import random
 
+        random.seed(10)
+
         num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
