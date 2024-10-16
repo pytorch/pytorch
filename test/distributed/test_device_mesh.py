@@ -92,11 +92,10 @@ class DeviceMeshTest(DTensorTestBase):
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-        # self.assertNotEqual(mesh_2d.get_group(0), None)
-        device = torch.cuda.current_device()
 
-        print(f"{self.rank=}, {device=}, {mesh_2d.get_group(0).bound_device_id=}")
-        print(f"{self.rank=}, {device=}, {mesh_2d.get_group(1).bound_device_id=}\n\n")
+        curr_device = torch.cuda.current_device()
+        self.assertEqual(mesh_2d.get_group(0).bound_device_id, curr_device)
+        self.assertEqual(mesh_2d.get_group(1).bound_device_id, curr_device)
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
