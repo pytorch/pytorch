@@ -112,6 +112,7 @@ class TestFullyShardCompile(FSDPTest):
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
             torch.device("cuda"),  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
         )
@@ -242,7 +243,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"Unexpected number of `inductor.resize_storage_bytes_` ops (expected {resize_count}, got {actual_resize_count}) in graph: {graph}",  # noqa: B950
             )
 
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        if not torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
             _check_count(fwd_copy_count, fwd_resize_count)  # fwd graph
         else:
             _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph

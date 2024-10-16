@@ -14,15 +14,16 @@ namespace torch::aot_inductor {
 
 void OSSProxyExecutor::prefill_stack_with_static_arguments(
     int index,
-    at::TypePtr schema_arg_type,
+    const at::TypePtr& schema_arg_type,
     const nlohmann::json& serialized_arg,
     OSSOpKernel& op_kernel) {
   auto& stack = op_kernel.stack_;
   auto& dynamic_args = op_kernel.dynamic_args_;
 
   TORCH_CHECK(serialized_arg.size() == 1);
-  std::string serialized_arg_type = serialized_arg.begin().key();
-  auto& serialized_arg_val = serialized_arg.begin().value();
+  auto serialized_arg_elem = serialized_arg.begin();
+  std::string serialized_arg_type = serialized_arg_elem.key();
+  auto& serialized_arg_val = serialized_arg_elem.value();
 
   switch (schema_arg_type->kind()) {
     case c10::TypeKind::TensorType: {
@@ -33,7 +34,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     }
     case c10::TypeKind::IntType: {
       TORCH_CHECK(serialized_arg_type == "as_int");
-      stack.emplace_back(c10::IValue());
+      stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
     }
@@ -41,7 +42,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       TORCH_CHECK(
           serialized_arg_type == "as_int" ||
           serialized_arg_type == "as_sym_int");
-      stack.emplace_back(c10::IValue());
+      stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
     }
@@ -107,14 +108,14 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         TORCH_CHECK(serialized_arg_type == "as_ints");
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
-        stack.emplace_back(c10::IValue());
+        stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofSymInts())) {
         TORCH_CHECK(
             serialized_arg_type == "as_ints" ||
             serialized_arg_type == "as_sym_ints");
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
-        stack.emplace_back(c10::IValue());
+        stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofFloats())) {
         TORCH_CHECK(serialized_arg_type == "as_floats");
         std::vector<double> ret;
@@ -133,7 +134,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         if (serialized_arg_type == "as_ints") {
           dynamic_args.emplace_back(
               index, DynamicArgType::ListIntType, serialized_arg_val.size());
-          stack.emplace_back(c10::IValue());
+          stack.emplace_back();
         } else if (serialized_arg_type == "as_floats") {
           std::vector<double> ret;
           for (const auto& arg : serialized_arg_val) {
@@ -255,11 +256,12 @@ void OSSProxyExecutor::get_output_info_from_serialized(
   size_t output_index = 0;
   for (const auto& serialized_output : serialized_node["outputs"]) {
     TORCH_CHECK(serialized_output.size() == 1);
-    std::string serialized_output_type = serialized_output.begin().key();
-    auto& serialized_output_val = serialized_output.begin().value();
+    auto serialized_output_elem = serialized_output.begin();
+    std::string serialized_output_type = serialized_output_elem.key();
+    auto& serialized_output_val = serialized_output_elem.value();
 
     auto& schema_return = schema_returns[output_index];
-    at::TypePtr schema_return_type = schema_return.real_type();
+    const at::TypePtr& schema_return_type = schema_return.real_type();
 
     switch (schema_return_type->kind()) {
       case c10::TypeKind::TensorType: {
@@ -408,7 +410,7 @@ void OSSProxyExecutor::call_function(
             list_item_types.has_value(),
             "Could not find list of item types for optional tensor list input");
 
-        for (std::string item_type : list_item_types.value()) {
+        for (const std::string& item_type : list_item_types.value()) {
           if (item_type == "as_tensor") {
             at::Tensor* tensor = tensor_handle_to_tensor_pointer(
                 flatten_tensor_args[tensor_id++]);
@@ -422,6 +424,7 @@ void OSSProxyExecutor::call_function(
       }
       case DynamicArgType::ListIntType: {
         std::vector<int64_t> vals;
+        vals.reserve(length);
         for (int j = 0; j < length; j++) {
           vals.push_back(flatten_int_args[int_id++]);
         }
@@ -468,10 +471,10 @@ void OSSProxyExecutor::call_function(
         schema_return.type()->kind() == c10::TypeKind::ListType &&
         schema_return.type()->isSubtypeOf(at::ListType::ofTensors())) {
       auto tensors = stack[index++].toTensorList();
-      for (size_t i = 0; i < tensors.size(); ++i) {
+      for (auto&& t : tensors) {
         at::Tensor* tensor =
             tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
-        *tensor = tensors[i];
+        *tensor = t;
       }
     } else {
       TORCH_CHECK(
