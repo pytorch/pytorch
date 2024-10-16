@@ -718,7 +718,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                   secondaryTensor:epsilonTensor
                                                                              name:nil];
 #ifdef __MAC_15_0
-          if (@available(macOS 15.0, *)) {
+          if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
             rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
           } else
 #endif // __MAC_15_0

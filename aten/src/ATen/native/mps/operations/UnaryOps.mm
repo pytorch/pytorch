@@ -245,7 +245,7 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
   mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
 #ifdef __MAC_15_0
-    if (@available(macOS 15.0, *)) {
+    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
       return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
     }
 #endif // __MAC_15_0
