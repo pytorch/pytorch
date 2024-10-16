@@ -8,6 +8,8 @@ from torch._export.utils import (
     _is_aten_op,
 )
 
+__all__ = ["CustomDecompTable"]
+
 
 class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     """
