@@ -48,6 +48,10 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `resizePrivateUse1Bytes`.");
   }
+
+  Allocator* getDeviceAllocator() const override {
+    return GetAllocator(kPrivateUse1);
+  }
 };
 
 struct TORCH_API PrivateUse1HooksArgs {};

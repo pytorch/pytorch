@@ -11,6 +11,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
+#include <ATen/Context.h>
 
 #include <cmath>
 #include <utility>
@@ -111,19 +112,7 @@ inline Tensor new_qtensor(
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
-  at::Allocator* allocator = nullptr;
-  // TODO: why isn't this just using GetAllocator
-  if (device.is_cuda()) {
-    allocator = at::detail::getCUDAHooks().getCUDADeviceAllocator();
-  } else if (device.is_cpu()) {
-    allocator = at::getCPUAllocator();
-  } else if (device.is_meta()) {
-    allocator = GetAllocator(kMeta);
-  } else if (device.is_privateuseone()) {
-    allocator = GetAllocator(kPrivateUse1);
-  } else {
-    TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
-  }
+  Allocator* allocator = globalContext().getDeviceAllocator(device);
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
