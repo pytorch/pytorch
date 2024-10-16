@@ -273,9 +273,9 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(
-        self, *, device: torch.device, non_blocking: _bool = False
-    ) -> Union[_StorageBase, TypedStorage]:
+    def to(self, *, device: Union[str, torch.device], non_blocking: _bool = False):
+        if isinstance(device, str):
+            device = torch.device(device)
         return _to(self, device, non_blocking)
 
     def double(self):
