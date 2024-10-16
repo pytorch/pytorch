@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -89,6 +90,9 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @skipIfWindows(
+        msg="Known issue: Window can't delete loaded modules, so we can't clear module cache."
+    )
     def test_clear_fx_graph_cache(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -588,7 +592,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        return autograd_cache_key(fx_g, example_inputs, config)
+        return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):

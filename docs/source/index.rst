@@ -74,12 +74,13 @@ Features described in this documentation are classified by release status:
    torch.backends <backends>
    torch.export <export>
    torch.distributed <distributed>
+   torch.distributed.tensor <distributed.tensor>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
+   torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.optim <distributed.optim>
    torch.distributed.pipelining <distributed.pipelining>
-   torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
    torch.compiler <torch.compiler>

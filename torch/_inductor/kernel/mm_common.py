@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import cast, List, Tuple
+from typing import cast, Sequence, Tuple
 
 import sympy
 
@@ -11,6 +11,8 @@ from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
+from ..codegen.wrapper import PythonWrapperCodegen
+from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import ceildiv as cdiv
 
@@ -28,10 +30,17 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: List[Tuple[int, int, int, int, int]],
+    configs: Sequence[Tuple[int, int, int, int, int]],
     has_int8_tensor=False,
+    scale=1,
+    exclude=lambda m, n, k: False,
 ):
-    """Heuristic to shrink configs when they are bigger than the input size"""
+    """
+    Heuristic to shrink configs when they are bigger than the input size
+
+    :param scale: scale factor applied to the config values
+    :param exclude: whether a given config should be excluded
+    """
 
     min_block_size = 16
     # block_k=16 seems to be causing issues
@@ -64,9 +73,13 @@ def filtered_configs(
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
-        block_m = max(min(block_m, m), min_block_size)
-        block_n = max(min(block_n, n), min_block_size)
-        block_k = max(min(block_k, k), min_block_size_k)
+        block_m = max(min(int(block_m * scale), m), min_block_size)
+        block_n = max(min(int(block_n * scale), n), min_block_size)
+        block_k = max(min(int(block_k * scale), k), min_block_size_k)
+
+        if exclude(block_m, block_n, block_k):
+            continue
+
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
@@ -464,3 +477,34 @@ def addmm_epilogue(dtype, alpha, beta):
         return V.ops.add(acc, bias)
 
     return epilogue
+
+
+def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
+    """
+    Check if input tensors and output layout have static shapes and non-zero sizes.
+
+    Args:
+        layout: Output layout object with a 'size' attribute.
+
+    Returns:
+        Tuple[bool, bool]: (is_static, is_nonzero)
+            is_static: True if all shapes are statically known
+            is_nonzero: True if all dimensions are non-zero
+    """
+    static_shape = True
+    static_size = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+        layout.size
+    )
+    if static_size is None:
+        nonzero = True
+        for s in layout.size:
+            sz = PythonWrapperCodegen.statically_known_int_or_none(s)
+            if sz is not None and sz == 0:
+                nonzero = False
+                break
+        return False, nonzero
+    numel = 1
+    for dim in static_size:
+        numel *= dim
+    nonzero = numel > 0
+    return static_shape, nonzero

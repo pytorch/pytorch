@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -49,6 +49,7 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictView,
+    FrozensetVariable,
     is_hashable,
     SetVariable,
 )
@@ -94,19 +95,6 @@ IN_PLACE_DESUGARING_MAP = {
 }
 
 
-def _polyfill_call_impl(name):
-    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
-
-    def call_fn(self, tx: "InstructionTranslator", *args, **kwargs):
-        return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn), args, kwargs
-        )
-
-    fn = getattr(polyfill, name)
-    call_fn.__name__ = f"call_{name}"
-    return call_fn
-
-
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
     _nonvar_fields = {
@@ -117,7 +105,7 @@ class BuiltinVariable(VariableTracker):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return BuiltinVariable(value, source=source)
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -212,7 +200,6 @@ class BuiltinVariable(VariableTracker):
             operator.ne,
             operator.eq,
             operator.sub,
-            operator.getitem,
             operator.length_hint,
             operator.lshift,
             operator.rshift,
@@ -224,6 +211,7 @@ class BuiltinVariable(VariableTracker):
             operator.imatmul,
             operator.ifloordiv,
             operator.itruediv,
+            operator.getitem,
             operator.imod,
             operator.iadd,
             operator.isub,
@@ -649,9 +637,6 @@ class BuiltinVariable(VariableTracker):
 
         return f"{self.__class__.__name__}({name})"
 
-    def python_type(self):
-        return type(self.fn)
-
     def as_python_constant(self):
         return self.fn
 
@@ -873,6 +858,39 @@ class BuiltinVariable(VariableTracker):
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return
 
+        # insert handling for torch function here
+        from .builder import SourcelessBuilder
+        from .torch_function import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+            can_dispatch_torch_function,
+            dispatch_torch_function,
+        )
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            # Only remap the fn to tensor methods if we aren't exporting
+            # export serde does not handle method descriptors today
+            if not tx.export:
+                # Use sourceless builder, we built the map ourselves
+                if not isinstance(args[0], TensorVariable):
+                    if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
+                        func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
+                    else:
+                        func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+
+                    tmp = args[0]
+                    # swap args and call reverse version of func
+                    args[0] = args[1]
+                    args[1] = tmp
+                else:
+                    func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+            else:
+                func = self.fn
+
+            fn_var = SourcelessBuilder.create(tx, func)
+
+            return dispatch_torch_function(tx, fn_var, args, kwargs)
+
         fn = self.fn
         try:
             # Constant fold for constant tensor and python constants
@@ -988,7 +1006,7 @@ class BuiltinVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if self.fn == object and name == "__setattr__":
+        if self.fn is object and name == "__setattr__":
             assert len(args) == 3
             assert len(kwargs) == 0
             obj, name_var, val = args
@@ -999,17 +1017,14 @@ class BuiltinVariable(VariableTracker):
                 and name_var.is_python_constant()
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
-        if self.fn == dict and name == "fromkeys":
-            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-        if self.fn == itertools.chain and name == "from_iterable":
+        if self.fn is object and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            obj = args[0]
-            items = []
-            for item in obj.unpack_var_sequence(tx):
-                items.extend(item.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
+            )
+        if self.fn is dict and name == "fromkeys":
+            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -1076,9 +1091,8 @@ class BuiltinVariable(VariableTracker):
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
-        if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-            # expand iterable
-            items = args[0].unpack_var_sequence(tx)
+        if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+            items = args[0].force_unpack_var_sequence(tx)
             return self._call_min_max_seq(tx, items)
         elif len(args) == 2:
             return self._call_min_max_binary(tx, args[0], args[1])
@@ -1093,6 +1107,10 @@ class BuiltinVariable(VariableTracker):
         return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)
 
     def _call_min_max_binary(self, tx: "InstructionTranslator", a, b):
+        if a is None or b is None:
+            # a or b could be none if we reduce and _call_min_max_binary failed
+            # to return something
+            return
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
@@ -1241,16 +1259,14 @@ class BuiltinVariable(VariableTracker):
             ),
         )
 
+    # NOTE must handle IteratorVariable separately!
     def _call_iter_tuple_list(
         self, tx: "InstructionTranslator", obj=None, *args, **kwargs
     ):
+        assert not isinstance(obj, variables.IteratorVariable)
+
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
-
-        if isinstance(obj, variables.IteratorVariable):
-            # For non-list iterators, we will guard on vars that
-            # determine the control flow
-            return obj
 
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
@@ -1279,9 +1295,22 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
             )
 
+    def _call_tuple_list(self, tx, obj=None, *args, **kwargs):
+        if isinstance(obj, variables.IteratorVariable):
+            cls = variables.BaseListVariable.cls_for(self.fn)
+            return cls(
+                list(obj.force_unpack_var_sequence(tx)),
+                mutable_local=MutableLocal(),
+            )
+        else:
+            return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
-        # Handle the case where we are iterating over a tuple, list or iterator
-        ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+        if isinstance(obj, variables.IteratorVariable):
+            ret = obj
+        else:
+            # Handle the case where we are iterating over a tuple, list or iterator
+            ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
         if ret is None:
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
@@ -1290,8 +1319,8 @@ class BuiltinVariable(VariableTracker):
             return obj.call_method(tx, "__iter__", args, kwargs)
         return ret
 
-    call_tuple = _call_iter_tuple_list
-    call_list = _call_iter_tuple_list
+    call_tuple = _call_tuple_list
+    call_list = _call_tuple_list
 
     def call_callable(self, tx: "InstructionTranslator", arg):
         from .functions import BaseUserFunctionVariable
@@ -1349,10 +1378,12 @@ class BuiltinVariable(VariableTracker):
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
+                    variables.IteratorVariable,
                 ),
             ):
                 items = dict(
-                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
+                    x.force_unpack_var_sequence(tx)
+                    for x in arg.force_unpack_var_sequence(tx)
                 )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.MutableMappingVariable):
@@ -1409,13 +1440,12 @@ class BuiltinVariable(VariableTracker):
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif arg.has_unpack_var_sequence(tx) and all(
-            is_hashable(v) for v in arg.unpack_var_sequence(tx)
-        ):
-            keys = arg.unpack_var_sequence(tx)
-            return DictVariableType(
-                dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
-            )
+        elif arg.has_force_unpack_var_sequence(tx):
+            keys = arg.force_unpack_var_sequence(tx)
+            if all(is_hashable(v) for v in keys):
+                return DictVariableType(
+                    dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
+                )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
     def call_set(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -1427,8 +1457,8 @@ class BuiltinVariable(VariableTracker):
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
             return arg.clone(mutable_local=MutableLocal())
-        elif arg.has_unpack_var_sequence(tx):
-            items = arg.unpack_var_sequence(tx)
+        elif arg.has_force_unpack_var_sequence(tx):
+            items = arg.force_unpack_var_sequence(tx)
             return SetVariable(items, mutable_local=MutableLocal())
         elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
             arg.value, KeysView
@@ -1444,35 +1474,29 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"set(): {args} {kwargs}")
 
+    def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
+        assert not kwargs
+        if not args:
+            return FrozensetVariable([])
+        assert len(args) == 1
+        arg = args[0]
+        if isinstance(arg, variables.FrozensetVariable):
+            return FrozensetVariable([x.vt for x in arg.set_items])
+        elif arg.has_unpack_var_sequence(tx):
+            items = arg.unpack_var_sequence(tx)
+            return FrozensetVariable(items)
+        else:
+            unimplemented(f"frozenset(): {args} {kwargs}")
+
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
-        if all(x.has_unpack_var_sequence(tx) for x in args):
-            unpacked = [arg.unpack_var_sequence(tx) for arg in args]
-            if kwargs.pop("strict", False) and len(unpacked) > 0:
-                if not all(len(u) == len(unpacked[0]) for u in unpacked):
-                    raise UserError(
-                        ValueError,
-                        "zip() has one argument of len differing from others",
-                    )
-            items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
-            return variables.TupleVariable(items)
-
-    def call_enumerate(self, tx: "InstructionTranslator", *args):
-        if len(args) == 1:
-            start = 0
-        else:
-            assert len(args) == 2
-            assert isinstance(args[1], variables.ConstantVariable)
-            start = args[1].as_python_constant()
-        if args[0].has_unpack_var_sequence(tx):
-            items = [
-                variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx), var],
-                )
-                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
-            ]
-            return variables.TupleVariable(items)
+        strict = kwargs.pop("strict", False)
+        args = [
+            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
+            for arg in args
+        ]
+        return variables.ZipVariable(args, strict=strict, mutable_local=MutableLocal())
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
@@ -1573,10 +1597,11 @@ class BuiltinVariable(VariableTracker):
             return obj.call_hasattr(tx, name)
 
     def call_map(self, tx: "InstructionTranslator", fn, *seqs):
-        if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
-            unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
-            items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
-            return variables.TupleVariable(items)
+        seqs = [
+            seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
+            for seq in seqs
+        ]
+        return variables.MapVariable(fn, seqs, mutable_local=MutableLocal())
 
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         if seq.has_unpack_var_sequence(tx):
@@ -1592,50 +1617,6 @@ class BuiltinVariable(VariableTracker):
             except NotImplementedError:
                 return
 
-    def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
-        # Special case for sum on tuple of floats and ints
-        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
-            isinstance(x, variables.ConstantVariable)
-            and isinstance(x.value, (int, float))
-            for x in seq.items
-        ):
-            if start is self._SENTINEL:
-                return variables.ConstantVariable.create(
-                    sum(x.value for x in seq.items),
-                )
-            if isinstance(start, variables.ConstantVariable) and isinstance(
-                start.value, (int, float)
-            ):
-                return variables.ConstantVariable.create(
-                    sum((x.value for x in seq.items), start=start.value),
-                )
-        if seq.has_unpack_var_sequence(tx):
-            if start is self._SENTINEL:
-                start = variables.ConstantVariable.create(0)
-            items = seq.unpack_var_sequence(tx)
-            return BuiltinVariable(functools.reduce).call_function(
-                tx,
-                [
-                    BuiltinVariable(operator.add),
-                    variables.TupleVariable(items),
-                    start,
-                ],
-                {},
-            )
-
-    def call_reduce(
-        self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
-    ):
-        if iterable.has_unpack_var_sequence(tx):
-            items = iterable.unpack_var_sequence(tx)
-            if initial is self._SENTINEL:
-                value, items = items[0], items[1:]
-            else:
-                value = initial
-            for element in items:
-                value = function.call_function(tx, [value, element], {})
-            return value
-
     def call_getattr(
         self,
         tx: "InstructionTranslator",
@@ -1647,7 +1628,6 @@ class BuiltinVariable(VariableTracker):
         from . import (
             ConstantVariable,
             GetAttrVariable,
-            PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
         )
@@ -1693,20 +1673,29 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
+        if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
+                    if name == "__bases__":
+                        bases = value.__bases__
+                        if source is not None:
+                            tuple_args = [
+                                VariableBuilder(tx, GetItemSource(source, i))(b)
+                                for i, b in enumerate(bases)
+                            ]
+                        else:
+                            tuple_args = [
+                                SourcelessBuilder.create(tx, b) for b in bases
+                            ]
+                        return variables.TupleVariable(tuple_args, **options)
+                    if name == "__base__":
+                        base = value.__base__
+                        if source is not None:
+                            return VariableBuilder(tx, source)(base)
+                        return SourcelessBuilder.create(tx, base)
+                    if name == "__flags__":
+                        return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
                 pass
 
@@ -1734,7 +1723,8 @@ class BuiltinVariable(VariableTracker):
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+        elif isinstance(obj, DummyModule):
+            # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
                 member = getattr(obj.value, name)
             else:
@@ -1914,11 +1904,12 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(items)
 
     def call_sorted(self, tx: "InstructionTranslator", obj: VariableTracker, **kwargs):
-        if (
-            obj.has_unpack_var_sequence(tx)
-            and not isinstance(obj, variables.TensorVariable)
-            and all(x.is_python_constant() for x in obj.unpack_var_sequence(tx))
+        if obj.has_force_unpack_var_sequence(tx) and not isinstance(
+            obj, variables.TensorVariable
         ):
+            unpacked = obj.force_unpack_var_sequence(tx)
+            if not all(x.is_python_constant() for x in unpacked):
+                return
             function = kwargs.pop("key", None)
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
@@ -1926,7 +1917,7 @@ class BuiltinVariable(VariableTracker):
             assert len(kwargs) == 0
             if function:
                 items = sorted(
-                    obj.unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: function.call_function(
                         tx, [x], {}
                     ).as_python_constant(),
@@ -1934,27 +1925,11 @@ class BuiltinVariable(VariableTracker):
                 )
             else:
                 items = sorted(
-                    obj.unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: x.as_python_constant(),
                     reverse=reverse,
                 )
             return variables.ListVariable(items)
-
-    def call_chain(self, tx: "InstructionTranslator", *args):
-        if all(obj.has_unpack_var_sequence(tx) for obj in args):
-            items = []
-            for obj in args:
-                items.extend(obj.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
-    def call_islice(self, tx: "InstructionTranslator", iterable, *args):
-        if iterable.has_unpack_var_sequence(tx) and all(
-            x.is_python_constant() for x in args
-        ):
-            const_args = [x.as_python_constant() for x in args]
-            items = iterable.unpack_var_sequence(tx)
-            items = list(itertools.islice(items, *const_args))
-            return variables.TupleVariable(items)
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
@@ -2108,9 +2083,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ):
         return a.call_method(tx, "__contains__", [b], {})
-
-    call_all = _polyfill_call_impl("all")
-    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager

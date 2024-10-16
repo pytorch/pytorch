@@ -50,7 +50,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 
@@ -58,15 +58,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const override {
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  virtual bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
   }
 };
@@ -81,4 +81,4 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()

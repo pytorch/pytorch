@@ -20,6 +20,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
       size_t block_size,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
+      HandleType mc_handle,
+      void* mc_addr,
       size_t buffer_size,
       int local_device_idx,
       int rank,
@@ -34,24 +36,31 @@ class CUDASymmetricMemory : public SymmetricMemory {
   size_t get_buffer_size() override;
   size_t get_signal_pad_size() override;
 
+  bool has_multicast_support() override;
+  void* get_multicast_ptr() override;
+
   at::Tensor get_buffer(
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
       int64_t storage_offset) override;
 
-  void barrier(int channel) override;
-  void put_signal(int dst_rank, int channel) override;
-  void wait_signal(int src_rank, int channel) override;
+  void barrier(int channel, size_t timeout_ms) override;
+  void put_signal(int dst_rank, int channel, size_t timeout_ms) override;
+  void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
   int get_world_size() override;
+
+  void stream_write_value32(uintptr_t addr, uint32_t val) override;
 
  private:
   std::vector<HandleType> handles_;
   size_t block_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
+  HandleType mc_handle_;
+  void* mc_addr_;
   size_t buffer_size_;
   int local_device_idx_;
   int rank_;
@@ -95,6 +104,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) override;
   bool is_rendezvous_completed(void* ptr) override;
+  bool has_multicast_support(int device_idx) override;
 
  private:
   c10::intrusive_ptr<Block> find_block(void* ptr);
