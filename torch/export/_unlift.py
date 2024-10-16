@@ -279,10 +279,10 @@ def _create_stateful_graph_module(
 
     if ep is None:
         return stateful_gm
-    
+
     # When we have a constant that has requires_grad=True, we need to detach it
     # when we unlift as the tensors that require gradients should be registered
-    # via parameters. But this is problematic when we have aliasing two constants 
+    # via parameters. But this is problematic when we have aliasing two constants
     # because when we call detach, they will become different tensors. This dict
     # keeps track of this logic.
     original_tensor_to_detached_tensor = {}
@@ -320,7 +320,7 @@ def _create_stateful_graph_module(
             if isinstance(value, torch.Tensor):
                 if value.requires_grad:
                     warnings.warn(
-                        f"A model attribute `{const_name}` requires gradient. "
+                        f"A model attribute `{const_name}` requires gradient "
                         f"but it's not properly registered as a parameter. "
                         f"torch.export will detach it and treat it as a constant tensor "
                         f"but please register it as parameter instead."

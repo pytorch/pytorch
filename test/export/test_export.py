@@ -7576,13 +7576,13 @@ def forward(self, x, y):
         a, b = mod(torch.zeros(4, 4))
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
-        
+
     def test_constant_requires_grad_const(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.foo = torch.randn(2, 2, requires_grad=True)
-            
+
             def forward(self, x):
                 return x.cos() + self.foo.sum()
 
