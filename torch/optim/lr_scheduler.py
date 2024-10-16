@@ -927,7 +927,7 @@ class SequentialLR(LRScheduler):
             for s in scheds._schedulers:
                 self.recursive_undo(s)
         elif hasattr(scheds, "last_epoch"):
-            scheds.last_epoch -= 1    
+            scheds.last_epoch -= 1
 
     def step(self):  # type: ignore[override]
         """Perform a step."""
