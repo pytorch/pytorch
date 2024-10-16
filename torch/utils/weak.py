@@ -5,7 +5,7 @@ import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import MutableMapping, Mapping
-from torch import Tensor
+from torch import Tensor, storage
 import collections.abc as _collections_abc
 
 
@@ -325,17 +325,17 @@ class TensorWeakRef:
 class StorageWeakRefWrapper:
     """Wrapper around a weak ref of a Storage that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
 
-    ref: WeakRef[torch.storage.UntypedStorage]
+    ref: WeakRef[storage.UntypedStorage]
 
-    def __init__(self, stor: torch.storage.UntypedStorage):
-        assert isinstance(stor, torch.storage.UntypedStorage)
+    def __init__(self, stor: storage.UntypedStorage):
+        assert isinstance(stor, storage.UntypedStorage)
         self.ref = weakref.ref(stor)
 
     def __call__(self):
         out = self.ref()
         if out is None:
             return out
-        assert isinstance(out, torch.storage.UntypedStorage)
+        assert isinstance(out, storage.UntypedStorage)
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out
