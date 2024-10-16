@@ -323,7 +323,7 @@ class TensorWeakRef:
 
 
 class StorageWeakRefWrapper:
-    """Wrapper around a weak ref of a Storage that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
+    """Wrapper around a weak ref of a Storage that handles the _fix_weakref() call required when unwrapping a Storage weakref."""
 
     ref: WeakRef[storage.UntypedStorage]
 
