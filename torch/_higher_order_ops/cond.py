@@ -60,7 +60,7 @@ cond_op = CondOp()
 
 
 @exposed_in("torch")
-def cond(pred, true_fn, false_fn, operands):
+def cond(pred, true_fn, false_fn, operands=()):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
@@ -154,7 +154,7 @@ def cond(pred, true_fn, false_fn, operands):
             )
 
         if not callable(true_fn) or not callable(false_fn):
-            raise RuntimeError("Expect both branches to be callbale.")
+            raise RuntimeError("Expect both branches to be callable.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), operands
