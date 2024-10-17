@@ -575,23 +575,13 @@ class TestDeserialize(TestCase):
             return inputs_clone
 
         def _check_graph(pre_dispatch):
-            if pre_dispatch:
-                ep = torch.export._trace._export(
-                    fn,
-                    _deepcopy_inputs(inputs),
-                    {},
-                    dynamic_shapes=dynamic_shapes,
-                    pre_dispatch=True,
-                    strict=strict,
-                )
-            else:
-                ep = torch.export.export(
-                    fn,
-                    _deepcopy_inputs(inputs),
-                    {},
-                    dynamic_shapes=dynamic_shapes,
-                    strict=strict,
-                )
+            ep = torch.export.export_for_training(
+                fn,
+                _deepcopy_inputs(inputs),
+                {},
+                dynamic_shapes=dynamic_shapes,
+                strict=strict,
+            )
             ep.graph.eliminate_dead_code()
 
             serialized_artifact = serialize(ep, opset_version={"aten": 0})
