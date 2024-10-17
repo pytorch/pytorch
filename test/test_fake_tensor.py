@@ -1883,6 +1883,42 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    def test_invoke_subgraph(self):
+        """
+        Tests invoke subgraph
+        """
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            return x + y * 2
+
+        with FakeTensorMode():
+            x = torch.randn(6, 4)
+            y = torch.randn(6, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(fn, "subgraph", (x, y))
+            # 3 misses - 1 for invoke subgraph and 2 for the computation of fn
+            self.assertHitsMisses(0, 3)
+
+            # Deliberately kept the identifier to be same. In torch.compile,
+            # this will be done by Dynamo.
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            self.assertHitsMisses(1, 3)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            self.assertHitsMisses(2, 3)
+
+            self.assertEqual(len(ref), len(res))
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                self.assertEqual(
+                    extract_tensor_metadata(a),
+                    extract_tensor_metadata(b),
+                )
+
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.
