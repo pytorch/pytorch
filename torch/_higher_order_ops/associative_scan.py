@@ -193,11 +193,11 @@ def associative_scan(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
-    # if not torch._dynamo.is_compiling():
-    #     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-    #         return torch.compile(associative_scan, fullgraph=True)(
-    #             combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
-    #         )
+    if not torch._dynamo.is_compiling():
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(associative_scan, fullgraph=True)(
+                combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
+            )
 
     leaves, spec = pytree.tree_flatten(xs)
 
@@ -214,11 +214,12 @@ def associative_scan(
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
         
-    # # Move scan dim to 0 and always perform scan on dim 0
-    # leaves = [
-    #     shift_source_dim_to_target_dim(elem, int(dim), 0) for elem in leaves
-    # ]
-    # dim = 0
+    # Move scan dim to 0 and always perform scan on dim 0
+    orig_scan_dim = dim
+    leaves = [
+        shift_source_dim_to_target_dim(elem, int(dim), 0) for elem in leaves
+    ]
+    dim = 0
 
     shape = leaves[0].shape
     ndim = len(shape)
@@ -252,6 +253,10 @@ def associative_scan(
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+
+    result_flat = [
+        shift_source_dim_to_target_dim(elem, 0, orig_scan_dim) for elem in result_flat
+    ]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -558,10 +563,15 @@ class ScanAutogradOp(torch.autograd.Function):
             # grads_h_parts, grads_x_parts = grads_intermediate[:num_xs_masked], grads_intermediate[num_xs_masked:]
             
             # grads_h_parts = [torch.concat([torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), aten.slice(g, dim + 1, 1, None, 1)], dim + 1) for g in grads_h_parts]
-            # grads_h_parts2 = [torch.concat([torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), aten.slice(g, dim + 1, 1, -1, 1)], dim + 1) for g in grads_h_parts]
+            # # grads_h_parts2 = [torch.concat([torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), aten.slice(g, dim + 1, 1, -1, 1)], dim + 1) for g in grads_h_parts]
             # grads_x_parts = [torch.concat([torch.stack([torch.ones_like(gp) if ind == 0 else torch.zeros_like(gp) for ind, gp in enumerate(aten.slice(g, dim + 1, 0, 1, 1))], 0), aten.slice(g, dim + 1, 1, None, 1)], dim + 1) for g in grads_x_parts]
             
+            # ones_p = torch.ones_like(aten.slice(grads_x_parts[0], dim + 1, 0, 1, 1))
+            # zeros_p = torch.zeros_like(aten.slice(grads_x_parts[0], dim + 1, 0, 1, 1))
+            
+            # # grads_h_parts2 = grads_h_parts
             # grads_h_parts = [torch.flip(gh_p, [dim + 1]) for gh_p in grads_h_parts]
+            # grads_h_parts2 = [torch.concat([zeros_p, gh_p], dim + 1) for gh_p in grads_h_parts]
             # grads_x = [torch.flip(torch.sum(gx_p, 0), [dim]) for gx_p in grads_x_parts]
             # flat_grads = [torch.concat([torch.flip(fg, [dim]), ones], dim) for fg in flat_grads]
             
@@ -579,28 +589,64 @@ class ScanAutogradOp(torch.autograd.Function):
             # grads_h_prod_mat = [torch.stack([prepad(torch.sum(torch.cumprod(select(gh_p, i), dim + 1), 0), i) * aten.slice(fg, dim, i, i + 1, 1) for i in range(scan_length)], 0) for gh_p, fg in zip(grads_h_parts, flat_grads)]
             
             # ones_t = torch.ones((scan_length, scan_length), device=outs[0].device)
-            # shape = grads_h_parts[0].shape
+            # # shape = grads_h_parts[0].shape
+            # shape = grads_x[0].shape
             # def expand_to_equal_dims(el):
             #     while len(el.shape) < (len(shape) + 1):
+            #     # while len(el.shape) < (len(shape)):
             #         el = torch.unsqueeze(el, -1)
             #     return el
-            # triu = torch.unsqueeze(torch.triu(ones_t, diagonal=1), 0)
+            # triu = torch.triu(ones_t, diagonal=1)
+            # # triu = torch.unsqueeze(triu, 0)
             # triu = expand_to_equal_dims(triu)
-            # tril = torch.unsqueeze(torch.tril(ones_t, diagonal=0), 0)
+            # tril = torch.tril(ones_t, diagonal=0)
+            # # tril = torch.unsqueeze(tril, 0)
             # tril = expand_to_equal_dims(tril)
-            # tril2 = torch.unsqueeze(torch.tril(ones_t, diagonal=-1), 0)
+            # tril2 = torch.tril(ones_t, diagonal=-1)
+            # # tril2 = torch.unsqueeze(tril2, 0)
             # tril2 = expand_to_equal_dims(tril2)
+            # eye = torch.eye(scan_length, device=outs[0].device)
+            # eye = expand_to_equal_dims(eye)
             
             # def create_grads_h_matrix(gh_p):
             #     h_mat = gh_p.expand(shape[0:1] + shape[1:2] + shape[1:])
             #     h_mat = h_mat * triu + tril
             #     return h_mat
             
-            # grads_h_prod_mat2 = [torch.sum(torch.cumprod(create_grads_h_matrix(gh_p), dim + 2) - tril2, 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # def create_grads_h_matrix_part(gh_p):
+            #     # h_mat = gh_p.expand(shape[0:1] + shape)
+            #     h_mat = torch.tile(torch.unsqueeze(gh_p, 0), [scan_length] + [1] * (len(shape)))
+            #     h_mat = h_mat * triu + tril# + tril2 - tril2
+            #     # print(torch.sum(torch.cumprod(h_mat, dim + 1), 0) - (scan_length - 1))
+            #     return h_mat
+            
+            # def compute_matrix_factors_part(h_mat):
+            #     return torch.cumprod(h_mat, dim + 1) - tril2
+            
+            # def stack_and_reduce_parts(mat_fact):
+            #     return torch.sum(torch.stack(mat_fact, 0), 0) - (eye * (len(mat_fact) - 1))
+            
+            # def partial_sum(mat_parts):
+            #     mat_parts = [torch.sum(part, 0) for part in mat_parts]
+            #     return torch.stack(mat_parts)
+            
+            # # grads_h_prod_mat2 = [torch.sum(torch.cumprod(create_grads_h_matrix(gh_p), dim + 2) - tril2, 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # grads_h_prod_mat2 = [torch.sum(torch.cumprod(create_grads_h_matrix(aten.slice(gh_p, dim + 1, 0, -1, 1)), dim + 2) - tril2, 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # grads_h_prod_mat2 = [partial_sum(torch.cumprod(create_grads_h_matrix(aten.slice(gh_p, dim + 1, 0, -1, 1)), dim + 2) - tril2, 0, dim + 1) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # grads_h_prod_mat2 = [partial_sum([torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim) - tril2 for p in range(gh_p.shape[0])]) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # grads_h_prod_mat2 = [torch.stack([torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim) - tril2 for p in range(gh_p.shape[0])], 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            
+            # # grads_h_prod_mat2 = [torch.sum(torch.stack([torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim + 1) - tril2 for p in range(gh_p.shape[0])], 0), 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # tmp = (torch.sum(torch.stack([torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(grads_h_parts2[0], dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim + 1) - tril2 for p in range(grads_h_parts2[0].shape[0])], 0), 0) - (eye * (grads_h_parts2[0].shape[0] - 1))) * aten.slice(flat_grads[0], dim, 0, -1, 1)
+            # # grads_h_prod_mat2 = [(torch.sum(torch.stack([torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim + 1) - tril2 for p in range(gh_p.shape[0])], 0), 0) - (eye * (gh_p.shape[0] - 1))) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # grads_h_prod_mat2 = [stack_and_reduce_parts([compute_matrix_factors_part(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim))) for p in range(gh_p.shape[0])]) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # # tmp = [torch.cumprod(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(grads_h_parts2[0], dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim)), dim + 1) for p in range(grads_h_parts2[0].shape[0])]
             
             # grads = [torch.flip(torch.sum(gh_p * gx, 0), [dim]) for gh_p, gx in zip(grads_h_prod_mat, grads_x)]
             # grads2 = [torch.flip(torch.sum(gh_p * gx, 0), [dim]) for gh_p, gx in zip(grads_h_prod_mat2, grads_x)]
             # grads = expand_grads_with_None(grads, gradient_mask)
+            
+            # # print(grads2)
             
             # if any(torch.max(torch.abs(g - go)) > 1e-4 for g, go in zip(grads, grads_old)):
             #     print('Failed')
@@ -731,42 +777,66 @@ class ScanAutogradOp(torch.autograd.Function):
             grads_h_parts, grads_x_parts = grads_intermediate[:num_xs_masked], grads_intermediate[num_xs_masked:]
             
             grads_h_parts = [torch.concat([torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), aten.slice(g, dim + 1, 1, None, 1)], dim + 1) for g in grads_h_parts]
-            # grads_h_parts = [torch.concat([torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), torch.zeros_like(aten.slice(g, dim + 1, 0, 1, 1)), aten.slice(g, dim + 1, 1, -1, 1)], dim + 1) for g in grads_h_parts]
             grads_x_parts = [torch.concat([torch.stack([torch.ones_like(gp) if ind == 0 else torch.zeros_like(gp) for ind, gp in enumerate(aten.slice(g, dim + 1, 0, 1, 1))], 0), aten.slice(g, dim + 1, 1, None, 1)], dim + 1) for g in grads_x_parts]
             
+            zeros_p = torch.zeros_like(aten.slice(grads_x_parts[0], dim + 1, 0, 1, 1))
+            
             grads_h_parts = [torch.flip(gh_p, [dim + 1]) for gh_p in grads_h_parts]
+            grads_h_parts2 = [torch.concat([zeros_p, gh_p], dim + 1) for gh_p in grads_h_parts]
             grads_x = [torch.flip(torch.sum(gx_p, 0), [dim]) for gx_p in grads_x_parts]
             flat_grads = [torch.concat([torch.flip(fg, [dim]), ones], dim) for fg in flat_grads]
             
-            def select(val, size):
-                return aten.slice(val, dim + 1, size, -1, 1)
+            # # Compute the cumprod of the rows of the gradient matrix and fill the remainder with zeros
+            # def select(val, size):
+            #     return aten.slice(val, dim + 1, size, -1)
             
-            def prepad(val, size):
-                return torch.concat([zeros] * size + [ones] + [val], dim)
+            # def prepad(val, size):
+            #     return torch.concat([zeros] * size + [ones] + [val], dim)
             
-            grads_h_prod_mat = [torch.stack([prepad(torch.sum(torch.cumprod(select(gh_p, i), dim + 1), 0), i) * aten.slice(fg, dim, i, i + 1, 1) for i in range(scan_length)], 0) for gh_p, fg in zip(grads_h_parts, flat_grads)]
+            # grads_h_prod_mat = [torch.stack([prepad(torch.sum(torch.cumprod(select(gh_p, i), dim + 1), 0), i) * aten.slice(fg, dim, i, i + 1, 1) for i in range(scan_length)], 0) for gh_p, fg in zip(grads_h_parts, flat_grads)]
             
-            # ones_t = torch.ones((scan_length, scan_length), device=outs[0].device)
-            # shape = grads_h_parts[0].shape
-            # def expand_to_equal_dims(el):
-            #     while len(el.shape) < (len(shape) + 1):
-            #         el = torch.unsqueeze(el, -1)
-            #     return el
-            # triu = torch.unsqueeze(torch.triu(ones_t, diagonal=1), 0)
-            # triu = expand_to_equal_dims(triu)
-            # tril = torch.unsqueeze(torch.tril(ones_t, diagonal=0), 0)
-            # tril = expand_to_equal_dims(tril)
-            # tril2 = torch.unsqueeze(torch.tril(ones_t, diagonal=-1), 0)
-            # tril2 = expand_to_equal_dims(tril2)
+            ones_t = torch.ones((scan_length, scan_length), device=outs[0].device)
+            shape = grads_x[0].shape
+            def expand_to_equal_dims(el):
+                while len(el.shape) < (len(shape) + 1):
+                    el = torch.unsqueeze(el, -1)
+                return el
+            triu = torch.triu(ones_t, diagonal=1)
+            triu = expand_to_equal_dims(triu)
+            tril = torch.tril(ones_t, diagonal=0)
+            tril = expand_to_equal_dims(tril)
+            tril2 = torch.tril(ones_t, diagonal=-1)
+            tril2 = expand_to_equal_dims(tril2)
+            eye = torch.eye(scan_length, device=outs[0].device)
+            eye = expand_to_equal_dims(eye)
             
-            # def create_grads_h_matrix(gh_p):
-            #     h_mat = gh_p.expand(shape[0:1] + shape[1:2] + shape[1:])
-            #     h_mat = h_mat * triu + tril
-            #     return h_mat
+            def create_grads_h_matrix_part(gh_p):
+                h_mat = torch.tile(torch.unsqueeze(gh_p, 0), [scan_length] + [1] * (len(shape)))
+                h_mat = h_mat * triu + tril
+                return h_mat
             
-            # grads_h_prod_mat = [torch.sum(torch.cumprod(create_grads_h_matrix(gh_p), dim + 2) - tril2, 0) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts, flat_grads)]
+            def compute_matrix_factors_part(h_mat):
+                return torch.cumprod(h_mat, dim + 1) - tril2
             
+            def stack_and_reduce_parts(mat_fact):
+                return torch.sum(torch.stack(mat_fact, 0), 0) - (eye * (len(mat_fact) - 1))
+            
+            # grads_h_prod_mat2 = [stack_and_reduce_parts([compute_matrix_factors_part(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim))) for p in range(gh_p.shape[0])]) * aten.slice(fg, dim, 0, -1, 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            grads_h_prod_mat = [stack_and_reduce_parts([compute_matrix_factors_part(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim))) for p in range(gh_p.shape[0])]) * torch.unsqueeze(aten.slice(fg, dim, 0, -1, 1), dim + 1) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # grads_h_prod_mat2_no_fg = [stack_and_reduce_parts([compute_matrix_factors_part(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim))) for p in range(gh_p.shape[0])]) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+            # grads_h_prod_mat2_fg_before_sum = [stack_and_reduce_parts([compute_matrix_factors_part(create_grads_h_matrix_part(torch.squeeze(aten.slice(aten.slice(gh_p, dim + 1, 0, -1, 1), dim, p, p + 1, 1), dim))) * aten.slice(fg, dim, 0, -1, 1) for p in range(gh_p.shape[0])]) for gh_p, fg in zip(grads_h_parts2, flat_grads)]
+
+            # import pdb
+            # pdb.set_trace()
+            # print('=' * 40)
+            # print(grads_h_prod_mat)
+            # print('-' * 40)
+            # print(grads_h_prod_mat2)
+            # print('-' * 40)
+            # print(flat_grads)
             grads = [torch.flip(torch.sum(gh_p * gx, 0), [dim]) for gh_p, gx in zip(grads_h_prod_mat, grads_x)]
+            # grads = [torch.flip(torch.sum(gh_p * gx, 0), [dim]) for gh_p, gx in zip(grads_h_prod_mat2, grads_x)]
+            
             grads = expand_grads_with_None(grads, gradient_mask)
             
             return *[None] * 4, *grads
