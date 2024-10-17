@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Callable, Dict
 
 import torch
@@ -7,6 +8,7 @@ from torch._export.utils import (
     _get_decomp_for_cia,
     _is_aten_op,
 )
+
 
 __all__ = ["CustomDecompTable"]
 
@@ -46,7 +48,7 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self._materialize_if_needed()
         return self.decomp_table.__getitem__(key)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         self.decomp_table.__setitem__(key, value)
 
         if key in self.deleted_custom_ops:
@@ -56,21 +58,21 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self._materialize_if_needed()
         return self.decomp_table.keys()
 
-    def __delitem__(self, key):
+    def __delitem__(self, key) -> None:
         self.pop(key)
 
-    def update(self, other_dict):  # type: ignore[override]
+    def update(self, other_dict):
         for k, v in other_dict.items():
             self.decomp_table.__setitem__(k, v)
 
-    def __missing__(self, key):
+    def __missing__(self, key) -> bool:
         return not self.__contains__(key)
 
-    def __contains__(self, key):
+    def __contains__(self, key) -> bool:
         self._materialize_if_needed()
         return self.decomp_table.__contains__(key)
 
-    def __len__(self):
+    def __len__(self) -> int:
         self._materialize_if_needed()
         return self.decomp_table.__len__()
 
@@ -78,14 +80,13 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self._materialize_if_needed()
         return self.decomp_table.__iter__()
 
-    def __reverse__(self):
+    def __reversed__(self):
         self._materialize_if_needed()
-        return self.decomp_table.__reverse__()
+        return self.decomp_table.__reversed__()
 
-    def copy(self):
+    def copy(self) -> "CustomDecompTable":
         new_dict = CustomDecompTable()
-        new_dict.aten_decomp_table = self.aten_decomp_table.copy()
-        new_dict.additional_custom_op_decomp = self.additional_custom_op_decomp.copy()
+        new_dict.decomp_table = self.decomp_table.copy()
         new_dict.deleted_custom_ops = self.deleted_custom_ops.copy()
         new_dict.has_materialized = self.has_materialized
         return new_dict
@@ -124,7 +125,7 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self._materialize_if_needed()
         return self.decomp_table.items()
 
-    def materialize(self):
+    def materialize(self) -> Dict[torch._ops.OperatorBase, Callable]:
         for op in _collect_all_valid_cia_ops():
             if _is_aten_op(op):
                 continue
@@ -137,6 +138,6 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
         self.deleted_custom_ops = set()
         return {**self.decomp_table}
 
-    def _materialize_if_needed(self):
+    def _materialize_if_needed(self) -> None:
         if not self.has_materialized:
             self.materialize()
