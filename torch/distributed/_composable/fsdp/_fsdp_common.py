@@ -9,8 +9,15 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 @dataclass
@@ -97,13 +104,15 @@ def _chunk_with_empty(
     return chunks
 
 
-def _get_dim0_chunked_size(
-    chunk: torch.Tensor, unchunked_size: torch.Size
+def _get_dim_chunked_size(
+    chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
 ) -> torch.Size:
     if chunk.numel() > 0:
         return chunk.size()
-    # For 0 numel, we need to preserve trailing dims for DTensor APIs
-    return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
+    # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
+    return cast(
+        torch.Size, unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
+    )
 
 
 def _from_local_no_grad(
@@ -114,7 +123,6 @@ def _from_local_no_grad(
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-    import torch._dynamo.compiled_autograd as ca
 
     if not ca.compiled_autograd_enabled:
         return DTensor(
@@ -124,13 +132,14 @@ def _from_local_no_grad(
             sharding_spec,
             requires_grad=local_tensor.requires_grad,
         )
-    return DTensor.from_local(
-        local_tensor,
-        sharding_spec.mesh,
-        sharding_spec.placements,
-        shape=sharding_spec.shape,
-        stride=sharding_spec.stride,
-    )
+    else:
+        return DTensor.from_local(
+            local_tensor,
+            sharding_spec.mesh,
+            sharding_spec.placements,
+            shape=sharding_spec.shape,
+            stride=sharding_spec.stride,
+        )
 
 
 def _to_dtype_if_needed(

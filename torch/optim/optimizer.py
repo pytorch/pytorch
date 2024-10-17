@@ -26,11 +26,13 @@ from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
+from torch._utils import is_compiling
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
+    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
 
@@ -38,7 +40,6 @@ from torch.utils.hooks import RemovableHandle
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
-TensorListList: TypeAlias = List[List[torch.Tensor]]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
 
 
@@ -99,14 +100,14 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+    if not torch.jit.is_scripting() and is_compiling():
         return x
     else:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
-    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+    if not torch.jit.is_scripting() and is_compiling():
         return torch.stack(x)
     else:
         return x
@@ -138,7 +139,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
         def maybe_fallback(*args, **kwargs):
-            if torch.compiler.is_compiling() and (
+            if is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
                 and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
@@ -191,6 +192,19 @@ def _default_to_fused_or_foreach(
     return fused, foreach
 
 
+def _device_dtype_check_for_fused(
+    p: torch.Tensor, cuda_unsupported: bool = False
+) -> None:
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    if cuda_unsupported:
+        fused_supported_devices.remove("cuda")
+    if not (p.device.type in fused_supported_devices and torch.is_floating_point(p)):
+        raise RuntimeError(
+            "`fused=True` requires all the params to be floating point Tensors of "
+            f"supported devices: {fused_supported_devices} but {p.dtype} and {p.device.type}"
+        )
+
+
 def _view_as_real(params, *state_and_grads):
     for i, p in enumerate(params):
         if torch.is_complex(p):
@@ -231,17 +245,13 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
             are supported. (default: None)
 
     .. note:: The foreach and fused implementations are typically faster than the for-loop,
-              single-tensor implementation. Thus, if the user has not specified BOTH flags
-              (i.e., when foreach = fused = None), we will attempt defaulting to the foreach
-              implementation when the tensors are all on CUDA. For example, if the user specifies
-              True for fused but nothing for foreach, we will run the fused implementation. If
-              the user specifies False for foreach but nothing for fused (or False for fused but
-              nothing for foreach), we will run the for-loop implementation. If the user specifies
-              True for both foreach and fused, we will prioritize fused over foreach, as it is
-              typically faster. We attempt to use the fastest, so the hierarchy goes fused ->
-              foreach -> for-loop. HOWEVER, since the fused implementation is relatively new,
-              we want to give it sufficient bake-in time, so we default to foreach and NOT
-              fused when the user has not specified either flag."""
+              single-tensor implementation, with fused being theoretically fastest with both
+              vertical and horizontal fusion. As such, if the user has not specified either
+              flag (i.e., when foreach = fused = None), we will attempt defaulting to the foreach
+              implementation when the tensors are all on CUDA. Why not fused? Since the fused
+              implementation is relatively new, we want to give it sufficient bake-in time.
+              To specify fused, pass True for fused. To force running the for-loop
+              implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
             capture in a CUDA graph. Passing True can impair ungraphed performance,
@@ -413,7 +423,7 @@ class Optimizer:
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if (
-            not torch.compiler.is_compiling()
+            not is_compiling()
             and torch.backends.cuda.is_built()
             and torch.cuda.is_available()
         ):
@@ -451,7 +461,6 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
-        pass
 
     @staticmethod
     def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102
@@ -501,7 +510,7 @@ class Optimizer:
 
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
-        if torch.compiler.is_compiling():
+        if is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
@@ -973,10 +982,6 @@ class Optimizer:
         Args:
             closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
-
-        .. note::
-            Unless otherwise specified, this function should not modify the
-            ``.grad`` field of the parameters.
         """
         raise NotImplementedError
 

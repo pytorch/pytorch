@@ -15,9 +15,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
-#include <unordered_set>
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 void removePrintOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
@@ -165,7 +164,6 @@ void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
-  auto constant_value_map = ConstantValueMap::getInstance();
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   py::dict env;
@@ -310,8 +308,8 @@ void NodeToONNX(
         if (old->hasDebugName() && !exist_in_env) {
           auto old_name = outputs[i]->debugName();
           auto new_name = old->debugNameBase();
-          Value* found_value;
-          bool exists;
+          Value* found_value = nullptr;
+          bool exists = false;
           // In this scope, we fetch debug_names as a const reference and then
           // construct an iterator exist_name based on it. This iterator will
           // be corrupted if the underlying map of debug_names changes. This
@@ -631,5 +629,4 @@ void NodeToONNX(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

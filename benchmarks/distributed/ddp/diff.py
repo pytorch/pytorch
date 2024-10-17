@@ -51,9 +51,7 @@ def main():
         print()
         print(f"{'':>10s}", end="")  # noqa: E999
         for _ in [75, 95]:
-            print(
-                f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end=""
-            )  # noqa: E999
+            print(f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end="")  # noqa: E999
         print()
 
         # Print measurements
