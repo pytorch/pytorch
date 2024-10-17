@@ -4,6 +4,7 @@ from typing import cast, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.utils import is_symbolic
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
@@ -64,9 +65,7 @@ def can_realize_as_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> bool
 
     # We can realized a buffer as comm buffer only if we know its size at
     # codegen time.
-    try:
-        V.graph.sizevars.size_hint(buffer.get_numel())
-    except Exception:
+    if is_symbolic(buffer.get_numel()):
         return False
 
     # The buffer isn't allocated by the codegen in the first place.
