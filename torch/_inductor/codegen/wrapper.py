@@ -648,13 +648,19 @@ class PythonWrapperCodegen(CodeGen):
             """,
             strip=True,
         )
-        if "symm_mem" in V.graph.comm_buffer_type.values():
+        try:
+            # Only add empty_strided_p2p() if distributed and SymmetricMemory
+            # is available
+            from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
+
             self.header.splice(
                 """
                 empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
                 """,
                 strip=True,
             )
+        except (AttributeError, ImportError):
+            pass
 
     def include_extra_header(self, header: str):
         pass
@@ -1964,17 +1970,21 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_comm_buffer_allocation(self, name, buffer):
-        comm_buffer_type = V.graph.comm_buffer_type[name]
-        if comm_buffer_type == "symm_mem":
+        layout = buffer.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+
+        if layout.comm_buffer_type == "symm_mem":
             self.writeline(SymmMemAllocateLine(self, buffer))
         else:
             raise NotImplementedError(
-                "Unsupported comm buffer type: {comm_buffer_type}"
+                f"Unsupported comm buffer type: {layout.comm_buffer_type}"
             )
 
-    def codegen_comm_buffer_free(self, name, buffer):
-        comm_buffer_type = V.graph.comm_buffer_type[name]
-        self.writeline(CommBufferFreeLine(self, buffer, comm_buffer_type))
+    def codegen_comm_buffer_free(self, buffer):
+        layout = buffer.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+
+        self.writeline(CommBufferFreeLine(self, buffer, layout.comm_buffer_type))
 
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
@@ -2003,7 +2013,7 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_deferred_allocation(name, layout)
             return
 
-        if name in V.graph.comm_buffer_type:
+        if isinstance(layout, ir.CommBufferLayout):
             self.codegen_comm_buffer_allocation(name, buffer)
             return
 
@@ -2015,6 +2025,12 @@ class PythonWrapperCodegen(CodeGen):
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
             self.writeline(self.make_buffer_free(buffer))
+            return
+
+        if isinstance(buffer.get_layout(), ir.CommBufferLayout):
+            # Comm buffers are not eligible for in-place reuse. Their reuse is
+            # achieved exclusively via buffer planning.
+            self.codegen_comm_buffer_free(buffer)
             return
 
         if not self.can_reuse(buffer):

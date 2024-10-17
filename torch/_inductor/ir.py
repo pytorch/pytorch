@@ -3304,6 +3304,39 @@ class NonOwningLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
 
+class CommBufferLayout(FixedLayout):
+    """
+    A layout that signifies that the buffer is a comm buffer.
+    In terms of striding, the layout is identical to `FixedLayout`.
+
+    For the detailed motivation and usage of this layout, see
+    NOTE [lowering-time collective optimization].
+    """
+
+    comm_buffer_type: str
+
+    def __init__(
+        self,
+        layout: FlexibleLayout,
+        comm_buffer_type: str,
+    ):
+        if not isinstance(layout, FlexibleLayout):
+            raise AssertionError(
+                "A CommBufferLayout can only be initialized with "
+                f"a Flexible layout (got {layout})."
+            )
+
+        fixed = layout.as_fixed()
+        super().__init__(
+            device=fixed.device,
+            dtype=fixed.dtype,
+            size=fixed.size,
+            stride=fixed.stride,
+            offset=fixed.offset,
+        )
+        self.comm_buffer_type = comm_buffer_type
+
+
 class NoneLayout(IRNode):
     # This is janky, I figured out what fields to populate by just running
     # the model I was interested in and adding properties/methods as needed.
