@@ -31,9 +31,11 @@ if TYPE_CHECKING:
     )
 
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.variables.base import VariableTracker
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
+    from torch.fx.proxy import Proxy
     from torch.utils._triton import TritonKernelType
 
     TritonMetaParamsType = Dict[str, int]
@@ -613,7 +615,7 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         kwargs: Dict[str, Any],
         tensors_to_clone: List[str],
     ) -> Dict[str, Any]:
-        ret = super().__call__(
+        return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
@@ -621,7 +623,6 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
             kwargs=kwargs,
             tensors_to_clone=tensors_to_clone,
         )
-        return ret
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
@@ -958,10 +959,10 @@ class TritonHOPifier:
 
     def call_grid(
         self,
-        grid: "TritonGridCallableType",
-        meta: "TritonMetaParamsType",
+        grid: "Union[TritonGridCallableType, VariableTracker]",
+        meta: "Union[TritonMetaParamsType, VariableTracker]",
         tx: Optional["InstructionTranslator"],
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
     def call_HOP(
@@ -974,8 +975,8 @@ class TritonHOPifier:
         raise NotImplementedError("abstract method")
 
     def check_grid(
-        self, grid: "TritonGridType"
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+        self, grid: "Union[TritonGridType, VariableTracker]"
+    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
     def init_variable(
@@ -1234,15 +1235,18 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def call_grid(
         self,
-        grid: "TritonGridCallableType",
-        meta: "TritonMetaParamsType",
+        grid: "Union[TritonGridCallableType, VariableTracker]",
+        meta: "Union[TritonMetaParamsType, VariableTracker]",
         tx: Optional["InstructionTranslator"],
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         assert tx is None
+        assert isinstance(grid, dict)
+        assert isinstance(grid, Callable)
         return grid(meta)
 
     def check_grid(
-        self, grid: "TritonGridType"
+        self,
+        grid: "Union[TritonGridType, VariableTracker]",
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(

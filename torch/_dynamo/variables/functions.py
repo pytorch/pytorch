@@ -5,7 +5,17 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 
@@ -36,7 +46,10 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
-    from torch._higher_order_ops.triton_kernel_wrap import TritonGridType
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        TritonGridType,
+        TritonMetaParamsType,
+    )
     from torch.utils._triton import TritonKernelType
 
 
@@ -1047,18 +1060,20 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
-    def raise_unsupported(self, msg):
+    def raise_unsupported(self, msg: str) -> None:
         raise Unsupported(msg)
 
-    def is_callable(self, maybe_callable):
+    def is_callable(self, maybe_callable: Any) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
 
-    def get_value(self, val):
+    def get_value(self, val: Any) -> Any:
         return val.value
 
-    def check_grid(self, grid):
+    def check_grid(
+        self, grid: "Union[TritonGridType, VariableTracker]"
+    ) -> Tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
         if isinstance(grid, BaseListVariable):
@@ -1066,7 +1081,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         else:
             unimplemented(f"grid for the triton kernel is {type(grid)}")
 
-    def call_grid(self, grid, meta, tx):
+    def call_grid(
+        self,
+        grid: "Union[TritonGridType, VariableTracker]",
+        meta: "Union[TritonMetaParamsType, VariableTracker]",
+        tx,
+    ):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
         grid = grid.call_function(tx, [meta], {})
         return grid
