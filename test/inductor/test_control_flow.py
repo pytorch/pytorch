@@ -44,6 +44,19 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [a, b])
 
+    class SimpleWithIntClosure(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num = 3
+
+        def forward(self, p, a, b):
+            return torch.cond(
+                pred=p,
+                true_fn=lambda a, b: [a + b + self.num],
+                false_fn=lambda a, b: [a - b - self.num],
+                operands=(a, b),
+            )
+
     class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
             def true_fn(x0, y0, z0):
@@ -221,6 +234,18 @@ class CondTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_simple_with_int_closure(self, device):
+        self._run_test(
+            model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
         )
 
     @requires_gpu
