@@ -1,11 +1,6 @@
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
-#if defined(USE_ROCM)
-#include <hip/amd_detail/amd_hip_bf16.h>
-#include <hip/amd_detail/amd_hip_atomic.h>
-#include <hip/amd_detail/hip_ldg.h>
-#endif
 
 namespace c10d {
 namespace intra_node_comm {

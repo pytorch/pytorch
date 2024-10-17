@@ -66,7 +66,6 @@ class IpcChannel {
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
-    unlink(addr.sun_path);
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
         "Failed to bind socket: ",
