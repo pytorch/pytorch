@@ -2412,7 +2412,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             try:
                 out = model(x)
                 with compiled_autograd.enable(compiler_fn):
-                    self.assertEqual(compiled_autograd.local.enabled(), True)
+                    self.assertEqual(compiled_autograd.enabled(), True)
                     self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
             except Exception as e:
                 print(f"Found error: {e}")

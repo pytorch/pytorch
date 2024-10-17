@@ -88,9 +88,6 @@ class TLSWrapper:
 
         return revert
 
-    def enabled(self) -> bool:
-        return self.get("compiler") is not None
-
     def enter_ctx(self) -> Callable[[], None]:
         state = self._get_tls()
         state.next_ctx_id += 1
@@ -125,6 +122,14 @@ class TLSWrapper:
 
 
 local = TLSWrapper()
+
+
+def enabled() -> bool:
+    return local.get("compiler") is not None
+
+
+def in_compiled_autograd_region() -> bool:
+    return local.get("in_compiled_autograd_region")
 
 
 def maybe_clone(x):
