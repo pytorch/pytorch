@@ -7,7 +7,10 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
-from torch._higher_order_ops.associative_scan import _fake_associative_scan, associative_scan
+from torch._higher_order_ops.associative_scan import (
+    _fake_associative_scan,
+    associative_scan,
+)
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -1336,7 +1339,7 @@ def forward(self, pred_1, x_1):
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result, result_exp_PT)
-                
+
             if autograd:
                 self.check_autograd(result, result_exp, (x,))
 
@@ -1585,7 +1588,7 @@ def forward(self, pred_1, x_1):
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     self.assertEqual(result, result_exp_PT)
-                    
+
                 if autograd:
                     self.check_autograd(result, result_exp, (x,))
 
@@ -1641,7 +1644,9 @@ def forward(self, pred_1, x_1):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_binary_operator(self, combine_mode, reverse, device, autograd):
+    def test_associative_scan_binary_operator(
+        self, combine_mode, reverse, device, autograd
+    ):
         state_dim = 20
         timesteps = 10
         projected_inputs = torch.randn(
@@ -1649,7 +1654,7 @@ def forward(self, pred_1, x_1):
         )
         A = torch.randn(state_dim, requires_grad=autograd, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
-        
+
         result = associative_scan(
             get_scan_combine_fn("s5_operator", True),
             elements,
@@ -1665,7 +1670,7 @@ def forward(self, pred_1, x_1):
             expected_result,
         )
         self.assertEqual([r.device.type for r in result], [device.type] * len(result))
-        
+
         if autograd:
             elements_flatten, _ = pytree.tree_flatten(elements)
             result_flatten, _ = pytree.tree_flatten(result)
@@ -1675,9 +1680,7 @@ def forward(self, pred_1, x_1):
             expected_grads = torch.autograd.grad(
                 result_exp_flatten, (*elements_flatten,), expected_grad_out
             )
-            grads = torch.autograd.grad(
-                result_flatten, (*elements_flatten,), grad_out
-            )
+            grads = torch.autograd.grad(result_flatten, (*elements_flatten,), grad_out)
             self.assertEqual(grads, expected_grads)
 
     @requires_cuda
@@ -1748,7 +1751,7 @@ def forward(self, pred_1, x_1):
             get_scan_combine_fn("tuple_fct", True), inp, 0, reverse=reverse
         )
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             self.check_autograd(result, expected_result, (*inp,))
 
@@ -1833,7 +1836,9 @@ def forward(self, pred_1, x_1):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_complex_pytree(self, combine_mode, reverse, device, autograd):
+    def test_associative_scan_complex_pytree(
+        self, combine_mode, reverse, device, autograd
+    ):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
@@ -1850,7 +1855,7 @@ def forward(self, pred_1, x_1):
             get_scan_combine_fn("complex_pointwise", True), inp, 0, reverse=reverse
         )
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             flat_param = pytree.tree_leaves(inp)
             self.check_autograd(result, expected_result, (*flat_param,))
@@ -1959,7 +1964,7 @@ def forward(self, pred_1, x_1):
         ) @ torch.ones(2, 5, device=device)
         result = fct_cmp(inp)
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
 
@@ -2014,7 +2019,7 @@ def forward(self, pred_1, x_1):
         )
         result = fct_cmp(inp)
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
 
@@ -2068,10 +2073,10 @@ def forward(self, pred_1, x_1):
         )
         result = fct_cmp(inp)
         self.assertEqual(result, expected_result)
-        
+
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2091,6 +2096,7 @@ def forward(self, pred_1, x_1):
         self, combine_mode, compile_mode, reverse, device
     ):
         import random
+
         fct_cmp = compile_mode_helper(associative_scan, compile_mode)
 
         n_params = 6
@@ -2100,24 +2106,29 @@ def forward(self, pred_1, x_1):
         autograds.append([False, True, False, False, False, False])
         for _ in range(5):
             autograds.append([bool(random.randint(0, 1)) for _ in range(n_params)])
-            
+
         def mul2(x, y):
-            return *[xv * yv for xv, yv in zip(x, y)],
-            
+            return (*[xv * yv for xv, yv in zip(x, y)],)
+
         for a_grads in autograds:
-            inp = tuple([torch.randn(10, 3, 2, device=device, requires_grad=a_grads[n]) for n in range(n_params)])
-            
+            inp = tuple(
+                [
+                    torch.randn(10, 3, 2, device=device, requires_grad=a_grads[n])
+                    for n in range(n_params)
+                ]
+            )
+
             expected_result = _fake_associative_scan(mul2, inp, 0, reverse=reverse)
             result = fct_cmp(mul2, inp, 0, combine_mode=combine_mode, reverse=reverse)
             self.assertEqual(result, expected_result)
-            
+
             grad_param = [p for p, m in zip(inp, a_grads) if m]
             result_masked = [r for r, m in zip(result, a_grads) if m]
             expected_result_masked = [r for r, m in zip(expected_result, a_grads) if m]
-            
+
             if any(a_grads):
                 self.check_autograd(result_masked, expected_result_masked, grad_param)
-                
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2133,7 +2144,7 @@ def forward(self, pred_1, x_1):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_partial_grad(
+    def test_associative_scan_partial_grad_no_grad(
         self, combine_mode, compile_mode, reverse, device
     ):
         fct_cmp = compile_mode_helper(associative_scan, compile_mode)
@@ -2143,11 +2154,17 @@ def forward(self, pred_1, x_1):
             with torch.no_grad():
                 xy2 = x[1] * y[1]
             return xy1, xy2
-        
-        inp = tuple([torch.randn(10, 3, 2, device=device, requires_grad=True) for n in range(2)])
-        
-        expected_result = _fake_associative_scan(mul_single_nograd, inp, 0, reverse=reverse)
-        result = fct_cmp(mul_single_nograd, inp, 0, combine_mode=combine_mode, reverse=reverse)
+
+        inp = tuple(
+            [torch.randn(10, 3, 2, device=device, requires_grad=True) for n in range(2)]
+        )
+
+        expected_result = _fake_associative_scan(
+            mul_single_nograd, inp, 0, reverse=reverse
+        )
+        result = fct_cmp(
+            mul_single_nograd, inp, 0, combine_mode=combine_mode, reverse=reverse
+        )
         self.assertEqual(result, expected_result)
         self.check_autograd(result, expected_result, inp[0])
 
@@ -2183,6 +2200,50 @@ def forward(self, pred_1, x_1):
             )[ind] @ torch.ones(2, 5, device=device)
             result1 = fct_cmp(inp)
             self.assertEqual(result1, expected_result)
+
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_downstream_scan_scan(self, compile_mode, reverse, device):
+        inp = torch.randn(3, 10, 2, device=device)
+        init = torch.randn(3, 1, 2, device=device)
+
+        # Chain with scan
+        def chain_fct_same_dim(inp):
+            o1 = scan(
+                get_scan_combine_fn("add", False),
+                init,
+                inp,
+                dim=1,
+                reverse=reverse,
+            )
+            o2 = scan(
+                get_scan_combine_fn("add", False),
+                init,
+                o1[1],
+                dim=1,
+                reverse=reverse,
+            )
+            return o2
+
+        fct_cmp = compile_mode_helper(chain_fct_same_dim, compile_mode)
+
+        expected_result = _fake_scan(
+            get_scan_combine_fn("add", False),
+            init=init,
+            xs=_fake_scan(
+                get_scan_combine_fn("add", False),
+                init=init,
+                xs=inp,
+                dim=1,
+                reverse=reverse,
+            )[1],
+            dim=1,
+            reverse=reverse,
+        )
+        result1 = fct_cmp(inp)
+        self.assertEqual(result1, expected_result)
 
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
