@@ -566,6 +566,15 @@ def node_replace_(old_node: torch.fx.Node, new_node: torch.fx.Node) -> None:
     old_node.graph.erase_node(old_node)
 
 
+def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module):
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
+
+
 def node_inline_(call_mod_node: torch.fx.Node) -> None:
     """
     Inline the submodule of the given node into the parent module.
