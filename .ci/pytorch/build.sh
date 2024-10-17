@@ -206,6 +206,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   export USE_CUDA=0
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
+  export USE_FBGEMM=0
   export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
   unset USE_LLVM
 fi
