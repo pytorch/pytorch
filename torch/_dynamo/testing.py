@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -254,8 +255,6 @@ class AotEagerAndRecordGraphs:
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
     ) -> Callable[..., Any]:
-        from torch._dynamo.backends.common import aot_autograd
-
         self.graphs.append(gm)
 
         def fw_compiler(
@@ -270,8 +269,11 @@ class AotEagerAndRecordGraphs:
             self.bw_graphs.append(gm)
             return gm.forward
 
-        return aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)(
-            gm, example_inputs
+        return aot_eager(
+            gm,
+            example_inputs,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
         )
 
 
