@@ -478,12 +478,15 @@ class CachingAutotuner(KernelInterface):
                 raise
             binary._init_handles()
 
+
+        arg_names = [name for name in compile_meta["signature"].keys()]
+
         call_args = [
             arg
-            for i, arg in enumerate(self.fn.arg_names)
+            for i, arg in enumerate(arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
+        def_args = [name for name in arg_names if name not in cfg.kwargs]
 
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
@@ -1714,7 +1717,6 @@ def user_autotune(
             )
             for c in configs
         ]
-
     return cached_autotune(
         None,
         configs,

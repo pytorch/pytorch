@@ -5320,6 +5320,9 @@ class UserDefinedTritonKernel(ExternKernel):
 
         # Call to kernel
         self.codegen_comment(wrapper)
+
+        raw_args = list(filter(lambda x: not x is None, raw_args))
+
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
@@ -5359,6 +5362,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, configs = self.get_kernel_and_configs()
+
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
