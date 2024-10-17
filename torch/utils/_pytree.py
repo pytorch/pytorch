@@ -715,13 +715,12 @@ class TreeSpec:
         return repr_prefix + repr_suffix
 
     @property
+    @deprecated(
+        "`treespec.children_specs` is deprecated. "
+        "Use `treespec.children()` or `treespec.child(index)` instead.",
+        category=FutureWarning,
+    )
     def children_specs(self) -> List[Self]:
-        warnings.warn(
-            "`treespec.children_specs` is deprecated. "
-            "Use `treespec.children()` or `treespec.child(index)` instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
         return self._children_specs
 
     def is_leaf(self) -> bool:
