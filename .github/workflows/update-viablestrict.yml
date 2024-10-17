@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: 17,47 * * * *
   workflow_dispatch:
+  push:
 
 concurrency:
   group: ${{ github.workflow }}
@@ -29,11 +30,11 @@ jobs:
           clickhouse-user: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
           clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
 
-      - name: Authenticate to AWS with OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
-          aws-region: us-east-1
+      # - name: Authenticate to AWS with OIDC
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
+      #     aws-region: us-east-1
 
       - name: Print sha
         env:
