@@ -41,8 +41,8 @@ if python_pytree._cxx_pytree_exists:
             "because the original function will be called in the constant fold path."
         )
 
-    name = ""
-    for name in (
+    __name = ""
+    for __name in (
         "is_namedtuple",
         "is_namedtuple_class",
         "is_namedtuple_instance",
@@ -52,12 +52,12 @@ if python_pytree._cxx_pytree_exists:
         "namedtuple_fields",
         "structseq_fields",
     ):
-        func = getattr(optree, name)
-        substitute_in_graph(func, can_constant_fold_through=True)(
-            func.__python_implementation__
+        __func = getattr(optree, __name)
+        substitute_in_graph(__func, can_constant_fold_through=True)(
+            __func.__python_implementation__
         )
-        del func
-    del name
+        del __func
+    del __name
 
     @substitute_in_graph(cxx_pytree.tree_iter, can_constant_fold_through=False)
     def tree_iter(
@@ -215,17 +215,17 @@ if python_pytree._cxx_pytree_exists:
             assert callable(self._unflatten_func)
             return self._unflatten_func(self._metadata, subtrees)
 
-    leafspec = PyTreeSpec((), None, None, (), None)
+    _LEAF_SPEC = PyTreeSpec((), None, None, (), None)
 
     def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
         can_constant_fold_through=False,
-    )  # type: ignore[arg-type]
+    )
     def tree_flatten(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
@@ -233,12 +233,12 @@ if python_pytree._cxx_pytree_exists:
         def helper(node: PyTree, leaves: list[Any]) -> PyTreeSpec:
             if node is None or (is_leaf is not None and is_leaf(node)):
                 leaves.append(node)
-                return leafspec
+                return _LEAF_SPEC
 
             node_type = type(node)
             if optree.register_pytree_node.get(node_type, namespace="torch") is None:  # type: ignore[attr-defined]
                 leaves.append(node)
-                return leafspec
+                return _LEAF_SPEC
 
             (
                 children,
@@ -252,6 +252,7 @@ if python_pytree._cxx_pytree_exists:
                 namespace="torch",
             )
 
+            # Recursively flatten the children
             subspecs = tuple(helper(child, leaves) for child in children)
             return PyTreeSpec(subspecs, node_type, metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
@@ -261,12 +262,12 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_flatten"]
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_structure,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
         can_constant_fold_through=False,
-    )  # type: ignore[arg-type]
+    )
     def tree_structure(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
@@ -275,12 +276,12 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_structure"]
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_unflatten,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
         can_constant_fold_through=False,
-    )  # type: ignore[arg-type]
+    )
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         if not _is_pytreespec_instance(treespec):
             raise TypeError(

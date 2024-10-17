@@ -842,27 +842,6 @@ class LeafSpec(TreeSpec):
 _LEAF_SPEC = LeafSpec()
 
 
-def _tree_flatten_helper(
-    tree: PyTree,
-    leaves: List[Any],
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> TreeSpec:
-    if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
-        return _LEAF_SPEC
-
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, context = flatten_fn(tree)
-
-    # Recursively flatten the children
-    children_specs = [
-        _tree_flatten_helper(child, leaves, is_leaf=is_leaf) for child in child_pytrees
-    ]
-
-    return TreeSpec(node_type, context, children_specs)
-
-
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -870,9 +849,23 @@ def tree_flatten(
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
+
+    def helper(node: PyTree, leaves: List[Any]) -> TreeSpec:
+        if _is_leaf(node, is_leaf=is_leaf):
+            leaves.append(node)
+            return _LEAF_SPEC
+
+        node_type = _get_node_type(node)
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        children, context = flatten_fn(node)
+
+        # Recursively flatten the children
+        subspecs = [helper(child, leaves) for child in children]
+        return TreeSpec(node_type, context, subspecs)
+
     leaves: List[Any] = []
-    spec = _tree_flatten_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves, spec
+    treespec = helper(tree, leaves)
+    return leaves, treespec
 
 
 def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
