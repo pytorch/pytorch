@@ -339,7 +339,7 @@ Tensor mkldnn_linear_pointwise_binary(
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 
-static Tensor mkl_linear(
+Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,
