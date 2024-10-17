@@ -191,6 +191,9 @@ def get_history_recording() -> ContextManager[None]:
     return enable_history_recording()
 
 
+graph_capture_lock = threading.Lock()
+
+
 class TreeManagerContainer:
     """
     Manages the lifetime of the tree manager. Like `PrivatePool` in cuda caching allocator,
@@ -1174,7 +1177,8 @@ class CUDAGraphNode:
 
     def run_graph(self) -> None:
         assert self.graph is not None
-        self.graph.replay()
+        with graph_capture_lock:
+            self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
         "All outputs of the path from this node to its root are dead"
@@ -1864,7 +1868,8 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with torch.cuda.device(device_index):
+        # TODO: the order matters. graph_capture_lock must be acquired before torch.cuda.synchronize()
+        with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
@@ -1872,7 +1877,7 @@ class CUDAGraphTreeManager:
             # Keeps Memory Pool Alive
             self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
-            print("threading.get_ident()", threading.get_ident())
+
             with warnings.catch_warnings(record=True), torch.cuda.graph(
                 self.graph,
                 pool=self.cuda_graphs_thread_pool,
@@ -2053,7 +2058,10 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with graph_capture_lock:
+                out = self.run_eager(new_inputs, function_id)
+
+            return out
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2118,8 +2126,11 @@ class CUDAGraphTreeManager:
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-        # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        # TODO: make lock area smaller.
+        with graph_capture_lock:
+            out = self.record_function(new_inputs, function_id)
+
+        return out
 
     def shutdown(self) -> None:
         """
