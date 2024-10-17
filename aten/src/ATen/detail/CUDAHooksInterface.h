@@ -65,7 +65,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   ~CUDAHooksInterface() override = default;
 
   // Initialize THCState and, transitively, the CUDA state
-  void init() const override {
+  virtual void initCUDA() const {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 

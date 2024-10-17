@@ -98,3 +98,9 @@
 "module: distributed_checkpoint":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
+
+"module: compiled autograd":
+- torch/csrc/dynamo/python_compiled_autograd.cpp
+- torch/csrc/dynamo/compiled_autograd.h
+- torch/_dynamo/compiled_autograd.py
+- torch/inductor/test_compiled_autograd.py
