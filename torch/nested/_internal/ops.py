@@ -1971,6 +1971,16 @@ def flex_njt(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
 
+    # TODO: Support this if needed; determine if NJT buffers need be unwrapped as dense.
+    if any(
+        isinstance(buf, torch.Tensor) and buf.is_nested
+        for buf in score_mod_other_buffers + mask_mod_other_buffers
+    ):
+        raise RuntimeError(
+            "flex_attention(): Nested tensor score_mod / mask_mod buffers are not "
+            "currently supported. Please file an issue if this is important to you."
+        )
+
     # need to pass dense tensor of shape (B, n_heads, sum(seq_len), D)
     output = flex_attention_hop(
         query.values().unsqueeze(0),
