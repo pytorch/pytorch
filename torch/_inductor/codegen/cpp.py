@@ -4362,10 +4362,10 @@ class CppScheduling(BaseScheduling):
                             continue
                         # Local Buffer is a view of global buffer
                         local_buffer_layout = ir.FixedLayout(
-                            global_buffer_layout.device,
-                            global_buffer_layout.dtype,
-                            global_buffer_layout.size[size_offset:],
-                            global_buffer_layout.stride[size_offset:],
+                            device=global_buffer_layout.device,
+                            dtype=global_buffer_layout.dtype,
+                            size=global_buffer_layout.size[size_offset:],
+                            stride=global_buffer_layout.stride[size_offset:],
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
