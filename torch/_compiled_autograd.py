@@ -59,7 +59,7 @@ def python_autograd(saved_state, hooks, nodecalls, num_outputs, arange):
         apply_state, validate_outputs_state = next(saved_state)
 
         for hook_idx, input_idx in call.tensor_pre_hooks:
-            call_hook(hooks[hook_idx], inputs[input_idx], hook_type="pre_hook")
+            inputs[input_idx] = call_hook(hooks[hook_idx], inputs[input_idx], hook_type="pre_hook")
         for input_nr, result_idx in call.graph_output:
             graph_outputs[result_idx] = inputs[input_nr]
         if not call.needed:
@@ -102,7 +102,6 @@ def apply_with_saved(node_idx, inputs, saved_tensors, saved_sizes, saved_scalars
     """
     node = get_node(node_idx)
     outputs = _autograd.apply_with_saved(global_nodecalls.thread_local[node_idx], inputs, saved_tensors, list(saved_sizes), saved_scalars)
-    print(outputs)
     return outputs
 
 
@@ -112,10 +111,7 @@ def apply_with_saved_dynamo_disabled(node_idx, inputs, saved_tensors, saved_size
     """
     This is apply_with_saved, but also induces a graph break in Dynamo.
     """
-    node = get_node(node_idx)
-    outputs = _autograd.apply_with_saved(global_nodecalls.thread_local[node_idx], inputs, saved_tensors, list(saved_sizes), saved_scalars)
-    print(outputs)
-    return outputs
+    return apply_with_saved(node_idx, inputs, saved_tensors, saved_sizes, saved_scalars)
 
 
 @wrap

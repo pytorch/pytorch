@@ -754,11 +754,11 @@ struct SwapWithReal : public SwapInterface {
   }
 
   std::vector<at::Tensor> tensors_;
-  int64_t tensors_idx = 0;
+  size_t tensors_idx = 0;
   std::vector<std::optional<c10::SymInt>> sizes_;
-  int64_t sizes_idx = 0;
+  size_t sizes_idx = 0;
   std::vector<c10::IValue> ivalues_;
-  int64_t ivalues_idx = 0;
+  size_t ivalues_idx = 0;
 };
 
 class SwapSavedVariables {

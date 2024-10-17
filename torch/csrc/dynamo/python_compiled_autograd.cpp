@@ -462,7 +462,7 @@ static PyObject* call_capture(
 
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   std::vector<std::optional<c10::SymInt>> dynamic_inputs =
-      cache.unwrap_dynamic_inputs(py::cast<py::list>(pysizeinput).ptr());
+      cache.unwrap_dynamic_inputs(py::cast<py::list>(pysizeinput.get()).ptr());
 
   THPObjectPtr pyivalueargsinput(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
