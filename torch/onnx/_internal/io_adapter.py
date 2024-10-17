@@ -136,18 +136,10 @@ class OutputAdapter:
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
-def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    def replace_list_with_tuple(x: Any) -> Any:
-        if type(x) is list:
-            return tuple(x)
-        return x
-
-    leaf = object()
-    dummy_tree = pytree.tree_unflatten([leaf] * spec.num_leaves, spec)
-    dummy_tree = pytree.tree_map(
-        replace_list_with_tuple,
-        dummy_tree,
-        is_leaf=lambda x: type(x) is list,
+def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
+    _type = list if spec.type == tuple else spec.type
+    return pytree.TreeSpec(
+        _type, spec.context, list(map(_replace_tuple_with_list, spec.children_specs))
     )
 
 
@@ -175,7 +167,7 @@ def _assert_identical_pytree_spec(
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
-        lambda: _replace_list_with_tuple(spec1) == _replace_list_with_tuple(spec2),
+        lambda: _replace_tuple_with_list(spec1) == _replace_tuple_with_list(spec2),
         # FIXME: Bug in `dynamo.export`. Sometimes single function return is wrapped in list.
         lambda: _open_top_level_list_if_single_element(spec1) == spec2,
         lambda: spec1 == _open_top_level_list_if_single_element(spec2),
