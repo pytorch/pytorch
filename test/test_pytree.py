@@ -41,6 +41,14 @@ class GlobalDummyType:
         self.y = y
 
 
+cxx_pytree.register_pytree_node(
+    GlobalDummyType,
+    lambda dummy: ([dummy.x, dummy.y], None),
+    lambda xs, _: GlobalDummyType(*xs),
+    serialized_type_name="GlobalDummyType",
+)
+
+
 class TestGenericPytree(TestCase):
     def test_aligned_public_apis(self):
         public_apis = py_pytree.__all__
@@ -1308,7 +1316,9 @@ class TestCxxPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
+        self.assertEqual(
+            repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
+        )
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):
@@ -1317,7 +1327,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
         )
 
     @parametrize(
@@ -1372,12 +1382,6 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
-        cxx_pytree.register_pytree_node(
-            GlobalDummyType,
-            lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: GlobalDummyType(*xs),
-            serialized_type_name="GlobalDummyType",
-        )
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
