@@ -230,6 +230,8 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
             (0, [1, 0, 0, 0, 1, 0, 0, 0]),
