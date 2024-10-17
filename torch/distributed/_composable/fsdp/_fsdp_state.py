@@ -158,7 +158,8 @@ class FSDPState(_State):
             raise RuntimeError(
                 f"FSDP requires a single root module but got {self._modules}"
             )
-        detect_compiled_autograd()
+        if torch._dynamo.config.compiled_autograd:
+            detect_compiled_autograd()
         root_module = self._modules[0]
         visited_states: Set[FSDPState] = set()
         for module_name, module in root_module.named_modules():

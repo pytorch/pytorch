@@ -401,6 +401,27 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
+    @skipIfRocm
+    def test_compiled_autograd_ctx(self):
+        with torch._dynamo.config.patch(
+            skip_fsdp_hooks=False,
+        ), torch._functorch.config.patch(
+            recompute_views=True,
+        ):
+            inputs = torch.randn(8, 8)
+            model = torch.nn.Linear(8, 8)
+            fully_shard(model)
+            model_compiled = torch.compile(model, backend="aot_eager")
+            for i in range(10):
+                torch.compiler.set_stance(
+                    "force_eager" if i < 1 else "default"
+                )  # eager warmup for 1 iteration
+                with torch._dynamo.compiled_autograd.enable(
+                    torch.compile(backend="aot_eager", fullgraph=True)
+                ):
+                    out = model_compiled(inputs)
+                    out.sum().backward()
+
     def _test_traceable_fsdp(
         self,
         model_init_fn,
