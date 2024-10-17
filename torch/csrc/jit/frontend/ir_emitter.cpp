@@ -854,7 +854,8 @@ struct to_ir {
 
     if (self) {
       AT_ASSERT(it != end);
-      const auto& name = (*it).ident().name();
+      auto ident = (*it).ident();
+      const auto& name = ident.name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
           (*it).ident().range(),
@@ -872,7 +873,8 @@ struct to_ir {
     bool shouldDeriveType = shouldDeriveSetStateType(def, schema);
     size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
-      auto& name = (*it).ident().name();
+      auto ident = (*it).ident();
+      auto& name = ident.name();
       // Add the input to the graph
       Value* new_input = block->addInput();
       if (meaningfulName(name)) {
@@ -1017,7 +1019,8 @@ struct to_ir {
                  " (see https://github.com/pytorch/pytorch/issues/31430)");
         }
         const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-        const SourceRange& val_range = subscript.value().range();
+        auto subscript_value = subscript.value();
+        const SourceRange& val_range = subscript_value.range();
         Value* idx = emitExpr(subscript_exprs[0]);
         Value* val = sv->asValue(val_range, method);
 
@@ -1190,7 +1193,8 @@ struct to_ir {
       return {};
     }
     // statement must be var {is, is not} None
-    const std::string& name = Var(lhs).name().name();
+    auto var_lhs_name = Var(lhs).name();
+    const std::string& name = var_lhs_name.name();
     // While it should in theory be possible to specialize
     // the `x is None` to know x has type NoneType, we have previously
     // not done this. Unfortunately, doing this will make the type None
@@ -2169,7 +2173,8 @@ struct to_ir {
           ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal");
     }
-    const std::string& name = StringLiteral(attrExpr).text();
+    auto literal = StringLiteral(attrExpr);
+    const std::string& name = literal.text();
     const bool hasAttr = obj->hasAttr(objExpr.range(), method, name);
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
@@ -3502,7 +3507,8 @@ struct to_ir {
               ErrorReport(apply)
               << "getattr's second argument must be a string literal");
         }
-        const std::string& name = StringLiteral(selector).text();
+        auto literal = StringLiteral(selector);
+        const std::string& name = literal.text();
 
         if (apply.inputs().size() == 2) {
           return obj->attr(apply.range(), method, name);
@@ -5287,7 +5293,8 @@ struct to_ir {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
-    const SourceRange& val_range = subscript.value().range();
+    const auto& val = subscript.value();
+    const SourceRange& val_range = val.range();
     if (subscript_exprs.size() != 1) {
       return std::make_shared<SimpleValue>(emitMultidimSlicing(
           range, sv->asValue(val_range, method), subscript_exprs));
