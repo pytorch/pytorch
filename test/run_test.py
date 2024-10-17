@@ -1768,6 +1768,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
