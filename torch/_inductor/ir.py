@@ -5321,6 +5321,11 @@ class UserDefinedTritonKernel(ExternKernel):
         # Call to kernel
         self.codegen_comment(wrapper)
 
+        """
+        Filter out None args.
+
+        see _precompile_config(...) and https://github.com/pytorch/pytorch/issues/115344
+        """
         raw_args = list(filter(lambda x: not x is None, raw_args))
 
         wrapper.generate_user_defined_triton_kernel(
