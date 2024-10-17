@@ -95,6 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
+        'i0': None,  # missing `aten::i1`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -199,6 +200,8 @@ def mps_ops_grad_modifier(ops):
 
         # Exception: Caused by sample input at index 3 on MPS
         'nn.functional.conv3d': [torch.float32],
+
+
     }
 
     def addDecorator(op, d) -> None:
@@ -273,7 +276,6 @@ def mps_ops_modifier(ops):
         'empty',
         'empty_permuted',
         'empty_strided',
-        'eye',
         'exp',
         'expand',
         'expand_as',
@@ -292,10 +294,6 @@ def mps_ops_modifier(ops):
         'kron',
         'linalg.diagonal',
         'linalg.svd',
-        'linspace',
-        'logspace',
-        'linspacetensor_overload',
-        'logspacetensor_overload',
         'mH',
         'mT',
         'masked_scatter',
@@ -407,6 +405,7 @@ def mps_ops_modifier(ops):
         'equal',
         'exp2',
         'expm1',
+        'eye',
         'fft.fft',
         'fft.fft2',
         'fft.fftn',
@@ -435,6 +434,8 @@ def mps_ops_modifier(ops):
         'ldexp',
         'linalg.multi_dot',
         'linalg.pinv',
+        'linspace',
+        'linspacetensor_overload',
         'log10',
         'log1p',
         'log2',
@@ -667,6 +668,8 @@ def mps_ops_modifier(ops):
     UNIMPLEMENTED_XFAILLIST = {
         # Failures due to lack of op implementation on MPS backend
         'login': None,
+        'logspace': None,
+        'logspacetensor_overload': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
         'put': None,
@@ -689,7 +692,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'i0': None,
         'igamma': None,
         'igammac': None,
         'index_copy': None,
@@ -939,8 +941,10 @@ def mps_ops_modifier(ops):
         'multinomial': [torch.float16, torch.float32, torch.bfloat16],  # random results
         'uniform': [torch.float16, torch.float32, torch.bfloat16],
         'rand_like': [torch.float16, torch.float32, torch.bfloat16],
+        'randint': None,
         'randint_like': None,
-        'randn_like': [torch.float16, torch.float32, torch.bfloat16],
+        'randn': None,
+        'randn_like': None,
         'bernoulli': [torch.float16, torch.float32, torch.bfloat16],
         'exponential': [torch.float16, torch.float32, torch.bfloat16],
         'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32, torch.bfloat16],
@@ -985,6 +989,9 @@ def mps_ops_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
+
+        # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
+        'arange': [torch.uint8],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -12026,6 +12033,16 @@ MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
+def transform_opinfo_sample_to_mps(sample):
+    """Transforms opinfo.core.SampleInput from CPU to MPS"""
+    mps_sample = sample.transform(
+        lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+
+    # Transform kwargs `device="cpu"` to `device="mps"`
+    if mps_sample.kwargs.get("device", "") == "cpu":
+        mps_sample.kwargs["device"] = "mps"
+    return mps_sample
+
 class TestConsistency(TestCaseMPS):
     # TODO: This is only used while some ops are being added.
     # This list should contain all ops and dtypes eventually
@@ -12081,6 +12098,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
+        'arange', 'linspace',
     }
 
     FP32_LOW_PRECISION_LIST = {
@@ -12123,6 +12141,9 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
+        # TODO: Rounding is broken for linspace, see https://github.com/pytorch/pytorch/issues/137635
+        if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
+            return (1.0, 0.0)
         return (None, None)
 
     # Used for accept mode only
@@ -12147,8 +12168,7 @@ class TestConsistency(TestCaseMPS):
             #
             # Forward check
             #
-            mps_sample = cpu_sample.transform(
-                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
@@ -12189,8 +12209,7 @@ class TestConsistency(TestCaseMPS):
             # Forward check
             #
             forward_failed = False
-            mps_sample = cpu_sample.transform(
-                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
