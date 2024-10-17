@@ -95,11 +95,11 @@ struct uniform_int_distribution {
 template <typename T>
 struct uniform_real_distribution {
 
-  C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) {
+  C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) : from_(from), to_(to) {
     TORCH_CHECK_IF_NOT_ON_CUDA(from <= to);
     TORCH_CHECK_IF_NOT_ON_CUDA(to - from <= std::numeric_limits<T>::max());
-    from_ = from;
-    to_ = to;
+    
+    
   }
 
   template <typename RNG>
@@ -186,10 +186,10 @@ DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
 template <typename T>
 struct normal_distribution {
 
-  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
-    mean = mean_in;
-    stdv = stdv_in;
+    
+    
   }
 
   template <typename RNG>
@@ -236,9 +236,9 @@ template <> struct DiscreteDistributionType<double> { using type = double; };
 template <typename T>
 struct bernoulli_distribution {
 
-  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
+  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
-    p = p_in;
+    
   }
 
   template <typename RNG>
@@ -257,9 +257,9 @@ struct bernoulli_distribution {
 template <typename T>
 struct geometric_distribution {
 
-  C10_HOST_DEVICE inline geometric_distribution(T p_in) {
+  C10_HOST_DEVICE inline geometric_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in > 0 && p_in < 1);
-    p = p_in;
+    
   }
 
   template <typename RNG>
@@ -317,10 +317,10 @@ struct cauchy_distribution {
 template <typename T>
 struct lognormal_distribution {
 
-  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
-    mean = mean_in;
-    stdv = stdv_in;
+    
+    
   }
 
   template<typename RNG>
