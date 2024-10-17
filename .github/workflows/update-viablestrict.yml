@@ -27,7 +27,7 @@ jobs:
           requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
-          clickhouse-user: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
+          clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
           clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
 
       # - name: Authenticate to AWS with OIDC
