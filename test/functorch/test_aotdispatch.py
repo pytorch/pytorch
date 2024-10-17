@@ -6231,11 +6231,11 @@ class TestAOTModuleSimplified(AOTTestCase):
             return result, noise
 
         def fn_inplace(x):
-            noise = torch.ones_like(x)
+            noise = torch.ones_like(x, requires_grad=False)
             torch.ops.aten.rrelu_with_noise_(x, noise, 0.2, 0.8, True)
             return x, noise
 
-        def _test_fn(fn):
+        def _test_fn(fn, check_backward=True):
             x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
 
             ref_y, ref_noise = fn(x)
@@ -6244,11 +6244,16 @@ class TestAOTModuleSimplified(AOTTestCase):
             comp_y, comp_noise = torch.compile(fn, backend="inductor", fullgraph=True)(
                 x
             )
+
+            if check_backward:
+                comp_y.sum().backward()
+
             self.assertTrue(torch.all(comp_noise < torch.ones_like(comp_noise)).item())
+
 
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
-        _test_fn(fn_inplace)
+        _test_fn(fn_inplace, check_backward=False)
 
 
 # entries in here don't work and need to be fixed.
