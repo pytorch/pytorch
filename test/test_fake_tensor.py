@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 
