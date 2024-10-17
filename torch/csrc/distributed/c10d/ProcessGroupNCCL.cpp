@@ -821,27 +821,32 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 // This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
+  // register the deleter as a callback when the WorkNCCL object is destroyed.
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(this->cacheMutex_);
+    // We put the event back to the cache deque once the WorkNCCL object is
+    // destroyed.
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
     std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto events = eventsArray_[timing ? 1 : 0];
+    auto& events = eventsArray_[timing ? 1 : 0];
+    // If we still have events in the cache, we reuse it. Otherwise, we create a
+    // new one.
     if (!events.empty()) {
-      event = events.back();
-      events.pop_back();
+      event = events.front();
+      events.pop_front();
+    } else {
+      event = new at::cuda::CUDAEvent(
+          timing ? cudaEventDefault : cudaEventDisableTiming);
     }
-  }
-  if (!event) {
-    event = new at::cuda::CUDAEvent(
-        timing ? cudaEventDefault : cudaEventDisableTiming);
   }
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
 ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
+  // Return a singleton instance of CUDAEventCache.
   static ProcessGroupNCCL::CUDAEventCache cache;
   return cache;
 }
@@ -935,15 +940,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 #endif
 
   if (blockingWait_) {
-    if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
-      LOG(INFO)
-          << logPrefix() << "TORCH_NCCL_BLOCKING_WAIT and "
-          << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
-          << "should not both be enabled. "
-          << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
-      asyncErrorHandling_ = NoHandling;
-      desyncDebug_ = false;
-    }
+    LOG(INFO)
+        << logPrefix()
+        << "TORCH_NCCL_BLOCKING_WAIT is enabled, NO watchdog thread is created.";
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
@@ -956,8 +955,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  ncclCommWatchdogThread_ =
-      std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+  // in blockingWait mode, we don't need to enable the watchdog thread to check
+  // the timeout or nccl error because the main thread would throw an exception
+  // and it is the user's responsibility to handle the exception.
+  if (!blockingWait_) {
+    ncclCommWatchdogThread_ =
+        std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+  }
 #endif
 
   init();
@@ -1164,6 +1168,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     data.integers["pg_id"] = static_cast<int64_t>(local_id_);
     data.integers["rank"] = rank_;
     data.integers["global_rank"] = globalRank();
+    data.integers["world_size"] = getSize();
     data.strings["flight_recorder_version"] = c10d::version_val_str;
   }
 
@@ -1340,14 +1345,16 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Wait for all threads to finish before returning
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (ncclCommWatchdogThread_.joinable()) {
-    ncclCommWatchdogThread_.join();
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-  }
-  if (ncclHeartbeatMonitorThread_.joinable()) {
-    ncclHeartbeatMonitorThread_.join();
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
+  if (!blockingWait_) {
+    if (ncclCommWatchdogThread_.joinable()) {
+      ncclCommWatchdogThread_.join();
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+    }
+    if (ncclHeartbeatMonitorThread_.joinable()) {
+      ncclHeartbeatMonitorThread_.join();
+      LOG(INFO) << logPrefix()
+                << "ProcessGroupNCCL heart beat monitor thread joined.";
+    }
   }
 #endif
   if (onCompletionHookThread_.joinable()) {
@@ -2636,7 +2643,9 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-  if (!terminateProcessGroup_.load()) {
+  // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue
+  // the work
+  if (!terminateProcessGroup_.load() && !blockingWait_) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
     // View tensors' destruction invokes autograd_meta, which
