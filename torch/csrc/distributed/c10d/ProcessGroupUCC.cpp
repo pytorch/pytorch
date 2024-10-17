@@ -273,6 +273,9 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
   }
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
   return true;
 }
 

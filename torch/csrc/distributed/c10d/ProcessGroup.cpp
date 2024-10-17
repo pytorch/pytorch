@@ -205,21 +205,13 @@ class WorkRegistry {
     return works;
   }
 
-  void unregister_completed_works() {
+  void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
       std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
-      for (const auto& work : it->second) {
-        if (work.defined()) {
-          if (work->canCheckIsCompleted()) {
-            if (!work->isCompleted()) {
-              uncompleted_works.push_back(work);
-            }
-          } else {
-            // if isCompleted() cannot be checked, we assume the work is not
-            // completed.
-            uncompleted_works.push_back(work);
-          }
+      for (const auto& _work : it->second) {
+        if (_work != work) {
+          uncompleted_works.push_back(_work);
         }
       }
       if (uncompleted_works.empty()) {
@@ -281,10 +273,6 @@ namespace c10d {
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  // Always clean up previously completed work objects, so that even if
-  // the user keeps issuing new collectives without waiting on previous ones,
-  // the registry size would not grow unbounded.
-  RankLocal<WorkRegistry>::get().unregister_completed_works();
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
@@ -296,8 +284,8 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
   return tensor;
 }
 
-void unregister_completed_works() {
-  RankLocal<WorkRegistry>::get().unregister_completed_works();
+void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
+  RankLocal<WorkRegistry>::get().unregister_work(work);
 }
 
 size_t get_work_registry_size() {

@@ -30,7 +30,7 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
-C10_EXPORT void unregister_completed_works();
+C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
 
 C10_EXPORT size_t get_work_registry_size();
 
@@ -635,11 +635,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         dstRank,
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> recv(
@@ -653,11 +657,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         srcRank,
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
@@ -669,10 +677,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> barrier(
