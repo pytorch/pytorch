@@ -5,8 +5,8 @@ from typing import List
 
 import torch
 from torch.distributed.pipelining import (
-    ScheduleFlexibleInterleaved1F1B,
     ScheduleInterleaved1F1B,
+    ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
 from torch.distributed.pipelining.schedules import (
@@ -66,7 +66,6 @@ class ScheduleTest(TestCase):
             "Interleaved1F1B",
             "INTERLEAVED1F1B",
             "GPipe",
-            "FlexibleInterleaved1F1B",
             "LoopedBFS",
             "PipelineScheduleSingle",
             "PipelineScheduleMulti",
@@ -164,7 +163,7 @@ class TestSchedulePlan(TestCase):
 
     @parametrize(
         "ScheduleClass",
-        [ScheduleFlexibleInterleaved1F1B],
+        [ScheduleInterleaved1F1B, ScheduleInterleavedZeroBubble],
     )
     def test_pipeline_order_flex_and_zero_bubble(self, ScheduleClass):
         for num_local_stages, num_microbatches, group_size in self.test_cases:
@@ -179,25 +178,22 @@ class TestSchedulePlan(TestCase):
                 warmup_ops = warmups_ops_last_stage + 2 * (group_size - 1)
                 warmup_ops = min(warmup_ops, num_microbatches * num_local_stages)
 
-                for i in range(2):
-                    num_stages = num_local_stages * group_size
-                    stages = [
-                        MockPipelineStage(group_size=group_size, num_stages=num_stages)
-                        for i in range(num_local_stages)
-                    ]
-                    schedule = ScheduleClass(
-                        stages, num_microbatches, enable_zero_bubble=(i == 0)
-                    )
-                    formatted_pipeline_order = _format_pipeline_order(
-                        schedule.pipeline_order
-                    )
-                    # print(formatted_pipeline_order)
-                    _validate_pipeline_order(
-                        schedule.pipeline_order,
-                        num_microbatches,
-                        num_stages,
-                        enable_zero_bubble=(i == 0),
-                    )
+                num_stages = num_local_stages * group_size
+                stages = [
+                    MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                    for i in range(num_local_stages)
+                ]
+                schedule = ScheduleClass(stages, num_microbatches)
+                formatted_pipeline_order = _format_pipeline_order(
+                    schedule.pipeline_order
+                )
+                # print(formatted_pipeline_order)
+                _validate_pipeline_order(
+                    schedule.pipeline_order,
+                    num_microbatches,
+                    num_stages,
+                    enable_zero_bubble=(ScheduleClass is ScheduleInterleavedZeroBubble),
+                )
 
 
 instantiate_parametrized_tests(TestSchedulePlan)
