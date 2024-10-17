@@ -44,6 +44,10 @@ def snapshot_verbose_logging_enabled():
     )
 
 
+def cpp_verbose_log_fn(msg: str) -> None:
+    verbose_log.debug(msg)
+
+
 def snapshot_cudagraph_enabled():
     return torch._inductor.config.triton.cudagraphs
 
