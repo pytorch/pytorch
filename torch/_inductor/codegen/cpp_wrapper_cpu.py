@@ -272,11 +272,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
-        from ..ir import ExprAsConstantBuffer
+        from ..ir import ShapeAsConstantBuffer
 
         output_is_tensor = {}
         for idx, x in enumerate(V.graph.graph_outputs):
-            if isinstance(x, ExprAsConstantBuffer):
+            if isinstance(x, ShapeAsConstantBuffer):
                 output_is_tensor[idx] = False
             else:
                 output_is_tensor[idx] = True
@@ -1022,7 +1022,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def get_output_refs(self):
         return [
             f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
-            if isinstance(x, ir.ExprAsConstantBuffer) and not config.abi_compatible
+            if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
             else x.codegen_reference(self.wrapper_call)
             for x in V.graph.graph_outputs
         ]
@@ -1079,7 +1079,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     is_constant_buffer = True
 
             if config.abi_compatible:
-                if isinstance(output_buffer, ir.ExprAsConstantBuffer):
+                if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                     # Need to wrap scalar into tensor as the main function returns a vector of tensors
                     output_tensor = self.codegen_scalar_to_tensor(output)
                     self.wrapper_call.writeline(
@@ -1223,7 +1223,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
-            # If no ExprAsConstantBuffer in the output, directly return the output as tensors
+            # If no ShapeAsConstantBuffer in the output, directly return the output as tensors
             outputs_str = "output_tensors"
         else:
             outputs = [
@@ -1888,7 +1888,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
                 outer_outputs.append(out.get_name())
 
-            if not isinstance(conditional.predicate, ir.ExprAsConstantBuffer):
+            if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
                 # in ABI-compatible mode, we need to use the ABI shim function
                 # to extract a C++ bool from the unrelying scalar bool Tensor
                 predicate = f"{conditional.predicate.get_name()}_scalar"
@@ -1906,7 +1906,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
             self.writeline(f"at::Tensor {name}[{len(conditional.outputs)}];")
             predicate = f"{conditional.predicate.codegen_reference()}"
-            if not isinstance(conditional.predicate, ir.ExprAsConstantBuffer):
+            if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
                 # move the Tensor predicate to host
                 predicate = f"{predicate}.item<bool>()"
 
