@@ -546,8 +546,8 @@ def tuned_cslt_sparse_mm(
     input_nodes: Tuple[Any, ...] = (mat1_compressed, mat2)
     k, n = mat2.get_size()
 
-    is_8bit_input_type = mat1_compressed.dtype in [torch.int8, torch.float8_e4m3fn]
-    compression_factor = 10 if is_8bit_input_type else 9
+    is_int8_input_type = mat1_compressed.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
     m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
 
     from torch._inductor.ir import FixedLayout
@@ -632,7 +632,7 @@ def tuned_cslt_sparse_mm(
         transpose_result=transpose_result,
     )
     searched.debug_extra = f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"  # noqa: B950
-    choices = [baseline, searched]
+    choices = [baseline, ]
 
     return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
 
