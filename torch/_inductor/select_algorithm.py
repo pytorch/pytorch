@@ -1489,16 +1489,25 @@ class AlgorithmSelectorCache(PersistentCache):
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
             # Make sure that all workspace sizes for each choice are the same
-            needs_workspace = any(choice.workspace_arg is not None for choice in choices)
+            needs_workspace = any(
+                choice.workspace_arg is not None for choice in choices
+            )
             if needs_workspace:
                 # TODO right now we only support the same workspace arg for all choices
+                assert (
+                    choices[0].workspace_arg is not None
+                ), "Workspace arg is not found for choice[0], expected all choices to have the same workspace arg."
                 workspace: WorkspaceArg = choices[0].workspace_arg
-                assert all(choice.workspace_arg == workspace for choice in choices)
+                assert all(
+                    choice.workspace_arg == workspace for choice in choices
+                ), "All choices must have the same workspace argument."
                 size, zero_fill = workspace.nbytes, workspace.zero_fill
-                workspace_tensor = torch.empty_strided((size,), (1,), dtype=torch.uint8, device=out.device)
+                workspace_tensor = torch.empty_strided(
+                    (size,), (1,), dtype=torch.uint8, device=out.device
+                )
                 if zero_fill:
                     workspace_tensor.zero_()
-                example_inputs.append(workspace_tensor)     
+                example_inputs.append(workspace_tensor)
                 example_inputs_extern.append(workspace_tensor)
 
             expected = None
