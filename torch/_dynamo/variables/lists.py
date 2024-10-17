@@ -81,8 +81,11 @@ class BaseListVariable(VariableTrackerContainer):
     def debug_repr_helper(self, prefix, suffix):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
-        return self.python_type()(self._recursive_constants(already_visited))
+    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
+        return self.python_type()(self._as_constant_list(visited))
+
+    def _as_constant_list(self, visited: list[VariableTracker]) -> Any:
+        return [self._as_constant(i, visited) for i in self.items]
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -279,8 +282,8 @@ class RangeVariable(BaseListVariable):
         )
         return result
 
-    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
-        return range(*self._recursive_constants(already_visited))
+    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
+        return range(*self._as_constant_list(visited))
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
@@ -736,8 +739,8 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
-    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
-        consts = self._recursive_constants(already_visited)
+    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
+        consts = self._as_constant_list(visited)
         if self.is_structseq():
             return self.python_type()(consts)
         # NamedTupleType(*iterable)

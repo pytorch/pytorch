@@ -393,26 +393,16 @@ class VariableTrackerContainer(VariableTracker):
         """Implement this in subclasses"""
         unimplemented(f"_as_python_constant_impl: {self}")
 
-    def _recursive_constants(self, already_visited: list[VariableTracker]) -> Any:
-        def as_constant(vt: VariableTracker) -> Any:
-            assert isinstance(vt, VariableTracker)
-
-            if vt in already_visited:
-                unimplemented(f"recursive containment {vt}")
-            already_visited.append(vt)
-
-            if isinstance(vt, VariableTrackerContainer):
-                return vt._as_python_constant_impl(already_visited)
-            else:
-                return vt.as_python_constant()
-
-        if isinstance(self.items, (list, tuple)):
-            return type(self.items)(as_constant(i) for i in self.items)
-
-        if isinstance(self.items, dict):
-            return {k: as_constant(v) for k, v in self.items.items()}
-
-        raise TypeError(f"Don't understand {self.items}")
+    @staticmethod
+    def _as_constant(vt: VariableTracker, visited: list[VariableTracker]) -> Any:
+        """Call from subclass"""
+        if not isinstance(vt, VariableTrackerContainer):
+            return vt.as_python_constant()
+        elif vt in visited:
+            unimplemented(f"recursive containment {vt}")
+        else:
+            visited.append(vt)
+            return vt._as_python_constant_impl(visited)
 
 
 def typestr(*objs):
