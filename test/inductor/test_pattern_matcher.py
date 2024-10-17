@@ -1290,7 +1290,7 @@ class TestPatternMatcher(TestCase):
 
         # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
         # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
-        FileCheck().check("def triton_tem_fused_mm").check().run(code[0])
+        FileCheck().check("def triton_tem_fused_mm").run(code[0])
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
