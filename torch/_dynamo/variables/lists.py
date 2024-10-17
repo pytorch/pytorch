@@ -81,10 +81,8 @@ class BaseListVariable(VariableTrackerContainer):
     def debug_repr_helper(self, prefix, suffix):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def _as_python_constant(self, already_visited: list[VariableTracker]) -> Any:
-        return self.python_type()(
-            [self._recursive_constant(x, already_visited) for x in self.items]
-        )
+    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
+        return self.python_type()(self._recursive_constants(already_visited))
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -281,8 +279,8 @@ class RangeVariable(BaseListVariable):
         )
         return result
 
-    def as_python_constant(self):
-        return range(*[x.as_python_constant() for x in self.items])
+    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
+        return range(*self._recursive_constants(already_visited))
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
@@ -738,12 +736,12 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
-    def as_python_constant(self):
+    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
+        consts = self._recursive_constants(already_visited)
         if self.is_structseq():
-            # StructSequenceType(iterable)
-            return self.python_type()([x.as_python_constant() for x in self.items])
+            return self.python_type()(consts)
         # NamedTupleType(*iterable)
-        return self.python_type()(*[x.as_python_constant() for x in self.items])
+        return self.python_type()(*consts)
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -828,7 +826,7 @@ class SliceVariable(BaseListVariable):
     def python_type(self):
         return slice
 
-    def as_python_constant(self):
+    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
