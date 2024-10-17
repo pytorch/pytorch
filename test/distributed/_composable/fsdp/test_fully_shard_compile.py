@@ -100,6 +100,7 @@ class TestFullyShardCompileCompute(FSDPTest):
             self.assertTrue(trace_rules_check_count > 0)
 
 
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFullyShardCompile(FSDPTest):
     fake_pg = not at_least_x_gpu(2)
 
@@ -109,9 +110,13 @@ class TestFullyShardCompile(FSDPTest):
     def world_size(self) -> int:
         return 2
 
+    # This method is an override of the base class.
     # Tests in this class requires bf16 support, so SM arch must be 80 or
     # higher.
-    def skipTestForOldSm(self, device: torch.device):
+    def skipTestForOldSm(self):
+        # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
+        # the top of the class.
+        device = torch.device("cuda", self.rank % self.world_size)
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
