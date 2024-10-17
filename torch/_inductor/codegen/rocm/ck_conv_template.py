@@ -1,18 +1,20 @@
 # mypy: allow-untyped-defs
 import copy
-from dataclasses import asdict, dataclass, replace
-from functools import lru_cache
 import logging
 import os
 import random
 import subprocess
-from typing import Tuple, Optional, List
+from dataclasses import asdict, dataclass, replace
+from functools import lru_cache
+from typing import List, Optional, Tuple
+
+from ck4inductor.util import library_path
+
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.utils import IndentedBuffer
 
-from ck4inductor.util import library_path
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ def torch_layout_to_ck_output_layout(torch_layout):
         return "NHWGK"
     else:
         return None
+
 
 @dataclass
 class CKGroupedConvFwdOp:
@@ -105,7 +108,9 @@ class CKGroupedConvFwdOp:
 
     c_shuffle_m_xdl_per_wave_per_shuffle: int
     c_shuffle_n_xdl_per_wave_per_shuffle: int
-    cde_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: Tuple[int, int, int, int]
+    cde_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: Tuple[
+        int, int, int, int
+    ]
     cde_block_transfer_scalar_per_vector_n_per_block: int
     block_gemm_pipeline_scheduler: str
     block_gemm_pipeline_version: str
@@ -139,10 +144,18 @@ class CKGroupedConvFwdOp:
 
 def _ck_conv_instances_path():
     conv_instances_path = os.path.join(  # noqa: F821
-        library_path(), "include", "ck", "library", "tensor_operation_instance", "gpu", "grouped_conv_fwd"
+        library_path(),
+        "include",
+        "ck",
+        "library",
+        "tensor_operation_instance",
+        "gpu",
+        "grouped_conv_fwd",
     )
     if not os.path.exists(conv_instances_path):
-        log.error("CK library conv instances path %s does not exist", conv_instances_path)
+        log.error(
+            "CK library conv instances path %s does not exist", conv_instances_path
+        )
         return None
     return conv_instances_path
 
@@ -161,7 +174,9 @@ def parse_instances(str_instances: List[str]) -> List[CKGroupedConvFwdOp]:
     op_instances = []
     # TODO: maybe use libclang for parsing C++ code in the future to avoid this hacky parsing logic below ? :) - copilot
     for line in str_instances:
-        s_template_args = line.split("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3")[-1].strip("<>, ")
+        s_template_args = line.split("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3")[
+            -1
+        ].strip("<>, ")
         template_args = []
         i_current = 0
         while i_current < len(s_template_args):
@@ -189,7 +204,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGroupedConvFwdOp]:
             if i_next == -1:
                 break
 
-        template_args[0] = -1       # n_dim_spatial
+        template_args[0] = -1  # n_dim_spatial
         template_args[3] = tuple()  # ds_layout
         template_args[9] = tuple()  # ds_element_dtype
 
@@ -265,9 +280,10 @@ def gen_conv_ops_library() -> List[CKGroupedConvFwdOp]:
                             b_layout="GKYXC",
                             e_layout=e_layout,
                         )
-                )
+                    )
 
     return substitute_instances
+
 
 class CKGroupedConvFwdTemplate(CKTemplate):
     conv_template = r"""
@@ -622,7 +638,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.n_spatial_dimensions = n_spatial_dimensions
 
     def filter_op(self, op: CKGroupedConvFwdOp) -> bool:
-        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node] if T is not None]
+        metas = [
+            T.get_layout()
+            for T in [*self.input_nodes, self.output_node]
+            if T is not None
+        ]
         X_meta = metas[0]
         W_meta = metas[1]
         Y_meta = metas[-1]
@@ -723,11 +743,10 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             kernel_definition=kernel.def_kernel(
                 inputs=[X, W, Bias] if Bias is not None else [X, W],
                 outputs=[Y],
-                names_str="input, weight, bias, output" if Bias is not None else "input, weight, output",
-                size_args=[
-                    f"int32_t {arg}"
-                    for arg in []
-                ],
+                names_str="input, weight, bias, output"
+                if Bias is not None
+                else "input, weight, output",
+                size_args=[f"int32_t {arg}" for arg in []],
             ),
             n_d_tensors=1 if Bias is not None else 0,
             n_dim_spatial=self.n_spatial_dimensions,

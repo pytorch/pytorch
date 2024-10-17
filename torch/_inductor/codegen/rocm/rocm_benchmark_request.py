@@ -86,7 +86,6 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
         )
-        # import pdb; pdb.set_trace()
         return result
 
     def update_workspace_size(self) -> None:
