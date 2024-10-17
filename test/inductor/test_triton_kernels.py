@@ -1677,7 +1677,7 @@ def forward(self, x_1, output_1):
 
         if dynamic:
             self.assertExpectedInline(
-                backend.graphs[0].code.strip(),
+                backend.fw_graphs[0].code.strip(),
                 """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False)
@@ -1690,7 +1690,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
         else:
             self.assertExpectedInline(
-                backend.graphs[0].code.strip(),
+                backend.fw_graphs[0].code.strip(),
                 """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
