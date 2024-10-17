@@ -12,7 +12,7 @@ namespace at::mps {
 // The real implementation of MPSHooksInterface
 struct MPSHooks : public at::MPSHooksInterface {
   MPSHooks(at::MPSHooksArgs) {}
-  void init() const override;
+  void initMPS() const override;
 
   // MPSDevice interface
   bool hasMPS() const override;
