@@ -21,6 +21,8 @@ import threading
 import pdb
 import importlib
 import importlib.util
+import json
+import draw_things
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -223,7 +225,10 @@ def _load_global_deps() -> None:
     if library_path:
         global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
     try:
-        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        root = os.path.splitext(global_deps_lib_path)[0]
+        actual_rel_path = open(f'{root}.fwork', 'r').read().rstrip('\n')
+        actual_path = f'{draw_things.CONTEXT.app_dir}/{actual_rel_path}'
+        ctypes.CDLL(actual_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
