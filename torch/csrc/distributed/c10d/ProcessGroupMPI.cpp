@@ -7,6 +7,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check

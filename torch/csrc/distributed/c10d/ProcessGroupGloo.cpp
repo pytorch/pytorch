@@ -1,11 +1,11 @@
 #include <c10/util/Exception.h>
-#include <distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <chrono>
 #include <exception>
 

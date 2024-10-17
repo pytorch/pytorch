@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/util/env.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
