@@ -6135,6 +6135,34 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    # This can't happen in the opinfo tests due to subprocess creation
+    def test_index_put_error(self, device):
+        import subprocess
+
+        with self.subTest():
+            r = subprocess.call(
+                [
+                    sys.executable,
+                    "-c",
+                    """\
+import torch
+offsets = torch.tensor([0, 2, 5, 7], device='cuda')
+lengths = torch.tensor([2, 2, 2], device='cuda')
+indices = [
+    torch.tensor([0, 1, 2], device='cuda'),
+    torch.tensor([0, 2, 1], device='cuda'),
+    torch.tensor([0, 0, 0], device='cuda'),
+]
+a = torch.nested.nested_tensor_from_jagged(
+    torch.zeros(7, 3, device='cuda'), offsets, lengths
+)
+a[indices] = 1.0
+torch.cuda.synchronize()
+""",
+                ]
+            )
+            self.assertTrue(r != 0)
+
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         with torch.profiler.profile() as prof:
