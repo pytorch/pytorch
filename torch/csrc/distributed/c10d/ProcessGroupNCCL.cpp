@@ -580,6 +580,10 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
+bool ProcessGroupNCCL::WorkNCCL::canCheckIsCompleted() {
+  return !(at::cuda::CUDAGraph::is_capturing(at::cuda::getCurrentCUDAStream()));
+}
+
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
@@ -720,6 +724,9 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -2625,6 +2632,10 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
 
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
   return seq_;
+}
+
+std::string ProcessGroupNCCL::WorkNCCL::getBackendType() const {
+  return "nccl";
 }
 
 void ProcessGroupNCCL::assignTimeoutToWork(
