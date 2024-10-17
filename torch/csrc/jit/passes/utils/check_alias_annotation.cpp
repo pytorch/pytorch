@@ -26,7 +26,8 @@ IValue deepCopy(const IValue& self) {
     auto source = self.toList();
     auto newList = c10::impl::GenericList(source.elementType());
     newList.reserve(source.size());
-    for (const IValue& value : source) {
+    for (const auto& value_ref : source) {
+      const IValue& value = value_ref;
       newList.push_back(deepCopy(value));
     }
     return newList;
