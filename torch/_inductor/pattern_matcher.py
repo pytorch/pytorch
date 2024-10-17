@@ -569,21 +569,18 @@ class _TargetArgsExpr(_TargetExpr):
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
     ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
-        type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
+        def norm_spec(s: pytree.TreeSpec) -> pytree.TreeSpec:
+            if s.type is None:
+                return s
+            mapping = {immutable_list: list, tuple: list, immutable_dict: dict}
+            return pytree.TreeSpec(
+                mapping.get(s.type, s.type),
+                s.context,
+                list(map(norm_spec, s.children_specs)),
+            )
 
-        def replace_type(x: Any) -> Any:
-            cls = type(x)
-            new_cls = type_mapping.get(cls, cls)
-            if new_cls is not cls:
-                return new_cls(pytree.tree_map(replace_type, x))
-            return x
-
-        normalized_args_tree = pytree.tree_map(
-            replace_type,
-            (args, kwargs),
-            is_leaf=lambda x: type(x) in type_mapping,
-        )
-        flat, spec = pytree.tree_flatten(normalized_args_tree)
+        flat, spec = pytree.tree_flatten([args, kwargs])
+        spec = norm_spec(spec)
         return flat, spec
 
     def __repr__(self) -> str:
