@@ -13,7 +13,13 @@ from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
-from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
+from ..utils import (
+    cache_on_self,
+    has_free_symbols,
+    is_same_mkldnn_tensor,
+    is_same_tensor,
+    parallel_num_threads,
+)
 from ..virtualized import ops, V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
@@ -641,8 +647,8 @@ class CppPackedGemmTemplate(CppTemplate):
             if isinstance(W, ir.IRNode):
                 new_size = [padded_n // block_n, k, block_n]
                 blocked_w = ir.Buffer(
-                    W.get_name(),  # Borrow the registered buffer name
-                    ir.FixedLayout(
+                    name=W.get_name(),  # Borrow the registered buffer name
+                    layout=ir.FixedLayout(
                         W.get_device(),
                         W.get_dtype(),
                         new_size,
@@ -715,6 +721,68 @@ class CppPackedGemmTemplate(CppTemplate):
                 *normalize_shapes(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
             )
 
+        def prune_tensors(input_nodes, new_input_nodes):
+            def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
+                return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
+                    is_same_tensor(base_tensor, comp_tensor)
+                    or is_same_mkldnn_tensor(base_tensor, comp_tensor)
+                )
+
+            def get_candidates(input_nodes, new_input_nodes):
+                # Only Constant Buffer like weight and bias might be changed in GEMM Template.
+                # The Inductor IR Node may changed, but still share the storage. For example:
+                # bias in bfloat16 case which only do the expand
+                return [
+                    node
+                    for node in input_nodes
+                    if (
+                        node not in new_input_nodes
+                        and isinstance(node, (ir.TensorBox, ir.StorageBox))
+                        and node.get_name() in V.graph.constants
+                        and not any(
+                            (
+                                isinstance(new_node, (ir.TensorBox, ir.StorageBox))
+                                and new_node.get_name() in V.graph.constants
+                                and share_storage(
+                                    V.graph.constants[node.get_name()],
+                                    V.graph.constants[new_node.get_name()],
+                                )
+                            )
+                            for new_node in new_input_nodes
+                        )
+                    )
+                ]
+
+            for candidate_node in get_candidates(input_nodes, new_input_nodes):
+                # By using the new packed weight for the GEMM template, we can prune the
+                # old weight if it has no other users. This saves memory but makes the FX graph
+                # non-retraceable. To support retracing, we can add a repack node to the
+                # FX graph. For example:
+                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+                candidate_tensor_users = 0
+                candidate_tensor = V.graph.constants[candidate_node.get_name()]
+                for node in reversed(V.graph.graph.nodes):
+                    # Case may happen when the candidate tensor is used by more than 1 get_attr node
+                    # https://github.com/pytorch/pytorch/issues/134998
+                    if node.op == "get_attr" and hasattr(
+                        V.graph.module, node.name
+                    ):  # candidate tensor might already be deleted
+                        comp_tensor = getattr(V.graph.module, node.name)
+                        if share_storage(candidate_tensor, comp_tensor):
+                            candidate_tensor_users += 1
+
+                for node in reversed(V.graph.graph.nodes):
+                    # The get_attr node has only 1 user fx node
+                    # The candidate tensor has been used by only 1 get_attr node
+                    if (
+                        node.name == candidate_node.get_name()
+                        and len(node.users) == 1
+                        and candidate_tensor_users == 1
+                    ):
+                        del V.graph.constants[node.name]
+                        delattr(V.graph.module, node.name)
+                        delattr(V.graph.graph.owning_module, node.name)
+
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
                 # prepack the weight as input to the template buffer
@@ -729,57 +797,13 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-
-                # By using the new packed weight for the GEMM template, we can prune the
-                # old weight if it has no other users. This saves memory but makes the FX graph
-                # non-retraceable. To support retracing, we can add a repack node to the
-                # FX graph. For example:
-                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
-                W_tensor_users = 0
-                for node in reversed(V.graph.graph.nodes):
-                    # Case may happen when the wgt tensor is used by more than 1 get_attr node
-                    # https://github.com/pytorch/pytorch/issues/134998
-                    if node.op == "get_attr" and hasattr(
-                        V.graph.module, node.name
-                    ):  # wgt might already be deleted
-                        comp_tensor = getattr(V.graph.module, node.name)
-                        if (
-                            W.is_mkldnn == comp_tensor.is_mkldnn
-                            and W.dtype == comp_tensor.dtype
-                            and W.device == comp_tensor.device
-                            and (
-                                (
-                                    not W.is_mkldnn
-                                    and (
-                                        W.untyped_storage().data_ptr()
-                                        == comp_tensor.untyped_storage().data_ptr()
-                                    )
-                                )
-                                or (
-                                    W.is_mkldnn
-                                    and (
-                                        torch.ops.mkldnn.data_ptr(W)
-                                        == torch.ops.mkldnn.data_ptr(comp_tensor)
-                                    )
-                                )
-                            )
-                        ):
-                            W_tensor_users += 1
-
-                for node in reversed(V.graph.graph.nodes):
-                    # The wgt tensor has been used by only 1 get_attr node
-                    # The get_attr node has only 1 user fx node
-                    if (
-                        node.name == W_node.get_name()
-                        and len(node.users) == 1
-                        and W_tensor_users == 1
-                    ):
-                        del V.graph.constants[node.name]
-                        delattr(V.graph.module, node.name)
-                        delattr(V.graph.graph.owning_module, node.name)
-
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
+                new_input_nodes[1] = W_packed_constant
+
+                # Prune unused tensors
+                prune_tensors(input_nodes, new_input_nodes)
+
                 template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
                     W_packed_constant
                 )
@@ -928,7 +952,9 @@ class CppPackedGemmTemplate(CppTemplate):
         #   Y
         if epilogue_creators:
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
+            gemm_output_buffer = ir.Buffer(
+                name=gemm_output_name, layout=template_buffer.layout
+            )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
@@ -947,7 +973,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        buffer_name, template_buffer.layout
+                        name=buffer_name, layout=template_buffer.layout
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
@@ -1011,7 +1037,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 else:
                     assert isinstance(Y, ir.Buffer)
                     storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
+                Y_2d = ir.ReinterpretView(
+                    data=storage, layout=template_buffer.get_layout()
+                )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()

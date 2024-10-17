@@ -124,7 +124,7 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
   for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
     s << (*i) << (cnt ? delimiter : "");
   }
-  return s.str();
+  return std::move(s).str();
 }
 
 // Replace all occurrences of "from" substring to "to" string.
