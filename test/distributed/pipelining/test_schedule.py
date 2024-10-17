@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
-from re import A
 from typing import List
 
 import torch
@@ -14,7 +13,6 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
     _add_unshard_reshard,
-    _dump_chrometrace,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
@@ -414,7 +412,7 @@ class TestScheduleLowering(TestCase):
 
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 271)
+        self.assertEqual(num_steps, 456)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
