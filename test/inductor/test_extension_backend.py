@@ -22,6 +22,8 @@ except ImportError:
         ExtensionWrapperCodegen,
     )
 
+from filelock import FileLock, Timeout
+
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen import cpp_utils
@@ -48,13 +50,22 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
-@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class ExtensionBackendTests(TestCase):
+class BaseExtensionBackendTests(TestCase):
     module = None
+
+    # Use a lock file so that only one test can build this extension at a time
+    lock_file = "extension_device.lock"
+    lock = FileLock(lock_file)
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
+        try:
+            cls.lock.acquire(timeout=600)
+        except Timeout:
+            # This shouldn't happen, still attempt to build the extension anyway
+            pass
 
         # Build Extension
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
@@ -78,6 +89,10 @@ class ExtensionBackendTests(TestCase):
 
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
+        if os.path.exists(cls.lock_file):
+            os.remove(cls.lock_file)
+        cls.lock.release()
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -95,6 +110,9 @@ class ExtensionBackendTests(TestCase):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class ExtensionBackendTests(BaseExtensionBackendTests):
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)
