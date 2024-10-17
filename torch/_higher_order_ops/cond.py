@@ -21,6 +21,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     unique_graph_id,
     UnsupportedAliasMutationException,
 )
@@ -160,7 +162,7 @@ def cond(pred, true_fn, false_fn, operands):
             lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
                 f"consists of tensor leaves, but got {operands}."
             )
 
@@ -229,10 +231,10 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
-    ), "Cond operands must be a list or tuple of tensors"
+    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
     assert all(
-        isinstance(o, torch.Tensor) for o in operands
-    ), "Cond operands must be a list of tensors"
+        isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
+    ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -372,14 +374,14 @@ class CondAutogradOp(torch.autograd.Function):
         ctx._pred = pred
         ctx._joint_true_graph = joint_true_graph
         ctx._joint_false_graph = joint_false_graph
-        ctx.save_for_backward(*operands)
+        save_tensors_and_symints_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, fw_true_graph, fw_false_graph, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        operands = ctx.saved_tensors
+        operands = saved_tensors_and_symints(ctx)
 
         grads = cond_op(
             ctx._pred,
@@ -491,7 +493,8 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         isinstance(i, torch.Tensor) for i in inputs
     ), "Cond inputs must be a list of tensors"
 
-    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+    pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
+    pred_ = get_unwrapped(pred) if pred_is_batched else pred
 
     # unbatched tensors are not vmapped
     tensors, in_dims = zip(
@@ -501,7 +504,7 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         ]
     )
 
-    if is_batchedtensor(pred):
+    if pred_is_batched:
         # prepend "pred" and vmap everything
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims
