@@ -149,6 +149,7 @@ def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
         dummy_tree,
         is_leaf=lambda x: type(x) is list,
     )
+    return pytree.tree_structure(dummy_tree)
 
 
 def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
@@ -361,7 +362,7 @@ class RemoveNonTensorInputStep(InputAdaptStep):
 
         # class GraphModule(torch.nn.Module):
         #     def forward(self, x, b):
-        #         arg0: f32[1, 1, 2], arg1, = fx_pytree.tree_flatten_spec(([x, b], {}), self._in_spec)
+        #         arg0: f32[1, 1, 2], arg1, = fx_pytree.tree_flatten_spec(((x, b,), {}), self._in_spec)
         #         # File: path/to/pytorch/test_constant_input.py:5, code: y = x + b
         #         add_tensor: f32[1, 1, 2] = torch.ops.aten.add.Tensor(arg0, 8.0);  arg0 = None
 
