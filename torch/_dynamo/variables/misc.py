@@ -712,6 +712,9 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
+            sig = inspect.signature(fn)
+            if len(args) - 1 == len(sig._parameters):
+                args = args[1:]  # Don't use context
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
             )
