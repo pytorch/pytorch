@@ -127,11 +127,6 @@ class Constructable {
   friend bool operator==(const Constructable& c0, const Constructable& c1) {
     return c0.getValue() == c1.getValue();
   }
-
-  friend bool C10_UNUSED
-  operator!=(const Constructable& c0, const Constructable& c1) {
-    return c0.getValue() != c1.getValue();
-  }
 };
 
 int Constructable::numConstructorCalls;
@@ -888,8 +883,8 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
 }
 
 struct MovedFrom {
-  bool hasValue;
-  MovedFrom() : hasValue(true) {}
+  bool hasValue{true};
+  MovedFrom() = default;
   MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
     m.hasValue = false;
   }
@@ -1107,7 +1102,7 @@ class SmallVectorReferenceInvalidationTest : public SmallVectorTestBase {
 
   template <class T>
   static bool isValueType() {
-    return std::is_same<T, typename VectorT::value_type>::value;
+    return std::is_same_v<T, typename VectorT::value_type>;
   }
 
   void SetUp() override {

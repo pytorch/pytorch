@@ -1200,7 +1200,7 @@ def export_to_pretty_string(
             do_constant_folding, operator_export_type, training
         )
         args = _decide_input_format(model, args)
-        graph, params_dict, _torch_out = _model_to_graph(
+        graph, params_dict, torch_out = _model_to_graph(
             model,
             args,
             verbose,

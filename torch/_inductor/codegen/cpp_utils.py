@@ -655,7 +655,7 @@ class LocalBufferContext:
             new_loops = copy.copy(loops)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    node.get_name(), node.get_layout(), new_loops
+                    name=node.get_name(), layout=node.get_layout(), data=new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
@@ -934,7 +934,8 @@ def template_fusion_with_epilogues_supported(
         ]
 
     def _check_supported_and_same_indexes(
-        index_of_template_buf_read: sympy.Expr, epilogue_writes: OrderedSet[Dep]
+        index_of_template_buf_read: Sequence[sympy.Expr],
+        epilogue_writes: OrderedSet[Dep],
     ) -> Tuple[bool, bool]:
         num_indexes = len(set(index_of_template_buf_read))
 
@@ -945,10 +946,8 @@ def template_fusion_with_epilogues_supported(
             same_index = True
             supported = True  # No reads, automatically supported
         elif num_indexes == 1:
-            index_of_template_buf_read = index_of_template_buf_read[0]
-            same_index = all(
-                write.index == index_of_template_buf_read for write in epilogue_writes
-            )
+            iotbr = index_of_template_buf_read[0]
+            same_index = all(write.index == iotbr for write in epilogue_writes)
             # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
             # in the epilogue node don't have the same index and change supported to True
             supported = same_index

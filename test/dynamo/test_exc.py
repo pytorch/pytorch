@@ -163,20 +163,35 @@ from user code:
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
-        record = self.getRecord(records, "Graph break:")
+        record = self.getRecord(records, "Graph break in user code")
 
         # TODO: This should also report the enclosing frames; need to plumb
         # frame object to it
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-Graph break: from user code at:
+Graph break in user code at test_exc.py:N
+Reason: Unsupported: 'skip function graph_break in file _dynamo/decorators.py'
+User code traceback:
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
 """,  # noqa: B950
         )
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_log_generic_jump(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x + 1
+            else:
+                return x - 1
+
+        torch.compile(fn, backend="eager")(torch.ones(3, 3))
+
+        # check for record existence
+        self.getRecord(records, "Graph break in user code")
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
