@@ -704,14 +704,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const std::vector<int64_t>&,
                              int64_t)>();
 
-    auto work = op.call(
+    return op.call(
         tensor,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.device_ids,
         opts.timeout.count());
-
-    c10d::register_work(tensor, work);
-    return work;
   }
 
   bool hasBackends() {
