@@ -768,8 +768,8 @@ class TestLRScheduler(TestCase):
         milestones = []
 
         targets = [
-            [0.0005, 0.0014, 0.0023, 0.0032, 0.0041] +
-            [0.025, 0.025, 0.025, 0.025, 0.025]
+            [0.0005, 0.0014, 0.0023, 0.0032, 0.0041]
+            + [0.025, 0.025, 0.025, 0.025, 0.025]
         ]
 
         const_sched = ConstantLR(optimizer=self.opt, factor=0.1, total_iters=5)
