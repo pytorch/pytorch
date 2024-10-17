@@ -57,4 +57,3 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
   endif()
   message("-- </FindRVV>")
 endif()
-

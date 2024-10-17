@@ -574,4 +574,3 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 }
 
 }} // namespace at::vec::CPU_CAPABILITY
-

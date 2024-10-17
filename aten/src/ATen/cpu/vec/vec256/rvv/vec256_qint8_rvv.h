@@ -291,4 +291,3 @@ Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vec
 } // namespace
 } // namespace vec
 } // namespace at
-

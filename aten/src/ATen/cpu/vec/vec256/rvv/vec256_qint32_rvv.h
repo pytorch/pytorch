@@ -145,4 +145,3 @@ Vectorized<c10::qint32> inline operator+(
 }
 }
 }
-
