@@ -1277,11 +1277,6 @@ def load(
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
 
-    if weights_only is None:
-        weights_only, warn_weights_only = False, True
-    else:
-        warn_weights_only = False
-
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
     force_weights_only_load = (
@@ -1298,16 +1293,19 @@ def load(
         )
     elif force_weights_only_load:
         weights_only = True
-        warn_weights_only = False
     elif force_no_weights_only_load:
-        if weights_only:
+        if weights_only is None:
             warnings.warn(
-                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, overriding `weights_only=True`"
-                "passed to `torch.load` and forcing weights_only=False.",
+                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
+                "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
                 UserWarning,
                 stacklevel=2,
             )
-        weights_only = False
+            weights_only = False
+
+    if weights_only is None:
+        weights_only, warn_weights_only = False, True
+    else:
         warn_weights_only = False
 
     if weights_only:

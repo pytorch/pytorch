@@ -4311,17 +4311,20 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize("force_weights_only", (True, False))
     def test_weights_only_env_variables(self, force_weights_only):
         env_var = "TORCH_FORCE_WEIGHTS_ONLY_LOAD" if force_weights_only else "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"
-        args = (pickle.UnpicklingError, "Weights only load failed") if force_weights_only else ()
-        ctx = self.assertRaisesRegex if force_weights_only else contextlib.nullcontext
-        args2 = () if force_weights_only else (UserWarning, "overriding `weights_only=True`",)
-        ctx2 = contextlib.nullcontext if force_weights_only else self.assertWarnsRegex
+        args = (
+            (pickle.UnpicklingError, "Weights only load failed")
+            if force_weights_only
+            else (UserWarning, "forcing weights_only=False")
+        )
+        ctx = self.assertRaisesRegex if force_weights_only else self.assertWarnsRegex
         m = torch.nn.Linear(3, 5)
         with TemporaryFileName() as f:
             torch.save(m, f)
             try:
                 old_value = os.environ[env_var] if env_var in os.environ else None
                 os.environ[env_var] = "1"
-                with ctx(*args), ctx2(*args2):
+                # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
                     m = torch.load(f, weights_only=not force_weights_only)
                 with ctx(*args):
                     m = torch.load(f, weights_only=None)
