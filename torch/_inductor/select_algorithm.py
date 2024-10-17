@@ -788,6 +788,7 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
+            workspace_arg=workspace_arg,
         )
 
         return TritonTemplateCaller(
@@ -1483,22 +1484,23 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 for input_node in input_nodes
             ]
-            
+            out = cls.benchmark_example_value(layout)
+            out_extern = torch.as_strided(
+                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+            )
             # Make sure that all workspace sizes for each choice are the same
             needs_workspace = any(choice.workspace_arg is not None for choice in choices)
             if needs_workspace:
                 # TODO right now we only support the same workspace arg for all choices
                 workspace: WorkspaceArg = choices[0].workspace_arg
                 assert all(choice.workspace_arg == workspace for choice in choices)
-                # add 
                 size, zero_fill = workspace.nbytes, workspace.zero_fill
-                workspace_tensor = torch.empty_strided((size,), (1,), dtype=torch.uint8, device="cuda")
-                example_inputs.append(workspace_tensor)            
+                workspace_tensor = torch.empty_strided((size,), (1,), dtype=torch.uint8, device=out.device)
+                if zero_fill:
+                    workspace_tensor.zero_()
+                example_inputs.append(workspace_tensor)     
+                example_inputs_extern.append(workspace_tensor)
 
-            out = cls.benchmark_example_value(layout)
-            out_extern = torch.as_strided(
-                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
-            )
             expected = None
             if VERIFY:
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
