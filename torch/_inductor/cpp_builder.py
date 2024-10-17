@@ -501,7 +501,12 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            cflags.append("Werror=ignored-optimization-argument")
+            ignored_optimization_argument = (
+                "Werror=ignored-optimization-argument"
+                if config.aot_inductor.raise_error_on_ignored_optimization
+                else "Wno-ignored-optimization-argument"
+            )
+            cflags.append(ignored_optimization_argument)
     return cflags
 
 
@@ -778,11 +783,6 @@ def _get_torch_related_args(
 
     if _IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
-
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.abi_compatible:
-        libraries.append("c10")
-        libraries_dirs.append(TORCH_LIB_PATH)
 
     return include_dirs, libraries_dirs, libraries
 
