@@ -539,7 +539,7 @@ def enable(compiler_fn):
             functools.partial(AutogradCompilerInstance, compiler_fn)
         )
         if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
         prior_config = torch._dynamo.config.compiled_autograd
