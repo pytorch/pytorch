@@ -406,6 +406,9 @@ def _pipelined_produce_and_all2all(
             chunk_producer((rank + step) % group_size, p2p_buf)
             symm_mem.barrier(channel=step % 2)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
+            # The local P2P buffer can only be overwritten by the next
+            # chunk_producer after all peers have finished reading from it.
+            symm_mem.barrier(channel=step % 2)
 
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
