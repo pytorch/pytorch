@@ -85,17 +85,18 @@ class WorkspaceArg:
     count: sympy.Expr
     zero_mode: WorkspaceZeroMode
     device: torch.device
-    dtype: torch.dtype = torch.uint8
+    outer_name: str
     inner_name: str = "ws_ptr"
-    outer_name: str = "workspace"
+    dtype: torch.dtype = torch.uint8
+
+    @staticmethod
+    def unique_name(prefix="workspace_"):
+        return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
     def can_join(a, b) -> bool:
         return (
-            a.inner_name == b.inner_name
-            and a.outer_name == b.outer_name
-            and a.dtype == b.dtype
-            and a.device == b.device
+            a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
         )
 
     @staticmethod
@@ -1421,6 +1422,7 @@ class KernelArgs:
             count=nbytes,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
             device=V.graph.scheduler.get_current_device_or_throw(),
+            outer_name=WorkspaceArg.unique_name(),
         )
         for i, existing_arg in enumerate(self.workspace_args):
             if WorkspaceArg.can_join(existing_arg, arg):
