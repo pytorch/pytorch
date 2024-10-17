@@ -275,13 +275,11 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
-    ...
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
-    ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
@@ -1136,9 +1134,7 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val)
-                    if dst_dtype.is_floating_point
-                    else int(val)
+                    else float(val) if dst_dtype.is_floating_point else int(val)
                 )
 
             rtypes_to_inits = {
@@ -4570,9 +4566,7 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(
-        cls, kernel, *args, **kwargs
-    ) -> Tuple[
+    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -4808,11 +4802,13 @@ class ExternKernel(InputsKernel):
                         x,
                         freeze=True,
                         want_contiguous=False,
-                        stride_order=get_stride_order(
-                            V.graph.sizevars.size_hints(x.get_layout().stride)
-                        )
-                        if is_stride_order_storage_and_layout(x, order)
-                        else order,
+                        stride_order=(
+                            get_stride_order(
+                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                            )
+                            if is_stride_order_storage_and_layout(x, order)
+                            else order
+                        ),
                         allow_padding=allow_padding,
                     )
                     return x
@@ -5211,9 +5207,11 @@ class RandomSeeds(ExternKernelOut):
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
-            cpp_kernel_name="at::_ops::randint_low_out::call"
-            if config.abi_compatible
-            else "at::randint_out",
+            cpp_kernel_name=(
+                "at::_ops::randint_low_out::call"
+                if config.abi_compatible
+                else "at::randint_out"
+            ),
             op_overload=aten.randint.low_out,
         )
 
@@ -5331,8 +5329,11 @@ class UserDefinedTritonKernel(ExternKernel):
         2. The arg is not tl.constexpr so we have to remove it
         """
         constexpr_args_set = set(constexpr_indices)
-        raw_args = [arg for idx, arg in enumerate(raw_args)
-                    if (arg is not None) or (arg is None and idx in constexpr_args_set)]
+        raw_args = [
+            arg
+            for idx, arg in enumerate(raw_args)
+            if (arg is not None) or (arg is None and idx in constexpr_args_set)
+        ]
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )

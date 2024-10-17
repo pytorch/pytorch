@@ -1114,7 +1114,6 @@ class TritonHOPifier:
             assert isinstance(variable.kernel, Autotuner)
             constexprs = variable.kernel.fn.constexprs
 
-
         for idx, arg_name in enumerate(variable.kernel.arg_names):
             if idx in constexprs:
                 if arg_name in combined_args_raw:
