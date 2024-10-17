@@ -856,7 +856,13 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     // Need 3.0 for atomic oprations, 3.1 introduces bfloat support
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion3_0];
-    [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
+    if (isMacOS13Plus(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      options.mathMode = !fast_math || std::stoi(fast_math) == 0) ? MTLMathModeSafe : MTLMathModeFast;
+    } else {
+      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+      [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
+      C10_DIAGNOSTIC_POP()
+    }
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
