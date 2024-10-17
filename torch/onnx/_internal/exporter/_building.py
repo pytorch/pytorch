@@ -207,6 +207,8 @@ def _determine_input_dtype(
         return ir.DataType.STRING
     if isinstance(arg, (ir.Tensor, ir.TensorProtocol)):
         return arg.dtype
+    if isinstance(arg, complex):
+        return ir.DataType.FLOAT
     if arg is None:
         return ir.DataType.UNDEFINED
 
@@ -333,6 +335,11 @@ def _process_python_constants(
             continue
 
         dtype = _determine_input_dtype(param, arg, type_binding)
+
+        # float representation of complex numbers
+        if isinstance(arg, complex):
+            # Convert the complex number to a float
+            arg = [arg.real, arg.imag]
 
         if arg is None:
             constant_value = None
