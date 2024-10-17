@@ -13,9 +13,9 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    register_hop_fake,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -31,6 +31,8 @@ invoke_subgraph_counter = 0
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("invoke_subgraph")
+        self.tags = ()
+        self.is_view = False
 
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
@@ -44,8 +46,6 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
-invoke_subgraph.tags = ()  # type: ignore[attr-defined]
-invoke_subgraph.is_view = False  # type: ignore[attr-defined]
 
 
 def get_invoke_subgraph_cache():
@@ -228,13 +228,18 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
     return ctx.wrap_tensors(out)
 
 
-@invoke_subgraph.py_impl(FakeTensorMode)
-def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
-    # Redirect to the torch_dispatch of fake tensor mode. This enables us to use
-    # the caching infra of fake tensor mode.
-    return mode.__torch_dispatch__(
-        invoke_subgraph, [], (subgraph, identifier, operands)
-    )
+@register_hop_fake(invoke_subgraph)
+def invoke_subgraph_fake(subgraph, identifier, operands):
+    return subgraph(*operands)
+
+
+# @invoke_subgraph.py_impl(FakeTensorMode)
+# def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
+#     # Redirect to the torch_dispatch of fake tensor mode. This enables us to use
+#     # the caching infra of fake tensor mode.
+#     return mode.__torch_dispatch__(
+#         invoke_subgraph, [], (subgraph, identifier, operands)
+#     )
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)

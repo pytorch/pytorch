@@ -1832,6 +1832,8 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
+        from torch._higher_order_ops.utils import registered_hop_fake_fns
+
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
@@ -1924,15 +1926,6 @@ class FakeTensorMode(TorchDispatchMode):
         )
         del args, kwargs  # Invalidated
 
-        if func in self.supported_hops:
-            # For invoke_subgraph, we just call subgraph with the operands
-            if func is torch._higher_order_ops.invoke_subgraph:
-                # Signature is (subgraph, identifier, operands)
-                subgraph = flat_args[0]
-                operands = flat_args[2:]
-                assert callable(subgraph)
-                return subgraph(*operands)
-
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
@@ -1981,6 +1974,10 @@ class FakeTensorMode(TorchDispatchMode):
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+
+        if func in registered_hop_fake_fns:
+            return registered_hop_fake_fns[func](*args, **kwargs)
+
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         def maybe_to_real_tensor(t: T) -> Optional[Union[T, Tensor]]:

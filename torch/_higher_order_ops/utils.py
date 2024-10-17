@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -404,3 +404,21 @@ def get_dummy_aot_autograd_config():
         aot_id=0,
         keep_inference_input_mutations=False,
     )
+
+
+registered_hop_fake_fns: Dict[torch._ops.OpOverload, Callable] = {}
+
+
+def register_hop_fake(op, fn=None):
+    assert op not in registered_hop_fake_fns
+
+    def register(func):
+        registered_hop_fake_fns[op] = func
+        # Attach metadata to help fake_tensor identify the original meta op
+        func._is_hop_fake_fn = True
+        func._original_hop = op
+        return func
+
+    if fn is None:
+        return register
+    return register(fn)
