@@ -548,6 +548,14 @@ else:
                         else f"mesh_dim_{dim}"
                     )
 
+                    # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+                    # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+                    # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+                    # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+                    # all the subgroups.
+                    # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+                    # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+                    # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
                     if (
                         bound_device_id := getattr(
                             default_group, "bound_device_id", None
@@ -560,8 +568,11 @@ else:
                             group_desc=group_desc,
                         )
 
-                    # multi-dim mesh, create subgroups by looping over the pg_ranks
-                    # for each dim and append the groups
+                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+                    # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
+                    # the current rank is in the subgroup.
+                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+                    # along with appending information to the `dim_group_infos` list whenever necessary.
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
