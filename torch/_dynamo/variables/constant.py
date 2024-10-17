@@ -85,6 +85,9 @@ class ConstantVariable(VariableTracker):
     def __str__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
+    def __repr__(self):
+        return str(self)
+
     def as_python_constant(self):
         return self.value
 
