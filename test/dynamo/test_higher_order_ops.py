@@ -2584,7 +2584,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
             return torch.cond(x, f, g)
 
-        zeros = torch.true(1)
+        zeros = torch.zeros(1)
         ones = torch.ones(1)
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.]))
