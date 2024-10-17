@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import tempfile
 
 import torch
 from torch import distributed as dist
@@ -22,6 +21,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 if not dist.is_available():
@@ -48,6 +48,7 @@ class TestDistributedCheckpoint(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
+    @with_temp_dir
     @parametrize("state_dict_type", _DISTRIBUTED_STATE_DICT_IMPLS)
     def test_distributed_checkpoint(self, state_dict_type) -> None:
         with enable_wrap(wrapper_cls=FSDP):
@@ -63,25 +64,21 @@ class TestDistributedCheckpoint(FSDPTest):
             new_params = list(new_model.parameters())
             self.assertNotEqual(params, new_params)
 
-        with tempfile.TemporaryDirectory() as path:
-            paths = [path]
-            dist.broadcast_object_list(paths)
-            path = paths[0]
-            writer = FileSystemWriter(path)
-            reader = FileSystemReader(path)
-            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-                new_model, state_dict_type
-            ):
-                state_dict = model.state_dict()
+        writer = FileSystemWriter(self.temp_dir)
+        reader = FileSystemReader(self.temp_dir)
+        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+            new_model, state_dict_type
+        ):
+            state_dict = model.state_dict()
 
-            save_state_dict(state_dict, writer)
+        save_state_dict(state_dict, writer)
 
-            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-                new_model, state_dict_type
-            ):
-                state_dict = new_model.state_dict()
-                load_state_dict(state_dict, reader)
-                new_model.load_state_dict(state_dict)
+        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+            new_model, state_dict_type
+        ):
+            state_dict = new_model.state_dict()
+            load_state_dict(state_dict, reader)
+            new_model.load_state_dict(state_dict)
 
         with FullyShardedDataParallel.summon_full_params(
             model

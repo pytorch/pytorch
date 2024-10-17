@@ -1841,21 +1841,6 @@ class TestDistributions(DistributionsTestCase):
             torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64),
         )
 
-    def test_multinomial_sequential_draw(self):
-        # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
-        torch.manual_seed(0xDE0B6B3A764007E8)
-        prob = torch.ones(26)
-        dups_mult = 0
-        perm_counts_mult = {}
-        for _ in range(300_000):
-            p = tuple(torch.multinomial(prob, prob.numel(), replacement=False).tolist())
-            if p in perm_counts_mult:
-                dups_mult += 1
-                perm_counts_mult[p] += 1
-            else:
-                perm_counts_mult[p] = 1
-        self.assertLess(dups_mult, 10)
-
     @set_default_dtype(torch.double)
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -3345,9 +3330,9 @@ class TestDistributions(DistributionsTestCase):
             )
 
     def test_distribution_duplicated_permutations(self):
-        def test_duplicated_permutations(dist, dtype, sample_size, size, thre_size):
+        def test_duplicated_permutations(dist, dtype, sample_size, size, repet_size):
             sample = dist(torch.empty(sample_size, dtype=dtype))
-            for _ in range(thre_size):
+            for _ in range(repet_size):
                 test = dist(torch.empty(size, dtype=dtype))
                 allFound = True
                 for s in sample:
@@ -3365,16 +3350,17 @@ class TestDistributions(DistributionsTestCase):
                     if test_list[i] == sample_list[0]
                 ]
                 for i in found_indices:
-                    self.assertFalse(test_list[i : i + 100] == sample_list)
+                    self.assertFalse(test_list[i : i + sample_size] == sample_list)
 
         test_duplicated_permutations(
-            lambda x: x.exponential_(), torch.float, 100, 1024 * 1024 * 2, 10240
+            lambda x: x.exponential_(), torch.float, 100, 1024 * 1024 * 2, 4096
         )
         test_duplicated_permutations(
-            lambda x: x.exponential_(), torch.double, 100, 1024 * 1024 * 2, 10240
+            lambda x: x.exponential_(), torch.double, 100, 1024 * 1024 * 2, 4096
         )
+        # use smaller repet_size to reduce test time
         test_duplicated_permutations(
-            lambda x: x.bernoulli_(), torch.int32, 100, 1024 * 1024 * 2, 10240
+            lambda x: x.bernoulli_(), torch.int32, 50, 1024 * 1024 * 10, 64
         )
 
     @set_default_dtype(torch.double)

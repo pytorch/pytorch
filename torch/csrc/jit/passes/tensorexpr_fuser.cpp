@@ -26,7 +26,6 @@
 
 #include <utility>
 
-// NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
@@ -622,9 +621,7 @@ class TensorExprFuser {
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     GRAPH_DEBUG(msg, *n);
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
@@ -665,9 +662,8 @@ class TensorExprFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        auto [tmp_it, changed] = scanNode(*it);
+        it = tmp_it;
         any_changed |= changed;
       }
     }

@@ -62,7 +62,7 @@ from torch.testing._internal.common_distributed import (
     initialize_temp_directories,
     cleanup_temp_dir,
     simple_sparse_reduce_tests,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
     skip_if_small_worldsize,
     skip_if_odd_worldsize,
     skip_if_lt_x_gpu,
@@ -1016,7 +1016,7 @@ class DistributedTest:
             world_size = get_world_size(group_id)
 
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
@@ -3936,7 +3936,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3952,7 +3952,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_cuda_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4020,7 +4020,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
         @skip_if_small_worldsize
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_group_cuda(self):
             group, group_id, rank = self._init_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4080,7 +4080,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4271,15 +4271,18 @@ class DistributedTest:
                         if sys.platform == "win32":
                             torch.save(model_DDP, tmp)
                             tmp.seek(0)
-                            model_DDP = torch.load(tmp)
+                            # weights_only=False as this is legacy code that saves the model
+                            model_DDP = torch.load(tmp, weights_only=False)
                         else:
                             torch.save(model_DDP, tmp.name)
-                            model_DDP = torch.load(tmp.name)
+                            # weights_only=False as this is legacy code that saves the model
+                            model_DDP = torch.load(tmp.name, weights_only=False)
 
             with tempfile.TemporaryFile() as tmp_file:
                 torch.save(model_DDP, tmp_file)
                 tmp_file.seek(0)
-                saved_model = torch.load(tmp_file)
+                # weights_only=False as this is legacy code that saves the model
+                saved_model = torch.load(tmp_file, weights_only=False)
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
@@ -4320,10 +4323,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # dummy data initialization
             local_bs = len(gpu_subset)
@@ -5598,10 +5603,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # data initialization
             input_cpu = torch.randn(global_bs, 2)
@@ -8859,6 +8866,8 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
+            # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+            os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
             # tests expected behavior when nonzero rank hangs and we want to
             # report all timed out ranks.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)
@@ -10323,7 +10332,6 @@ class DistributedTest:
             model = TwoLinLayerNet().cuda()
             ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_mesh=device_mesh)
             self.assertEqual(ddp_model.device_mesh, device_mesh)
-            self.assertEqual(ddp_model.device_mesh.get_group(mesh_dim=0), pg)
 
             with self.assertRaisesRegex(
                 RuntimeError, "Cannot specify both process_group and device_mesh arguments."

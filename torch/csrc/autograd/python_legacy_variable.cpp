@@ -10,8 +10,7 @@
 
 using namespace at;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 static PyObject* THPVariable_pynew(
     PyTypeObject* type,
@@ -110,9 +109,8 @@ static PyObject* THPVariable_pynew(
 }
 
 PyTypeObject THPLegacyVariableType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._LegacyVariableBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._LegacyVariableBase", /* tp_name */
     0, /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -163,5 +161,4 @@ void init_legacy_variable(PyObject* module) {
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

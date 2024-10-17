@@ -328,7 +328,7 @@ class ConcatExpander {
     //   * Create a slice of `cat` output buffer.
     auto cat_out_value = cat_out_empty->output();
     auto cat_inp_list = node->input(0)->node();
-    int start_idx = 0;
+    int64_t start_idx = 0;
     auto start = graph_->insertConstant(start_idx);
     for (auto cat_inp : cat_inp_list->inputs()) {
       // Create a slice of the cat output buffer that correspond to
@@ -338,8 +338,7 @@ class ConcatExpander {
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type);
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type->dim());
       auto cat_inp_tensortype_sizes = cat_inp_tensor_type->sizes();
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      int end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
+      auto end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
       auto end = graph_->insertConstant(end_idx);
 
       auto slice = graph_->create(
