@@ -86,14 +86,8 @@ class TORCH_API Context {
     initXPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type).getDeviceFromPtr(data);
     }
   }
   bool isPinnedPtr(
@@ -106,8 +100,7 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
-    return getAcceleratorHooksInterface(opt_device_type.value())
-        .isPinnedPtr(data);
+    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
@@ -513,7 +506,7 @@ inline size_t getNumGPUs() {
         "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
         "means HIP.  Rebuild PyTorch with one or the other disabled.");
   } else if (hasCUDA()) {
-    return detail::getCUDAHooks().getNumGPUs();
+    return detail::getCUDAHooks().deviceCount();
   } else if (hasHIP()) {
     return detail::getHIPHooks().getNumGPUs();
   } else {
@@ -550,7 +543,7 @@ inline void manual_seed(uint64_t seed) {
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().getNumGPUs();
+  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
   if (hasCUDA() && cuda_num_gpus > 0) {
     for (const auto i : c10::irange(cuda_num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
@@ -563,7 +556,7 @@ inline void manual_seed(uint64_t seed) {
     }
   }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
   if (hasXPU() && xpu_num_gpus) {
     for (const auto i : c10::irange(xpu_num_gpus)) {
       auto xpu_gen = globalContext().defaultGenerator(
