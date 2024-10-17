@@ -3145,7 +3145,7 @@ BUILTIN_SKIPLIST = (
     traceback,
     types,
     typing,
-    unittest,
+    # unittest,
     weakref,
     _collections_abc,
     _weakrefset,
