@@ -3350,13 +3350,17 @@ class TestDistributions(DistributionsTestCase):
                     if test_list[i] == sample_list[0]
                 ]
                 for i in found_indices:
-                    self.assertFalse(test_list[i : i + 100] == sample_list)
+                    self.assertFalse(test_list[i : i + sample_size] == sample_list)
 
         test_duplicated_permutations(
             lambda x: x.exponential_(), torch.float, 100, 1024 * 1024 * 2, 4096
         )
         test_duplicated_permutations(
             lambda x: x.exponential_(), torch.double, 100, 1024 * 1024 * 2, 4096
+        )
+        # use smaller repet_size to reduce test time
+        test_duplicated_permutations(
+            lambda x: x.bernoulli_(), torch.int32, 50, 1024 * 1024 * 10, 64
         )
 
     @set_default_dtype(torch.double)
