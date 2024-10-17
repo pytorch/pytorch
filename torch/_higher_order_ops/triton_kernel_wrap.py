@@ -736,7 +736,6 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: Dict[str, Any],
 ) -> None:
-    assert isinstance(grid, list)  # TODO(dberard): remove
     trace_triton_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
@@ -891,7 +890,6 @@ def triton_kernel_wrapper_functional_functionalize(
     kwargs: Dict[str, Any],
     tensors_to_clone: List[str],
 ) -> Dict[str, Any]:
-    assert isinstance(grid, list)  # TODO(dberard) remove
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         outputs = triton_kernel_wrapper_functional(
