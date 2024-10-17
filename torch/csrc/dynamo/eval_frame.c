@@ -8,6 +8,7 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
+#include <signal.h>
 #include <stdbool.h>
 
 PyObject* guard_error_hook = NULL;
@@ -861,12 +862,25 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+// Debugging function for GNU C only.
+// Used to set gdb breakpoints in hot CPython sites.
+// e.g you want to breakpoint on CALL after generating dynamo bytecode.
+// Call raise_sigtrap right before the dynamo bytecode is run, then
+// you can set a breakpoint in gdb.
+static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
+#ifdef __GNUC__
+  raise(SIGTRAP);
+#endif
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
