@@ -82,6 +82,49 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
+    def capture(self, tensors, sizes, scalars, origins, nodecalls, num_outputs):
+        dynamic_sizes = tuple(s for s in sizes if s is not None)
+
+        counters["compiled_autograd"]["captures"] += 1
+        inputs_origins, sizes_origins, scalars_origins = origins
+
+        self.fx_tracer.root = torch.nn.Module()
+        self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
+        self.fx_tracer.tensor_attrs = {}
+        inputs_proxy, dynamic_sizes_proxy, scalars_proxy, self.hooks_proxy = (
+            self.fx_tracer.create_proxy("placeholder", name, (), {})
+            for name in self.graph_placeholders
+        )
+
+        sizes_proxy = [None] * len(sizes)
+        dynamic_sizes_next = 0
+        for idx in range(len(sizes)):
+            if sizes[idx] is not None:
+                sizes_proxy[idx] = dynamic_sizes[dynamic_sizes_next]
+                dynamic_sizes_next += 1
+
+        from torch._compiled_autograd import IterableWrapper, python_autograd, arange
+
+        arange_proxy = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=arange,
+            args=(len(nodecalls),),
+            kwargs={}
+        )
+
+        graph_outputs = python_autograd(
+            (
+                IterableWrapper(inputs_proxy, len(tensors)),
+                IterableWrapper(sizes_proxy, len(sizes)),
+                IterableWrapper(scalars_proxy, len(scalars)),
+            ),
+            self.hooks_proxy,
+            nodecalls,
+            num_outputs,
+            arange_proxy,
+        )
+        return self.end_capture(graph_outputs)
+
     def begin_capture(
         self,
         inputs: List[torch.Tensor],
@@ -308,8 +351,10 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        self.rename_aot_dispatcher_nodes()
-        self.reorder_accumulate_grad_nodes()
+        # TODO(rzou): we didn't inline the AOTDispatcher nodes
+        # self.rename_aot_dispatcher_nodes()
+        # TODO(rzou): we need to transform AccumulateGrad nodes into torch.inductor.accumulate_grad_.
+        # self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -317,6 +362,7 @@ class AutogradCompilerInstance:
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
+        graph.print_readable()
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
             "Compiled autograd graph",
@@ -562,3 +608,5 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+
+from torch._compiled_autograd import set_global_nodecalls

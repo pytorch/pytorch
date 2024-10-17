@@ -950,6 +950,9 @@ class OutputGraph:
             list_name = arg.source.local_name
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
+                if not hasattr(x.source, "index"):
+                    # TODO(rzou): idk
+                    breakpoint()
                 list_idx = x.source.index
                 if list_idx not in visited:
                     alias_name = self.new_var(

@@ -1,4 +1,5 @@
 #include <torch/csrc/python_headers.h>
+#include <memory>
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
@@ -14,6 +15,7 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/input_metadata.h>
@@ -26,6 +28,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
@@ -42,6 +45,7 @@
 
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
+using namespace torch::dynamo::autograd;
 
 namespace {
 
@@ -78,6 +82,55 @@ struct EnablePythonDispatcher {
   }
   c10::impl::PyInterpreter* old_;
 };
+
+std::vector<at::Tensor> toVec(
+    const std::vector<std::optional<at::Tensor>>& ts) {
+  std::vector<at::Tensor> result;
+  for (const auto& opt_tensor : ts) {
+    if (opt_tensor.has_value()) {
+      result.push_back(opt_tensor.value());
+    } else {
+      result.emplace_back();
+    }
+  }
+  return result;
+}
+
+variable_list validate_outputs_with_saved(
+    const NodeCall& nodecall,
+    std::vector<at::Tensor>& outputs,
+    const std::vector<at::Tensor>& saved_tensors,
+    const std::vector<std::optional<at::SymInt>>& saved_sizes,
+    const std::vector<at::IValue>& saved_ivalues) {
+  auto saved = SwapSavedVariables(
+      saved_tensors, saved_sizes, saved_ivalues, nullptr, nodecall);
+  saved.before(nodecall.node->next_edges());
+  torch::autograd::validate_outputs(
+      nodecall.node->next_edges(), outputs, [&](const std::string& msg) {
+        std::ostringstream ss;
+        ss << "[Compiled Autograd Tracing: " << nodecall.node->name() << "] "
+           << msg;
+        return ss.str();
+      });
+  saved.after(nodecall.node->next_edges());
+  return outputs;
+}
+
+variable_list apply_with_saved314(
+    const NodeCall& nodecall,
+    const std::vector<std::optional<at::Tensor>>& inputs,
+    const std::vector<std::optional<at::Tensor>>& saved_tensors,
+    const std::vector<std::optional<at::SymInt>>& saved_sizes,
+    const std::vector<at::IValue>& saved_ivalues) {
+  auto saved = SwapSavedVariables(
+      toVec(saved_tensors), saved_sizes, saved_ivalues, nullptr, nodecall);
+  auto outputs = nodecall.node->apply_with_saved(toVec(inputs), saved);
+  return outputs;
+}
+
+uint64_t node_id(const std::shared_ptr<Node>& node) {
+  return reinterpret_cast<uint64_t>(node.get());
+}
 
 struct EnablePreDispatch {
   EnablePreDispatch() : guard_(c10::DispatchKey::PreDispatch) {}
@@ -490,6 +543,50 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode");
     }
   });
+
+  // compiled_autograd stuff
+  py::class_<torch::autograd::Node, std::shared_ptr<torch::autograd::Node>>(
+      m, "Node")
+      .def("compiled_args", &torch::autograd::Node::compiled_args)
+      .def("next_edge", &torch::autograd::Node::next_edge)
+      .def(
+          "is_compiled_autograd_traceable",
+          &torch::autograd::Node::is_compiled_autograd_traceable)
+      .def("name", &torch::autograd::Node::name)
+      .def("num_outputs", &torch::autograd::Node::num_outputs)
+      .def("num_inputs", &torch::autograd::Node::num_inputs);
+  py::class_<torch::autograd::Edge>(m, "Edge")
+      .def("is_valid", &torch::autograd::Edge::is_valid)
+      .def_readonly("input_nr", &torch::autograd::Edge::input_nr)
+      .def_readonly("function", &torch::autograd::Edge::function);
+  py::class_<CollectionInfo>(m, "CollectionInfo")
+      .def_readonly("num_saved_tensors", &CollectionInfo::num_saved_tensors)
+      .def_readonly("num_saved_sizes", &CollectionInfo::num_saved_sizes)
+      .def_readonly("num_saved_ivalues", &CollectionInfo::num_saved_ivalues);
+  py::class_<torch::dynamo::autograd::NodeCall>(m, "NodeCall")
+      .def_readonly("node", &NodeCall::node)
+      .def_readonly("compiled_args_info", &NodeCall::compiled_args_info)
+      .def_readonly("next_edges_info", &NodeCall::next_edges_info)
+      .def_readonly("tensor_pre_hooks", &NodeCall::tensor_pre_hooks)
+      .def_readonly("post_hooks", &NodeCall::post_hooks)
+      .def_readonly("graph_output", &NodeCall::graph_output)
+      .def_readonly("needed", &NodeCall::needed);
+  py::class_<torch::dynamo::autograd::CompiledNodeArgs>(m, "CompiledNodeArgs")
+      .def(py::init<AutogradCompilerCall&, NodeCall&>());
+  py::class_<torch::dynamo::autograd::AutogradCompilerCall>(
+      m, "AutogradCompilerCall")
+      .def(py::init<>());
+  m.def("apply_with_saved", &apply_with_saved314);
+  m.def("validate_outputs_with_saved", &validate_outputs_with_saved);
+  m.def("node_id", &node_id);
+  // py::class_<SwapInterface,PySwapInterface>(m, "SwapInterface");
+  //  py::class_<SwapWithReal,SwapInterface>(m, "SwapWithReal")
+  //    .def(py::init<std::vector<at::Tensor>,std::vector<c10::SymInt>,std::vector<c10::IValue>>())
+  //    ;
+  //  py::class_<SwapSavedVariables>(m, "SwapSavedVariables")
+  //    .def(py::init<std::vector<at::Tensor>,std::vector<c10::SymInt>,std::vector<c10::IValue>,PyObject*,const
+  //    NodeCall&>())
+  //    ;
 
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
 
