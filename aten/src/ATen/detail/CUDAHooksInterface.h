@@ -6,13 +6,16 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-// NB: Class must live in `at` due to limitations of Registry.h.
+// Forward-declares at::Generator and at::cuda::NVRTC
 namespace at {
-
-// Forward-declares at::cuda::NVRTC
+struct Generator;
 namespace cuda {
 struct NVRTC;
 } // namespace cuda
+} // namespace at
+
+// NB: Class must live in `at` due to limitations of Registry.h.
+namespace at {
 
 #ifdef _MSC_VER
 constexpr const char* CUDA_HELP =
@@ -62,19 +65,15 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   ~CUDAHooksInterface() override = default;
 
   // Initialize THCState and, transitively, the CUDA state
-  void init() const override {
+  virtual void initCUDA() const {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
-    TORCH_CHECK(
-        false,
-        "Cannot get default CUDA generator without ATen_cuda library. ",
-        CUDA_HELP);
+  virtual const Generator& getDefaultCUDAGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 

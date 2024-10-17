@@ -16,6 +16,7 @@ from torch.export.exported_program import (
     InputSpec,
     TensorArgument,
 )
+from torch.fx.graph_module import _get_attr
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -154,9 +155,10 @@ def lift_constants_pass(
         first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
+    renamed_targets = {}
     for node in gm.graph.nodes:
         if node.op == "get_attr":
-            constant_val = getattr(gm, node.target)
+            constant_val = _get_attr(gm, node.target)
             if constant_val in lifted_objs:
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
@@ -164,6 +166,7 @@ def lift_constants_pass(
                 const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+                renamed_targets[node.name] = const_placeholder_node.name
                 continue
 
             # For ScriptObject, Tensor and FakeScriptObject constants:
@@ -262,6 +265,8 @@ def lift_constants_pass(
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
+                renamed_targets[node.name] = const_placeholder_node.name
+
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(
                     first_user_input_loc,
@@ -277,6 +282,10 @@ def lift_constants_pass(
                 else:
                     all_constants[constant_fqn] = constant_val
                 first_user_input_loc += 1
+
+    for spec in graph_signature.output_specs:
+        if spec.arg.name in renamed_targets:
+            spec.arg.name = renamed_targets[spec.arg.name]
 
     return all_constants
 
