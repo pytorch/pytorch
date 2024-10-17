@@ -632,7 +632,7 @@ def tuned_cslt_sparse_mm(
         transpose_result=transpose_result,
     )
     searched.debug_extra = f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"  # noqa: B950
-    choices = [baseline, ]
+    choices = [baseline, searched]
 
     return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
 
