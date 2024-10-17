@@ -1,0 +1,41 @@
+diff --git a/torch/_dynamo/testing.py b/torch/_dynamo/testing.py
+index 2e998873d0c..9142806fc3b 100644
+--- a/torch/_dynamo/testing.py
++++ b/torch/_dynamo/testing.py
+@@ -245,6 +245,36 @@ class EagerAndRecordGraphs:
+         return gm.forward
+ 
+ 
++class AotEagerAndRecordGraphs:
++    def __init__(self) -> None:
++        self.graphs: List[torch.fx.GraphModule] = []
++        self.fw_graphs: List[torch.fx.GraphModule] = []
++        self.bw_graphs: List[torch.fx.GraphModule] = []
++
++    def __call__(
++        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
++    ) -> Callable[..., Any]:
++        from torch._dynamo.backends.common import aot_autograd
++
++        self.graphs.append(gm)
++
++        def fw_compiler(
++            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
++        ) -> Callable[..., Any]:
++            self.fw_graphs.append(gm)
++            return gm.forward
++
++        def bw_compiler(
++            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
++        ) -> Callable[..., Any]:
++            self.bw_graphs.append(gm)
++            return gm.forward
++
++        return aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)(
++            gm, example_inputs
++        )
++
++
+ def strip_comment(code: str) -> str:
+     return re.sub(r"(?m)^ *#.*\n?", "", code)
+ 
