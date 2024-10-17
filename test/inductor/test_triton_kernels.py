@@ -1797,6 +1797,54 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
+    def test_tma_descriptor_dedup(self):
+        def f(a):
+            BLOCK_SIZE = 256
+            out = torch.zeros_like(a)
+            n_elements = out.numel()
+
+            desc_a, desc_out = (
+                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
+                    t.data_ptr(),
+                    n_elements,
+                    BLOCK_SIZE,
+                    t.element_size(),
+                )
+                for t in (a, out)
+            )
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_tma_1d[grid](
+                desc_a,
+                desc_a,
+                desc_out,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn(301, device=GPU_TYPE)
+
+        expected_out = a + a
+        eager_out = f(a)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(
+                f,
+                fullgraph=True,
+                backend="inductor",
+                dynamic=True,
+            ),
+            a,
+        )
+
+        self.assertEqual(eager_out, expected_out)
+        self.assertEqual(compiled_out, expected_out)
+
+        # 2 calls: one for two inputs (dedupped), one for the output
+        self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager"])
     def test_tma_descriptor_2d(self, dynamic, backend):
