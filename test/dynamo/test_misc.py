@@ -7538,6 +7538,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt = torch._dynamo.optimize(nopython=True)(fn)
         opt(*inputs)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_fold_nontrivial_product_modulo(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            # The condition should fold to true.
+            if ((u0 + 10) * (u0 + 10)) % (u0 + 10) == 0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        res = f(torch.tensor([20, 21]))
+        self.assertEqual(torch.tensor(True), res)
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
