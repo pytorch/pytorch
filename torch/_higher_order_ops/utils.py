@@ -414,9 +414,6 @@ def register_hop_fake(op, fn=None):
 
     def register(func):
         registered_hop_fake_fns[op] = func
-        # Attach metadata to help fake_tensor identify the original meta op
-        func._is_hop_fake_fn = True
-        func._original_hop = op
         return func
 
     if fn is None:

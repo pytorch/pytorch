@@ -1404,7 +1404,8 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
-        if func in self.supported_hops:
+
+        if isinstance(func, torch._ops.HigherOrderOperator):
             # For invoke_subgraph, ignore the subgraph arg. We rely on
             # identifier as a hash for the subgraph. It is Dynamo responsibility
             # to use same identifier for identical subgraphs. For non-Dynamo
@@ -1434,7 +1435,7 @@ class FakeTensorMode(TorchDispatchMode):
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
 
-        if func in self.supported_hops:
+        if isinstance(func, torch._ops.HigherOrderOperator):
             return
 
         if torch.Tag.data_dependent_output in func.tags:
@@ -1975,7 +1976,10 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
 
-        if func in registered_hop_fake_fns:
+        if (
+            isinstance(func, torch._ops.HigherOrderOperator)
+            and func in registered_hop_fake_fns
+        ):
             return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
@@ -2356,13 +2360,6 @@ class FakeTensorMode(TorchDispatchMode):
         return func in self._cpp_meta_supports_symint
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
-
-    @property
-    def supported_hops(self) -> Dict[torch._ops.HigherOrderOperator, Literal[True]]:
-        # Delayed import to avoid circular dependency
-        return ordered_set(
-            torch._higher_order_ops.invoke_subgraph,
-        )
 
     def may_turn_const(self, t: Tensor) -> bool:
         return (
