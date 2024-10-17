@@ -456,14 +456,14 @@ lib.define(
 )
 
 
-lib_impl = torch.library.Library("symm_mem", "IMPL")  # noqa: TOR901
-
-
-@torch.library.impl(lib_impl, "one_shot_all_reduce", "Meta")
-def _one_shot_all_reduce_meta(
-    input: torch.Tensor, reduce_op: str, group_name: str
-) -> torch.Tensor:
-    return torch.empty_like(input)
+# lib_impl = torch.library.Library("symm_mem", "IMPL")  # noqa: TOR901
+# 
+# 
+# @torch.library.impl(lib_impl, "one_shot_all_reduce", "Meta")
+# def _one_shot_all_reduce_meta(
+#     input: torch.Tensor, reduce_op: str, group_name: str
+# ) -> torch.Tensor:
+#     return torch.empty_like(input)
 
 
 class _ScaleMode(Enum):
