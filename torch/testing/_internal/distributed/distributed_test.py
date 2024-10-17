@@ -75,7 +75,6 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
     verify_ddp_error_logged,
     DistTestCases,
-    sm_lower_than_70,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -3463,11 +3462,6 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_gather_v_cuda(self):
-            device = torch.device("cuda:%d" % self.rank)
-            # Test needs sm_70, see #135273, #137161
-            if sm_lower_than_70(device):
-                return
-
             self._barrier()
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -8888,11 +8882,6 @@ class DistributedTest:
         @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_build_debug_param_to_name_mapping(self):
-            device = torch.device("cuda:%d" % self.rank)
-            # Test needs sm_70, see #135273, #137161
-            if sm_lower_than_70(device):
-                return
-
             model = TwoLinLayerNet()
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank),
