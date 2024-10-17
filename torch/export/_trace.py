@@ -1930,7 +1930,7 @@ def _export(
 
     from torch._utils_internal import export_training_ir_rollout_check
 
-    if export_training_ir_rollout_check():
+    if True:
         return _export_for_training(
             mod,
             args,
