@@ -7,3 +7,5 @@
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #endif
+
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
