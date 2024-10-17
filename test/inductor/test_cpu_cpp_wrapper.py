@@ -142,7 +142,6 @@ def make_test_case(
 
 
 if RUN_CPU:
-    config.abi_compatible = True
 
     class BaseTest(NamedTuple):
         name: str
@@ -168,12 +167,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("]
-                if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise_binary.call"],
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("]
-                if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
             ],
         ),
         BaseTest(
@@ -182,12 +177,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("]
-                if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise__binary.call"],
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("]
-                if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
             ],
         ),
         BaseTest(
@@ -290,13 +281,7 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                None
-                if config.abi_compatible
-                else [
-                    "op_onednn_qconv2d_pointwise_.call",
-                    "op_quantized_max_pool2d_.call",
-                    "op_onednn_qlinear_pointwise_tensor.call",
-                ],
+                None,
             ],
         ),
         *[
