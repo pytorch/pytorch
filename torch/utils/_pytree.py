@@ -717,7 +717,8 @@ class TreeSpec:
     @property
     def children_specs(self) -> List[Self]:
         warnings.warn(
-            "`treespec.children_specs` is deprecated. Use `treespec.children()` instead.",
+            "`treespec.children_specs` is deprecated. "
+            "Use `treespec.children()` or `treespec.child(index)` instead.",
             FutureWarning,
             stacklevel=2,
         )
