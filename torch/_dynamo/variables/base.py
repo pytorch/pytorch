@@ -6,9 +6,9 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
@@ -236,18 +236,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        """getattr(self, name) returning a python constant"""
-        raise NotImplementedError
+        v = self.as_python_constant()
+        try:
+            return getattr(v, name)
+        except AttributeError:
+            raise NotImplementedError from None
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        value = self.const_getattr(tx, name)
-        if not variables.ConstantVariable.is_literal(value):
-            raise NotImplementedError
-        source = None
-        if self.source:
-            source = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, source=source)
+
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .misc import GetAttrVariable
+
+        source = self.source and AttrSource(self.source, name)
+        try:
+            value = self.const_getattr(tx, name)
+            if not is_function_or_wrapper(value):
+                if source:
+                    return VariableBuilder(tx, source)(value=value)
+                else:
+                    return SourcelessBuilder.create(tx=tx, value=value)
+        except (NotImplementedError, Unsupported):
+            pass
+        return GetAttrVariable(self, name, source=source)
 
     def is_proxy(self):
         try:
@@ -372,6 +383,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
+
+
+class VariableTrackerContainer(VariableTracker):
+    def as_python_constant(self) -> Any:
+        return self._as_python_constant_impl([])
+
+    def _as_python_constant_impl(self, already_visited: list[VariableTracker]) -> Any:
+        """Implement this in subclasses"""
+        unimplemented(f"_as_python_constant_impl: {self}")
+
+    @staticmethod
+    def _as_constant(vt: VariableTracker, visited: list[VariableTracker]) -> Any:
+        """Call from subclass"""
+        if not isinstance(vt, VariableTrackerContainer):
+            return vt.as_python_constant()
+        elif vt in visited:
+            unimplemented(f"recursive containment {vt}")
+        else:
+            visited.append(vt)
+            return vt._as_python_constant_impl(visited)
 
 
 def typestr(*objs):
