@@ -556,6 +556,7 @@ else:
                     # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
                     # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
                     # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
+                    dim_group = None
                     if (
                         bound_device_id := getattr(
                             default_group, "bound_device_id", None
