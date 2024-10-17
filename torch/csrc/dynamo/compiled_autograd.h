@@ -712,9 +712,9 @@ struct SwapWithProxies : public SwapInterface {
 };
 
 // The previous compiled autograd implementation was about swapping in
-// ProxyTensors for a node. Given a single node and some saved tensors/sizes/scalars,
-// we needed some way to swap in those saved tensors/sizes/scalars.
-// That's what SwapWithReal is.
+// ProxyTensors for a node. Given a single node and some saved
+// tensors/sizes/scalars, we needed some way to swap in those saved
+// tensors/sizes/scalars. That's what SwapWithReal is.
 struct SwapWithReal : public SwapInterface {
   explicit SwapWithReal(
       std::vector<at::Tensor> tensors,
