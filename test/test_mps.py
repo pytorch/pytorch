@@ -319,7 +319,6 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
-        'permute_copy',
         'positive',
         'randn',
         'ravel',
