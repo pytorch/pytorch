@@ -24,7 +24,7 @@ else:
         if torch.compiler.is_compiling():
             import torch._dynamo.compiled_autograd as ca
 
-            return ca.compiled_autograd_enabled or ca.in_compiled_autograd_region
+            return ca.local.enabled() or ca.local.get("in_compiled_autograd_region")
         else:
             return False
 

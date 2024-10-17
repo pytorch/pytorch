@@ -472,6 +472,11 @@ compiled_autograd = False
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: Dict[str, Any] = {}
 
+# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
+# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
+# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
+compiled_autograd_opaque_cpp_node = False
+
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
 # behavior, making it so that we infer that if an input is dynamic by
