@@ -48,7 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 
 __all__ = [
@@ -684,7 +684,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 class TreeSpec:
     type: Any
     context: Context
-    _children_specs: List["TreeSpec"]
+    _children_specs: List[Self]
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
@@ -715,9 +715,10 @@ class TreeSpec:
         return repr_prefix + repr_suffix
 
     @property
-    def children_specs(self) -> List["TreeSpec"]:
+    def children_specs(self) -> List[Self]:
         warnings.warn(
             "`treespec.children_specs` is deprecated. Use `treespec.children()` instead.",
+            FutureWarning,
             stacklevel=2,
         )
         return self._children_specs
@@ -725,10 +726,10 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def children(self) -> List["TreeSpec"]:
+    def children(self) -> List[Self]:
         return self._children_specs.copy()
 
-    def child(self, index: int) -> "TreeSpec":
+    def child(self, index: int) -> Self:
         return self._children_specs[index]
 
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
