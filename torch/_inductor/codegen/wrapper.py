@@ -53,7 +53,6 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
@@ -181,13 +180,16 @@ def user_defined_kernel_grid_fn_code(
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
-                tuple(
-                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+            (
+                wrapper.codegen_shape_tuple(
+                    tuple(
+                        wrapper.generate_example_arg_value(g, type(g))
+                        for g in sympy_grid
+                    )
                 )
-            )
-            if config.triton.autotune_at_compile_time
-            else None,
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
 
     def writeline(line: str, example_grid: Optional[str] = None):
@@ -300,17 +302,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
                 if self.last_seen_device_guard_index is None:
-                    if config.abi_compatible:
-                        code.writeline(
-                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                        )
-                    else:
-                        code.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
-                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
-                            )
-                        )
+                    code.writeline(
+                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                    )
                 else:
                     assert (
                         self.last_seen_device_guard_index == self.device_idx
@@ -319,10 +313,6 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
                         f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                        if config.abi_compatible
-                        else maybe_hipify_code_wrapper(
-                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
-                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -1520,13 +1510,17 @@ class PythonWrapperCodegen(CodeGen):
         line = self.make_allocation(
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
+        zline = self.make_zero_buffer("workspace")
         self.writeline(line)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(line)
         if zero_fill:
-            self.writeline(f"workspace.zero_(){self.ending}")
+            self.writeline(zline)
             if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
+                self.kernel_autotune_calls.writeline(zline)
+
+    def make_zero_buffer(self, name):
+        return f"{name}.zero_(){self.ending}"
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"

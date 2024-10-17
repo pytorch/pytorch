@@ -9,6 +9,7 @@ import torch
 import torch.cuda._sanitizer as csan
 from torch.cuda._sanitizer import DataPtr, EventId, StreamId
 from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 if not TEST_CUDA:
@@ -490,6 +491,22 @@ class TestMessages(TestCase):
                 """
             ),
         )
+
+    def test_subclass(self):
+        class MyT(torch.Tensor):
+            def __new__(cls, data):
+                new_data = data.clone()
+                return new_data.as_subclass(cls)
+
+        try:
+            csan.enable_cuda_sanitizer()
+
+            # These two tests ensure that subclass creation
+            # happens smoothly under the mode used by csan
+            t = TwoTensor(torch.rand(2), torch.rand(2))
+            t = MyT(torch.rand(2))
+        finally:
+            csan.cuda_sanitizer.disable()
 
 
 if __name__ == "__main__":
