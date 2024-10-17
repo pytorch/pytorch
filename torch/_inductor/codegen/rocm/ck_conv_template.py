@@ -7,7 +7,7 @@ import os
 import random
 import subprocess
 from typing import Tuple, Optional, List
-from torch._inductor import config, ir
+from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.utils import IndentedBuffer
@@ -58,7 +58,7 @@ def torch_layout_to_ck_output_layout(torch_layout):
         return None
 
 @dataclass
-class CKConvOp:
+class CKGroupedConvFwdOp:
     n_dim_spatial: int
     a_layout: str
     b_layout: str
@@ -147,9 +147,9 @@ def _ck_conv_instances_path():
     return conv_instances_path
 
 
-def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
+def parse_instances(str_instances: List[str]) -> List[CKGroupedConvFwdOp]:
     """
-    Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
+    Parse the lines containing Grouped Convolution Forward template instances into `CKGroupedConvFwdOp` instances
     """
 
     def maybe_int(s):
@@ -193,7 +193,7 @@ def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
         template_args[3] = tuple()  # ds_layout
         template_args[9] = tuple()  # ds_element_dtype
 
-        new_instance = CKConvOp(
+        new_instance = CKGroupedConvFwdOp(
             *template_args,  # type: ignore[arg-type]
         )
 
@@ -202,9 +202,9 @@ def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
 
 
 @lru_cache(None)
-def gen_conv_ops_library() -> List[CKConvOp]:
+def gen_conv_ops_library() -> List[CKGroupedConvFwdOp]:
     """
-    Parse the Universal Gemm instances defined in the composable kernel library folder.
+    Parse the Grouped Convolution Forward instances defined in the composable kernel library folder.
     """
     ck_library_dir = _ck_conv_instances_path()
     if not ck_library_dir:
@@ -269,7 +269,7 @@ def gen_conv_ops_library() -> List[CKConvOp]:
 
     return substitute_instances
 
-class CKConvTemplate(CKTemplate):
+class CKGroupedConvFwdTemplate(CKTemplate):
     conv_template = r"""
     {{headers}}
     {{globals}}
@@ -567,8 +567,6 @@ class CKConvTemplate(CKTemplate):
 
                 #include "ck/library/utility/convolution_parameter.hpp"
                 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
-                #include "ck/library/utility/device_memory.hpp"
-                #include "ck/library/utility/host_tensor.hpp"
             """
         )
         return res
@@ -585,7 +583,7 @@ class CKConvTemplate(CKTemplate):
         groups,
         n_spatial_dimensions,
     ):
-        template = CKConvTemplate(
+        template = CKGroupedConvFwdTemplate(
             input_nodes,
             layout,
             stride=stride,
@@ -623,7 +621,7 @@ class CKConvTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-    def filter_op(self, op: CKConvOp) -> bool:
+    def filter_op(self, op: CKGroupedConvFwdOp) -> bool:
         metas = [T.get_layout() for T in [*self.input_nodes, self.output_node] if T is not None]
         X_meta = metas[0]
         W_meta = metas[1]
@@ -669,7 +667,7 @@ class CKConvTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKConvOp") -> Tuple[str, str]:
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> Tuple[str, str]:
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -699,7 +697,7 @@ class CKConvTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKConvOp", **kwargs) -> str:  # type: ignore[override]
+    def render(self, kernel: ROCmTemplateKernel, op: "CKGroupedConvFwdOp", **kwargs) -> str:  # type: ignore[override]
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
