@@ -459,7 +459,7 @@ def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
     if not has_free_symbols(input.numel()):
         num_elements = int(input.numel())
     else:
-        prod_node = math.prod(input.shape).node
+        prod_node = math.prod(input.shape).node  # type: ignore
         prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
         if isinstance(prod_range.upper, IntInfinity):
             num_elements = sys.maxsize - 1
@@ -468,7 +468,7 @@ def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
     if num_elements > 2:
         maxval = num_elements
 
-    _constrain_range_for_size(res.size(0), max=maxval)
+    _constrain_range_for_size(res.size(0), max=maxval)  # type: ignore
     return res
 
 
