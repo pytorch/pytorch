@@ -253,7 +253,7 @@ def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
 
 
 def treespec_dict(
-    mapping: Mapping[Any, TreeSpec] | Iterable[tuple[Any, TreeSpec]] = (),
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[Tuple[Any, TreeSpec]]] = (),
     /,
     **kwargs: TreeSpec,
 ) -> TreeSpec:
