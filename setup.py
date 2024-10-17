@@ -1234,6 +1234,7 @@ def main():
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
+        "include/ATen/cpu/vec/vec128/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
         "include/ATen/cpu/vec/vec256/zarch/*.h",
