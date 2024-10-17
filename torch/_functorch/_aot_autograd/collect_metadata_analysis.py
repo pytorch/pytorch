@@ -15,7 +15,7 @@ from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional, Set
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._logging import getArtifactLogger
@@ -694,11 +694,8 @@ from a multi-output view call"
             view_avoid_dupes_with_primals, traced_tangents
         )
 
-        output_tangents_start_idx = len(f_input_tangents)
-        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
         tangents_and_memory_formats = [
-            coerce_tangent_and_suggest_memory_format(tt)
-            for i, tt in enumerate(traced_tangents)
+            coerce_tangent_and_suggest_memory_format(tt) for tt in traced_tangents
         ]
         traced_tangents = [t[0] for t in tangents_and_memory_formats]
         traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]

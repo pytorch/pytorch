@@ -14,7 +14,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Un
 import torch
 import torch._inductor.inductor_prims
 import torch.fx as fx
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -189,7 +189,7 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "placeholder":
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
-            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
+            all_args = pytree.tree_leaves((node.args, node.kwargs))
             all_args = [
                 isinstance(env[x], InvalidNodeBase)
                 for x in all_args
@@ -267,8 +267,8 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 def _extract_fwd_bwd_outputs(
     joint_module: fx.GraphModule, *, num_fwd_outputs
 ) -> Tuple[List[fx.Node], List[fx.Node]]:
-    outputs = pytree.arg_tree_leaves(
-        *(node.args for node in joint_module.graph.find_nodes(op="output"))
+    outputs = pytree.tree_leaves(
+        [node.args for node in joint_module.graph.find_nodes(op="output")]
     )
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
