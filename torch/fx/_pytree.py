@@ -36,7 +36,7 @@ def tree_flatten_spec(
         assert isinstance(spec, PyTreeSpec), "Expected a PyTreeSpec"
         return [accessor(pytree) for accessor in spec.accessors()]
 
-    dummy_leaf = object()
+    dummy_leaf = None
     dummy_tree = python_pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
     return [
         python_pytree.key_get(pytree, key_path)
