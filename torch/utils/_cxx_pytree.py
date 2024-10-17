@@ -27,13 +27,13 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, TypeGuard
 
 import optree
-from optree import PyTreeSpec  # direct import for type annotations
+from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
 
-import torch.utils._pytree as _pytree
-from torch.utils._pytree import KeyEntry
+import torch.utils._pytree as python_pytree
+from torch.utils._pytree import KeyEntry as KeyEntry
 
 
 __all__ = [
@@ -71,6 +71,10 @@ __all__ = [
 ]
 
 
+__TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
+__TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -79,7 +83,6 @@ R = TypeVar("R")
 
 Context = Any
 PyTree = Any
-TreeSpec = PyTreeSpec
 FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
@@ -151,9 +154,7 @@ def register_pytree_node(
         from_dumpable_context=from_dumpable_context,
     )
 
-    from . import _pytree as python
-
-    python._private_register_pytree_node(
+    python_pytree._private_register_pytree_node(
         cls,
         flatten_fn,
         unflatten_fn,
@@ -243,6 +244,10 @@ def _private_register_pytree_node(
         )
 
 
+def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[TreeSpec]:
+    return isinstance(obj, TreeSpec)
+
+
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -254,22 +259,17 @@ def tree_flatten(
     The flattening order (i.e., the order of elements in the output list) is deterministic,
     corresponding to a left-to-right depth-first tree traversal.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_flatten(tree)
-    ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(1)
-    ([1], PyTreeSpec(*, NoneIsLeaf))
+    ([1], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(None)
-    ([None], PyTreeSpec(*, NoneIsLeaf))
-
-    For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
-    dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
-    if you want to keep the keys in the insertion order.
-
+    ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> from collections import OrderedDict
-    >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
+    >>> tree = OrderedDict([("b", (2, [3, 4])), ("a", 1), ("c", None), ("d", 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -296,7 +296,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
 
     The inverse of :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> leaves, treespec = tree_flatten(tree)
     >>> tree == tree_unflatten(leaves, treespec)
     True
@@ -310,10 +310,10 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not isinstance(treespec, TreeSpec):
+    if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"tree_unflatten(values, spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
+            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
         )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
@@ -326,9 +326,9 @@ def tree_iter(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> list(tree_iter(tree))
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
     [1]
     >>> list(tree_iter(None))
@@ -361,9 +361,9 @@ def tree_leaves(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_leaves(tree)
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
@@ -396,13 +396,13 @@ def tree_structure(
 
     See also :func:`tree_flatten`.
 
-    >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
+    >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_structure(tree)
-    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
+    PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
     >>> tree_structure(1)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
     >>> tree_structure(None)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -433,9 +433,9 @@ def tree_map(
 
     See also :func:`tree_map_`.
 
-    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64)})
+    >>> tree_map(lambda x: x + 1, {"x": 7, "y": (42, 64)})
     {'x': 8, 'y': (43, 65)}
-    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
+    >>> tree_map(lambda x: x is None, {"x": 7, "y": (42, 64), "z": None})
     {'x': False, 'y': (False, False), 'z': True}
 
     If multiple inputs are given, the structure of the tree is taken from the first input;
@@ -533,7 +533,9 @@ def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
 
 
 @overload
-def map_only(__type_or_types_or_pred: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
+def map_only(
+    __type_or_types_or_pred: Type3[T, S, U],
+) -> MapOnlyFn[Fn3[T, S, U, Any]]:
     ...
 
 
@@ -549,12 +551,14 @@ def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
 
 @overload
-def map_only(__type_or_types_or_pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
+def map_only(
+    __type_or_types_or_pred: Callable[[Any], bool],
+) -> MapOnlyFn[FnAny[Any]]:
     ...
 
 
 def map_only(
-    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
 ) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
@@ -819,7 +823,7 @@ def broadcast_prefix(
     ValueError: list arity mismatch; expected: 3, got: 4; list: [1, 2, 3, 4].
     >>> broadcast_prefix([1, 2, 3], [1, 2, (3, 4)])
     [1, 2, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
+    >>> broadcast_prefix([1, 2, 3], [1, 2, {"a": 3, "b": 4, "c": (None, 5)}])
     [1, 2, 3, 3, 3, 3]
 
     Args:
@@ -834,13 +838,19 @@ def broadcast_prefix(
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
-    return optree.broadcast_prefix(
+    result: List[Any] = []
+
+    def add_leaves(x: Any, subtree: PyTree) -> None:
+        subtreespec = tree_structure(subtree, is_leaf=is_leaf)
+        result.extend([x] * subtreespec.num_leaves)
+
+    tree_map_(
+        add_leaves,
         prefix_tree,
         full_tree,
         is_leaf=is_leaf,
-        none_is_leaf=True,
-        namespace="torch",
     )
+    return result
 
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
@@ -856,7 +866,7 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[List[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    assert _is_pytreespec_instance(treespec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -866,29 +876,24 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
-    if not isinstance(treespec, TreeSpec):
+    if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"treespec_dumps(spec): Expected `spec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}."
+            f"treespec_dumps(treespec): Expected `treespec` to be instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    from ._pytree import (
-        tree_structure as _tree_structure,
-        treespec_dumps as _treespec_dumps,
-    )
 
-    orig_treespec = _tree_structure(tree_unflatten([0] * treespec.num_leaves, treespec))
-    return _treespec_dumps(orig_treespec, protocol=protocol)
+    dummy_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
+    orig_treespec = python_pytree.tree_structure(dummy_tree)
+    return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
 
 
 def treespec_loads(serialized: str) -> TreeSpec:
     """Deserialize a treespec from a JSON string."""
-    from ._pytree import (
-        tree_unflatten as _tree_unflatten,
-        treespec_loads as _treespec_loads,
+    orig_treespec = python_pytree.treespec_loads(serialized)
+    dummy_tree = python_pytree.tree_unflatten(
+        [0] * orig_treespec.num_leaves,
+        orig_treespec,
     )
-
-    orig_treespec = _treespec_loads(serialized)
-    dummy_tree = _tree_unflatten([0] * orig_treespec.num_leaves, orig_treespec)
     treespec = tree_structure(dummy_tree)
     return treespec
 
@@ -908,7 +913,7 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
     def __instancecheck__(self, instance: object) -> bool:
-        return isinstance(instance, TreeSpec) and instance.is_leaf()
+        return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
@@ -1002,6 +1007,10 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
     raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
 
 
-_pytree._cxx_pytree_imported = True
-for args, kwargs in _pytree._cxx_pytree_pending_imports:
-    _private_register_pytree_node(*args, **kwargs)
+with python_pytree._NODE_REGISTRY_LOCK:
+    python_pytree._cxx_pytree_imported = True
+    args, kwargs = (), {}  # type: ignore[var-annotated]
+    for args, kwargs in python_pytree._cxx_pytree_pending_imports:
+        _private_register_pytree_node(*args, **kwargs)
+    python_pytree._cxx_pytree_pending_imports.clear()
+    del args, kwargs

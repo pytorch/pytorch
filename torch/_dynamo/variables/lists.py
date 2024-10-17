@@ -491,7 +491,7 @@ class DequeVariable(CommonListMethodsVariable):
         codegen.foreach(self.items)
         codegen.extend_output([create_instruction("BUILD_LIST", arg=len(self.items))])
         codegen(self.maxlen)
-        codegen.extend_output(codegen.create_call_function_kw(1, ("maxlen",), False))
+        codegen.extend_output(codegen.create_call_function_kw(2, ("maxlen",), False))
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "maxlen":
