@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
+    from .codegen.common import WorkspaceArg
 
 from . import config
 from .runtime.benchmarking import benchmarker
@@ -626,6 +627,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
+        workspace_arg: Optional[WorkspaceArg] = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -634,6 +636,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.num_stages = num_stages
         self.num_warps = num_warps
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
+        self.workspace_arg = workspace_arg
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -663,10 +666,16 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
             stream = get_raw_stream(self.output_tensor_meta.device.index)
 
+        if self.workspace_arg is not None:
+            # Triton will generate code with the arg signature (args, output, workspace)
+            # We thus need to flip the order of the last entry in input_tensor and output_tensor
+            arg_list = [*input_tensors[:-1], output_tensor, input_tensors[-1]]
+        else:
+            arg_list = [*input_tensors, output_tensor]
+
         return functools.partial(
             run_method,
-            *input_tensors,
-            output_tensor,
+            *arg_list,
             *self.extra_args,
             grid=self.grid,
             **warmup_arg,

@@ -59,6 +59,11 @@ class WorkspaceArg:
 
     Not registered as a traditional buffer since there are no users,
     so it would be dead code eliminated.
+
+    Args:
+        nbytes: The size of the buffer in bytes.
+        zero_fill: Whether the buffer should be initialized to zero.
+
     """
 
     nbytes: sympy.Expr
@@ -1309,7 +1314,30 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> Tuple[str, int]:
+        """
+        Allocate or extend a workspace buffer of nbytes bytes.
+
+        This function manages the allocation of a workspace buffer. It either creates
+        a new WorkspaceArg or extends an existing one. 
+
+        Note: 
+        - Calling this function will in-place mutate the args by adding or updating
+        a WorkspaceArg.
+        - The codegen for generating the Python argdefs and call_defs will check
+        this field and allocate the buffer accordingly.
+        - A new argument "ws_ptr" will be present in the generated code.
+
+        Args:
+            nbytes (sympy.Expr): The number of bytes to allocate.
+            zero_fill (bool): Whether to initialize the buffer to zero.
+
+        Returns:
+            Tuple[str, int]: A tuple containing:
+                - "ws_ptr": A string identifier for the workspace pointer.
+                - offset: An integer representing the byte offset in the workspace.
+        """
+
         if self.workspace_arg is None:
             self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
             return "ws_ptr", 0

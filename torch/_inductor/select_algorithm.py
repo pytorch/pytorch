@@ -34,7 +34,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate
+from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -137,6 +137,7 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
+        workspace_arg: Optional[WorkspaceArg] = None,
         *,
         index_dtype,
     ) -> None:
@@ -164,6 +165,10 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
+
+        # Some templates use extra global memory as a workspace
+        if workspace_arg is not None:
+            self.args.workspace(workspace_arg.nbytes, workspace_arg.zero_fill)
 
         # The following attributes (body, template_mask, output_val) are all
         # used for triton kernel codegen.
@@ -557,6 +562,15 @@ class TritonTemplateKernel(TritonKernel):
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
+
+        # Handle workspace allocation
+        if self.args.workspace_arg is not None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            ws = self.args.workspace_arg
+            wrapper.generate_workspace_allocation(
+                ws.nbytes, current_device, ws.zero_fill
+            )
+
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
             # if any dynamic dimension is involved. We rely on the Python version
@@ -584,6 +598,9 @@ class TritonTemplateKernel(TritonKernel):
                 triton_meta=self.triton_meta,
                 gpu="cpu" not in V.graph.device_types,
             )
+
+        if self.args.workspace_arg is not None:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
 
 @functools.lru_cache(None)
@@ -622,6 +639,7 @@ class TritonTemplate(KernelTemplate):
         subgraphs=None,
         mutated_inputs=None,
         call_sizes=None,
+        workspace_arg: Optional[WorkspaceArg] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -659,26 +677,27 @@ class TritonTemplate(KernelTemplate):
         if call_sizes is None:
             call_sizes = layout.size
 
-        kernel_options = dict(
-            input_nodes=input_nodes,
-            defines=defines,
-            num_stages=num_stages,
-            num_warps=num_warps,
-            grid_fn=self.grid,
-            meta=kwargs,
-            call_sizes=call_sizes,
-            prefix_args=prefix_args,
-            suffix_args=suffix_args,
-            epilogue_fn=epilogue_fn,
-            index_dtype="tl.int32",
-            subgraphs=subgraphs,
-        )
+        kernel_options = {
+            "input_nodes": input_nodes,
+            "defines": defines,
+            "num_stages": num_stages,
+            "num_warps": num_warps,
+            "grid_fn": self.grid,
+            "meta": kwargs,
+            "call_sizes": call_sizes,
+            "prefix_args": prefix_args,
+            "suffix_args": suffix_args,
+            "epilogue_fn": epilogue_fn,
+            "index_dtype": "tl.int32",
+            "subgraphs": subgraphs,
+        }
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
+            workspace_arg=workspace_arg,
             use_jit=False,
             **kernel_options,
         ) as kernel:
@@ -733,6 +752,7 @@ class TritonTemplate(KernelTemplate):
             kernel = TritonTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
+                workspace_arg=workspace_arg,
                 use_jit=False,
                 **kernel_options,
             )
@@ -768,6 +788,7 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
+            workspace_arg=workspace_arg,
         )
 
         return TritonTemplateCaller(
@@ -791,6 +812,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
+            workspace_arg=workspace_arg,
         )
 
 
@@ -864,6 +886,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
+        workspace_arg: Optional[WorkspaceArg] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -880,6 +903,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             }
         )
         self.mutated_inputs = mutated_inputs
+        self.workspace_arg = workspace_arg
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -1431,7 +1455,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs():
+        def get_inputs(choices: List[TritonTemplateCaller]):
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1460,11 +1484,35 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 for input_node in input_nodes
             ]
-
             out = cls.benchmark_example_value(layout)
             out_extern = torch.as_strided(
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
+            # Make sure that all workspace sizes for each choice are the same
+            triton_templates_choices = [
+                choice for choice in choices if isinstance(choice, TritonTemplateCaller)
+            ]
+            needs_workspace = any(
+                choice.workspace_arg is not None for choice in triton_templates_choices
+            )
+            if needs_workspace:
+                # TODO right now we only support the same workspace arg for all choices
+                assert (
+                    triton_templates_choices[0].workspace_arg is not None
+                ), "Expected all triton templates choices to have the same workspace arg."
+                workspace: WorkspaceArg = triton_templates_choices[0].workspace_arg
+                assert all(
+                    choice.workspace_arg == workspace
+                    for choice in triton_templates_choices
+                ), "All choices must have the same workspace argument."
+                size, zero_fill = workspace.nbytes, workspace.zero_fill
+                workspace_tensor = torch.empty_strided(
+                    (size,), (1,), dtype=torch.uint8, device=out.device
+                )
+                if zero_fill:
+                    workspace_tensor.zero_()
+                example_inputs.append(workspace_tensor)
+
             expected = None
             if VERIFY:
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
@@ -1507,7 +1555,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
-            inputs = get_inputs()
+            inputs = get_inputs(choices)
             example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
