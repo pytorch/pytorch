@@ -102,8 +102,9 @@ Tensor _cudnn_init_dropout_state(
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-      pin_memory);
+  [[maybe_unused]] auto unused_result =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
