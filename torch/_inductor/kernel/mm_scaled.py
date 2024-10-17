@@ -7,6 +7,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import config as inductor_config
+from ..codegen.common import WorkspaceArg
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
@@ -16,9 +17,14 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..codegen.common import WorkspaceArg
-from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
-from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs, persistent_grid
+from ..utils import use_aten_gemm_kernels, use_ck_template
+from .mm_common import (
+    _is_static_problem,
+    mm_args,
+    mm_grid,
+    persistent_grid,
+    scaled_mm_configs,
+)
 
 
 log = logging.getLogger(__name__)
@@ -540,19 +546,19 @@ def tuned_scaled_mm(
     #         #     **kwargs,
     #         # )
 
-            # if ADD_TMA_DEVICE_KERNELS:
-            #     kwargs = scaled_mm_options_device_tma(
-            #         config, m, n, k, layout, scale_a, scale_b, use_fast_accum
-            #     )
-            #     input_nodes = (mat_a, mat_b, scale_a, scale_b)
-            #     workspace_bytes = get_workspace_size(kwargs["NUM_SMS"])
-            #     scaled_mm_device_tma_template.maybe_append_choice(
-            #         choices,
-            #         input_nodes=input_nodes,
-            #         layout=layout,
-            #         workspace_arg=WorkspaceArg(workspace_bytes, False),
-            #         **kwargs,
-            #     )
+    # if ADD_TMA_DEVICE_KERNELS:
+    #     kwargs = scaled_mm_options_device_tma(
+    #         config, m, n, k, layout, scale_a, scale_b, use_fast_accum
+    #     )
+    #     input_nodes = (mat_a, mat_b, scale_a, scale_b)
+    #     workspace_bytes = get_workspace_size(kwargs["NUM_SMS"])
+    #     scaled_mm_device_tma_template.maybe_append_choice(
+    #         choices,
+    #         input_nodes=input_nodes,
+    #         layout=layout,
+    #         workspace_arg=WorkspaceArg(workspace_bytes, False),
+    #         **kwargs,
+    #     )
 
     if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)

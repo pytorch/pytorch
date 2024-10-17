@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import cast, Sequence, Tuple, Dict, Any
+from typing import Any, cast, Dict, Sequence, Tuple
 
 import sympy
 
@@ -394,10 +394,13 @@ def mm_grid(m, n, meta):
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
+
 def persistent_grid(M: int, N: int, meta: Dict[str, Any]):
-    """ Defines the grid for persistent kernels. """
+    """Defines the grid for persistent kernels."""
     return (
-        min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])), 1, 1
+        min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
+        1,
+        1,
     )
 
 
