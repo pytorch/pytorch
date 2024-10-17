@@ -969,6 +969,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)
             res += "\n\n" + test_runner_code
+
+        print("ETAF rendered code:", res)
         return res
 
     def test_call_statement(
