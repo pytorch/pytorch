@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
@@ -296,7 +297,7 @@ def transform_args(
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
-                return ir.Constant(arg.value, dtype, device)
+                return ir.Constant(value=arg.value, dtype=dtype, device=device)
             else:
                 return arg
 
@@ -439,9 +440,13 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -469,9 +474,11 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         def const_func(x):
             if isinstance(x, sympy.Basic):
-                return ir.IndexingConstant(x, dtype, decode_device(None))
+                return ir.IndexingConstant(
+                    index=x, dtype=dtype, device=decode_device(None)
+                )
             else:
-                return ir.Constant(x, dtype, decode_device(None))
+                return ir.Constant(value=x, dtype=dtype, device=decode_device(None))
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
@@ -480,13 +487,16 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
-                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                    ir.Constant(value=x, dtype=ex.get_dtype(), device=ex.get_device()),
+                    list(ex.get_size()),
                 )
             )
         elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
-                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    IndexingConstant(
+                        index=x, dtype=ex.get_dtype(), device=ex.get_device()
+                    ),
                     list(ex.get_size()),
                 )
             )
@@ -858,7 +868,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1094,7 +1122,7 @@ def as_strided(x, size, stride, storage_offset=None):
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
     )
-    return TensorBox(ir.ReinterpretView(storage, new_layout))
+    return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
 @register_lowering(aten.as_strided_, type_promotion_kind=None)
@@ -2078,6 +2106,113 @@ def inductor_randint(
     )
 
 
+def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    return (
+        tb.get_name(),
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
+    )
+
+
+def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+    return tb.get_name(), tb.get_stride()[-1]
+
+
+@register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
+def searchsorted(
+    sorted_sequence: TensorBox,
+    self: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[TensorBox] = None,
+) -> TensorBox:
+    validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
+        tb, BackendFeature.BUCKETIZE
+    )
+    if (
+        not validate_bucketize(sorted_sequence)
+        or not validate_bucketize(self)
+        or (sorter is not None and not validate_bucketize(sorter))
+    ):
+        return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
+            sorted_sequence,
+            self,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            sorter=sorter,
+        )
+
+    # If side is present, override the value of right if needed.  This assumes that
+    # validation of the two options being non-contradictory is already done by the
+    # searchsorted meta-function.
+    if side is not None and side == "right":
+        right = True
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    values_loader = self.make_loader()
+
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
+    # realize it into global memory; or in other words, we can't guarantee that
+    # sorted_sequence.get_name() (used below) will exist unless we call
+    # sorted_sequence.realize().
+    sorted_sequence.realize()
+
+    if sorter is not None:
+        sorter.realize()
+
+    if len(sorted_sequence.get_size()) == 1:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                0,
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else 0,
+            )
+
+    else:
+
+        def inner_fn(idx):
+            val = values_loader(idx)
+
+            # Get index to the beginning of the sorted sequence within a flattened
+            # version of the array.
+            def get_flattened_index(tb: TensorBox):
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
+
+            return ops.bucketize(
+                val,
+                _boundaries_helper(sorted_sequence),
+                get_flattened_index(sorted_sequence),
+                index_dtype,
+                right,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else get_flattened_index(sorter),
+            )
+
+    device = self.get_device()
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=self.shape,
+    )
+
+
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
     input: TensorBox,
@@ -2101,7 +2236,6 @@ def bucketize(
     # guarantee that boundaries.get_name() (used below) will exist unless
     # we call boundaries.realize().
     boundaries.realize()
-    boundaries_size = boundaries.get_size()[0]
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2111,8 +2245,8 @@ def bucketize(
         val = input_loader(index)
         indices = ops.bucketize(
             val,
-            boundaries.get_name(),
-            boundaries_size,
+            _boundaries_helper(boundaries),
+            0,
             index_dtype,
             right,
         )
@@ -2246,7 +2380,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
-make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible
@@ -2468,7 +2601,7 @@ def clone_preserve_reinterpret_view(x):
     if reinterpret_view_layouts:
         x = x.data  # unwrap TensorBox
         for layout in reinterpret_view_layouts[::-1]:
-            x = ir.ReinterpretView(x, layout)
+            x = ir.ReinterpretView(data=x, layout=layout)
         x = TensorBox(x)
 
     return x
@@ -2886,7 +3019,7 @@ def empty_strided(
     pointwise.realize()
     buffer = pointwise.data.data
     # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data.ranges = [0] * len(size)
+    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     assert isinstance(buffer, ir.ComputedBuffer)
     size = [sympy.expand(s) for s in size]
     stride = (
@@ -3286,9 +3419,9 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter_mode="atomic_add" if accumulate else None,
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -3507,9 +3640,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             scatter_mode=None,
         )
         buffer = ir.ComputedBuffer(
-            None,
-            ir.MutationLayoutSHOULDREMOVE(self),
-            zero_out,
+            name=None,
+            layout=ir.MutationLayoutSHOULDREMOVE(self),
+            data=zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
         V.graph.register_operation(buffer)
@@ -3526,9 +3659,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter_mode=backend_reduce_str(reduce),
     )
     buffer = ir.ComputedBuffer(
-        None,
-        ir.MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=ir.MutationLayoutSHOULDREMOVE(self),
+        data=scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -5171,7 +5304,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
         x = to_dtype(x, torch.float)
     sum_result = sum_(x, axis, keepdim)
     denom = sympy_product(size[i] for i in axis)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     return to_dtype(div(sum_result, denom), output_dtype)
 
@@ -5192,7 +5325,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = sympy_product(size[i] for i in axis)
     if correction:
         denom = sympy.Max(denom - correction, 0)
-    denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
+    denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
@@ -5960,14 +6093,17 @@ foreach_add_scalar = register_foreach_pointwise(
 )
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.List, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
@@ -6212,7 +6348,14 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata,
+    kwargs,
+):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
@@ -6318,6 +6461,7 @@ try:
             # in-place reuse. Therefore, we tell the scheduler to not fuse it.
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )

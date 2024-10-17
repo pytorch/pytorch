@@ -1,3 +1,4 @@
+import copy
 import csv
 import json
 import sys
@@ -35,6 +36,11 @@ def main():
     # add_loop_eager,compile_time_instruction_count,283178305
     result_file_path = sys.argv[2]
 
+    # A path where a new expected results file will be written that can be used to replace expected_results.csv
+    # in case of failure. In case of no failure the content of this file will match expected_file_path, values
+    # will be changed for benchmarks that failed only.
+    reference_expected_results_path = sys.argv[3]
+
     # Read expected data file.
     expected_data: dict[str, ExpectedFileEntry] = {}
 
@@ -68,6 +74,7 @@ def main():
             result_data[key] = entry
 
     fail = False
+    new_expected = copy.deepcopy(expected_data)
     for key, entry in expected_data.items():
         if key not in result_data:
             print(f"Missing entry for {key} in result file")
@@ -92,34 +99,50 @@ def main():
                 ),
             )
 
+        ratio = float(result - entry.expected_value) * 100 / entry.expected_value
+
         if result > high:
+            new_entry = copy.deepcopy(entry)
+            new_entry.expected_value = result
+            new_expected[key] = new_entry
+
             fail = True
-            ratio = float(result - entry.expected_value) * 100 / entry.expected_value
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
-                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
-                f"if this is an expected regression, please update the expected results."
+                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:+.2f}% "
+                f"if this is an expected regression, please update the expected results.\n"
             )
 
             log("fail_regression")
 
-        if result < low:
+        elif result < low:
+            new_entry = copy.deepcopy(entry)
+            new_entry.expected_value = result
+            new_expected[key] = new_entry
+
             fail = True
-            ratio = float(entry.expected_value - result) * 100 / entry.expected_value
 
             print(
-                f"WIN: benchmark {key} failed, actual result {result} is {ratio:.2f}% lower than "
+                f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
-                f"please update the expected results."
+                f"please update the expected results.\n"
             )
 
             log("fail_win")
+
+        else:
+            print(
+                f"PASS: benchmark {key} pass, actual result {result} {ratio:+.2f}% is within "
+                f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}%\n"
+            )
+
+            log("pass")
 
     # Log all benchmarks that do not have a regression test enabled for them.
     for key, entry in result_data.items():
         if key not in expected_data:
             print(
-                f"MISSING REGRESSION TEST: benchmark {key} does not have a regression test enabled for it"
+                f"MISSING REGRESSION TEST: benchmark {key} does not have a regression test enabled for it.\n"
             )
             scribe.open_source_signpost(
                 subsystem="pr_time_benchmarks",
@@ -131,7 +154,27 @@ def main():
                     }
                 ),
             )
+
     if fail:
+        print(
+            f"You can use the new reference expected result stored at path: {reference_expected_results_path}.\n"
+        )
+
+        with open(reference_expected_results_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for entry in new_expected.values():
+                # Write the data to the CSV file
+                writer.writerow(
+                    [
+                        entry.benchmark_name,
+                        entry.metric_name,
+                        round(entry.expected_value),
+                        entry.noise_margin,
+                    ]
+                )
+
+        with open(reference_expected_results_path) as f:
+            print(f.read())
         sys.exit(1)
     else:
         print("All benchmarks passed")
