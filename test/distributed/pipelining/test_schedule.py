@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
+from re import A
 from typing import List
 
 import torch
@@ -362,6 +363,16 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
 
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=test_info["stage_to_rank"],
+            num_stages=test_info["num_stages"],
+        )
+        # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+        # print(_format_pipeline_order(simulated_schedule))
+        num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
+        self.assertEqual(num_steps, 9)
+
     def test_csv(self):
         def _dump_csv(pipeline_order_with_comms, filename: str):
             """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
@@ -388,7 +399,6 @@ class TestScheduleLowering(TestCase):
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
             num_stages=num_stages,
-            enable_batching=True,
         )
 
         simulated_schedule = _simulate_comms_compute(
