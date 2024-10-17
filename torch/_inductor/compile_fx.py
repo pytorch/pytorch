@@ -40,6 +40,7 @@ from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    dynamo_timed,
     flatten_graph_inputs,
     lazy_format_graph_code,
 )
@@ -280,12 +281,13 @@ def _get_subgraph_names(gm):
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        # as we don't have recursive example inputs, passing None here
-        new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
-        setattr(gm, subgraph_name, new_subgraph)
-    return pre_grad_passes(gm, example_inputs)
+    with dynamo_timed("_recursive_pre_grad_passes"):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            # as we don't have recursive example inputs, passing None here
+            new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
+            setattr(gm, subgraph_name, new_subgraph)
+        return pre_grad_passes(gm, example_inputs)
 
 
 def _recursive_joint_graph_passes(gm):
@@ -296,10 +298,11 @@ def _recursive_joint_graph_passes(gm):
 
 
 def _recursive_post_grad_passes(gm, is_inference: bool = False):
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+    with dynamo_timed("_recursive_post_grad_passes"):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            _recursive_post_grad_passes(subgraph, is_inference)
+        post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(

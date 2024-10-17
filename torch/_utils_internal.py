@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
@@ -357,6 +357,10 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 
 def log_chromium_event_internal(
-    event, stack, compile_id, logger_uuid, start_timestamp=None
+    event: Dict[str, Any],
+    stack: List[str],
+    compile_id: Optional[str],
+    logger_uuid: str,
+    start_time_ns: int,
 ):
     return None
