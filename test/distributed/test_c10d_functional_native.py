@@ -624,6 +624,16 @@ class CompileTest(TestCase):
         # clone induced by non contig input
         assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
+        def func2(arg: torch.Tensor) -> torch.Tensor:
+            torch.ops._c10d_functional.all_reduce_(arg, "avg", "0")
+            return arg
+
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        # clone induced by non contig input
+        assert "torch.ops._c10d_functional.wait_tensor.default" in code
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):

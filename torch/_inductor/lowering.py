@@ -6465,6 +6465,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
