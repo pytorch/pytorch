@@ -9,6 +9,7 @@ import functools
 import inspect
 import logging
 import operator
+import random
 import re
 import tempfile
 from itertools import count
@@ -448,7 +449,6 @@ class NullLine(MemoryPlanningLine):
 class CommBufferAllocateLine(WrapperLine):
     wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
     node: ir.Buffer
-    comm_buffer_type: str
 
     @property
     def size(self):
@@ -456,14 +456,17 @@ class CommBufferAllocateLine(WrapperLine):
         dtype = self.node.get_dtype()
         return numel * dtype.itemsize
 
-    def codegen(self, code: IndentedBuffer) -> None:
-        raise NotImplementedError
+    @property
+    def comm_buffer_type(self):
+        layout = self.node.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+        return layout.comm_buffer_type
 
-
-@dataclasses.dataclass
-class SymmMemAllocateLine(CommBufferAllocateLine):
-    def __init__(self, wrapper, node):
-        super().__init__(wrapper, node, "symm_mem")
+    @property
+    def group_name(self):
+        layout = self.node.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+        return layout.group_name
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
@@ -472,30 +475,33 @@ class SymmMemAllocateLine(CommBufferAllocateLine):
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
         stride = tuple(self.node.get_stride())
-        code.writeline(
-            self.make_allocation_line(self.wrapper, name, device, dtype, shape, stride)
-        )
 
-    @staticmethod
-    def make_allocation_line(wrapper, name, device, dtype, shape, stride):
-        import random
-
-        return (
-            f"{name} = empty_strided_p2p("
-            f"{wrapper.codegen_shape_tuple(shape)}, "
-            f"{wrapper.codegen_shape_tuple(stride)}, "
-            f"{dtype}, "
-            f'torch.device("cuda:{device.index}"), '
-            f'group_name="0", '
-            f"alloc_id={random.randint(0, 2**64 - 1)})"
-        )
+        if self.comm_buffer_type == "symm_mem":
+            code.writeline(
+                f"{name} = empty_strided_p2p("
+                f"{self.wrapper.codegen_shape_tuple(shape)}, "
+                f"{self.wrapper.codegen_shape_tuple(stride)}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'group_name="{self.group_name}", '
+                f"alloc_id={random.randint(0, 2**64 - 1)})"
+            )
+        else:
+            raise NotImplementedError(
+                f"Unsupported comm buffer type: {self.comm_buffer_type}"
+            )
 
 
 @dataclasses.dataclass
 class CommBufferFreeLine(WrapperLine):
     wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
     node: ir.Buffer
-    comm_buffer_type: str
+
+    @property
+    def comm_buffer_type(self):
+        layout = self.node.get_layout()
+        assert isinstance(layout, ir.CommBufferLayout)
+        return layout.comm_buffer_type
 
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
@@ -1969,23 +1975,6 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
-    def codegen_comm_buffer_allocation(self, name, buffer):
-        layout = buffer.get_layout()
-        assert isinstance(layout, ir.CommBufferLayout)
-
-        if layout.comm_buffer_type == "symm_mem":
-            self.writeline(SymmMemAllocateLine(self, buffer))
-        else:
-            raise NotImplementedError(
-                f"Unsupported comm buffer type: {layout.comm_buffer_type}"
-            )
-
-    def codegen_comm_buffer_free(self, buffer):
-        layout = buffer.get_layout()
-        assert isinstance(layout, ir.CommBufferLayout)
-
-        self.writeline(CommBufferFreeLine(self, buffer, layout.comm_buffer_type))
-
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
@@ -2014,7 +2003,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         if isinstance(layout, ir.CommBufferLayout):
-            self.codegen_comm_buffer_allocation(name, buffer)
+            self.writeline(CommBufferAllocateLine(self, buffer))
             return
 
         self.writeline(AllocateLine(self, buffer))
@@ -2030,7 +2019,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(buffer.get_layout(), ir.CommBufferLayout):
             # Comm buffers are not eligible for in-place reuse. Their reuse is
             # achieved exclusively via buffer planning.
-            self.codegen_comm_buffer_free(buffer)
+            self.writeline(CommBufferFreeLine(self, buffer))
             return
 
         if not self.can_reuse(buffer):

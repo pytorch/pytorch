@@ -75,7 +75,9 @@ def can_convert_to_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> bool
     return False
 
 
-def convert_to_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> None:
+def convert_to_comm_buffer(
+    buffer: ir.Buffer, comm_buffer_type: str, group_name: str
+) -> None:
     """
     Convert a buffer to a comm buffer of the specified `comm_buffer_type`.
 
@@ -107,6 +109,7 @@ def convert_to_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> None:
     buffer.layout = ir.CommBufferLayout(
         layout=layout,
         comm_buffer_type=comm_buffer_type,
+        group_name=group_name,
     )
 
 
@@ -157,7 +160,7 @@ def _should_lower_as_one_shot_all_reduce(
 
 def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     buffer = _get_buffer(inp)
-    convert_to_comm_buffer(buffer, "symm_mem")
+    convert_to_comm_buffer(buffer, "symm_mem", group_name)
     return pytree.tree_map(
         ir.TensorBox.create,
         ir.FallbackKernel.create(

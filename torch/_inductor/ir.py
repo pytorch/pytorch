@@ -3319,6 +3319,7 @@ class CommBufferLayout(FixedLayout):
         self,
         layout: FlexibleLayout,
         comm_buffer_type: str,
+        group_name: str,
     ):
         if not isinstance(layout, FlexibleLayout):
             raise AssertionError(
@@ -3335,6 +3336,7 @@ class CommBufferLayout(FixedLayout):
             offset=fixed.offset,
         )
         self.comm_buffer_type = comm_buffer_type
+        self.group_name = group_name
 
 
 class NoneLayout(IRNode):
