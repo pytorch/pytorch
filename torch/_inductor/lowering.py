@@ -439,9 +439,13 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -863,7 +867,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -6322,7 +6344,14 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata,
+    kwargs,
+):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
