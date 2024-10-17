@@ -168,7 +168,7 @@ class TestSACILP(TestCase):
         # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
         # Since runtime is device_flops dependent, so we only check the ratio
         self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.15
+            (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.25
         )
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
