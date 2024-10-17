@@ -659,13 +659,12 @@ def _lower_static_weighted_ref_module(
     and replace them with the quantized version of the ref module.
     """
     modules = dict(model.named_modules(remove_duplicate=False))
-    nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
         matching_modules = list(STATIC_LOWER_MODULE_MAP.keys()) + list(
             STATIC_LOWER_FUSED_MODULE_MAP.keys()
         )
-        (q_node, relu_node, ref_node) = _match_static_pattern(
+        q_node, _relu_node, ref_node = _match_static_pattern(
             n, modules, qconfig_map, matching_modules, dequantize_node_arg_indices=[0]  # type: ignore[arg-type]
         )
         if q_node is None:
@@ -718,7 +717,6 @@ def _lower_static_weighted_ref_module_with_two_inputs(
     and replace them with the quantized version of the ref module.
     """
     modules = dict(model.named_modules(remove_duplicate=False))
-    nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         #                                            (dequantize \
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
@@ -849,7 +847,6 @@ def _lower_static_weighted_ref_functional(
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
     modules = dict(model.named_modules(remove_duplicate=False))
-    nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         # Step 0: Find nodes that match this pattern (dequantize - functional op - quantize)
         matching_ops = list(STATIC_LOWER_FUNCTIONAL_MAP.keys())
@@ -953,7 +950,6 @@ def _lower_dynamic_weighted_ref_functional(
     to(torch.float16) - dequantize - functional linear --> linear_dynamic_fp16
     """
     modules = dict(model.named_modules(remove_duplicate=False))
-    nodes = list(model.graph.nodes)
     # we want to search in reserved order so that we can match the larger patterns first
     # e.g. we want to match linear - relu before linear.
     for n in reversed(model.graph.nodes):

@@ -19,7 +19,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
@@ -603,7 +602,6 @@ def _annotate_gru_io_only(
             continue
         # inside each GRU partition, we should be able to annotate each linear
         # subgraph
-        input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)

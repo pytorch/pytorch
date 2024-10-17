@@ -2753,7 +2753,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     assert len(graph.outputs) == len(signature.output_specs)
 
     def rank_input(inp) -> Tuple[int, Optional[str], int]:
-        idx, (arg, spec) = inp
+        idx, (_arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
             return 5, None, idx
@@ -2773,7 +2773,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             raise AssertionError(f"Unknown input type: {spec}")
 
     def rank_output(out) -> Tuple[int, Optional[str], int]:
-        idx, (arg, spec) = out
+        idx, (_arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
             return 3, None, idx
