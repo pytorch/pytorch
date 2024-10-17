@@ -111,6 +111,7 @@ jobs:
             docker-image-name: manylinux2_28-builder-cuda${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
+            force-push: true
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
