@@ -35,8 +35,8 @@ if python_pytree._cxx_pytree_exists:
             "because the original function will be called in the constant fold path."
         )
 
-    name = ""
-    for name in (
+    __name = ""
+    for __name in (
         "is_namedtuple",
         "is_namedtuple_class",
         "is_namedtuple_instance",
@@ -46,12 +46,12 @@ if python_pytree._cxx_pytree_exists:
         "namedtuple_fields",
         "structseq_fields",
     ):
-        func = getattr(optree, name)
-        substitute_in_graph(func, can_constant_fold_through=True)(
-            func.__python_implementation__
+        __func = getattr(optree, __name)
+        substitute_in_graph(__func, can_constant_fold_through=True)(
+            __func.__python_implementation__
         )
-        del func
-    del name
+        del __func
+    del __name
 
     @substitute_in_graph(cxx_pytree.tree_iter, can_constant_fold_through=False)
     def tree_iter(
