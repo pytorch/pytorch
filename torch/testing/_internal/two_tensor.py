@@ -9,6 +9,10 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 class TwoTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, a, b, outer_size=None, outer_stride=None):
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:

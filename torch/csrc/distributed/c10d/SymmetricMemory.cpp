@@ -71,8 +71,11 @@ static at::Tensor empty_strided_p2p_persistent(
         "is still active.");
   }
 
-  const size_t numel =
-      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      size.begin(),
+      size.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 
