@@ -4382,6 +4382,34 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
+    def test_tensor_constant_with_wrapped_method(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.ones(4, 4)
+
+            def forward(self, x):
+                return x + self.constant, self.constant
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, *arg, **kwargs):
+                return self.fn(*arg, **kwargs)
+
+        inp = (torch.zeros(4, 4),)
+
+        def test(m):
+            m_result = m(*inp)
+            ep_result = export(m, inp).module()(*inp)
+            for m_t, ep_t in zip(m_result, ep_result):
+                self.assertTrue(torch.allclose(m_t, ep_t))
+
+        test(M())
+        test(Wrapper(M().forward))
+
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
