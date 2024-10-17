@@ -69,6 +69,14 @@ struct CacheKey {
   const uint8_t* key;
 };
 
+struct CollectionInfo {
+  int num_saved_tensors = 0;
+  int num_saved_sizes = 0;
+  int num_saved_ivalues = 0;
+};
+
+enum CollectionMode { COMPILED_ARGS, NEXT_EDGES };
+
 struct TORCH_API NodeCall {
   NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
@@ -84,9 +92,24 @@ struct TORCH_API NodeCall {
   std::vector<int> post_hooks;
   std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
-  int num_saved_tensors = 0;
-  int num_saved_sizes = 0;
-  int num_saved_ivalues = 0;
+
+  CollectionInfo& collection_info() {
+    if (mode == CollectionMode::NEXT_EDGES) {
+      return next_edges_info;
+    } else {
+      return compiled_args_info;
+    }
+  }
+
+  // Given the full list of saved arguments (saved tensors, saved sizes,
+  // saved scalars), we want to be able to map them back to which node
+  // they came from.
+  // The way we do this is that we store information on how many
+  // tensors/sizes/scalars each Node uses.
+  CollectionMode mode = CollectionMode::COMPILED_ARGS;
+  CollectionInfo compiled_args_info;
+  CollectionInfo next_edges_info;
+
   bool needed = true;
 };
 
@@ -140,8 +163,6 @@ struct TensorArgs {
       : active_node_call_idx(active_node_call_idx) {}
 
   TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
-    // unconditionally add the tensor to inputs... Dynamo will de-dupe them later
-    inputs.emplace_back(tensor);
     if (!tensor.defined()) {
       return _undefined;
     }
@@ -165,6 +186,9 @@ struct TensorArgs {
   }
 
   TensorArg& add(const at::Tensor& tensor) {
+    // unconditionally add the tensor to inputs... Dynamo will de-dupe them
+    // later
+    inputs.emplace_back(tensor);
     return lookup(tensor, true);
   }
 
@@ -276,7 +300,6 @@ class CompiledNodeArgs {
   // key.
  public:
   void collect(const TensorArg& t) {
-    _node_call.num_saved_tensors++;
     collect_size(t.id);
     if (t.defined()) {
       const at::Tensor& tensor = _compiler.tensor_args.inputs[t.index()];
@@ -289,14 +312,16 @@ class CompiledNodeArgs {
   }
 
   void collect(const at::Tensor& t) {
+    _node_call.collection_info().num_saved_tensors++;
     collect(_compiler.tensor_args.add(t));
   }
   void collect(const SavedVariable& sv, bool is_output) {
+    _node_call.collection_info().num_saved_tensors++;
     collect(
         _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
   void collect(const c10::SymInt& t) {
-    _node_call.num_saved_sizes++;
+    _node_call.collection_info().num_saved_sizes++;
     _compiler.add_size_input(t);
   }
   void collect(const std::vector<SavedVariable>& t, bool is_output) {
@@ -378,7 +403,7 @@ class CompiledNodeArgs {
         !nested &&
         (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
       // can't lift ivalues nested in collections
-      _node_call.num_saved_ivalues++;
+      _node_call.collection_info().num_saved_ivalues++;
       _compiler.lifted_ivalue_args.add(&iv);
     } else {
       try {
@@ -651,11 +676,12 @@ struct TORCH_API SwapInterface {
 };
 
 struct SwapWithProxies : public SwapInterface {
-  explicit SwapWithProxies(AutogradCompilerCall& compiler, TraceState& state): compiler_(compiler), state_(state) {}
+  explicit SwapWithProxies(AutogradCompilerCall& compiler, TraceState& state)
+      : compiler_(compiler), state_(state) {}
 
   ~SwapWithProxies() override = default;
 
-  std::optional<at::Tensor> tensor(const at::Tensor& tensor)  override {
+  std::optional<at::Tensor> tensor(const at::Tensor& tensor) override {
     TensorArg& arg = compiler_.tensor_args.lookup(tensor);
     if (arg.defined()) {
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
@@ -664,7 +690,7 @@ struct SwapWithProxies : public SwapInterface {
     return std::nullopt;
   }
 
-  std::optional<at::Tensor> tensor(const SavedVariable& t)  override {
+  std::optional<at::Tensor> tensor(const SavedVariable& t) override {
     TensorArg& arg = compiler_.tensor_args.lookup(t);
     if (arg.defined()) {
       return arg.proxy_tensor;
@@ -685,9 +711,18 @@ struct SwapWithProxies : public SwapInterface {
   TraceState& state_;
 };
 
-struct  SwapWithReal : public SwapInterface {
-  explicit SwapWithReal(std::vector<at::Tensor> tensors, std::vector<std::optional<c10::SymInt>> sizes, std::vector<c10::IValue> ivalues)
-    : tensors_(std::move(tensors)), sizes_(std::move(sizes)), ivalues_(std::move(ivalues)) {}
+// The previous compiled autograd implementation was about swapping in
+// ProxyTensors for a node. Given a single node and some saved tensors/sizes/scalars,
+// we needed some way to swap in those saved tensors/sizes/scalars.
+// That's what SwapWithReal is.
+struct SwapWithReal : public SwapInterface {
+  explicit SwapWithReal(
+      std::vector<at::Tensor> tensors,
+      std::vector<std::optional<c10::SymInt>> sizes,
+      std::vector<c10::IValue> ivalues)
+      : tensors_(std::move(tensors)),
+        sizes_(std::move(sizes)),
+        ivalues_(std::move(ivalues)) {}
 
   ~SwapWithReal() override = default;
 
@@ -717,7 +752,7 @@ struct  SwapWithReal : public SwapInterface {
     ivalues_idx++;
     return result;
   }
-  
+
   std::vector<at::Tensor> tensors_;
   int64_t tensors_idx = 0;
   std::vector<std::optional<c10::SymInt>> sizes_;
@@ -920,7 +955,7 @@ class SwapSavedVariables {
       PyObject* p,
       const NodeCall& n)
       : py_compiler(p), curr_node_call(n) {
-        state = std::make_shared<SwapWithProxies>(c, s);
+    state = std::make_shared<SwapWithProxies>(c, s);
   }
 
   SwapSavedVariables(
@@ -929,7 +964,13 @@ class SwapSavedVariables {
       std::vector<at::IValue> c,
       PyObject* p,
       const NodeCall& n)
-      : state(std::static_pointer_cast<SwapInterface>(std::make_shared<SwapWithReal>(std::move(a), std::move(b), std::move(c)))), py_compiler(p), curr_node_call(n) {}
+      : state(std::static_pointer_cast<SwapInterface>(
+            std::make_shared<SwapWithReal>(
+                std::move(a),
+                std::move(b),
+                std::move(c)))),
+        py_compiler(p),
+        curr_node_call(n) {}
 
   PyObject* get_py_compiler() {
     return py_compiler;

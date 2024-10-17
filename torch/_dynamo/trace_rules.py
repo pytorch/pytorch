@@ -135,6 +135,8 @@ If you are removing an existing torch level API:
 """
 manual_torch_name_rule_map = {
     "torch._compiled_autograd.CA_apply_with_saved": TorchInGraphFunctionVariable,
+    "torch._compiled_autograd.accumulate2": TorchInGraphFunctionVariable,
+    "torch._compiled_autograd.CA_validate_outputs": TorchInGraphFunctionVariable,
     # "torch._compiled_autograd.CA_apply_with_saved_dynamo_disabled": TorchInGraphFunctionVariable,
     "torch._compiled_autograd.CA_update_input_buffers": TorchInGraphFunctionVariable,
     "torch._compiled_autograd.CA_input_buffers_init": TorchInGraphFunctionVariable,

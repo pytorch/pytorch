@@ -103,88 +103,26 @@ class AutogradCompilerInstance:
                 sizes_proxy[idx] = dynamic_sizes[dynamic_sizes_next]
                 dynamic_sizes_next += 1
 
-        graph_outputs = [None] * num_outputs
+        from torch._compiled_autograd import IterableWrapper, python_autograd, arange
 
-        self.fx_tracer.create_proxy(
+        arange_proxy = self.fx_tracer.create_proxy(
             kind="call_function",
-            target=torch._compiled_autograd.CA_input_buffers_init,
-            args=(),
-            kwargs={},
+            target=arange,
+            args=(len(nodecalls),),
+            kwargs={}
         )
 
-        for node_idx, call in enumerate(nodecalls):
-            inputs_idx = 0
-            sizes_idx = 0
-            scalars_idx = 0
-
-            inputs = self.fx_tracer.create_proxy(
-                kind="call_function",
-                target=torch._compiled_autograd.CA_input_buffers_lookup,
-                args=(node_idx,),
-                kwargs={},
-            )
-
-            num_saved_inputs = call.num_saved_tensors
-            num_saved_sizes = call.num_saved_sizes
-            num_saved_scalars = call.num_saved_ivalues
-
-            saved_inputs = inputs_proxy[inputs_idx:inputs_idx + num_saved_inputs]
-            saved_sizes = sizes_proxy[sizes_idx:sizes_idx + num_saved_sizes]
-            saved_scalars = scalars_proxy[scalars_idx:scalars_idx + num_saved_scalars]
-
-            inputs_idx += num_saved_inputs
-            sizes_idx += num_saved_sizes
-            scalars_idx += num_saved_scalars
-
-            for hook_idx, input_idx in call.tensor_pre_hooks:
-                inputs = self.fx_tracer.create_proxy(
-                    kind="call_function",
-                    target=call_hook,
-                    args=(self.hooks_proxy[hook_idx], [inputs[input_idx]]),
-                    kwargs={"hook_type": "pre_hook"},
-                )
-
-            for input_nr, result_idx in call.graph_output:
-                graph_outputs[result_idx] = inputs[input_nr]
-
-            if not call.needed:
-                continue
-
-            if call.node.is_compiled_autograd_traceable():
-                outputs = self.fx_tracer.create_proxy(
-                    kind="call_function",
-                    target=torch._compiled_autograd.CA_apply_with_saved,
-                    args=(node_idx, inputs, saved_inputs, saved_sizes, saved_scalars),
-                    kwargs={},
-                )
-            else:
-                outputs = self.fx_tracer.create_proxy(
-                    kind="call_function",
-                    target=torch._compiled_autograd.CA_apply_with_saved_dynamo_disabled,
-                    args=(node_idx, inputs, saved_inputs, saved_sizes, saved_scalars),
-                    kwargs={},
-                )
-            # self.fx_tracer.create_proxy(
-            #     kind="call_function",
-            #     target=CA_validate_outputs,
-            #     args=(node_idx, outputs),
-            #     kwargs={},
-            # )
-
-            for hook_id in call.post_hooks:
-                outputs = self.fx_tracer.create_proxy(
-                    kind="call_function",
-                    target=call_hook,
-                    args=(self.hooks_proxy[hook_id], outputs, inputs),
-                    kwargs={"hook_type": "post_hook"},
-                )
-
-            self.fx_tracer.create_proxy(
-                kind="call_function",
-                target=torch._compiled_autograd.CA_update_input_buffers,
-                args=(node_idx, outputs),
-                kwargs={},
-            )
+        graph_outputs = python_autograd(
+            (
+                IterableWrapper(inputs_proxy, len(tensors)),
+                IterableWrapper(sizes_proxy, len(sizes)),
+                IterableWrapper(scalars_proxy, len(scalars)),
+            ),
+            self.hooks_proxy,
+            nodecalls,
+            num_outputs,
+            arange_proxy,
+        )
         return self.end_capture(graph_outputs)
 
     def begin_capture(
@@ -413,7 +351,9 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        # TODO(rzou): we didn't inline the AOTDispatcher nodes
         # self.rename_aot_dispatcher_nodes()
+        # TODO(rzou): we need to transform AccumulateGrad nodes into torch.inductor.accumulate_grad_.
         # self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():

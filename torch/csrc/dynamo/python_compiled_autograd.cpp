@@ -461,8 +461,8 @@ static PyObject* call_capture(
   THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
 
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
-  std::vector<std::optional<c10::SymInt>> dynamic_inputs = cache.unwrap_dynamic_inputs(py::cast<py::list>(pysizeinput).ptr());
-
+  std::vector<std::optional<c10::SymInt>> dynamic_inputs =
+      cache.unwrap_dynamic_inputs(py::cast<py::list>(pysizeinput).ptr());
 
   THPObjectPtr pyivalueargsinput(
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
@@ -583,7 +583,9 @@ CacheNode* _compiled_autograd_impl(
         compiler_call.set_active_node_call_idx(i);
       }
       if (node_args.cond(call.needed)) {
+        call.mode = CollectionMode::COMPILED_ARGS;
         fn->compiled_args(node_args);
+        call.mode = CollectionMode::NEXT_EDGES;
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
@@ -633,7 +635,12 @@ CacheNode* _compiled_autograd_impl(
 
     // nodes
     py::object nodecalls = py::cast(calls);
-    PyObject* res = call_capture(py_compiler, *cache, compiler_call, output_edges.size(), nodecalls.ptr());
+    PyObject* res = call_capture(
+        py_compiler,
+        *cache,
+        compiler_call,
+        output_edges.size(),
+        nodecalls.ptr());
 
     TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
     TORCH_CHECK(
@@ -658,8 +665,14 @@ CacheNode* _compiled_autograd_impl(
   //     call->node->release_variables();
   //   }
   // }
+
+  // TODO(rzou): we probably shouldn't be copying the nodes in the hot path?
+  std::vector<NodeCall> persistent_node_calls;
+  for (NodeCall* call : calls) {
+    persistent_node_calls.push_back(*call);
+  }
   auto ca = py::module::import("torch._dynamo.compiled_autograd");
-  ca.attr("set_global_nodecalls")(calls);
+  ca.attr("set_global_nodecalls")(persistent_node_calls);
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);

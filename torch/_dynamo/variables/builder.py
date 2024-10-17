@@ -1219,7 +1219,12 @@ class VariableBuilder:
         maybe_gm = self.tx.output.local_scope.get("self")
         if isinstance(
             self.source, LocalSource
-        ) and self.source.local_name in get_locals_to_steal(maybe_gm):
+        # TODO(rzou): We changed compiled autograd to pass all of the inputs saved
+        # instead of a de-duplicated list. Unfortunately that makes the input
+        # stealing logic go haywire. We can either fix it or figure out
+        # how to deal with a de-duplicated list (the problem is
+        # mapping the de-duplicated saved tensors back to the nodes that need them).
+        ) and self.source.local_name in get_locals_to_steal(maybe_gm) and False:
             # The input tensor list to dynamo from compiled autograd may contain activations
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
@@ -1246,19 +1251,20 @@ class VariableBuilder:
 
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                # TODO(rzou): is this correct?
-                if not isinstance(tensor_variable, TensorVariable):
-                    continue
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
-                tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
-                    value[i]
-                )
+                if isinstance(tensor_variable, TensorVariable):
+                    tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
+                        value[i]
+                    )
 
-                guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
-                )
+                    guard = functools.partial(
+                        GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                    )
+                else:
+                    # TODO(rzou): None guard?
+                    pass
                 guards.append(source_i.make_guard(guard))
 
             install_guard(*guards, skip=1)

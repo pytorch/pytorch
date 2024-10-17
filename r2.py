@@ -1,3 +1,4 @@
+# type: ignore
 import torch
 import torch.utils.cpp_extension
 
@@ -5,23 +6,39 @@ def compiler_fn(gm):
     # return gm
     return torch.compile(gm, backend="eager", fullgraph=False)
 
-# x = torch.tensor([1., 2., 3.], requires_grad=True)
-# y = x ** 2
-# z = y.sum()
-# 
-# def hook(grad):
-#     print(grad)
-#     return grad
-# 
-# y.register_hook(hook)
-# 
-# with torch._dynamo.compiled_autograd.enable(compiler_fn):
-#     z.backward()
-# 
-# print(x.grad)
+# ===========================================================
+# Basic test with a hook that has side effects
+
+
+# Test case 1: a hook
+x = torch.tensor([1., 2., 3.], requires_grad=True)
+y = x ** 2
+z = y.sum()
+
+im_grad = []
+
+def hook(grad):
+    im_grad.append(grad)
+    return grad
+
+y.register_hook(hook)
+
+with torch._dynamo.compiled_autograd.enable(compiler_fn):
+    z.backward()
+
+assert torch.allclose(x.grad, 2 * x)
+assert torch.allclose(im_grad[0], torch.ones_like(y))
+
+# ===========================================================
+# Unsupported C++ autograd node should graph break.
+# This is better than the current compiled autograd behavior of "error out"
+# and brings us a step closer to having "compiled autograd on by default".
+# In theory we can also add a config that automatically treats
+# it as an opaque callable, but such a config is unsound.
 
 cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+
   static constexpr bool is_traceable = false;
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,

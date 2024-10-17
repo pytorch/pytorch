@@ -36,18 +36,3 @@ def _disable_dynamo(fn=None, recursive=True):
         # decorator usage like @_disable_dynamo(recursive=False). The resulting
         # object expects the original decorated function as the arg.
         return functools.partial(_disable_dynamo, recursive=recursive)
-
-def _allow_in_graph(fn):
-    @functools.wraps(fn)
-    def inner(*args, **kwargs):
-        # cache this on the first invocation to avoid adding too much overhead.
-        is_allowed = getattr(fn, "__dynamo_allowed_in_graph", False)
-        if not is_allowed:
-            import torch._dynamo
-
-            torch._dynamo.allow_in_graph(fn)
-            fn.__dynamo_allowed_in_graph = True
-
-        return fn(*args, **kwargs)
-
-    return inner
