@@ -737,7 +737,7 @@ class _PyTreeCodeGen(CodeGen):
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         # Given a user function/model:
-        #   myargs = [myargs0, myargs1]
+        #   myargs = (myargs0, myargs1)
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
         #   def forward(self, mypos, *myargs, mykey=None, **mykwargs):
         #
@@ -745,12 +745,12 @@ class _PyTreeCodeGen(CodeGen):
         #   e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
         #
         # Within `forward`, `tree_flatten_spec``still parses args and kwargs separately
-        #   e.g. tree_flatten_spec(([mypos, myargs0, myargs1],
-        #                           {'mykey':mykey, 'mykwargs0':mykwargs0, 'mykwargs1':mykwargs1}),
+        #   e.g. tree_flatten_spec(((mypos, myargs0, myargs1,),
+        #                           {'mykey': mykey, 'mykwargs0': mykwargs0, 'mykwargs1': mykwargs1}),
         #                          self._in_spec)
         #
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
-        #   e.g. tree_flatten_spec([mypos, myargs0, myargs1]), self._in_spec)
+        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1,), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
 
@@ -767,14 +767,14 @@ class _PyTreeCodeGen(CodeGen):
                 self.pytree_info.in_spec.children_specs[0].type == tuple and \
                 self.pytree_info.in_spec.children_specs[1].type == dict
             fn_kwargs = '{}'
-            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+            fn_signature = f"({', '.join(fn_args)},), self._in_spec"
             if has_args_kwargs_tuple:
                 count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
                                   self.pytree_info.in_spec.children_specs[1].context,
                                   self.pytree_info.orig_args[count_args:])) + '}'
-                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+                fn_signature = f"(({', '.join(fn_args)},), {fn_kwargs}), self._in_spec"
 
             # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
             # we need to split it to two lines:
