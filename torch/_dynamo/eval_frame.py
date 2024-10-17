@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import copy
 import functools
 import inspect
 import logging
@@ -122,6 +123,10 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+
+
+def _get_stance() -> DynamoStance:
+    return copy.copy(_stance)
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
@@ -878,9 +883,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -994,9 +1001,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
