@@ -72,7 +72,7 @@ class TestSACEstimator(TestCase):
         with FakeTensorMode():
             with torch.device(dev):
                 model = Foo()
-            x = torch.rand((10, 5), device="cuda")
+            x = torch.rand((10, 5), device=dev)
 
             sac_estimator = SACEstimator()
             with sac_estimator(estimate_mode_type="operator-level-benchmark"):
