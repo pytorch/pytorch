@@ -284,7 +284,7 @@ struct VecConvert<
 #endif /* defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) */
 
 
-#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || defined(CPU_CAPABILITY_NEON)
+#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <typename src_t>
 struct VecConvert<
     float,
@@ -299,18 +299,17 @@ struct VecConvert<
 };
 #endif
 
-#if defined(CPU_CAPABILITY_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <>
 struct VecConvert<float, 1, BFloat16, 1> {
   static inline VectorizedN<float, 1> apply(
       const VectorizedN<BFloat16, 1>& src) {
     VectorizedN<float, 1> result;
     uint16x8_t u16_8 = vld1q_u16(reinterpret_cast<const uint16_t*>(&src[0]));
-    int32x4_t shift = vdupq_n_s32(16);
     auto u16_low1 = vget_low_u16(u16_8);
     auto u16_high1 = vget_high_u16(u16_8);
-    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_low1), shift));
-    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_high1), shift));
+    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_low1), 16));
+    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_high1), 16));
     result[0] = {f32x4_0, f32x4_1};
     return result;
   }
