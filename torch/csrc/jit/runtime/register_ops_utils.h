@@ -329,7 +329,8 @@ void listContains(Stack& stack) {
   auto key = pop(stack).to<T>();
   auto list = pop(stack).to<c10::List<T>>();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const T& item : list) {
+  for (const auto& item_ref : list) {
+    const T& item = item_ref;
     if (item == key) {
       push(stack, true);
       return;

@@ -1143,7 +1143,6 @@ def main():
         "filelock",
         "typing-extensions>=4.8.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.12.1 ; python_version == "3.8"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
