@@ -199,7 +199,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "transpose",
     "transpose_copy",
     "permute",
-    "permute_copy",
     "squeeze",
     "squeeze_copy",
     "unsqueeze",
