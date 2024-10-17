@@ -359,6 +359,48 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    def test_custom_tag_metadata_re_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.rand(4, 2))
+                self.b = torch.nn.Parameter(torch.rand(4))
+
+            def forward(self, x):
+                out = torch.nn.functional.linear(x, self.w, self.b)
+                return out
+
+        f = Foo()
+        inputs = (torch.zeros(1, 2),)
+        ep = export(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        for node in new_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.linear.default
+            ):
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        new_ep = export(new_ep.module(), inputs)
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+
+        # the custom field should be preserved after re-export and
+        # should not be copied to other nodes
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if "custom" in node.meta:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+                self.assertTrue(node.target == torch.ops.aten.linear.default)
+
+        self.assertEqual(counter, 1)
+
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):

@@ -42,6 +42,7 @@ from torch._export.utils import (
     _collect_param_buffer_metadata,
     _get_shape_env_from_gm,
     _populate_param_buffer_metadata_to_new_gm,
+    _update_gm_meta_if_possible,
     placeholder_naming_pass,
     placeholder_prefixes,
 )
@@ -1860,6 +1861,8 @@ def _export_for_training(
     _verify_stack_trace(gm)
     _verify_placeholder_names(gm, export_graph_signature)
 
+    _update_gm_meta_if_possible(gm, mod)
+
     from torch._export.verifier import TrainingIRVerifier
 
     exported_program = ExportedProgram(
@@ -2013,12 +2016,7 @@ def _export(
 
     from torch._export.verifier import Verifier
 
-    if (
-        isinstance(mod, torch.fx.GraphModule)
-        and hasattr(mod, "meta")
-        and "custom" in mod.meta
-    ):
-        gm.meta.update({"custom": mod.meta["custom"]})
+    _update_gm_meta_if_possible(gm, mod)
 
     exported_program = ExportedProgram(
         root=gm,
