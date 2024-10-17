@@ -17,7 +17,6 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
-    _maybe_copy_beta,
     _params_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
@@ -326,8 +325,8 @@ def _single_tensor_adamw(
     found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[Tensor, float],
+    beta2: Union[Tensor, float],
     lr: Union[Tensor, float],
     weight_decay: float,
     eps: float,
@@ -343,6 +342,14 @@ def _single_tensor_adamw(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
+
+    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    beta1_dict: Optional[DeviceDict] = (
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -373,7 +380,11 @@ def _single_tensor_adamw(
         param.mul_(1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
-        beta1, device_beta1 = _maybe_copy_beta(beta1, grad.device, grad.dtype)
+        device = param[0].device
+        if beta1_dict is not None and device not in beta1_dict:
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+
+        device_beta1 = beta1_dict[device] if beta1_dict else beta1
         exp_avg.lerp_(grad, 1 - device_beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
@@ -446,8 +457,8 @@ def _multi_tensor_adamw(
     found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[Tensor, float],
+    beta2: Union[Tensor, float],
     lr: Union[Tensor, float],
     weight_decay: float,
     eps: float,
@@ -482,6 +493,15 @@ def _multi_tensor_adamw(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
+
+    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
+
     for (
         device_params_,
         device_grads_,
@@ -495,9 +515,12 @@ def _multi_tensor_adamw(
         device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(List[Tensor], device_state_steps_)
-        beta1, device_beta1 = _maybe_copy_beta(
-            beta1, device=device_params[0].device, dtype=device_params[0].dtype
-        )
+
+        device = device_params[0].device
+        if beta1_dict is not None and device not in beta1_dict:
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+
+        device_beta1 = beta1_dict[device] if beta1_dict else beta1
 
         if has_complex:
             if amsgrad:
@@ -540,10 +563,10 @@ def _multi_tensor_adamw(
         # tensor scalar as the scalar arg (only python number is supported there)
         # as a result, separate out the value mul
         if isinstance(beta2, torch.Tensor):
-            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
             value = 1.0
         else:
-            scaled_device_grads = device_grads
+            scaled_device_grads = device_grads  # type: ignore[assignment]
             value = 1 - beta2
 
         torch._foreach_addcmul_(
@@ -559,8 +582,8 @@ def _multi_tensor_adamw(
         bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)

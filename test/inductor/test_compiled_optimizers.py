@@ -125,6 +125,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adam_tensor_lr_amsgrad_capturable_xpu": 6,
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_xpu": 6,
     "test_adadelta_tensor_lr_capturable_cuda": 6,
