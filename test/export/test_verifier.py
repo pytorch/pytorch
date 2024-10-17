@@ -47,7 +47,9 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(100), torch.randn(100))).run_decompositions({})
+        ep = export_for_training(
+            f, (torch.randn(100), torch.randn(100))
+        ).run_decompositions({})
         for node in ep.graph.nodes:
             if node.target == torch.ops.aten.add.Tensor:
                 node.target = torch.ops.aten.add_.Tensor
@@ -89,7 +91,9 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(3, 3), torch.randn(3, 3))).run_decompositions({})
+        ep = export_for_training(
+            f, (torch.randn(3, 3), torch.randn(3, 3))
+        ).run_decompositions({})
         for node in ep.graph_module.true_graph_0.graph.nodes:
             if node.target == torch.ops.aten.add.Tensor:
                 node.target = torch.ops.aten.add_.Tensor
