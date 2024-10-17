@@ -79,6 +79,8 @@ struct PostOpParam {
       : scale_(scale), alpha_(alpha), beta_(beta), algo_(algo), kind_(kind) {}
   // sum post op constructor
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
+  // sum post op with zp
+  PostOpParam(float scale, int64_t zero_point, kind_t kind): scale_(scale), zero_point_(zero_point), kind_(kind){};
   // binary post op constructor
   PostOpParam(
       at::Tensor& binary,
@@ -100,6 +102,7 @@ struct PostOpParam {
 
   // for int8 sum/eltwise
   float scale_ = 1.0;
+  int64_t zero_point_ = 0;
   // for eltwise
   float alpha_ = 0.0;
   float beta_ = 0.0;
@@ -206,8 +209,7 @@ class Attr {
   }
 
   // append bias with binary_add method (only used for QConv now)
-  template <int N>
-  Attr& append_bias(const at::Tensor& binary) {
+  Attr& append_bias(const at::Tensor& binary, const int N) {
     // In PyTorch, bias are in shape of [OC],
     // we expand its shape according to Conv dimension
     // Conv1d [OC, 1, 1], Conv2d [1, OC, 1, ,1], Conv3d [1, OC, 1, 1, 1]
@@ -248,7 +250,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst){
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst, bool is_quantized=false){
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -263,9 +265,10 @@ class Attr {
         }
         case kind_t::sum: {
           float scale = ops_params_[i].scale_;
+          int64_t zero_point = ops_params_[i].zero_point_;
           // TODO [Asymmetric]:
           // Post-sum zp for gpu is not supported currently
-          dnnl_post_ops_.append_sum(scale);
+          dnnl_post_ops_.append_sum(scale, zero_point);
           break;
         }
         case kind_t::binary: {
@@ -288,7 +291,7 @@ class Attr {
 
     // if output is quantized, then append the eltwise linear to adjust the
     // output scale/zero_point
-    if (dst.is_quantized()) {
+    if (is_quantized) {
       // [Note: Gap of u8 qtensor scale between oneDNN and PyTorch]
       // The /2 here is for output_scale collected by observer is different
       // from quantization requirements in oneDNN.
@@ -361,5 +364,46 @@ class Attr {
   std::vector<PostOpParam> ops_params_; // series of post ops
   dnnl::post_ops dnnl_post_ops_;
 };
+
+static inline void construct_attr_by_post_op(
+    const c10::string_view& binary_post_op,
+    double binary_alpha,
+    double input1_scale,
+    int64_t input1_zero_point,
+    // input1_desc,
+    const c10::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const c10::string_view& unary_post_op_algorithm,
+    at::native::onednn::Attr& attr
+){
+    if(binary_post_op == "none"){
+        if( unary_post_op == "relu"){
+            attr = attr.append_post_eltwise(
+                /* eltwise_scale */ 1.f,
+                /* alpha */ 0.f,
+                /* beta */ 0.f,
+                attr.kind_with_relu);
+        }else if (unary_post_op == "leaky_relu"){
+            auto alpha = unary_post_op_args[0].value().to<float>();
+            attr = attr.append_post_eltwise(1.0, alpha, 0.f, attr.kind_with_relu);
+        }else if (unary_post_op == "tanh"){
+            attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
+        }else if (unary_post_op == "gelu"){
+            auto post_algorithm = unary_post_op_algorithm == "none" ?
+                attr.kind_with_gelu_erf : attr.kind_with_gelu_tanh;
+            attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, post_algorithm);
+        }else if (unary_post_op == "hardtanh"){
+            auto alpha = unary_post_op_args[0].value().to<float>();
+            auto beta = unary_post_op_args[1].value().to<float>();
+            attr = attr.append_post_eltwise(1.0, alpha, beta, attr.kind_with_clip);
+        }else if (unary_post_op == "hardswish"){
+            attr = attr.append_post_eltwise(1.0f, 1.f / 6.f, 1.f / 2.f, attr.kind_with_hardswish);
+        }else if (unary_post_op == "swish"){
+            attr = attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish);
+        }else {
+            TORCH_CHECK(unary_post_op == "none", "onednn qlinear: unspported unary post op", unary_post_op);
+        }
+    }
+}
 
 } // namespace at::native::onednn
