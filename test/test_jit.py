@@ -9706,9 +9706,9 @@ dedent """
     def test_script_pad_sequence_pack_sequence(self):
         from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
 
-        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
-            # type: (List[Tensor], bool, float) -> Tensor
-            return pad_sequence(tensor_list, batch_first, padding_value)
+        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0, padding_side="right"):
+            # type: (List[Tensor], bool, float, str) -> Tensor
+            return pad_sequence(tensor_list, batch_first, padding_value, padding_side)
 
         def pack_sequence_func(tensor_list, enforce_sorted=True):
             # type: (List[Tensor], bool) -> Tensor
@@ -9727,6 +9727,10 @@ dedent """
                              ([ones3, ones4, ones5], True))
             self.checkScript(pad_sequence_func,
                              ([ones3, ones4, ones5], True, 2.5))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5, "left"))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], False, 2.5, "left"))
             self.checkScript(pack_sequence_func,
                              ([tensor1, tensor2, tensor3],))
             self.checkScript(pack_sequence_func,
@@ -15632,7 +15636,7 @@ dedent """
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # shrug
+            # 🤷🤷🤷🤷
             return torch.nn.functional.relu(a)
 
     def test_get_set_state_with_tensors(self):

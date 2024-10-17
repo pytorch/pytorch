@@ -11,8 +11,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::function<void(std::shared_ptr<Graph>&)>& getFuseFrozenConvAddReluImpl() {
   static std::function<void(std::shared_ptr<Graph>&)> impl;
@@ -30,5 +29,4 @@ void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

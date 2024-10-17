@@ -3,15 +3,13 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import getpass
-import inspect
 import operator
-import os
-import re
-import tempfile
-import time
 
 import torch
+from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
+    cache_dir,
+    default_cache_dir,
+)
 
 
 def conditional_product(*args):
@@ -67,6 +65,17 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
+def validate_triton_config(cfg):
+    # [Note: Triton pre_hook in inductor]
+    # pre-hook is a lambda function, which we don't attempt to serialize.
+    # right now, if a pre-hook is attached to the config, it will not be saved;
+    # and then it won't be used when the config is loaded from cache.
+    # So we assert - if we do get a pre_hook, it might get ignored after caching.
+    assert (
+        getattr(cfg, "pre_hook", None) is None
+    ), "triton configs with pre_hooks not supported"
+
+
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     slow = ms > 0.012 and gb_per_s < 650
@@ -75,100 +84,6 @@ def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=
 
 def get_max_y_grid():
     return 65535
-
-
-def do_bench(fn, fn_args, fn_kwargs, **kwargs):
-    from torch._inductor.utils import is_cpu_device
-
-    args = list(fn_args)
-    args.extend(fn_kwargs.values())
-    if is_cpu_device(args):
-        return do_bench_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
-    else:
-        return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
-
-
-def do_bench_gpu(*args, **kwargs):
-    @functools.lru_cache(None)
-    def load_triton():
-        try:
-            # NB: Lazily load triton, as importing triton is slow
-            # see https://github.com/openai/triton/issues/1599
-            from triton.testing import do_bench as triton_do_bench
-        except ImportError as exc:
-            raise NotImplementedError("requires Triton") from exc
-
-        # triton PR https://github.com/openai/triton/pull/1513 change the
-        # quantile fields name from 'percentiles' to 'quantiles'
-        # and change the default value from (0.5, 0.2, 0.8) to None.
-        # This may break inductor since a caller expects a tuple may get a item.
-        #
-        # Add a wrapper to maintain the same behavior for inductor.
-        # Maybe we should have own implementation of this function?
-        return triton_do_bench, (
-            "quantiles"
-            if inspect.signature(triton_do_bench).parameters.get("quantiles")
-            is not None
-            else "percentiles"
-        )
-
-    triton_do_bench, quantile_field_name = load_triton()
-
-    if quantile_field_name not in kwargs:
-        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    return triton_do_bench(*args, **kwargs)[0]
-
-
-def do_bench_cpu(fn, warmup=20, rep=100):
-    """
-    Benchmark a function on the CPU.
-
-    Parameters:
-    - fn: The function to be benchmarked.
-    - warmup: The number of milliseconds to run the function before starting the benchmark.
-    - rep: The number of milliseconds to run the function for the benchmark.
-
-    Returns:
-    - The median time (in milliseconds) taken by the function.
-
-    """
-    start = time.perf_counter()
-    while True:
-        fn()
-        if (time.perf_counter() - start) * 1000 > warmup:
-            break
-    durations = []
-    start = time.perf_counter()
-    while True:
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        durations.append((t1 - t0) * 1000)
-        if (t1 - start) * 1000 > rep:
-            break
-    # return the median time
-    sorted_durations = sorted(durations)
-    times = len(durations)
-    if times % 2 == 0:
-        return (sorted_durations[times // 2 - 1] + sorted_durations[times // 2]) / 2
-    else:
-        return sorted_durations[times // 2]
-
-
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def default_cache_dir():
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-    return os.path.join(
-        tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
-    )
 
 
 try:

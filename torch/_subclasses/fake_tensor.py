@@ -14,6 +14,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
+    Any,
     Callable,
     cast,
     Dict,
@@ -474,13 +475,13 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_cuda_context() -> None:
+def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() or torch.xpu.is_available():
         (
-            torch.empty(1, device="cuda")
+            torch.empty(1, device=device)
             if torch.version.hip is None
-            else torch.zeros(1, device="cuda")
+            else torch.zeros(1, device=device)
         )
 
 
@@ -528,8 +529,18 @@ class FakeTensorConfig:
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to make sure we have access to FakeTensor during access,
 # which is required for testing version counter and epoch validity
-class UnbackedMemoDescriptor:
+class SymIntMemoDescriptor:
     _name: str
+
+    # By default, SymInts in this memo are invalidated across versions/epochs.
+    # nested_ints however are preserved across epochs and across versions.
+    # Preserving across versions is okay for nested int since the association
+    # of a nested int is agnostic to the underlying data and nested ints are not
+    # shared across multiple distinct tensors.
+    _is_nested_int: bool
+
+    def __init__(self, *, is_nested_int: bool = False) -> None:
+        self._is_nested_int = is_nested_int
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -549,27 +560,30 @@ class UnbackedMemoDescriptor:
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[Type[FakeTensor]] = None
-    ) -> Optional[object]:
+    ) -> Optional[torch.SymInt]:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            getattr(obj, self._memo_vc(obj)) != obj._version
-            or getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
+        ) or (
+            not self._is_nested_int
+            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
             return None
         return r
 
-    def __set__(self, obj: FakeTensor, value: Optional[object]) -> None:
+    def __set__(self, obj: FakeTensor, value: Optional[torch.SymInt]) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not torch.is_inference_mode_enabled():
+        elif not obj.is_inference() or self._is_nested_int:
             setattr(obj, self._memo(obj), value)
-            setattr(obj, self._memo_vc(obj), obj._version)
+            if not self._is_nested_int:
+                setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
@@ -590,9 +604,14 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = UnbackedMemoDescriptor()
-    item_memo = UnbackedMemoDescriptor()
-    unique_memo = UnbackedMemoDescriptor()
+    nonzero_memo = SymIntMemoDescriptor()
+    item_memo = SymIntMemoDescriptor()
+    unique_memo = SymIntMemoDescriptor()
+
+    # We expect nested_int_memo to be None when an offsets is a graph
+    # intermediate, or an input that has never been associated with a
+    # nested int.
+    nested_int_memo = SymIntMemoDescriptor(is_nested_int=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -668,8 +687,8 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type == "cuda":
-            init_cuda_context()
+        if device.type in ["cuda", "xpu"]:
+            init_gpu_context(device)
 
         if (
             device.type
@@ -690,6 +709,7 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
+        self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -860,28 +880,25 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
-    # We must handle tolist in a special way for FakeTensors here in the case
-    # where tolist is called from torch dispatch for tensor subclasses.
-    # Ordinarily, if a program calls .tolist compiling still works because there is
-    # special handling in dynamo, but for tensor subclasses if .tolist is called
-    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
-    # This would result in an error since wrapper subclasses don't have storage.
-    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
-    # of the tensor to create the output Python list, and (2) creating unbacked
-    # symints for each element of the list.
-    def tolist(self) -> List[SymInt]:
-        assert self.dim() == 1, "NYI for higher dims"
-        shape_env = self.fake_mode.shape_env
-        assert shape_env is not None
-        out = []
-        # Specialize on the length of the list
-        for _ in range(self.shape[0]):
-            s = shape_env.create_unbacked_symint()
-            # max value?
-            torch._check_is_size(s)
-            torch._check(s >= 2)
-            out.append(s)
-        return out
+    def get_nested_int(
+        self,
+        *,
+        coeff: Union[int, torch.SymInt] = 1,
+    ) -> torch.SymInt:
+        if self.nested_int_memo is None:
+            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
+                nt_tensor_id=None
+            )
+        return self.nested_int_memo * coeff
+
+    # Similar to FunctionalTensor.tolist
+    def tolist(self) -> Any:
+        if self.dim() == 0:
+            return self.item()
+        elif self.dim() == 1:
+            return [elem.item() for elem in self]
+        else:
+            return [elem.tolist() for elem in self]
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1060,6 +1077,16 @@ class FakeTensorMode(TorchDispatchMode):
     _stack: Optional[str]
     allow_meta: bool
 
+    # NestedTensor uses a tensor_id_counter to uniquely identify offsets.
+    # This counter is incremented when an offsets is used to create an NJT
+    # for the first time. To avoid mutating eager state if we construct NJT
+    # during tracing, we maintain a separate counter on the FakeTensorMode.
+    # The initial count is set to the current eager tensor_id_counter value
+    # upon initialization, and every time you retrace using the same fake tensor
+    # mode, you should reset the counter to the initial count.
+    nt_tensor_id_counter: int = -1
+    nt_tensor_id_initial_count: int = -1
+
     def __init__(
         self,
         *,
@@ -1148,6 +1175,16 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
+        import torch.nested._internal.nested_tensor
+
+        self.nt_tensor_id_initial_count = (
+            torch.nested._internal.nested_tensor._tensor_id_counter
+        )
+        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    def reset_nt_tensor_id_counter(self) -> None:
+        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
     # TWO fake tensor modes.  The canonical example of this is exporting
@@ -1170,7 +1207,14 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        return not torch.cuda.is_available()
+        if torch.xpu._is_compiled():
+            assert not torch.cuda._is_compiled()
+            return not torch.xpu.is_available()
+
+        return not (
+            torch.cuda.is_available()
+            or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        )
 
     @property
     def stack(self) -> str:
@@ -1198,6 +1242,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self) -> Self:
+        import torch.nested._internal.nested_tensor
+
         prev_only_lift_cpu_tensors = None
         if self.avoid_device_init:
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
@@ -1656,6 +1702,24 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
+        # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
+        # We must throw NotImplemented in case of unrecognized types to handle subclasses.
+        # Throwing the exception will pass the control to the next __torch_dispatch__.
+        # See [subclass inputs] below
+        # NB: If you're seeing a mysterious infinite loop involving fake
+        # tensor, it might be related to this line.  Though I'm not sure
+        # how you'll know to read this comment, as this line won't show up
+        # in the stack trace.
+        has_unrecognized_types = _check_for_subclass(flat_args)
+        if has_unrecognized_types:
+            unrecognized_types = [
+                type(x) for x in flat_args if _check_for_subclass_arg(x)
+            ]
+            not_implemented_log.debug(
+                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
+            )
+            return NotImplemented
+
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
@@ -1695,21 +1759,6 @@ class FakeTensorMode(TorchDispatchMode):
                 with no_dispatch():
                     out = out.clone()
                 return converter.from_real_tensor(self, out, make_constant=True)
-
-        # See [subclass inputs] below
-        # NB: If you're seeing a mysterious infinite loop involving fake
-        # tensor, it might be related to this line.  Though I'm not sure
-        # how you'll know to read this comment, as this line won't show up
-        # in the stack trace.
-        has_unrecognized_types = _check_for_subclass(flat_args)
-        if has_unrecognized_types:
-            unrecognized_types = [
-                type(x) for x in flat_args if _check_for_subclass_arg(x)
-            ]
-            not_implemented_log.debug(
-                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
-            )
-            return NotImplemented
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
         # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
@@ -1828,6 +1877,7 @@ class FakeTensorMode(TorchDispatchMode):
                 for a in flat_args
             )
         ):
+            log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
             real_out = func(*real_args, **real_kwargs)
@@ -1839,7 +1889,7 @@ class FakeTensorMode(TorchDispatchMode):
             # However, if there's a bug in the condition above, this condition
             # will also trigger.
             log.debug(
-                "propagate_real_tensors skipped %s(%s, %s) %s",
+                "SKIPPED propagate_real_tensors %s(%s, %s) %s",
                 func,
                 flat_arg_fake_tensors,
                 flat_args,
@@ -1849,17 +1899,40 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_propagate_real_tensors(fake_out: T) -> T:
             import sympy
 
+            log.debug("maybe_propagate_real_tensors %s", func)
+
             def go(t: object, real_t: Tensor) -> None:
                 if isinstance(t, FakeTensor):
                     # NB: unconditionally overwrite
+                    log.debug(
+                        "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
+                    )
                     t.real_tensor = real_t
+                    for s, real_s in zip(t.size(), real_t.size()):
+                        go(s, real_s)  # type: ignore[arg-type]
+                    for s, real_s in zip(t.stride(), real_t.stride()):
+                        go(s, real_s)  # type: ignore[arg-type]
+                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         assert self.shape_env is not None
                         self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
 
             if real_out is not nil:
-                tree_map_(go, fake_out, real_out)
+                if (
+                    not isinstance(fake_out, Tensor)
+                    and not isinstance(real_out, Tensor)
+                    and type(fake_out) != type(real_out)
+                ):
+                    # This can happen when decompositions have different return types,
+                    # e.g. namedtuple vs. tuple vs. list.
+                    tree_map_(
+                        go,
+                        tuple(pytree.tree_flatten(fake_out)),
+                        tuple(pytree.tree_flatten(real_out)),
+                    )
+                else:
+                    tree_map_(go, fake_out, real_out)
 
                 # If a data-dependent op is used in a decomposition, we
                 # may need to get the unbacked settings "early"
@@ -1891,13 +1964,15 @@ class FakeTensorMode(TorchDispatchMode):
                 )
             ):
                 with self:
-                    return decomposition_table[func](*args, **kwargs)
+                    return maybe_propagate_real_tensors(
+                        decomposition_table[func](*args, **kwargs)
+                    )
 
             with self:
                 # Decomposes CompositeImplicitAutograd ops
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
-                    return r
+                    return maybe_propagate_real_tensors(r)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
@@ -1914,6 +1989,11 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(
                     func.prim_meta_impl(*args, **kwargs)
                 )
+
+        profiles = torch._dynamo.config._custom_ops_profile
+        if profiles is not None:
+            if func in profiles.data:
+                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
@@ -2093,6 +2173,31 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
+    def create_symbolic_nested_int(
+        self, *, nt_tensor_id: Optional[int] = None
+    ) -> torch.SymInt:
+        # See Note: [Creating symbolic nested int]
+        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+        import torch.nested._internal.nested_tensor
+
+        if nt_tensor_id is None:
+            nt_tensor_id = self.nt_tensor_id_counter
+            assert self.enter_stack, "should only called while FakeTensorMode is active"
+            self.nt_tensor_id_counter += 1
+        hint = torch._C._get_nested_int(nt_tensor_id, 1)
+
+        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+        assert self.shape_env is not None
+        ret = self.shape_env.create_symintnode(
+            sym=self.shape_env.create_symbol(
+                val=hint,
+                source=src,
+            ),
+            hint=hint,
+            source=src,
+        )
+        return ret
+
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,
         aten.empty_strided.default,
@@ -2132,8 +2237,8 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
+                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"

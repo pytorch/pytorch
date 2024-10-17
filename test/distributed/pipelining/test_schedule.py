@@ -14,9 +14,11 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
+    _PipelineSchedule,
     _validate_pipeline_order,
     B,
     F,
+    get_schedule_class,
     RECV_F,
     RESHARD,
     SEND_B,
@@ -53,6 +55,40 @@ class MockPipelineStage(_PipelineStageBase):
 
     def _prepare_backward_infra(self, n_microbatches):
         pass
+
+
+class ScheduleTest(TestCase):
+    def test_get_schedule_class(self):
+        # List of all expected schedule names
+        schedule_names = [
+            "1F1B",
+            "1f1b",
+            "Interleaved1F1B",
+            "INTERLEAVED1F1B",
+            "GPipe",
+            "FlexibleInterleaved1F1B",
+            "LoopedBFS",
+            "PipelineScheduleSingle",
+            "PipelineScheduleMulti",
+        ]
+
+        # Test each schedule name
+        for name in schedule_names:
+            with self.subTest(name=name):
+                schedule_class = get_schedule_class(name)
+                self.assertIsNotNone(
+                    schedule_class, f"Class for {name} should not be None"
+                )
+                self.assertTrue(
+                    issubclass(schedule_class, _PipelineSchedule),
+                    f"{name} should be a subclass of _PipelineSchedule",
+                )
+
+        error_case = ["ScheduleThatDoesNotExist"]
+        for name in error_case:
+            # Test that the original name is included in the error message
+            with self.assertRaisesRegex(ValueError, f"{name}"):
+                get_schedule_class(name)
 
 
 class TestSchedulePlan(TestCase):

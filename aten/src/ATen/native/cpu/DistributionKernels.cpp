@@ -36,8 +36,7 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
-#if !AT_MKL_ENABLED() || 1
+#if !AT_MKL_ENABLED()
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
