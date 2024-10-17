@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
@@ -3018,7 +3019,7 @@ def empty_strided(
     pointwise.realize()
     buffer = pointwise.data.data
     # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data.ranges = [0] * len(size)
+    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     assert isinstance(buffer, ir.ComputedBuffer)
     size = [sympy.expand(s) for s in size]
     stride = (
