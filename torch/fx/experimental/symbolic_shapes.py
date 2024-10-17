@@ -1201,7 +1201,7 @@ def _constrain_range_for_size(
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    assert isinstance(a.node.expr, sympy.Symbol), f"constraining non-Symbols NYI: {a}"
 
     a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 

@@ -129,7 +129,6 @@ class TestUnbackedSymints(InductorTestCase):
 
     @requires_gpu()
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @inductor_config.patch({"abi_compatible": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
             raise unittest.SkipTest("Triton kernel requires GPU")
