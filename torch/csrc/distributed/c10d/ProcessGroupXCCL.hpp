@@ -138,6 +138,8 @@ class TORCH_API ProcessGroupXCCL : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  void setSequenceNumberForGroup() override {}
+
  protected:
   std::unordered_map<std::string, at::xpu::XPUStream> xcclStreamsMap_;
   std::unordered_map<std::string, at::xpu::XPUEvent> xcclEventsMap_;
@@ -151,7 +153,6 @@ class TORCH_API ProcessGroupXCCL : public Backend {
   ccl::shared_ptr_class<ccl::kvs> kvs;
 
   ccl::shared_ptr_class<ccl::kvs> get_kvs(int rank, c10d::Store& store) {
-    // todo: why do we need the mutex here?
     std::lock_guard<std::mutex> lock(kvs_mutex);
     if (kvs)
       return kvs;

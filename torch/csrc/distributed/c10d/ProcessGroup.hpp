@@ -51,8 +51,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     NCCL = 2,
     UCC = 3,
     MPI = 4,
-    CUSTOM = 5,
-    XCCL = 6,
+    XCCL = 5,
+    CUSTOM = 6,
   };
 
   static std::string backendTypeToString(const BackendType& type) {
