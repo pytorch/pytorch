@@ -780,6 +780,26 @@ graph():
         )
         torch.export.export(M(), args)
 
+    def test_cond_int_closure(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num = 4
+
+            def forward(self, a, x):
+                def true_fn(x):
+                    return x * self.num
+
+                def false_fn(x):
+                    return x + self.num
+
+                r = torch.cond(a, true_fn, false_fn, (x,))
+                return r * 2
+
+        args = (torch.tensor(True), torch.randn(10))
+        ep = torch.export.export(M(), args)
+        self.assertEqual(ep.module()(*args), M()(*args))
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -936,6 +956,46 @@ graph():
         y = torch.ones(64)
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
+    def test_real_tensor_bool_cast(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return bool(x.eq(0.1).any())
+
+        model = Foo()
+        inputs = (torch.randn(64),)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs, strict=False)
+
+    @testing.expectedFailureSerDer
+    def test_is_nonzero(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.is_nonzero(x)
+
+        def _long_tensor(nz):
+            return torch.full((), int(nz))
+
+        def _float_tensor(nz):
+            return torch.full((), int(nz), dtype=torch.float32)
+
+        def _bool_tensor(nz):
+            return torch.full((), int(nz)).bool()
+
+        mod = Foo()
+        for _tensor in [
+            _long_tensor,
+            _float_tensor,
+            _bool_tensor,
+            # local_scalar_dense on complex NYI for fake tensors
+        ]:
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                for nz in [True, False]:
+                    sample_input = _tensor(nz=nz)
+                    ep = export(mod, (sample_input,), strict=False)
+                    self.assertEqual(ep.module()(sample_input), nz)
+                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -4342,6 +4402,34 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
+    def test_tensor_constant_with_wrapped_method(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.ones(4, 4)
+
+            def forward(self, x):
+                return x + self.constant, self.constant
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, *arg, **kwargs):
+                return self.fn(*arg, **kwargs)
+
+        inp = (torch.zeros(4, 4),)
+
+        def test(m):
+            m_result = m(*inp)
+            ep_result = export(m, inp).module()(*inp)
+            for m_t, ep_t in zip(m_result, ep_result):
+                self.assertTrue(torch.allclose(m_t, ep_t))
+
+        test(M())
+        test(Wrapper(M().forward))
+
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -6748,9 +6836,12 @@ def forward(self, x, b_t, y):
                 "torch.ops.higher_order.wrap_with_set_grad_enabled",
                 ep.graph_module.code,
             )
+        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        self.assertIn(
+            "set_grad_enabled",
+            gm.code,
+        )
 
-    # T203671967
-    @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -6759,23 +6850,26 @@ def forward(self, x, b_t, y):
                 ):
                     y = x.sin().sum()
                 with torch.autocast(
-                    device_type="cpu", dtype=torch.float64, enabled=True
+                    device_type="cpu", dtype=torch.float16, enabled=True
                 ):
                     z = y.sin().sum()
                 return z
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        # _export_for_traininig is using pre_dispatch=False
-        # Therefore the autocast calls are not replaced with a hop.
-        # non_strict doesn't have autocast nodes
-        if not is_non_strict_test(self._testMethodName) and not is_training_ir_test(
-            self._testMethodName
-        ):
+        # autocast nodes do not exist after run_decomposition()
+        if not is_training_ir_test(self._testMethodName):
             self.assertIn(
                 "torch.ops.higher_order.wrap_with_autocast",
                 ep.graph_module.code,
             )
+        # _export_for_traininig is using pre_dispatch=False
+        # Therefore the autocast calls are not replaced with a hop.
+        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        self.assertIn(
+            "autocast",
+            gm.code,
+        )
 
     def test_export_as_backend(self):
         def f(x, y):
@@ -7514,6 +7608,33 @@ def forward(self, x, y):
             0,
         )
 
+    def test_constant_output_dup(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.ones(4, 4)
+
+            def forward(self, x):
+                return x + self.constant, self.constant
+
+        ep = export(M(), (torch.ones(4, 4),)).run_decompositions()
+        mod = ep.module()
+        a, b = mod(torch.zeros(4, 4))
+        self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
+        self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
+
+    def test_constant_requires_grad_const(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.randn(2, 2, requires_grad=True)
+
+            def forward(self, x):
+                return x.cos() + self.foo.sum()
+
+        gm = export(M(), (torch.ones(2, 2),)).module()
+        self.assertFalse(gm.foo.requires_grad)
+
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
@@ -7527,7 +7648,7 @@ def forward(self, x, y):
         class M2(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.foo = torch.ones(3, 3)
+                self.foo = torch.ones(3, 3, requires_grad=True)
 
             def forward(self, x):
                 return x + self.foo
