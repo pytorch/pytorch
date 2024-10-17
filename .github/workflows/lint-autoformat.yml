@@ -3,8 +3,6 @@ name: Apply lint suggestions
 on:
 
   push:
-    branches:
-      - main
     tags:
       - ciflow/autoformat/*
 
