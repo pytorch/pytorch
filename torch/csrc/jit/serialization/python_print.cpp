@@ -436,8 +436,7 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (const auto i : c10::irange(level)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(level)) {
       body_ << "  ";
     }
     return body_;
@@ -1140,7 +1139,8 @@ struct PythonPrintImpl {
         stmt << ")";
       } break;
       case prim::CallMethod: {
-        const auto& self = node->inputs().at(0);
+        auto node_inputs = node->inputs();
+        const auto& self = node_inputs.at(0);
         const auto& methodName = node->s(attr::name);
         stmt << "(" << useOf(self) << ")"
              << "." << methodName << "(";
@@ -1299,8 +1299,7 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (const auto i : c10::irange(N)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(N)) {
       repeated.push_back(value);
     }
     return repeated;
