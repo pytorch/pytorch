@@ -133,4 +133,26 @@ at::Tensor quantized_convolution_pt2(
     torch::List<c10::optional<at::Scalar>> unary_scalars,
     c10::optional<c10::string_view> unary_algorithm);
 
+void quantized_matmul_pt2(
+  at::Tensor  mat1, // act
+  double input_scale,
+  int64_t input_zero_point,
+  at::Tensor  mat2, // weight
+  at::Tensor& weight_scales,
+  at::Tensor& weight_zero_points,
+  at::Tensor& b_raw,
+  at::Tensor result, // output
+  double output_scale,
+  int64_t output_zero_point,
+  std::optional<c10::ScalarType> output_dtype,
+  std::optional<at::Tensor> other, // extra input for binary-post-op
+  double other_scale,
+  int64_t other_zero_point,
+  const c10::string_view& binary_post_op,
+  double binary_alpha,
+  const c10::string_view& unary_post_op,
+  torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+  c10::string_view unary_post_op_algorithm);
+
+
 } // namespace at::native::onednn
