@@ -6354,8 +6354,39 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    return list(map(TensorBox.create, result))
+    new_carried_inputs = [
+        tb_init
+        if isinstance(tb_init, int)
+        else ir.ExternKernel.require_exact_strides(
+            tb_init, fx_init.meta["val"].stride(), allow_padding=False
+        )
+        for fx_init, tb_init in zip(V.graph.current_node.args[-2], carried_inputs)  # type: ignore[arg-type]
+    ]
+
+    result, mutated_inputs = ir.WhileLoop.create(
+        cond_fn,
+        body_fn,
+        new_carried_inputs,
+        additional_inputs,
+    )
+
+    def _map_output(x):
+        if isinstance(x, ir.MultiOutput):
+            return TensorBox.create(x)
+        elif isinstance(x, ir.StorageBox):
+            return TensorBox(x)
+        elif isinstance(x, ir.ShapeAsConstantBuffer):
+            return x._shape
+        else:
+            return x
+
+    return list(map(_map_output, result + mutated_inputs))
+
+
+# This is a spcialized version of select because we're certain that the idx is valid
+@register_lowering(torch.ops._scan_helper.unsafe_select, type_promotion_kind=None)
+def _(dst, dim, idx):
+    return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
