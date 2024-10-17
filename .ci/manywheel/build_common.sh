@@ -123,9 +123,6 @@ pushd "$PYTORCH_ROOT"
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
-  cp38*)
-    retry pip install -q numpy==1.15
-    ;;
   cp31*)
     retry pip install -q --pre numpy==2.1.0
     ;;
@@ -500,7 +497,7 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   echo "$(date) :: Running tests"
   pushd "$PYTORCH_ROOT"
   LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-          "${SOURCE_DIR}/../run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
+          "/builder/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
   popd
   echo "$(date) :: Finished tests"
 fi
