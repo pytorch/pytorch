@@ -872,6 +872,16 @@ API Reference
 .. autoclass:: ModuleCallEntry
 
 
+.. automodule:: torch.export.decomp_utils
+.. autoclass:: CustomDecompTable
+
+    .. automethod:: copy
+    .. automethod:: items
+    .. automethod:: keys
+    .. automethod:: materialize
+    .. automethod:: pop
+    .. automethod:: update
+
 .. automodule:: torch.export.exported_program
 .. automodule:: torch.export.graph_signature
 .. autoclass:: InputKind

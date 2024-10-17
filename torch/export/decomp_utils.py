@@ -22,11 +22,12 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     until we really need to materialize it (which is when we run decomposition pass.)
 
     Invariants we hold are:
-    1. All aten decomp is loaded at the init time
-    2. We materialize ALL ops when user ever reads from the table to make it more likely
-       that dispatcher picks up the custom op.
-    3. If it is write operation, we don't necessarily materialize
-    4. We load the final time during export, right before calling run_decompositions()
+     1. All aten decomp is loaded at the init time
+     2. We materialize ALL ops when user ever reads from the table to make it more likely
+        that dispatcher picks up the custom op.
+     3. If it is write operation, we don't necessarily materialize
+     4. We load the final time during export, right before calling run_decompositions()
+
     """
 
     def __init__(self):
