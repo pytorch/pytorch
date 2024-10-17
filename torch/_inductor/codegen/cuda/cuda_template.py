@@ -70,6 +70,7 @@ class CUDATemplate(KernelTemplate):
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
+            print("ETAF: Generated Code:", code)
             log.debug("Generated Code:\n%s", code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
