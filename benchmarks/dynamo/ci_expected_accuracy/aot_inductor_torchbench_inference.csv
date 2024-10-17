@@ -30,7 +30,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,fail_to_run,0
+basic_gnn_gcn,pass,0
 
 
 

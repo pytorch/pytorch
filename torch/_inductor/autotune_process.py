@@ -433,7 +433,7 @@ class TensorMeta:
 
         node = irnodes
         if isinstance(node, ir.Layout):
-            node = ir.Buffer("fake", node)
+            node = ir.Buffer(name="fake", layout=node)
 
         dtype = node.get_dtype()
         assert dtype is not None
@@ -671,6 +671,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             grid=self.grid,
             **warmup_arg,
             stream=stream,
+            benchmark_run=True,
         )
 
     def precompile(self):

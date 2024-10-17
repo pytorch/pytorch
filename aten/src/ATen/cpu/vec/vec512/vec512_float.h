@@ -236,27 +236,27 @@ public:
   }
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
-    static __m512 vec_factorial_1 =
+    const __m512 vec_factorial_1 =
         _mm512_set1_ps(0.999999701f); // 1/factorial(1)
-    static __m512 vec_factorial_2 =
+    const __m512 vec_factorial_2 =
         _mm512_set1_ps(0.499991506f); // 1/factorial(2)
-    static __m512 vec_factorial_3 =
+    const __m512 vec_factorial_3 =
         _mm512_set1_ps(0.166676521f); // 1/factorial(3)
-    static __m512 vec_factorial_4 =
+    const __m512 vec_factorial_4 =
         _mm512_set1_ps(0.0418978221f); // 1/factorial(4)
-    static __m512 vec_factorial_5 =
+    const __m512 vec_factorial_5 =
         _mm512_set1_ps(0.00828929059f); // 1/factorial(5)
-    static __m512 vec_exp_log2ef =
+    const __m512 vec_exp_log2ef =
         _mm512_castsi512_ps(_mm512_set1_epi32(0x3fb8aa3b)); // log2(e)
-    static __m512 vec_half = _mm512_set1_ps(0.5f);
-    static __m512 vec_one = _mm512_set1_ps(1.f);
-    static __m512 vec_zero = _mm512_set1_ps(0.f);
-    static __m512 vec_two = _mm512_set1_ps(2.f);
-    static __m512 vec_ln2f = _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
-    static __m512 vec_ln_flt_min = _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
-    static __m512 vec_ln_flt_max = _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
-    static __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
-    static int n_mantissa_bits = 23;
+    const __m512 vec_half = _mm512_set1_ps(0.5f);
+    const __m512 vec_one = _mm512_set1_ps(1.f);
+    const __m512 vec_zero = _mm512_set1_ps(0.f);
+    const __m512 vec_two = _mm512_set1_ps(2.f);
+    const __m512 vec_ln2f = _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
+    const __m512 vec_ln_flt_min = _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    const __m512 vec_ln_flt_max = _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
+    const __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
+    const int n_mantissa_bits = 23;
 
     // exp(x) =
     // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem

@@ -240,10 +240,8 @@ class TestPoitwiseOps(torch.nn.Module):
         inputs = torch.split(x.to(self.device), 500, dim=1)
         x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
         y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
-        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
-        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
-        sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
-        sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
+        sigmoid_1 = [torch.sigmoid(x_split[i]) for i in range(len(x_split))]
+        sigmoid_2 = [torch.sigmoid(y_split[i]) for i in range(len(y_split))]
         relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
@@ -270,6 +268,25 @@ class TestPoitwiseOpsPostGrad(torch.nn.Module):
         relu_2 = [torch.ops.aten.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.ops.aten.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
         return torch.cat(add, dim=1)
+
+
+class TestMathOps(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = [x.to(self.device) for i in range(10)]
+        others = [x.to(self.device) for i in range(10)]
+        clamp_input = [x.clamp(min=-1000.1, max=1000.1) for x in inputs]
+        clamp_other = [x.clamp(min=-1000.1, max=1000.1) for x in others]
+        nan_to_num_input = [torch.nan_to_num(x, 0.0) for x in clamp_input]
+        nan_to_num_other = [torch.nan_to_num(x, 0.0) for x in clamp_other]
+        detach_input = [x.detach() for x in nan_to_num_input]
+        detach_other = [x.detach() for x in nan_to_num_other]
+        stack_input = torch.stack(detach_input, dim=0)
+        stack_other = torch.stack(detach_other, dim=0)
+        return torch.stack((stack_input, stack_other), dim=0)
 
 
 @requires_cuda
@@ -344,7 +361,7 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["batch_aten_add"],
-                3,
+                0,
             )
             self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
@@ -438,7 +455,6 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
@@ -472,7 +488,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
-        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -518,6 +534,39 @@ class TestGroupBatchFusion(TestCase):
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_detach": {},
+            "batch_nan_to_num": {},
+            "batch_clamp": {},
+            "unbind_stack_pass": {},
+            "unbind_stack_to_slices_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_math_op_fusion(self):
+        counters.clear()
+        module = TestMathOps("cuda")
+        input = [
+            torch.tensor(
+                [float("nan"), float("inf"), -float("inf"), 3.14], device="cuda"
+            )
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 3)
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        self.assertEqual(counters["inductor"]["batch_detach"], 1)
+        self.assertEqual(counters["inductor"]["batch_nan_to_num"], 1)
+        self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
+        self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
 
