@@ -27,7 +27,6 @@ from torch.distributed.pipelining.schedules import (
     RECV_F,
     RESHARD,
     SEND_B,
-    SEND_B_RECV_F,
     UNSHARD,
     W,
 )
@@ -222,8 +221,6 @@ class TestScheduleLowering(TestCase):
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
             ("1RECV_F1", _Action(1, RECV_F, 1)),
-            ("1SEND_B2_0RECV_F4", _Action(1, SEND_B_RECV_F, 2, 0, 4)),
-            ("17SEND_B0_1RECV_F14", _Action(17, SEND_B_RECV_F, 0, 1, 14)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
@@ -317,8 +314,8 @@ class TestScheduleLowering(TestCase):
                     ],
                     1: [
                         "1RECV_F0",
-                        "1F0",
                         "1RECV_F1",
+                        "1F0",
                         "1B0",
                         "1SEND_B0",
                         "1F1",
@@ -343,10 +340,7 @@ class TestScheduleLowering(TestCase):
         }
 
         comms_sch = _add_send_recv(
-            compute_sch,
-            test_info["stage_to_rank"],
-            test_info["num_stages"],
-            enable_batching=True,
+            compute_sch, test_info["stage_to_rank"], test_info["num_stages"]
         )
         for rank in expected_comms_sch:
             for i, (expected, actual) in enumerate(
@@ -401,12 +395,6 @@ class TestScheduleLowering(TestCase):
             num_stages=num_stages,
         )
 
-        simulated_schedule = _simulate_comms_compute(
-            comms_sch,
-            stage_to_rank=lambda s: s % pipeline_parallel_size,
-            num_stages=num_stages,
-        )
-        _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         # _dump_csv(comms_sch, "lowered_comms.csv")
 
         sch_ref = {}
@@ -418,9 +406,15 @@ class TestScheduleLowering(TestCase):
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
                 self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=lambda s: s % pipeline_parallel_size,
+            num_stages=num_stages,
+        )
+
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
-        # print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 336)
+        print(_format_pipeline_order(simulated_schedule))
+        self.assertEqual(num_steps, 271)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
