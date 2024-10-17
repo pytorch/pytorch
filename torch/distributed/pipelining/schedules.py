@@ -1257,7 +1257,9 @@ def _add_send_recv(
             if rank not in compute_actions:
                 continue
 
-            assert len(compute_actions[rank]) > 0
+            assert (
+                len(compute_actions[rank]) > 0
+            ), f"{rank=}, {len(compute_actions[rank])=}"
             action = compute_actions[rank][0]
             if not _ready_to_schedule(action, comm_actions[rank]):
                 continue
@@ -2483,14 +2485,8 @@ def _simulate_comms_compute(
                     and p.microbatch_index == action.microbatch_index
                 ):
                     return True
-                elif (
-                    p.computation_type == SEND_B_RECV_F
-                    and p.other_stage_index == action.stage_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
             return False
-        elif action.computation_type == B:
+        elif action.computation_type in (B, BW):
             if action.stage_index == num_stages - 1:
                 return True
             for p in _prev_ops(stage_idx):
@@ -2500,12 +2496,6 @@ def _simulate_comms_compute(
                     p.computation_type == RECV_B
                     and p.stage_index == action.stage_index
                     and p.microbatch_index == action.microbatch_index
-                ):
-                    return True
-                elif (
-                    p.computation_type == SEND_F_RECV_B
-                    and p.other_stage_index == action.stage_index
-                    and p.other_microbatch_index == action.microbatch_index
                 ):
                     return True
             return False
@@ -2520,44 +2510,14 @@ def _simulate_comms_compute(
             return expected_send in _prev_ops(peer_stage_idx)
         elif action.computation_type == SEND_B:
             expected_b = _Action(action.stage_index, B, action.microbatch_index)
-            return expected_b in _prev_ops(stage_idx)
+            expected_bw = _Action(action.stage_index, BW, action.microbatch_index)
+            return expected_b in _prev_ops(stage_idx) or expected_bw in _prev_ops(
+                stage_idx
+            )
         elif action.computation_type == RECV_B:
             peer_stage_idx = stage_idx + 1
             expected_send = _Action(peer_stage_idx, SEND_B, action.microbatch_index)
             return expected_send in _prev_ops(peer_stage_idx)
-        elif action.computation_type == SEND_F_RECV_B:
-            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
-            peer_stage_idx = stage_idx + 1
-            for p in _prev_ops(peer_stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == SEND_B_RECV_F
-                    and action.other_stage_index is not None
-                    and p.stage_index == action.other_stage_index + 1
-                    and p.other_stage_index is not None
-                    and p.other_stage_index == action.stage_index + 1
-                    and p.microbatch_index == action.other_microbatch_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-        elif action.computation_type == SEND_B_RECV_F:
-            # though the stage_index may not be the same between the SEND and the RECV, the rank must be
-            peer_stage_idx = action.stage_index - 1
-            for p in _prev_ops(peer_stage_idx):
-                if p is None:
-                    continue
-                elif (
-                    p.computation_type == SEND_F_RECV_B
-                    and p.stage_index + 1 == action.other_stage_index
-                    and p.other_stage_index + 1 == action.stage_index
-                    and p.microbatch_index == action.other_microbatch_index
-                    and p.other_microbatch_index == action.microbatch_index
-                ):
-                    return True
-            return False
-
         else:
             raise ValueError(f"Unsupported action type {action}")
 
