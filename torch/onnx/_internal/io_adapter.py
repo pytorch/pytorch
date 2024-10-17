@@ -146,7 +146,7 @@ def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
             )
         return x
 
-    dummy_leaf = object()
+    dummy_leaf = None
     dummy_tree = pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
     dummy_tree = pytree.tree_map(
         replace_list_with_tuple,
