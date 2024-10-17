@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
-from re import A
 from typing import List
 
 import torch
@@ -14,7 +13,6 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
     _add_unshard_reshard,
-    _dump_chrometrace,
     _format_pipeline_order,
     _PipelineSchedule,
     _simulate_comms_compute,

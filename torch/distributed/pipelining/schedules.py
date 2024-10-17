@@ -115,7 +115,7 @@ W = WEIGHT
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)([F,B,W]|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B{0,1})(\d*)"
+    r"(\d+)(F|B|W|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
 )
 
 
@@ -1131,13 +1131,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
             for rank in self.pipeline_order:
                 writer.writerow(self.pipeline_order[rank])
 
-    def _simulate(self):
-        return _simulate_comms_compute(
-            self.pipeline_order_with_comms,
-            lambda s: self.stage_index_to_group_rank[s],
-            self._num_stages,
-        )
-
     def _validate_schedule(self):
         # TODO(whc) this should be merged with the logic in test_schedule.py#L453-L554
         def _validate_rank_actions(
@@ -1477,6 +1470,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             writer = csv.writer(csvfile)
             for rank in self.pipeline_order_with_comms:
                 writer.writerow(self.pipeline_order_with_comms[rank])
+
+    def _simulate(self):
+        return _simulate_comms_compute(
+            self.pipeline_order_with_comms,
+            lambda s: self.stage_index_to_group_rank[s],
+            self._num_stages,
+        )
 
     def _step_microbatches(
         self,
