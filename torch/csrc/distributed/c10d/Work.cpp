@@ -1,4 +1,5 @@
 #include <ATen/ThreadLocalState.h>
+#include <distributed/c10d/ProcessGroup.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
@@ -44,6 +45,10 @@ OpType Work::retrieveOpType() const {
 
 Work::~Work() = default;
 
+bool Work::canCheckIsCompleted() {
+  return true;
+}
+
 bool Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
   return completed_;
@@ -70,7 +75,10 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
-void Work::synchronize() {}
+void Work::synchronize() {
+  c10d::unregister_work(
+      c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
+}
 
 bool Work::wait(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -136,6 +144,10 @@ float Work::getDuration() const {
 
 uint64_t Work::getSequencenumber() const {
   TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
+}
+
+std::string Work::getBackendType() const {
+  return "undefined";
 }
 
 class FutureWrappingWork : public Work {
