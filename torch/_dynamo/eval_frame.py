@@ -23,6 +23,7 @@ import traceback
 import types
 import warnings
 import weakref
+from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -112,6 +113,68 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return callback
     else:
         return set_eval_frame(callback)
+
+
+@dataclass
+class DynamoStance:
+    stance: str = "default"
+    backend: Union[str, Callable[..., Any], None] = None
+
+
+_stance = DynamoStance()
+
+
+def _set_stance(stance: DynamoStance) -> DynamoStance:
+    global _stance
+
+    from torch._C._dynamo.eval_frame import get_eval_frame_callback
+
+    callback = get_eval_frame_callback()
+
+    if callback is not False and callback is not None:
+        raise RuntimeError("attempted to set_stance in a torch.compile region")
+
+    prior = _stance
+    _stance = stance
+    return prior
+
+
+_set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+def _callback_from_stance(callback):
+    if _stance.stance == "default":
+        # force_backend
+        if _stance.backend is not None:
+            hooks = Hooks()
+            callback = convert_frame.catch_errors_wrapper(
+                convert_frame.convert_frame(  # type: ignore[arg-type]
+                    get_compiler_fn(_stance.backend),
+                    hooks,
+                ),
+                hooks,
+            )
+
+        return callback
+    elif _stance.stance == "force_eager":
+        # disable
+        return None
+    elif _stance.stance == "eager_on_recompile":
+        # run mode
+        return False
+    elif _stance.stance == "fail_on_recompile":
+
+        def fail_callback(*args, **kwargs):
+            raise RuntimeError(
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+            )
+
+        # to prevent cache miss due to different callback
+        fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+
+        return fail_callback
+    else:
+        raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
 def _reset_guarded_backend_cache():
@@ -376,7 +439,7 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(self.callback)
+        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
@@ -471,7 +534,7 @@ class _TorchDynamoContext:
                 )
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(callback))
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -645,11 +708,9 @@ class DisableContext(_TorchDynamoContext):
 
         assert callable(fn)
 
-        callback = self.callback
-
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
             try:
                 return fn(*args, **kwargs)
             finally:
