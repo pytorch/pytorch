@@ -649,11 +649,11 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = ir.Buffer(
                     name=W.get_name(),  # Borrow the registered buffer name
                     layout=ir.FixedLayout(
-                        W.get_device(),
-                        W.get_dtype(),
-                        new_size,
-                        ir.FlexibleLayout.contiguous_strides(new_size),
-                        0,
+                        device=W.get_device(),
+                        dtype=W.get_dtype(),
+                        size=new_size,
+                        stride=ir.FlexibleLayout.contiguous_strides(new_size),
+                        offset=0,
                     ),
                 )
             else:

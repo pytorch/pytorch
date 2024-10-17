@@ -1281,11 +1281,11 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 new_stride = list(old_layout.stride)
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 new_layout = FixedLayout(
-                    old_layout.device,
-                    old_layout.dtype,
-                    list(old_layout.size),
-                    new_stride,
-                    old_layout.offset,
+                    device=old_layout.device,
+                    dtype=old_layout.dtype,
+                    size=list(old_layout.size),
+                    stride=new_stride,
+                    offset=old_layout.offset,
                 )
                 return Buffer(name=node.get_name(), layout=new_layout)
 
