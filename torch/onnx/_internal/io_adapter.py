@@ -139,7 +139,11 @@ class OutputAdapter:
 def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
     def replace_list_with_tuple(x: Any) -> Any:
         if type(x) is list:
-            return tuple(x)
+            return pytree.tree_map(
+                replace_list_with_tuple,
+                tuple(x),
+                is_leaf=lambda x: type(x) is list,
+            )
         return x
 
     dummy_leaf = object()

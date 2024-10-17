@@ -571,15 +571,19 @@ class _TargetArgsExpr(_TargetExpr):
     ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
 
-        def replace_type(x: Any) -> Any:
+        def convert_type(x: Any) -> Any:
             cls = type(x)
-            new_cls = type_mapping.get(cls, cls)
-            if new_cls is not cls:
-                return new_cls(pytree.tree_map(replace_type, x))
+            convert_fn = type_mapping.get(cls)
+            if convert_fn is not None:
+                return pytree.tree_map(
+                    convert_type,
+                    convert_fn(x),
+                    is_leaf=lambda x: type(x) in type_mapping,
+                )
             return x
 
         normalized_args_tree = pytree.tree_map(
-            replace_type,
+            convert_type,
             (args, kwargs),
             is_leaf=lambda x: type(x) in type_mapping,
         )
