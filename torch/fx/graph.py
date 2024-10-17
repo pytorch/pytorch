@@ -737,7 +737,7 @@ class _PyTreeCodeGen(CodeGen):
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         # Given a user function/model:
-        #   myargs = [myargs0, myargs1]
+        #   myargs = (myargs0, myargs1)
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
         #   def forward(self, mypos, *myargs, mykey=None, **mykwargs):
         #
@@ -750,7 +750,7 @@ class _PyTreeCodeGen(CodeGen):
         #                          self._in_spec)
         #
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
-        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1,),), self._in_spec)
+        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1,), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
 

@@ -1,7 +1,6 @@
-from typing import Any, Callable, List, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Type
 
-if TYPE_CHECKING:
-    from torch.utils._pytree import PyTree, TreeSpec
+from torch.utils._pytree import PyTree, TreeSpec
 
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
@@ -17,8 +16,8 @@ def register_pytree_flatten_spec(
 
 
 def tree_flatten_spec(
-    pytree: "PyTree",
-    spec: "TreeSpec",
-    exact_structural_match=False,
+    pytree: PyTree,
+    spec: TreeSpec,
+    exact_structural_match: bool = False,
 ) -> List[Any]:
     return spec.flatten_up_to(pytree)
