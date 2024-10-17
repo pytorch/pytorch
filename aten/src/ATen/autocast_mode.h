@@ -145,6 +145,8 @@ inline bool is_autocast_eligible(
       return tensor.is_xla() && tensor.is_floating_point();
     case c10::DeviceType::PrivateUse1:
       return tensor.is_privateuseone() && tensor.is_floating_point();
+    case c10::DeviceType::MPS:
+      return tensor.is_mps() && tensor.is_floating_point();
     default:
       return false;
   }
@@ -168,6 +170,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::AutocastXLA;
     case c10::DeviceType::PrivateUse1:
       return DispatchKey::AutocastPrivateUse1;
+    case c10::DeviceType::MPS:
+      return DispatchKey::AutocastMPS;
     default:
       throw std::runtime_error(
           "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
@@ -178,7 +182,7 @@ inline bool is_autocast_available(c10::DeviceType device_type) {
   if (device_type == at::kCPU || device_type == at::kCUDA ||
       device_type == at::kXPU || device_type == at::kIPU ||
       device_type == at::kHPU || device_type == at::kXLA ||
-      device_type == at::kPrivateUse1) {
+      device_type == at::kPrivateUse1 || device_type == at::kMPS) {
     return true;
   } else {
     return false;
@@ -744,6 +748,10 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REGISTER_SIGNATURE,                                    \
       REDISPATCH_SIGNATURE,                                  \
       POLICY)
+
+// KERNEL_MPS
+// registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastMPS
+#define KERNEL_MPS(...) KERNEL(c10::DeviceType::MPS, __VA_ARGS__)
 
 // Op lists for different policies.
 // To make sure other backends can reuse the policy op list.

@@ -246,7 +246,9 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
-  type.ob_base = {PyObject_HEAD_INIT(nullptr) 0};
+  type.ob_base = {
+    PyObject_HEAD_INIT(nullptr)
+      0};
   // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;

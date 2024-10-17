@@ -132,12 +132,20 @@ def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
+def log_cache_bypass(*args, **kwargs) -> None:
+    pass
+
+
 def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
 
 def check_if_torch_exportable():
+    return False
+
+
+def export_training_ir_rollout_check() -> bool:
     return False
 
 
@@ -202,6 +210,9 @@ class JustKnobsConfig:
         v = bool(self)
         return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
 
+    def __bool__(self):
+        return self.get()
+
 
 def justknobs_feature(
     name: Optional[str], config_value=None, env_name=None, default: bool = True
@@ -235,7 +246,8 @@ def justknobs_feature(
             killswitch work by having feature return True to turn off features
 
     Requirements:
-        Don't use this at import time - Simply pass in the existing config
+        WARNING - Don't use this at import time - Simply pass in the existing config.
+        If you want to use this at config time, use JustKnobsConfig
     """
     if config_value is not None:
         return config_value
@@ -344,5 +356,7 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     return None
 
 
-def log_chromium_event_internal(event, stack, logger_uuid, start_timestamp=None):
+def log_chromium_event_internal(
+    event, stack, compile_id, logger_uuid, start_timestamp=None
+):
     return None

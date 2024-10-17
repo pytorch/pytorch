@@ -299,25 +299,11 @@ The following ops are currently supported:
     Tensor.unfold
     Tensor.view
 
-Other functions
----------------
-
-The following :mod:`torch` functions has also a specific support for :class:`~torch.masked.MaskedTensor`:
-
-:func:`~torch.empty_like`,
-:func:`~torch.full_like`,
-:func:`~torch.ones_like`,
-:func:`~torch.rand_like`,
-:func:`~torch.randint_like`,
-:func:`~torch.randn_like`,
-:func:`~torch.zeros_like`.
-
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.masked.maskedtensor.binary
 .. py:module:: torch.masked.maskedtensor.core
 .. py:module:: torch.masked.maskedtensor.creation
-.. py:module:: torch.masked.maskedtensor.like
 .. py:module:: torch.masked.maskedtensor.passthrough
 .. py:module:: torch.masked.maskedtensor.reductions
 .. py:module:: torch.masked.maskedtensor.unary

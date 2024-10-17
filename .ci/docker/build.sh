@@ -236,7 +236,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -245,7 +245,7 @@ case "$image" in
     ONNX=yes
     ;;
   pytorch-linux-focal-py3-clang9-android-ndk-r21e)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
@@ -254,8 +254,8 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-focal-py3.8-clang10)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-focal-py3.9-clang10)
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -276,8 +276,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.8-gcc9)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-focal-py3.9-gcc9)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -286,23 +286,23 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=6.0
-    NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
     ROCM_VERSION=6.1
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-rocm-n-py3)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=6.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -318,8 +318,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-    pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
-    ANACONDA_PYTHON_VERSION=3.8
+    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
@@ -330,8 +330,8 @@ case "$image" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12)
+    ANACONDA_PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
     CUDNN_VERSION=9
     CLANG_VERSION=12
@@ -355,8 +355,14 @@ case "$image" in
     CONDA_CMAKE=yes
     VISION=yes
     ;;
-  pytorch-linux-jammy-py3.8-gcc11)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-jammy-py3-clang18-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=18
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-py3.9-gcc11)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
@@ -379,6 +385,14 @@ case "$image" in
     GCC_VERSION=11
     CONDA_CMAKE=yes
     HALIDE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-py3.12-triton-cpu)
+    CUDA_VERSION=12.4
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    CONDA_CMAKE=yes
+    TRITON_CPU=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
@@ -509,6 +523,7 @@ docker build \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
+       --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \

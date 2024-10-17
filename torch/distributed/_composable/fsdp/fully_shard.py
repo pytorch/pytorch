@@ -1,12 +1,23 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    NoReturn,
+    Optional,
+    Type,
+    Union,
+)
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -34,6 +45,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
 ):
@@ -95,6 +107,14 @@ def fully_shard(
             between forward and backward, the registered parameters must be the
             sharded parameters. For ``False`` or an ``int``, this can be done
             by manually resharding via :meth:`reshard`.
+        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard]]]):
+            This callable can be used to override the sharding placement for a
+            parameter to shard a parameter on a dimension other than dim-0. If
+            this callable returns a ``Shard`` placement (not ``None``), then
+            FSDP will shard according to that placement (e.g. ``Shard(1)``).
+            If sharding on a nonzero dim, we currently require even sharding,
+            i.e. the tensor dim size on that dim must be divisible by the FSDP
+            shard mesh size.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -112,6 +132,10 @@ def fully_shard(
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
+        if mesh.mesh_dim_names is None:
+            raise AssertionError(
+                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+            )
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     post_forward_mesh_info = _get_post_forward_mesh_info(
@@ -135,6 +159,7 @@ def fully_shard(
             mesh_info,
             post_forward_mesh_info,
             device,
+            shard_placement_fn,
             mp_policy,
             offload_policy,
         )
@@ -324,7 +349,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_post_optim_event(self, event: torch.cuda.Event) -> None:
+    def set_post_optim_event(self, event: torch.Event) -> None:
         """
         Sets a post-optimizer-step event for the root FSDP module to wait the
         all-gather streams on.
@@ -338,7 +363,7 @@ class FSDPModule:
         called with a new event each iteration.
 
         Args:
-            event (torch.cuda.Event): Event recorded after the optimizer step
+            event (torch.Event): Event recorded after the optimizer step
                 to wait all-gather streams on.
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
@@ -357,6 +382,36 @@ class FSDPModule:
             mul_factor = 1.0 / float(factor)
             reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
             fsdp_param_group.reduce_scatter_reduce_op = reduce_op
+
+    def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
+        """
+        Sets whether the FSDP module's parameters need to be unsharded in
+        backward. This can be used in expert cases when the user knows that all
+        parameters in this FSDP module's parameter group are not needed for
+        backward computation (e.g. embedding).
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group.unshard_in_backward = unshard_in_backward
+
+    def _set_unshard_async_op(self, async_op: bool):
+        """
+        Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
+        and pre-backward unshard op. This defaults to ``False`` but can be set
+        to ``True`` with this method.
+
+        Setting this to ``True`` allows the all-gather allocations to happen in
+        the default stream, avoiding inter-stream memory fragmentation.
+        However, you must use explicit prefetching (e.g. via :meth:`unshard`)
+        in forward to still get overlap, and the pre-all-gather ops like dtype
+        casting and copy-in will not overlap with compute.
+        """
+        self_module = cast(nn.Module, self)
+        for module in self_module.modules():
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.unshard_async_op = async_op
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:

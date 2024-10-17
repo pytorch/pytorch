@@ -200,7 +200,8 @@ class Match:
     def __repr__(self) -> str:
         return f"Match(..., {self.args}, {self.kwargs})"
 
-    def erase_nodes(self, graph: torch.fx.Graph) -> None:
+    def erase_nodes(self) -> None:
+        graph = self.graph
         for n in reversed(self.nodes):
             if not n._erased and not n.users:
                 graph.erase_node(n)
@@ -236,9 +237,13 @@ class Match:
                 replacement graph.
 
         """
-        from torch._inductor.virtualized import V
+        from torch._inductor.virtualized import NullHandler, V
 
-        context = V.fake_mode if V.fake_mode is not None else contextlib.nullcontext
+        context = (
+            V.fake_mode
+            if (not isinstance(V.fake_mode, NullHandler) or (V.fake_mode is None))
+            else contextlib.nullcontext()
+        )
 
         with context:
             if trace_fn is None:
@@ -1005,7 +1010,7 @@ class LoweringPatternEntry(PatternEntry):
             replacement.meta.update(node.meta)
             node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 @dataclasses.dataclass
@@ -1032,9 +1037,6 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
-        output_nodes = match.output_nodes()
-        first_node = output_nodes[0]
-
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1176,7 +1178,7 @@ class ReplacementPatternEntry(PatternEntry):
                 assert len(output_nodes) == 1
                 replace(output_nodes[0], replacement)
 
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None
@@ -1614,7 +1616,27 @@ def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
 _mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
 
 
+def fixme_incorrect_inductor_schema_op(op: torch._ops.OpOverload) -> bool:
+    if op.namespace != "inductor":
+        return False
+
+    # TODO - fix schema
+    # Dont add any more !
+    return op in (
+        torch.ops.inductor.accumulate_grad_.default,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+
+
 def is_mutation_op(node: torch.fx.Node) -> bool:
+    if isinstance(
+        node.target, torch._ops.OpOverload
+    ) and not fixme_incorrect_inductor_schema_op(node.target):
+        return node.target._schema.is_mutable
+    elif isinstance(
+        node.target, torch._higher_order_ops.auto_functionalize.AutoFunctionalized
+    ):
+        return False
     if node.op == "call_function":
         if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True

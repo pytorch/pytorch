@@ -116,38 +116,7 @@
 #endif
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
-
-// Technically, we should check if __cplusplus > 201402L here, because
-// [[nodiscard]] is only defined in C++17.  However, some compilers
-// we care about don't advertise being C++17 (e.g., clang), but
-// support the attribute anyway.  In fact, this is not just a good idea,
-// it's the law: clang::warn_unused_result doesn't work on nvcc + clang
-// and the best workaround for this case is to use [[nodiscard]]
-// instead; see https://github.com/pytorch/pytorch/issues/13118
-//
-// Note to future editors: if you have noticed that a compiler is
-// misbehaving (e.g., it advertises support, but the support doesn't
-// actually work, or it is emitting warnings).  Some compilers which
-// are strict about the matter include MSVC, which will complain:
-//
-//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
-//
-// Exhibits:
-//  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
-//  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
-//  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
 #define C10_NODISCARD [[nodiscard]]
-// Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
-// error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
-// TODO: It's possible this is still triggering
-// https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
-// fix it.
-#define C10_NODISCARD [[clang::warn_unused_result]]
-#else
-#define C10_NODISCARD
-#endif
 
 // suppress an unused variable.
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -242,6 +211,16 @@ using namespace c10::xpu;
 #define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #else
 #define C10_ALWAYS_INLINE inline
+#endif
+
+// Unlike C10_ALWAYS_INLINE, C10_ALWAYS_INLINE_ATTRIBUTE can be used
+// on a lambda.
+#if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE_ATTRIBUTE [[msvc::forceinline]]
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
+#else
+#define C10_ALWAYS_INLINE_ATTRIBUTE
 #endif
 
 #if defined(_MSC_VER)
@@ -345,6 +324,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__ANDROID__) || defined(__APPLE__) || defined(__FreeBSD__)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -365,6 +345,16 @@ __host__ __device__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
+  }
+// TODO: This doesn't assert the message because I (chilli) couldn't figure out
+// a nice way to convert a char* to a wchar_t*
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)        \
   if (C10_UNLIKELY(!(cond))) {                   \
     (void)(_wassert(                             \
                _CRT_WIDE(#cond),                 \
@@ -413,12 +403,18 @@ __host__ __device__
 // ROCm disable kernel assert by default
 #if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)
 #define SYCL_KERNEL_ASSERT(cond)
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
+  if (C10_UNLIKELY(!(cond))) {                                         \
+    __assert_fail(                                                     \
+        msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
