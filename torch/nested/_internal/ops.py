@@ -2027,7 +2027,9 @@ def flex_njt_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     output = flex_attention_backward_hop(
         query.values().unsqueeze(0),
         key.values().unsqueeze(0),
@@ -2046,7 +2048,7 @@ def flex_njt_backward(
     )
 
     # wrap grads as NJTs
-    dense_q_grad, dense_k_grad, dense_v_grad = output
+    dense_q_grad, dense_k_grad, dense_v_grad, score_mod_other_buffer_grads = output
     njt_q_grad = torch.nested.nested_tensor_from_jagged(
         dense_q_grad.transpose(1, 2).squeeze(0),
         query._offsets,  # type: ignore[attr-defined]
@@ -2069,7 +2071,7 @@ def flex_njt_backward(
         max_seqlen=value._maybe_max_seqlen,  # type: ignore[attr-defined]
     ).transpose(1, 2)
 
-    return (njt_q_grad, njt_k_grad, njt_v_grad)
+    return (njt_q_grad, njt_k_grad, njt_v_grad, score_mod_other_buffer_grads)
 
 
 # Make the dummy available on the C++ side.
