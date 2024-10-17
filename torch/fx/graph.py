@@ -27,7 +27,6 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
