@@ -242,9 +242,9 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = (
-            collections.defaultdict(list)
-        )
+        self.reuse_pool: Dict[
+            ReuseKey, List[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
