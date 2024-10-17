@@ -7,18 +7,17 @@ import inspect
 import itertools
 import math
 import operator
-from contextlib import nullcontext
+import warnings
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch._higher_order_ops.flex_attention import (
-    flex_attention as flex_attention_hop,
-    TransformGetItemToIndex,
-)
+from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
@@ -186,6 +185,21 @@ def _dense_to_ordered(dense_mask) -> Tuple:
 def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
+
+
+def _adjust_num_blocks_and_indices(
+    num_blocks: Tensor,
+    indices: Tensor,
+    new_num_rows: int,
+    new_num_cols: int,
+):
+    num_rows = indices.shape[-2]
+    num_columns = indices.shape[-1]
+    indices = indices[:, :, :new_num_rows, :new_num_cols]
+    num_blocks = num_blocks[:, :, :new_num_rows]
+    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
+    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    return num_blocks, indices
 
 
 class BlockMask:
@@ -466,6 +480,35 @@ class BlockMask:
             f")"
         )
 
+    def _adjust(self, new_q_len: int, new_kv_len: int):
+        new_num_rows = new_q_len // self.BLOCK_SIZE[0]
+        new_num_cols = new_kv_len // self.BLOCK_SIZE[1]
+        new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
+            self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
+        )
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            (
+                new_full_kv_num_blocks,
+                new_full_kv_indices,
+            ) = _adjust_num_blocks_and_indices(
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                new_num_rows,
+                new_num_cols,
+            )
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
+        return self.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            self.BLOCK_SIZE,
+            self.mask_mod,
+        )
+
     @property
     def shape(self):
         """Returns the shape of the mask."""
@@ -607,12 +650,25 @@ def _round_up_to_multiple(x, multiple):
 
 def _convert_mask_to_block_mask(
     mask: Tensor,
-    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
+
+    def padding_needed_for_multiple(x, multiple):
+        return _round_up_to_multiple(x, multiple) - x
+
+    mask = torch.nn.functional.pad(
+        mask,
+        (
+            0,
+            padding_needed_for_multiple(mask.shape[-1], KV_BLOCK_SIZE),
+            0,
+            padding_needed_for_multiple(mask.shape[-2], Q_BLOCK_SIZE),
+        ),
+    )
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
@@ -683,8 +739,8 @@ def _convert_block_mask_to_mask(
 def _create_sparse_block_from_block_mask(
     block_mask: Tuple[Tensor, Optional[Tensor]],
     mask_mod: Optional[Callable],
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
     partial_blocks, full_blocks = block_mask
 
@@ -699,7 +755,7 @@ def _create_sparse_block_from_block_mask(
         partial_bm[1],
         full_bm[0],
         full_bm[1],
-        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
 
@@ -711,7 +767,6 @@ def create_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    _compile: bool = False,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -734,15 +789,9 @@ def create_mask(
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
     n = torch.arange(0, KV_LEN, device=device)
-    # TODO: fix this
-    # Lack instantiation support for __torch_function__ mode support under compile
-    if _compile:
-        ctx = nullcontext()
-    else:
-        ctx = TransformGetItemToIndex()  # type: ignore[assignment]
     mod_type = _get_mod_type(mod_fn)
 
-    with ctx:
+    with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
@@ -756,30 +805,6 @@ def create_mask(
             return mask
         else:
             raise AssertionError
-
-
-def _create_block_mask_inner(
-    mask_mod: Callable,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device: str,
-    KV_BLOCK_SIZE: int,
-    Q_BLOCK_SIZE: int,
-):
-    r"""Work around for being unable to instantiate __torch_function__ mode under compile.
-    `create_block_mask` will compile this inner function and wrap the call to this
-    with the __torch_function__ mode.
-    """
-    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device, _compile=True)
-    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
-        mask_tensor,
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-        separate_full_blocks=True,
-    )
-    return partial_block_mask, full_block_mask
 
 
 def create_block_mask(
@@ -805,9 +830,7 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        KV_BLOCK_SIZE (int): Block size of block mask for each query.
-        Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
-        _compile (bool): Whether to compile the mask creation.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -828,7 +851,6 @@ def create_block_mask(
     assert (
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
-    inner_func = _create_block_mask_inner
     if B is None:
         B = 1
     if H is None:
@@ -839,20 +861,25 @@ def create_block_mask(
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
-    if Q_LEN < 128:
-        Q_BLOCK_SIZE = Q_LEN
-    else:
-        Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
-    with TransformGetItemToIndex():
-        partial_block_mask, full_block_mask = inner_func(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+        warnings.warn(
+            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
+            DeprecationWarning,
         )
-        block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod
+        return torch.compile(create_block_mask)(
+            mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
         )
+
+    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
+    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
+        mask_tensor,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        separate_full_blocks=True,
+    )
+    block_mask = _create_sparse_block_from_block_mask(
+        (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+    )
     return block_mask
 
 
@@ -906,10 +933,16 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
             f"Got E={query.size(-1)} and Ev={value.size(-1)}."
         )
-    if value.size(-1) > query.size(-1):
+
+
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
+    """
+    if query.device.type != "cuda":
         raise ValueError(
-            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
-            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
+            "FlexAttention is only supported on CUDA devices. "
+            f"Found input tensors on {query.device.type} device."
         )
 
 
@@ -979,6 +1012,7 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
+    _validate_device(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -1000,8 +1034,21 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+    elif (
+        query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
+        or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
+    ):
+        new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
+        new_kv_len = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
+        block_mask = block_mask._adjust(new_q_len, new_kv_len)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
+
+    if query.device != block_mask.kv_num_blocks.device:  # type: ignore[union-attr]
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
+        )
 
     kernel_options = _apply_kernel_options(
         query,
@@ -1017,7 +1064,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)
@@ -1027,6 +1074,10 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
@@ -1035,18 +1086,25 @@ def flex_attention(
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, lse = torch.compile(
-                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                    scale,
-                    kernel_options,
-                )
-                if return_lse:
-                    return out, lse * math.log(2)
-                else:
-                    return out
+                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                    if metadata_mode:
+                        backend = make_eager_backend_with_torch_function_mode(
+                            metadata_mode
+                        )
+                    else:
+                        backend = "eager"
+                    out, lse = torch.compile(
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    )(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask.as_tuple(),  # type: ignore[union-attr]
+                        scale,
+                        kernel_options,
+                    )
+                    if return_lse:
+                        return out, lse * math.log(2)
+                    else:
+                        return out

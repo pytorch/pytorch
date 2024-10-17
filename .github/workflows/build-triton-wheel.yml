@@ -27,13 +27,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   build-wheel:
     name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.4xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
         device: ["cuda", "rocm", "xpu"]
         include:
           - device: "rocm"
@@ -81,9 +91,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.8)
-            PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
-            ;;
           3.9)
             PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
             ;;
@@ -199,11 +206,12 @@ jobs:
 
   build-conda:
     name: "Build Triton Conda"
-    runs-on: [self-hosted, linux.2xlarge]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu

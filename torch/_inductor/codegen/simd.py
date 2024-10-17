@@ -17,6 +17,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    no_type_check,
     Optional,
     Sequence,
     Tuple,
@@ -29,7 +30,12 @@ import torch
 import torch._logging
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
-from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.symbol import (
+    free_symbol_is_type,
+    prefix_str,
+    symbol_is_type,
+    SymT,
+)
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -41,6 +47,8 @@ from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
+    cache_on_self,
+    expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
@@ -105,6 +113,13 @@ class IterationRanges:
 
     def symbol(self):
         return sympy_index_symbol(self.name)
+
+    @property
+    @cache_on_self
+    @no_type_check
+    def symt(self) -> SymT:
+        prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
+        return prefix_to_symt[self.prefix]
 
 
 class IterationRangesRoot(IterationRanges):
@@ -1068,6 +1083,8 @@ class SIMDScheduling(BaseScheduling):
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1079,9 +1096,17 @@ class SIMDScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def expect_improved_memory_usage(n):
+            for read in n.read_writes.reads:
+                if read.name in current_loop_buffer_usage:
+                    return True
+            return False
+
         def schedule_node_in_loop(n):
             done.add(n)
             node_schedule.append(n)
+            current_loop_buffer_usage.update([x.name for x in n.read_writes.reads])
+
             # A scan is modelled as a reduction in the scheduler but has a
             # full sized output that can be used inside the loop body
             if (
@@ -1091,16 +1116,24 @@ class SIMDScheduling(BaseScheduling):
                 and not isinstance(n.node.data, ir.Scan)
             ):
                 not_ready_yet_nodes.add(n.get_name())
+            else:  # this node is available within the loop
+                current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
+            nonlocal maybe_split_index
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
+            if maybe_split_index:
+                node_schedule.insert(maybe_split_index, DisableReduction)
+                node_schedule.insert(maybe_split_index + 1, EnableReduction)
+                maybe_split_index = None
             yield
             node_schedule.append(EnableReduction)
             not_ready_yet_nodes.clear()
+            current_loop_buffer_usage.clear()
 
         def requires_closing_previous_reduction(node, node_schedule):
             if rnumel == 1:
@@ -1121,6 +1154,13 @@ class SIMDScheduling(BaseScheduling):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
+
+                if current_loop_buffer_usage and not expect_improved_memory_usage(node):
+                    # If we don't improve memory usage, then it is better to split into two loops
+                    maybe_split_index = maybe_split_index or len(node_schedule)
+                else:
+                    # Memory usage got improved, cancel the loop split
+                    maybe_split_index = None
 
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
@@ -1170,18 +1210,8 @@ class SIMDScheduling(BaseScheduling):
         numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
-        size_hint = V.graph.sizevars.size_hint
-        has_hint = V.graph.sizevars.shape_env.has_hint
 
-        def within_32bit(e):
-            # Allow for unhinted e as long as we can still statically prove
-            # (e.g., via ValueRanges) that it is still in bounds
-            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
-                return True
-            # Otherwise, the hint MUST exist and be in range
-            return has_hint(e) and size_hint(e) <= int_max
-
-        if not within_32bit(numel):
+        if not expr_fits_within_32bit(numel):
             return False
 
         # Any use of a MultiOutputLayout will create a buffer with a
@@ -1192,7 +1222,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]
 
-        if not all(within_32bit(size) for size in buf_sizes):
+        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -1319,19 +1349,9 @@ class SIMDScheduling(BaseScheduling):
             index_dtype=index_dtype,
         )
 
-        def _node_has_sort(node):
-            if node in (EnableReduction, DisableReduction):
-                return False
-
-            sort_nodes = node._body.root_block.graph.find_nodes(
-                op="call_method", target="sort"
-            )
-            return bool(sort_nodes)
-
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        has_sort = any(_node_has_sort(node) for node in node_schedule)
-        if has_sort:
+        if has_sort := schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
@@ -1776,8 +1796,6 @@ class SIMDScheduling(BaseScheduling):
             def __del__(self) -> None:
                 self.n.last_usage = self.last_usage
 
-        last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
-
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = OrderedSet()
@@ -1867,3 +1885,12 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
+
+
+def schedule_contains_op(node_schedule, op_name: str) -> bool:
+    """True if V.ops.{op_name} is used in node_schedule"""
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node._body.has_op(op_name):
+                return True
+    return False

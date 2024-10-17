@@ -283,8 +283,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
         return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
 
-    # Harder case: do manual broadcasting over unbound components
-    # when NT dim == non-NT dim
+    # Harder case: do manual broadcasting when NT dim == non-NT dim
     # ex: (B, j0, D_0, D_1) + (B, 1, D_0, D_1) -> (B, j0, D_0, D_1)
     if a.dim() == b.dim():
         # ex: (B, j0, D_0, D_1) + (1, 1, D_0, D_1) -> should
@@ -294,14 +293,33 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        # need to use offsets to broadcast across ragged dim properly
-        # NB: inefficient fallback here; Triton codegen can help this
-        # TODO: Make this work with autograd
-        outputs = []
-        for a_comp, b_comp in zip(a.unbind(), b.unbind()):
-            outputs.append(func(a_comp, b_comp, *args[2:], **kwargs))
-        new_values = torch.cat(outputs, dim=0)
-        return NestedTensor(new_values, **extracted_kwargs)
+        from .nested_tensor import nested_from_padded
+
+        # handle broadcasting via padded dense -> jagged conversion
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        # convert dense tensor -> jagged
+        t = t.expand(
+            [x if i != nt._ragged_idx else padded_max_S for i, x in enumerate(t.shape)]
+        )
+        t_as_nt = nested_from_padded(
+            t,
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+        # function call with two NJTs
+        lhs, rhs = (nt, t_as_nt) if a_is_nt else (t_as_nt, nt)
+        return func(lhs, rhs, *args[2:], **kwargs)
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
@@ -345,6 +363,29 @@ def jagged_torch_function(func, *args, **kwargs):
         new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
 
         return inp.reshape(*new_shape)
+
+    # Handle nested-specific input validation for CompositeImplicit rms_norm
+    if func.__name__ == "rms_norm":
+
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+            pass
+
+        _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _rms_norm_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+
+        inp = new_kwargs.pop("input")
+        normalized_shape = new_kwargs.pop("normalized_shape")
+
+        # can't normalize over the ragged dim (yet)
+        max_normalizable = inp.dim() - inp._ragged_idx - 1
+        if len(normalized_shape) > max_normalizable:
+            raise ValueError(
+                "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
+            )
+
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
     raise NotImplementedError(func)
 
@@ -395,7 +436,7 @@ def prim_layout_default(func, *args, **kwargs):
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
         raise RuntimeError(
-            "NestedTensors does not support directly calling torch.ops.aten.size "
+            "NestedTensor does not support directly calling torch.ops.aten.size; "
             "please use `nested_tensor.size()` instead."
         )
 
@@ -480,13 +521,18 @@ def linear_backward_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     grad_output = new_kwargs.pop("grad_output")
     weight = new_kwargs.pop("weight")
+    output_mask = new_kwargs.pop("output_mask")
 
+    ds, dw, db = None, None, None
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
-    ds = NestedTensor(
-        torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
-    )
-    dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
-    db = None  # NYI: gradient for bias, need to reduce over ragged dim
+    if output_mask[0]:
+        ds = NestedTensor(
+            torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
+        )
+    if output_mask[1]:
+        dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+    if output_mask[2]:
+        db = grad_output._values.sum(0)
     return (ds, dw, db)
 
 
@@ -515,6 +561,9 @@ def to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
+    new_lengths = None
+    if inp._lengths is not None:
+        new_lengths = inp._lengths.to(device=new_values.device)
 
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import (
@@ -522,17 +571,21 @@ def to_copy_default(func, *args, **kwargs):
         mb_unwrap_functional_tensor,
     )
 
-    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
+    ragged_source = inp._offsets if inp._lengths is None else inp._lengths
+    new_thing = new_offsets if new_lengths is None else new_lengths
+    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
         # Temporary hack until we have the union find
-        tgt = mb_unwrap_functional_tensor(new_offsets)
-        src = mb_unwrap_functional_tensor(inp._offsets)
+        tgt = mb_unwrap_functional_tensor(new_thing)
+        src = mb_unwrap_functional_tensor(ragged_source)
         tgt.nested_int_memo = src.nested_int_memo
     else:
-        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+        _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
+    inp_kwargs["lengths"] = new_lengths
 
-    return NestedTensor(new_values, **inp_kwargs)
+    output = NestedTensor(new_values, **inp_kwargs)
+    return output
 
 
 @register_jagged_func(
@@ -916,7 +969,7 @@ def cat_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.matmul.default, "self: jt, other: any")
+@register_jagged_func(torch.ops.aten.matmul.default, "self: jt_all, other: any")
 def matmul_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -925,18 +978,93 @@ def matmul_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    if inp.is_nested and not other.is_nested:
-        return NestedTensor(
-            func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
+    def _unbind_impl(a, b):
+        return [
+            func(a_comp, b_comp) for (a_comp, b_comp) in zip(a.unbind(), b.unbind())
+        ]
+
+    def _padded_impl(a, b):
+        assert a.is_nested and not b.is_nested
+        nt, t = a, b
+
+        from .nested_tensor import nested_from_padded
+
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *nt.shape[: nt._ragged_idx],
+            padded_max_S,
+            *nt.shape[nt._ragged_idx + 1 :],
         )
+        padded_nt = nt.to_padded_tensor(0.0, output_size=padded_shape)
+        return nested_from_padded(
+            func(padded_nt, b),
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+    # TODO: Back these with proper kernels (e.g. grouped GEMM)
+    # NJT x dense
+    if inp.is_nested and not other.is_nested:
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        if inp.dim() >= 3 and inp.dim() == other.dim():
+            # convert to padded for this
+            return _padded_impl(inp, other)
+        # Support broadcasting the dense:
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        # etc.
+        elif other.dim() == 2 and inp.dim() > other.dim():
+            return NestedTensor(
+                func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
+            )
+    # NJT x NJT
     elif inp.is_nested and other.is_nested:
-        # BMM with equivalent ragged dims between the two inputs
+        # Support ragged batch dim:
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F), etc.
         if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
+        # Support reducing over ragged with dense output:
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+        elif (
+            inp.dim() == 3
+            and other.dim() == 3
+            and inp._ragged_idx == 2
+            and other._ragged_idx == 1
+            and inp.size(inp._ragged_idx) == other.size(other._ragged_idx)
+        ):
+            # do unbind for this; can't use padded conversion due to j1 in last dim
+            return torch.stack(_unbind_impl(inp, other))
 
     raise RuntimeError(
         f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
     )
+
+
+@register_jagged_func(torch.ops.aten.bmm.default, "self: jt_all, mat2: any")
+def bmm_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("mat2")
+
+    if inp.dim() != 3:
+        raise ValueError("bmm(): input must be 3D")
+    if other.dim() != 3:
+        raise ValueError("bmm(): mat2 must be 3D")
+
+    return matmul_default(torch.ops.aten.matmul.default, inp, other)
 
 
 @register_jagged_func(
@@ -1017,6 +1145,17 @@ def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
 
+@register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
+def sum_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
+
+
 @register_jagged_func(
     torch.ops.aten.sum.dim_IntList,
     "self: jt_all, dim: any?, keepdim: any?, dtype: any?",
@@ -1072,15 +1211,19 @@ def sum_dim_IntList(func, *args, **kwargs):
 
             # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             # with the ragged dimension as the 0th dimension
+            max_seqlen = inp._values.shape[inp._ragged_idx - 1]
+            if inp._max_seqlen_tensor is not None:
+                max_seqlen = inp._max_seqlen
+
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
                 values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
                 [inp._offsets],
-                max_lengths=[inp._max_seqlen],
+                max_lengths=[max_seqlen],
             )
 
             padded_ragged_dim_original = padded.view(
                 padded.shape[0],
-                inp._max_seqlen,
+                max_seqlen,
                 *values_ragged_dim_outer.shape[
                     1:
                 ],  # expand non-batch dimensions of padded tensor
@@ -1097,8 +1240,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
-            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
-            out = out.unsqueeze(0)
+            out = out.unsqueeze(inp._ragged_idx)
         return out
     else:  # raggedness preserved --> return nested tensor
         if (
@@ -1242,7 +1384,10 @@ def view_default(func, *args, **kwargs):
 
     inner_size = [get_inner_size(i) for i in range(len(size) - 1)]
 
-    return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
+    # Preserve inference-mode-ness of input.
+    # TODO: Do this for all other views!
+    with torch.inference_mode(inp.is_inference()):
+        return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
 @register_jagged_func(
@@ -1363,7 +1508,7 @@ def native_layer_norm_backward_default(func, *args, **kwargs):
     return (NestedTensor(d_input, **extract_kwargs(inp)), d_gamma, d_beta)
 
 
-@register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")
+@register_jagged_func(torch.ops.aten.select.int, "self: jt_all, dim: any, index: any")
 def select_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1378,6 +1523,11 @@ def select_int(func, *args, **kwargs):
     # TODO: make this more efficient
     if new_kwargs["dim"] == 0:
         return inp.unbind()[new_kwargs["index"]]
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "select(): not yet supported on dim != 0 for non-contiguous nested tensor with holes"
+        )
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1424,12 +1574,15 @@ def mean_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if len(new_kwargs["dim"]) > 1:
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor"
-        )
-
     inp = new_kwargs.pop("input")
+
+    if len(new_kwargs["dim"]) > 1 and (
+        inp._ragged_idx in new_kwargs["dim"] or 0 in new_kwargs["dim"]
+    ):
+        raise RuntimeError(
+            "mean(): not supported across multiple dimensions for NestedTensor "
+            "when either the batch dim or ragged dim is included"
+        )
 
     (
         new_kwargs["dim"],
@@ -1463,8 +1616,10 @@ def mean_dim(func, *args, **kwargs):
         # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
+        # Note: keepdim=True is on at this point so lengths has to be unsqueezed for
+        # that 1-size dim as well.
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 2):
+        for _ in range(inp.dim() - 1):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
@@ -1579,12 +1734,19 @@ def to_padded_tensor_default(func, *args, **kwargs):
     elif values.dim() == 1:
         values = values.unsqueeze(-1)
 
+    # NB: The CUDA kernel for jagged -> padded dense conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = values.dtype is torch.bool
+    if is_bool and values.is_cuda:
+        values = values.to(torch.half)
     padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
         values,
         [inp._offsets],
         [max_seq_len],
         new_kwargs["padding"],
     )
+    if is_bool and padded_out.is_cuda:
+        padded_out = padded_out.to(torch.bool)
 
     # shape gymnastics part 2
     if len(values_shape) > 2:
@@ -1618,9 +1780,16 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     elif padded.dim() < 3:
         padded = padded.unsqueeze(-1)
 
+    # NB: The CUDA kernel for padded dense -> jagged conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = padded.dtype is torch.bool
+    if is_bool and padded.is_cuda:
+        padded = padded.to(torch.half)
     values = torch.ops.aten._padded_dense_to_jagged_forward(
         padded, [offsets], new_kwargs["sum_S"]
     )
+    if is_bool and values.is_cuda:
+        values = values.to(torch.bool)
 
     # shape gymnastics part 2
     if len(padded_shape) > 3:
@@ -1751,6 +1920,24 @@ def masked_select_default(func, *args, **kwargs):
         values=res_values,
         **args,
     )
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_select_backward.default,
+    "grad_output: t, self: jt, dim: any, index: any",
+)
+def _nested_select_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    grad_output = new_kwargs.pop("grad_output")
+
+    grad_input = torch.zeros_like(inp, dtype=grad_output.dtype)
+    grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
+
+    return grad_input
 
 
 # Make the dummy available on the C++ side.

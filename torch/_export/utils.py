@@ -5,8 +5,19 @@ import inspect
 import math
 import operator
 import re
+from contextlib import contextmanager
 from inspect import Parameter
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
 import torch
 from torch._guards import detect_fake_mode
@@ -139,6 +150,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
             for arg in node._input_nodes:
                 if arg.op == "get_attr":
                     for entry in torch.fx.proxy._COPY_META_FIELDS:
+                        #  the custom field should not be copied
+                        if entry == "custom":
+                            continue
                         if entry in meta:
                             params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
@@ -219,7 +233,7 @@ def _rename_without_collisions(
 
 def _check_input_constraints_for_graph(
     input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
-):
+) -> None:
     def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
         describing how to access it, e.g. "*args["foo"][0].bar"
@@ -891,3 +905,16 @@ def _detect_fake_mode_from_gm(
                 fake_vals.append(fake_val)
 
     return detect_fake_mode(fake_inps + fake_vals)
+
+
+@contextmanager
+def _disable_load_state_dict_hooks(mod: torch.nn.Module):
+    state_dict_hooks: Dict[int, Callable] = dict(mod._state_dict_hooks)
+    state_dict_pre_hooks: Dict[int, Callable] = dict(mod._state_dict_pre_hooks)
+    mod._state_dict_hooks.clear()
+    mod._state_dict_pre_hooks.clear()
+    try:
+        yield
+    finally:
+        mod._state_dict_hooks = state_dict_hooks
+        mod._state_dict_pre_hooks = state_dict_pre_hooks

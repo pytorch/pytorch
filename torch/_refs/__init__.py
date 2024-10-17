@@ -10,7 +10,18 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._prims as prims
@@ -281,15 +292,18 @@ __all__ = [
     "roll",
     "rot90",
     "rsqrt",
+    "split_with_sizes",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
     "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -407,12 +421,12 @@ def _broadcast_shapes(*_shapes):
                     )
                 common_shape[idx] = shape[idx]
             elif guard_size_oblivious(shape[idx] != 1):
-                if common_shape[idx] != shape[idx]:
-                    raise RuntimeError(
-                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
-                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
-                        f"should be broadcastable to {common_shape}"
-                    )
+                torch._check(
+                    common_shape[idx] == shape[idx],
+                    lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                    f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                    f"should be broadcastable to {common_shape}",
+                )
 
     return common_shape
 
@@ -3078,22 +3092,27 @@ def narrow(
             lambda: "start must be an 0-dim integral Tensor.",
         )
         start = start.item()  # type: ignore[assignment]
+    start = cast(int, start)
     torch._check(a.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor.")
     torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
     dim_length = a.size(dim)
     torch._check_with(
         IndexError,
-        -dim_length <= start and start <= dim_length,  # type: ignore[arg-type]
+        -dim_length <= start and start <= dim_length,
         lambda: f"start out of range (expected to be in range of [{-dim_length}, {dim_length}], but got {start})",
     )
     if start < 0:
         start = start + dim_length
     torch._check(
-        start <= dim_length - length,  # type: ignore[arg-type]
+        start <= dim_length - length,
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
     )
-    return prims.slice_in_dim(a, start, start + length, axis=dim)
+    new_shape = list(a.shape)
+    new_shape[dim] = length
+    return a.as_strided(
+        new_shape, a.stride(), a.storage_offset() + a.stride(dim) * start
+    )
 
 
 def _normalize(
@@ -3121,7 +3140,7 @@ def _normalize(
         a_acc, dim=norm_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    out = (a - mean) * rstd
+    out = (a_acc - mean) * rstd
     return out, mean, rstd
 
 
@@ -4101,6 +4120,36 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
     return a
 
 
+@register_decomposition(aten.split_with_sizes)
+def split_with_sizes(
+    self: Tensor, split_sizes: List[int], dim: int = 0
+) -> List[Tensor]:
+    # NB: Perform the check_is_size tests first so that the
+    # sum test does not try to do a replacement
+    for i in range(len(split_sizes)):
+        torch._check_is_size(
+            split_sizes[i],
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
+    torch._check_with(
+        ValueError,
+        builtins.sum(split_sizes) == self.shape[dim],
+        lambda: f"Split sizes add up to {builtins.sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
+    )
+
+    splits = []
+    offset = self.storage_offset()
+
+    for split_size in split_sizes:
+        new_shape = list(self.shape)
+        new_shape[dim] = split_size
+        # We reimplement narrow here to avoid a lot of checks in the
+        # decomposition of narrow which calls slice_in_dim and slice
+        splits.append(self.as_strided(new_shape, self.stride(), offset))
+        offset = offset + self.stride()[dim] * split_size
+    return splits
+
+
 # Note: does not work with TensorMetas because of data-dependent control-flow
 # CompositeImplicitAutograd - don't register decomp
 def tensor_split(
@@ -4140,22 +4189,20 @@ def tensor_split(
             msg = f"tensor_split: number of sections must be greater than 0, but was {sections}"
             raise ValueError(msg)
 
-        splits = []
         dim_size = a.shape[_dim]
         min_split_size = math.floor(dim_size / sections)
         num_splits_one_extra = dim_size % sections
-        start_idx = 0
+
+        split_sizes = []
         for split_idx in range(sections):
             split_size = (
                 min_split_size + 1
                 if (split_idx < num_splits_one_extra)
                 else min_split_size
             )
-            s = prims.slice_in_dim(a, start_idx, start_idx + split_size, axis=_dim)
-            splits.append(s)
-            start_idx = start_idx + split_size
+            split_sizes.append(split_size)
 
-        return tuple(splits)
+        return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
     # Case 1 -- indices_or_sections is a sequence of integers or a 1D tensor describing the splits
     else:
         indices = indices_or_sections
@@ -4167,13 +4214,9 @@ def tensor_split(
 
             indices = indices_or_sections.tolist()
 
-        splits = []
-        start_idx = 0
-        for x in indices:
-            splits.append(prims.slice_in_dim(a, start_idx, x, axis=_dim))
-            start_idx = x
-        splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
-        return tuple(splits)
+        indices = [0] + list(indices) + [a.shape[_dim]]
+        split_sizes = [indices[i + 1] - indices[i] for i in range(len(indices) - 1)]
+        return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -6334,7 +6377,9 @@ expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
+squeeze_copy = _make_copy_from_view(aten.squeeze)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
