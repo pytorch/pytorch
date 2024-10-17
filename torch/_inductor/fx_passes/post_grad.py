@@ -1,10 +1,15 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+
+
+if TYPE_CHECKING:
+    from sympy import Expr
 
 import torch
 import torch._inductor as inductor
