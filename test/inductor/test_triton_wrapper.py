@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import os
 import subprocess
 import sys
 
@@ -39,11 +40,16 @@ class TestTritonWrapper(TestCase):
         y = torch.rand(N).to(device=GPU_TYPE)
         out = f(x, y)
         compiled_module = self.get_compiled_module()
-
+        # to make sure the subprocess runs on the exact same path as the parent process
+        # we augment the PYTHONPATH env var
+        augmented_pp = ":".join(sys.path)
+        if os.environ.get("PYTHONPATH"):
+            augmented_pp = f"{os.environ.get('PYTHONPATH')}:{augmented_pp}"
         # now run the compiled module in subprocess and check its output
         bench_out = subprocess.check_output(
             f"{sys.executable} {compiled_module.__file__}".split(),
             stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONPATH": augmented_pp},
         ).decode()
 
         self.assertTrue(len(bench_out) > 0)

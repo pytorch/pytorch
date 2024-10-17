@@ -183,7 +183,7 @@ def zip_schema(
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
-    that is, kwargs must be keyword-only arguments and default values may be omitted.
+    that is, (args, kwargs) must be bindable to the schema (args, kwargs).
     """
     assert len(schema.arguments) >= len(args) + len(kwargs)
     for i in range(len(schema.arguments)):
@@ -193,6 +193,8 @@ def zip_schema(
                 yield info, kwargs[info.name]
             continue
         if i >= len(args):
+            if not info.kwarg_only and info.name in kwargs:
+                yield info, kwargs[info.name]
             # args that are equal to their default values are not populated
             # if they are followed by args that are equal to their defaults.
             # Skip these.

@@ -1603,7 +1603,7 @@ y = torch.sin(x)
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
+        with self.assertRaisesRegex(RuntimeError, "data-dependent shape"):
             numpy_nonzero(x)
 
     def test_basic_make_fx(self):
@@ -3558,6 +3558,11 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x * y)
 
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3583,6 +3588,11 @@ Please use `add.register_fake` to add an fake impl.""",
         result = torch.vmap(f)(x, y)
         self.assertTrue(called)
         self.assertEqual(result, x * y)
+
+        x = torch.randn(3)
+        y = torch.randn(2)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):
