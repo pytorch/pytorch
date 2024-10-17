@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import logging
+from re import A
 from typing import List
 
 import torch
@@ -13,9 +14,11 @@ from torch.distributed.pipelining.schedules import (
     _Action,
     _add_send_recv,
     _add_unshard_reshard,
+    _dump_chrometrace,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
+    _simulate_comms_compute,
     _validate_pipeline_order,
     B,
     BW,
@@ -354,6 +357,16 @@ class TestScheduleLowering(TestCase):
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
 
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=test_info["stage_to_rank"],
+            num_stages=test_info["num_stages"],
+        )
+        # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+        # print(_format_pipeline_order(simulated_schedule))
+        num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
+        self.assertEqual(num_steps, 9)
+
     def test_csv(self):
         def _dump_csv(pipeline_order_with_comms, filename: str):
             """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
@@ -380,7 +393,6 @@ class TestScheduleLowering(TestCase):
             compute_sch,
             stage_to_rank=lambda chunk_index: chunk_index % pipeline_parallel_size,
             num_stages=num_stages,
-            enable_batching=True,
         )
 
         # _dump_csv(comms_sch, "lowered_comms.csv")
@@ -394,8 +406,14 @@ class TestScheduleLowering(TestCase):
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
                 self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=lambda s: s % pipeline_parallel_size,
+            num_stages=num_stages,
+        )
+
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
-        # print(_format_pipeline_order(simulated_schedule))
+        print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 271)
 
 
