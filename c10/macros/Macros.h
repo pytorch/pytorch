@@ -150,11 +150,7 @@
 #endif
 
 // suppress an unused variable.
-#if defined(_MSC_VER) && !defined(__clang__)
-#define C10_UNUSED __pragma(warning(suppress : 4100 4101))
-#else
-#define C10_UNUSED __attribute__((__unused__))
-#endif //_MSC_VER
+#define C10_UNUSED [[maybe_unused]]
 
 #if !defined(__has_attribute)
 #define __has_attribute(x) 0
