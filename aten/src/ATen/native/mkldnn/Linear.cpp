@@ -298,10 +298,6 @@ Tensor mkldnn_linear_pointwise_binary(
     other_reshaped = other_reshaped.reshape(output_size_reshaped);
   }
 
-  TORCH_CHECK(
-      output.sizes() == other_reshaped.sizes(),
-      "linear_binary_run expects the size of output and other tensor to be the same");
-
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
   const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
