@@ -236,7 +236,7 @@ def _create_output_node(packed):
         packed,
         [],
     )
-    packed.layout = MultiOutputLayout(packed.get_device())
+    packed.layout = MultiOutputLayout(device=packed.get_device())
     packed.outputs = [output_ir]
     return output_ir
 
@@ -1266,7 +1266,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         packed = LinearUnary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1347,7 +1347,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args.insert(0, B)
 
         packed = LinearBinary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1932,7 +1932,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         ]
 
         packed = MkldnnRnnLayer(
-            MultiOutputLayout(x.get_device()),
+            MultiOutputLayout(device=x.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )

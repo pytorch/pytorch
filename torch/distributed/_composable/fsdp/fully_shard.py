@@ -383,6 +383,17 @@ class FSDPModule:
             reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
             fsdp_param_group.reduce_scatter_reduce_op = reduce_op
 
+    def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
+        """
+        Sets whether the FSDP module's parameters need to be unsharded in
+        backward. This can be used in expert cases when the user knows that all
+        parameters in this FSDP module's parameter group are not needed for
+        backward computation (e.g. embedding).
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group.unshard_in_backward = unshard_in_backward
+
     def _set_unshard_async_op(self, async_op: bool):
         """
         Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
