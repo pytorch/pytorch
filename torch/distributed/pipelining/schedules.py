@@ -164,6 +164,17 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
     Formats the pipeline order in a timestep (row) x rank (column) grid of actions
     and returns the formatted string
     """
+
+    # don't mutate the original
+    pipeline_order = copy.deepcopy(pipeline_order)
+
+    # Replace None with ""
+    for rank in pipeline_order:
+        for i in range(len(pipeline_order[rank])):
+            if pipeline_order[rank][i] is None:
+                # TODO make a real 'None action' that prints as empty string and make mypy happy
+                pipeline_order[rank][i] = ""  # type: ignore[call-overload]
+
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
