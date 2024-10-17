@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -432,7 +433,10 @@ def safe_softmax(self, dim, dtype=None):
 
 @register_decomposition(aten.masked_select)
 def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
-    return torch.ops.aten.index(
+    # Decompositions take precedence during tracing over meta kernels, i.e.
+    # this takes precendence over `masked_select` in _subclasses/fake_impls.py.
+
+    res = torch.ops.aten.index(
         input,
         [
             torch.ops.aten.copy(
@@ -440,6 +444,32 @@ def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
             )
         ],
     )
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        has_free_symbols,
+    )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
+
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
+    if not has_free_symbols(input.numel()):
+        num_elements = int(input.numel())
+    else:
+        prod_node = math.prod(input.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
+    if num_elements > 2:
+        maxval = num_elements
+
+    _constrain_range_for_size(res.size(0), max=maxval)
+    return res
 
 
 @register_decomposition(aten.smooth_l1_loss)
