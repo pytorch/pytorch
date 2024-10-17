@@ -5303,6 +5303,75 @@ class MutationOutput(Buffer):
         return False
 
 
+class TMADescriptor(ExternKernel):
+    """
+    An IR node representing a host-side TMA descriptor in the Triton API
+    (the ones obtained via create_{1d,2d}_tma_descriptor calls). Mostly
+    useful for user-defined Triton kernels relying on host-side TMA; but
+    can, in principle, be used for Inductor's Triton templates, too.
+    """
+
+    # as TMA descriptors are immutable,
+    # we can dedup them by the input args
+    _CACHE: Dict[Any, TMADescriptor] = {}
+
+    @classmethod
+    def create(
+        cls,
+        tensor: TensorBox,
+        dims: List[Union[int, torch.SymInt]],
+        block_dims: List[Union[int, torch.SymInt]],
+        element_size: Optional[int] = None,
+    ):
+        key = (id(tensor), dims, block_dims, element_size)
+        if key not in cls._CACHE:
+            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
+        return cls._CACHE[key]
+
+    def __init__(
+        self,
+        tensor: TensorBox,
+        dims: List[Union[int, torch.SymInt]],
+        block_dims: List[Union[int, torch.SymInt]],
+        element_size: Optional[int] = None,
+    ):
+        assert len(dims) in (1, 2)
+        assert len(dims) == len(block_dims)
+
+        if element_size is None:
+            element_size = tensor.get_dtype().itemsize
+
+        self.tensor = tensor
+        self.dims = dims
+        self.block_dims = block_dims
+        self.element_size = element_size
+        self.rank = len(self.dims)
+
+        inputs = [tensor]
+        constant_args = [
+            *self.dims,
+            *self.block_dims,
+            self.element_size,
+        ]
+
+        super().__init__(
+            None,
+            # link back to the underlying tensor in terms of ownership
+            # to avoid getting the underlying tensor deleted *before*
+            # the TMADescriptor node can be deleted.
+            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            inputs,
+            tuple(constant_args),
+            None,
+        )
+
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def codegen(self, wrapper):
+        wrapper.generate_tma_descriptor(self)
+
+
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
@@ -5349,13 +5418,15 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(self, *, kernel_idx, grid, kernel_args):
+    def __init__(self, *, kernel_idx, grid, tma_descriptor_metadata, kernel_args):
         inputs = []
         kwargs = {}
         constant_args = []
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                if k in tma_descriptor_metadata:
+                    t = TMADescriptor.create(t, *tma_descriptor_metadata[k])
                 inputs.append(t)
                 kwargs[k] = t
             else:
