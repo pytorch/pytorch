@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Iterable,
     List,
+    Mapping,
     Optional,
     overload,
     Tuple,
@@ -241,6 +242,27 @@ def _private_register_pytree_node(
             _reverse_args(unflatten_fn),
             namespace="torch",
         )
+
+
+def treespec_leaf() -> TreeSpec:
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Mapping[Any, TreeSpec] | Iterable[tuple[Any, TreeSpec]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
 
 
 def tree_flatten(
