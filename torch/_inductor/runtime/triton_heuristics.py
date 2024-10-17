@@ -381,6 +381,9 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
+                if k == "kpack":
+                    compile_meta["kpack"] = v
+                    continue
             compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -724,10 +727,9 @@ class CachingAutotuner(KernelInterface):
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names:
+            if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                assert not arg.is_cpu
                 size = arg.numel() * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(
@@ -1003,7 +1005,7 @@ def end_graph(output_file):
     cur_file = inspect.stack()[1].filename
     summary_str = (
         f"SUMMARY ({cur_file})\n"
-        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb / (overall_time / 1e3):.2f}GB/s"
     )
     print(summary_str)
     print()
@@ -1018,7 +1020,7 @@ def end_graph(output_file):
                 file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
                 for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
                     # also display the runtime percentage for each kernel
-                    percentage = f"{ms/overall_time*100:.2f}%"
+                    percentage = f"{ms / overall_time * 100:.2f}%"
                     suffix = f" \t {percentage} \t {kernel_name}"
                     bw_info_str = create_bandwidth_info_str(
                         ms,
@@ -1579,7 +1581,6 @@ def reduction(
         size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
-    rnumel = size_hints[-1]
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
