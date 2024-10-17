@@ -689,7 +689,7 @@ static PyObject* THPVariable_as_subclass(
   c10::impl::DisablePythonDispatcher dpd_g;
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      self.detach(),
+      self.alias(),
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }

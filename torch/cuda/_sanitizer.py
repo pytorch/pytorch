@@ -608,13 +608,13 @@ class CUDASanitizer:
 
     def __del__(self):
         # Since this object lifetime is linked to the `torch.cuda._sanitizer` python
-        # module, it often gets deleted as part of the overal `torch` module cleanup
+        # module, it often gets deleted as part of the overall `torch` module cleanup
         # At that time, depending on CPython version, the torch.* module might be in
-        # different state of already cleaned up.
+        # different states of being already cleaned up.
         # Similarly other imports might already have been cleaned up so `sys` might
         # be already gone as well.
         # Skip exiting the mode if it outlived the runtime.
-        if (sys is not None) and (not sys.is_finalizing) and self.enabled:
+        if (sys is not None) and (not sys.is_finalizing()) and self.enabled:
             self.disable()
 
 
