@@ -114,6 +114,73 @@ def _set_compilation_env():
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
+def _detect_input_mutation(gm):
+    input_nodes = set()
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            input_nodes.add(node)
+        if node.op == "call_function":
+            target = node.target
+            if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+                for arg in node.args:
+                    if arg in input_nodes:
+                        return True
+
+    for _, module in gm.named_children():
+        if isinstance(module, torch.fx.GraphModule):
+            if _detect_input_mutation(module):
+                return True
+
+    return False
+
+
+def _detect_input_alias(gm):
+    input_storages = set()
+    for node in gm.graph.nodes:
+        # We need to check existence of "val" because we reuse the logic here
+        # for map operator, where num_mapped_args is a scalar
+        # and doesn't have a "val" meta.
+        if (
+            node.op == "placeholder"
+            and "val" in node.meta
+            and isinstance(node.meta["val"], torch.Tensor)
+        ):
+            input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
+        if node.op == "output":
+
+            def check_alias(out):
+                if (
+                    out is not None
+                    and "val" in out.meta
+                    and isinstance(out.meta["val"], torch.Tensor)
+                ):
+                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
+                    return out_storage in input_storages
+                return False
+
+            if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
+                return True
+
+    for _, module in gm.named_children():
+        if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
+            return True
+
+    return False
+
+
+def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+    try:
+        gm = make_fx(gm, pre_dispatch=pre_dispatch)(*inputs)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond_op is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
+
+    return _detect_input_mutation(gm) or _detect_input_alias(gm)
+
+
 def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
@@ -128,28 +195,6 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
         return True
     except Exception as e:
         raise e
-
-    def _detect_input_mutation(gm):
-        input_nodes = set()
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                input_nodes.add(node)
-            if node.op == "call_function":
-                target = node.target
-                if (
-                    isinstance(target, torch._ops.OpOverload)
-                    and target._schema.is_mutable
-                ):
-                    for arg in node.args:
-                        if arg in input_nodes:
-                            return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule):
-                if _detect_input_mutation(module):
-                    return True
-
-        return False
 
     return _detect_input_mutation(gm)
 
@@ -168,39 +213,6 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
         return True
     except Exception as e:
         raise e
-
-    def _detect_input_alias(gm):
-        input_storages = set()
-        for node in gm.graph.nodes:
-            # We need to check existence of "val" because we reuse the logic here
-            # for map operator, where num_mapped_args is a scalar
-            # and doesn't have a "val" meta.
-            if (
-                node.op == "placeholder"
-                and "val" in node.meta
-                and isinstance(node.meta["val"], torch.Tensor)
-            ):
-                input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
-            if node.op == "output":
-
-                def check_alias(out):
-                    if (
-                        out is not None
-                        and "val" in out.meta
-                        and isinstance(out.meta["val"], torch.Tensor)
-                    ):
-                        out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                        return out_storage in input_storages
-                    return False
-
-                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
-                    return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
-                return True
-
-        return False
 
     return _detect_input_alias(gm)
 
