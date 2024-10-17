@@ -3603,6 +3603,10 @@ class TestFX(JitTestCase):
             Foo,
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),
+            flatten_with_keys_fn=lambda x: (
+                ((pytree.GetAttrKey("a"), x.a), (pytree.GetAttrKey("b"), x.b)),
+                None,
+            ),
         )
 
         def f_custom(x):
