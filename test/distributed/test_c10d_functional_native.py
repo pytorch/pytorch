@@ -597,14 +597,15 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            # Ensure the all_reduce_ input is a view
+            # We always call .contiguous() on the input to all_reduce,
+            # so input will not be a view anymore.
             .check(
-                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+                "torch.ops._c10d_functional.all_reduce_.default(buf0"
             )
             .check(
-                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+                "torch.ops._c10d_functional.wait_tensor.default(buf0"
             )
-            .check("return (reinterpret_tensor(buf0")
+            .check("return (buf0")
             .run(code)
         )
 
