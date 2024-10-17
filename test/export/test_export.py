@@ -1918,7 +1918,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             str(gm.code).strip(),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     linear_weight = self.linear.weight
     linear_bias = self.linear.bias
     linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
@@ -1959,7 +1959,7 @@ def forward(self, b_buffer, x):
             str(gm.code).strip(),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     buffer = self.buffer
     add_ = torch.ops.aten.add_.Tensor(x, 5);  x = None
     add__1 = torch.ops.aten.add_.Tensor(buffer, 5);  buffer = None
@@ -4087,7 +4087,7 @@ def forward(self, c_lifted_tensor_0, x):
             str(gm.code).strip(),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -4107,7 +4107,7 @@ def forward(self, x):
             str(gm_train.code).strip(),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
