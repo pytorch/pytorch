@@ -132,6 +132,7 @@ def _reparametrize_module(
                 )
             )
 
+    orig_parameters_and_buffers: Dict[str, Tensor] = {}
     try:
         orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
             untied_parameters_and_buffers, allow_missing=True
