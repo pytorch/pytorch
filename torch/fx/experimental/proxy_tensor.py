@@ -1251,10 +1251,14 @@ _temp_remove_metadata_torch_function_mode = _make_temp_remove_mode_context_manag
 class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __init__(self, tracer: _ProxyTracer) -> None:
         self.tracer = tracer
+        # The input to torch.amp.autocast_mode._exit_autocast graph node should be the
+        # enter_autocast node. So we have to save the enter autocast node here, and assign it
+        # to the exit_autocast call_function node.
+        self.enter_autocast_nodes: List[torch.fx.Node] = []
 
     def __torch_function__(
         self,
-        func: OpOverload,
+        func: Union[OpOverload, Callable],
         types: Tuple[torch._C._TensorMeta, ...],
         args: Tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
@@ -1265,7 +1269,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
             # T203648563
+            if func == torch.amp.autocast_mode._exit_autocast:
+                enter_node = self.enter_autocast_nodes.pop()
+                args = (enter_node,)
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
+            if func == torch.amp.autocast_mode._enter_autocast:
+                self.enter_autocast_nodes.append(node)
             if func in [
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,

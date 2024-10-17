@@ -287,20 +287,19 @@ if dist.is_available():
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
-            # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
     #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-    #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
+    #         "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
     #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
     #         "UCX_TLS": "tcp,cuda",
     #         "UCC_TLS": "nccl,ucp,cuda",
@@ -1769,6 +1768,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)

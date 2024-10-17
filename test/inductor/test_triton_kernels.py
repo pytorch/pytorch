@@ -1916,15 +1916,13 @@ def forward(self, arg0_1, arg1_1):
 
     # TODO enable this test case on XPU.
     @requires_cuda
-    @parametrize("cfg", ["normal", "cpp_wrapper", "cpp_abi"])
+    @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
         if cfg == "normal":
-            config_kwargs = {"cpp_wrapper": False, "abi_compatible": False}
+            config_kwargs = {"cpp_wrapper": False}
         elif cfg == "cpp_wrapper":
-            config_kwargs = {"cpp_wrapper": True, "abi_compatible": False}
-        elif cfg == "cpp_abi":
-            config_kwargs = {"cpp_wrapper": True, "abi_compatible": True}
+            config_kwargs = {"cpp_wrapper": True}
 
         with torch._inductor.config.patch(**config_kwargs):
 
