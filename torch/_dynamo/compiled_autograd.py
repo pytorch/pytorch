@@ -590,6 +590,14 @@ class AutogradCompilerInstance:
 
 @contextlib.contextmanager
 def enable(compiler_fn):
+    from torch._dynamo import eval_frame
+
+    if eval_frame._stance.stance == "force_eager":
+        # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
+        # to fall back to eager as well.
+        yield
+        return
+
     # we need to import this to ensure cudagraphs TLS is initialized
     # it needs to be lazily imported because of circular dependencies
     import torch._inductor.cudagraph_trees

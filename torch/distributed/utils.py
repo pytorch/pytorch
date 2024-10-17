@@ -387,13 +387,3 @@ def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
         if is_root_module:
             root_modules.append(candidate_module)
     return root_modules
-
-
-# module not available under torch._running_with_deploy()
-class _FakeCompiledAutogradModule:
-    class FakeLocal:
-        def enabled(self) -> bool:
-            return False
-
-    def __init__(self):
-        self.local = self.FakeLocal()
