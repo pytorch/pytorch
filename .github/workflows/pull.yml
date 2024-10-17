@@ -1,9 +1,6 @@
 name: pull
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
   push:
     branches:
       - main
