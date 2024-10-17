@@ -24,4 +24,3 @@ typedef vfloat64m2_t fixed_vfloat64m2_t __attribute__((riscv_rvv_vector_bits(__r
 #define VQINT32_VL  (2*__riscv_v_min_vlen/32)
 
 #endif // defined(CPU_CAPABILITY_RVV)
-

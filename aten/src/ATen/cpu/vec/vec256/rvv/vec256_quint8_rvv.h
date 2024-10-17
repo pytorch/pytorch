@@ -300,4 +300,3 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 }
 }
 }
-
