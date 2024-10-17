@@ -2093,7 +2093,7 @@ class PythonWrapperCodegen(CodeGen):
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
         predicate = conditional.predicate.codegen_reference()
-        if not isinstance(conditional.predicate, ir.ExprAsConstantBuffer):
+        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
             # move the Tensor predicate to host
             predicate = f"{predicate}.item()"
 
