@@ -1665,11 +1665,8 @@ class FakeTensorMode(TorchDispatchMode):
         shape = tuple(check_value(v, state) for v in metadata.shape)
         stride = tuple(check_value(v, state) for v in metadata.stride)
         storage_offset = check_value(metadata.storage_offset, state)
-        storage_bytes = (
-            None
-            if metadata.storage_bytes is None
-            else check_value(metadata.storage_bytes, state)
-        )
+        if metadata.storage_bytes is not None:
+            check_value(metadata.storage_bytes, state)
 
         maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
         if self.shape_env is not None:
@@ -2024,6 +2021,13 @@ class FakeTensorMode(TorchDispatchMode):
                     if isinstance(t.node.expr, sympy.Symbol):
                         assert self.shape_env is not None
                         self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
+                    elif (
+                        isinstance(s := t.node.expr, sympy.Eq)
+                        and isinstance(s.lhs, sympy.Symbol)
+                        and s.rhs == 1
+                    ):
+                        assert self.shape_env is not None
+                        self.shape_env.set_unbacked_var_to_val(s, int(real_t))
 
             if real_out is not nil:
                 if (

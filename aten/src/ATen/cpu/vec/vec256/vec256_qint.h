@@ -1339,7 +1339,7 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
-#if defined(CPU_CAPABILITY_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <typename T>
 typename std::enable_if_t<std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(at::vec::Vectorized<T> src) {
