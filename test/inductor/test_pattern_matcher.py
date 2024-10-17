@@ -1241,7 +1241,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm_backends": "TRITON",
         }
     )
-    def test_original_aten_preserved(self):
+    def test_original_aten_preserved_split_addmm(self):
         # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
@@ -1263,6 +1263,34 @@ class TestPatternMatcher(TestCase):
         FileCheck().check_not("extern_kernels.addmm(").check(
             "def triton_tem_fused_addmm"
         ).run(code[0])
+
+    @inductor_config.patch(
+        {
+            "triton.unique_kernel_names": "original_aten",
+            "fx_graph_remote_cache": False,
+            "max_autotune_gemm_backends": "TRITON",
+            "shape_padding": True,
+        }
+    )
+    def test_original_aten_preserved_pad_mm(self):
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        def fn(x, y):
+            return x @ y
+
+        args = [
+            torch.randn(2**14, 2**16 - 1, device=GPU_TYPE, dtype=torch.float16),
+            torch.randn(2**16 - 1, 2**14, device=GPU_TYPE, dtype=torch.float16),
+        ]
+
+        counters.clear()
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+        ret, code = run_and_get_code(opt_fn, *args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
+        # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
+        FileCheck().check("def triton_tem_fused_mm").check().run(code[0])
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
