@@ -3605,7 +3605,6 @@ class TestFX(JitTestCase):
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),
         )
-        fx_pytree.register_pytree_flatten_spec(Foo, lambda x, _: [x.a, x.b])
 
         def f_custom(x):
             return x.a + x.b
