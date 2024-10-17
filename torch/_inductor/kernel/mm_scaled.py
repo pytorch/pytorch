@@ -17,7 +17,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_ck_template
+from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
 from .mm_common import (
     _is_static_problem,
     mm_args,
@@ -514,51 +514,39 @@ def tuned_scaled_mm(
     )
 
     choices: List[ChoiceCaller] = []
-    # if use_aten_gemm_kernels():
-    # choices.append(aten_choice)
+    if use_aten_gemm_kernels():
+        choices.append(aten_choice)
 
-    config = next(scaled_mm_configs(m, n, k))
     static_shape, is_nonzero = _is_static_problem(layout)
-    kwargs = scaled_mm_options_device_tma(
-        config, m, n, k, layout, scale_a, scale_b, use_fast_accum
-    )
-    input_nodes = (mat_a, mat_b, scale_a, scale_b)
-    workspace_size = get_workspace_size(kwargs["NUM_SMS"])
-    scaled_mm_device_tma_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=layout,
-        workspace_arg=WorkspaceArg(workspace_size, False),
-        **kwargs,
-    )
-    # if is_nonzero and use_triton_template(layout, enable_float8=True):
-    #     for config in scaled_mm_configs(m, n, k):
-    #         # if k == 16 and config.kwargs["BLOCK_M"] >= 64:
-    #         #     continue  # Triton crashes in this case
-    #         # kwargs = scaled_mm_options(
-    #         #     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
-    #         # )
-    #         # # possibly appends a TritonTemplateCaller to choices
-    #         # triton_template.maybe_append_choice(
-    #         #     choices,
-    #         #     input_nodes=input_nodes,
-    #         #     layout=layout,
-    #         #     **kwargs,
-    #         # )
 
-    # if ADD_TMA_DEVICE_KERNELS:
-    #     kwargs = scaled_mm_options_device_tma(
-    #         config, m, n, k, layout, scale_a, scale_b, use_fast_accum
-    #     )
-    #     input_nodes = (mat_a, mat_b, scale_a, scale_b)
-    #     workspace_bytes = get_workspace_size(kwargs["NUM_SMS"])
-    #     scaled_mm_device_tma_template.maybe_append_choice(
-    #         choices,
-    #         input_nodes=input_nodes,
-    #         layout=layout,
-    #         workspace_arg=WorkspaceArg(workspace_bytes, False),
-    #         **kwargs,
-    #     )
+    if is_nonzero and use_triton_template(layout, enable_float8=True):
+        for config in scaled_mm_configs(m, n, k):
+            if ADD_TMA_DEVICE_KERNELS:
+                kwargs = scaled_mm_options_device_tma(
+                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum
+                )
+                input_nodes = (mat_a, mat_b, scale_a, scale_b)
+                workspace_bytes = get_workspace_size(kwargs["NUM_SMS"])
+                scaled_mm_device_tma_template.maybe_append_choice(
+                    choices,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    workspace_arg=WorkspaceArg(workspace_bytes, False),
+                    **kwargs,
+                )
+            else:
+                if k == 16 and config.kwargs["BLOCK_M"] >= 64:
+                    continue  # Triton crashes in this case
+                kwargs = scaled_mm_options(
+                    config, m, n, k, layout, scale_a, scale_b, use_fast_accum
+                )
+                # possibly appends a TritonTemplateCaller to choices
+                triton_template.maybe_append_choice(
+                    choices,
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    **kwargs,
+                )
 
     if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
