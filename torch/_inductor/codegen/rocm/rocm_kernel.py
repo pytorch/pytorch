@@ -172,7 +172,7 @@ class ROCmTemplateKernel(ROCmKernel):
         if node.get_workspace_size() > 0:
             ws = WorkspaceArg(
                 count=node.get_workspace_size(),
-                device=V.graph.scheduler.get_current_device_or_throw(),
+                device=V.graph.get_current_device_or_throw(),
                 zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                 outer_name=WorkspaceArg.unique_name(),
             )
@@ -187,7 +187,7 @@ class ROCmTemplateKernel(ROCmKernel):
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             kernel_args,

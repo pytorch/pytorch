@@ -1421,7 +1421,7 @@ class KernelArgs:
         arg = WorkspaceArg(
             count=nbytes,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
-            device=V.graph.scheduler.get_current_device_or_throw(),
+            device=V.graph.get_current_device_or_throw(),
             outer_name=WorkspaceArg.unique_name(),
         )
         for i, existing_arg in enumerate(self.workspace_args):
@@ -1449,7 +1449,7 @@ class KernelArgs:
         Returns:
             name of the semaphores buffer
         """
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
