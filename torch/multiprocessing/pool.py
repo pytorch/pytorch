@@ -33,7 +33,7 @@ class Pool(multiprocessing.pool.Pool):
         Bring the number of pool processes up to the specified number, for use after
         reaping workers which have exited.
         """
-        for i in range(self._processes - len(self._pool)):
+        for _ in range(self._processes - len(self._pool)):
             # changed worker -> clean_worker
             args = (
                 self._inqueue,

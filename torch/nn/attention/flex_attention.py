@@ -193,8 +193,6 @@ def _adjust_num_blocks_and_indices(
     new_num_rows: int,
     new_num_cols: int,
 ):
-    num_rows = indices.shape[-2]
-    num_columns = indices.shape[-1]
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)

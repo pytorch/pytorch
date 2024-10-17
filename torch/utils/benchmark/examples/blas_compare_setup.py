@@ -171,7 +171,7 @@ def main():
         print(f"Building PyTorch for env: `{env_name}`")
         # We have to re-run during each build to pick up the new
         # build config settings.
-        build_run = subprocess.run(
+        subprocess.run(
             f"source activate {env_path} && "
             f"cd {git_root} && "
             "python setup.py install --cmake",

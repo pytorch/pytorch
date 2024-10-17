@@ -487,7 +487,7 @@ def reinplace(gm, *sample_args):
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
-    for idx, node in enumerate(gm.graph.nodes):
+    for node in gm.graph.nodes:
         if node.op == 'call_function':
 
             # Today, the re-inplace pass on directly acts on:
@@ -532,7 +532,6 @@ def reinplace(gm, *sample_args):
                 continue
 
             # Step 1b: ensure that the op we're trying to re-inplace isn't a program input
-            self_arg_name = self_arg.name
             self_arg_storage = StorageWeakRef(self_arg.meta['fake_result']._typed_storage())
             if self_arg_storage in input_storages:
                 # TODO: later, add the optimization for handling `copy_()` calls in the graph.
@@ -578,7 +577,7 @@ def reinplace(gm, *sample_args):
                     remaining_slice_args = node.args[2:]
                     slice_node = gm.graph.create_node(
                         'call_function', view_op, (self_arg,) + tuple(remaining_slice_args), node.kwargs)
-                    copy_node = gm.graph.create_node(
+                    gm.graph.create_node(
                         'call_function', torch.ops.aten.copy_.default, (slice_node, mutated_slice_node,), {})
                 # Add the slice_scatter node to our "nodes to delete" list.
                 all_later_view_inverse_nodes_to_delete.add(node)
@@ -612,8 +611,6 @@ def reinplace(gm, *sample_args):
                 new = old.args[0]
                 nodes_to_update = [n for n in old.users if n.meta['node_idx'] > node.meta['node_idx']]
                 for node_to_update in nodes_to_update:
-                    new_args = []
-                    args = node_to_update.args
 
                     def replace_arg(a):
                         if a == old:
@@ -654,7 +651,6 @@ def reinplace(gm, *sample_args):
                                 x._typed_storage()
                             ) for x in new_flattened_res if isinstance(x, FakeTensor)}
                         assert len(new_res_storage) == 1
-                        (old_ref,) = old_res_storage
                         (new_ref,) = new_res_storage
                         (node_ref,) = node_res_storage
                         # Technically, "old_ref" and all its aliases will remain

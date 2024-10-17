@@ -245,7 +245,7 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
     ) = all_gather_result
-    dtype, device = all_gather_output.dtype, all_gather_output.device
+    _dtype, device = all_gather_output.dtype, all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)

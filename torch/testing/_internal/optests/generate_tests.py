@@ -392,9 +392,7 @@ def validate_failures_dict_structure(
 
     """
     failure_dict = failure_dict.data
-    qualnames = list(failure_dict.keys())
     for test_to_option in failure_dict.values():
-        test_names = list(test_to_option.keys())
         for test_name, test_dict in test_to_option.items():
             if set(test_dict.keys()) != set({"comment", "status"}):
                 raise RuntimeError(
