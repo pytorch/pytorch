@@ -1087,6 +1087,40 @@ graph():
         ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
 
+    def test_export_preserve_linear_but_not_custom_op(self):
+        table = torch.export.default_decompositions()
+        del table[torch.ops.aten.linear.default]
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            class Bar(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4)
+
+                def forward(self, x):
+                    lin = self.linear(x)
+                    return torch.ops.mylib.foo123(lin)
+
+            x = torch.randn(4, 4)
+            if IS_FBCODE:
+                ep = export(Bar(), (x,)).run_decompositions(
+                    decomp_table=None, _preserve_ops=(torch.ops.aten.linear.default,)
+                )
+            else:
+                ep = export(Bar(), (x,)).run_decompositions(table)
+
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    sin = torch.ops.aten.sin.default(linear);  linear = None
+    return (sin,)""",
+            )
+
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
