@@ -1591,7 +1591,7 @@ def index_put_(func, *args, **kwargs):
             *inp.shape[inp._ragged_idx + 1 :],
         )
         padded_inp = inp.to_padded_tensor(0.0, output_size=padded_shape)
-        return nested_from_padded(
+        new_njt = nested_from_padded(
             func(padded_inp, indices, **new_kwargs),
             offsets=inp._offsets,
             ragged_idx=inp._ragged_idx,
@@ -1599,6 +1599,10 @@ def index_put_(func, *args, **kwargs):
             min_seqlen=min_seqlen,
             max_seqlen=max_seqlen,
         )
+
+        if func == torch.ops.aten.index_put_.default:
+            inp._values.copy_(new_njt._values)
+        return new_njt
 
     # We can run on the underlying values directly
 
