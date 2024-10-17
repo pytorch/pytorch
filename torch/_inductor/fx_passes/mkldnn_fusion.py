@@ -368,8 +368,7 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
-            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
