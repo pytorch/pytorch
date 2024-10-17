@@ -4231,6 +4231,45 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_record_stream(self, device, dtype):
+        def _create_nt():
+            values = torch.ones(1024, 4 * 1024, device="cuda")
+            offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
+            lengths = offsets.diff()
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
+            data_ptrs = {
+                nt._values.data_ptr(),
+                nt._offsets.data_ptr(),
+                nt._lengths.data_ptr(),
+            }
+            return nt, data_ptrs
+
+        def fn(record_stream):
+            nt, data_ptrs = _create_nt()
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # emulate doing something long via sleep
+                per_ms = 2e7
+                torch.cuda._sleep(int(per_ms * 100))
+                if record_stream:
+                    nt.record_stream(s)
+            return data_ptrs
+
+        # expect memory reuse when record_stream() is not run
+        data_ptrs = fn(record_stream=False)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(data_ptrs, nt_data_ptrs)
+        del nt
+        torch.cuda.synchronize()
+
+        # expect memory to be preserved (no reuse) when record_stream() is run
+        data_ptrs = fn(record_stream=True)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(len(data_ptrs.intersection(nt_data_ptrs)), 0)
+
     @dtypes(torch.float32)
     @parametrize(
         "func",
