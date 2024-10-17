@@ -45,12 +45,15 @@ from torch._dynamo.testing import CompileCounterWithBackend
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
-    IS_JETSON, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    IS_JETSON,
+    SM80OrLater,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     SM90OrLater,
-    tf32_on_and_off
+    tf32_on_and_off,
+    tf32_on,
 )
 
 if not IS_FBCODE:
@@ -63,6 +66,7 @@ if TEST_FAIRSEQ:
 
 SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
 Tolerances = namedtuple('Tolerances', ['atol', 'rtol'])
+
 
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
@@ -2938,6 +2942,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if MEM_EFF_CAPABILITY_MATCHES_SM80
                  else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
+    @tf32_on()
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
@@ -3037,6 +3042,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if MEM_EFF_CAPABILITY_MATCHES_SM80
                  else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
+    @tf32_on()
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
@@ -3145,6 +3151,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False] if not TEST_WITH_ROCM else [False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
+    @tf32_on()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: List[int]):
@@ -3266,6 +3273,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
+    @tf32_on()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
                                                          seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
