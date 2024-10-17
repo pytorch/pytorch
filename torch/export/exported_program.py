@@ -664,10 +664,7 @@ def _decompose_exported_program(
         joint_loss_index=joint_loss_index,
     )
 
-    # TODO unfortunately preserving graph-level metadata is not
-    # working well with aot_export. So we manually copy it.
-    # (The node-level meta is addressed above.)
-    gm.meta.update(ep.graph_module.meta)
+    _update_gm_meta_if_possible(gm, ep.graph_module)
 
     new_range_constraints = _get_updated_range_constraints(
         gm,
