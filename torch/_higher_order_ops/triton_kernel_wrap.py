@@ -1240,8 +1240,8 @@ class TracingTritonHOPifier(TritonHOPifier):
         tx: Optional["InstructionTranslator"],
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         assert tx is None
-        assert isinstance(grid, dict)
-        assert isinstance(grid, Callable)
+        assert isinstance(meta, dict)
+        assert callable(grid)
         return grid(meta)
 
     def check_grid(
