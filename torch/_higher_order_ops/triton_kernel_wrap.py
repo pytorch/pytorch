@@ -959,7 +959,7 @@ class TritonHOPifier:
 
     def call_grid(
         self,
-        grid: "TritonGridType",
+        grid: "TritonGridCallableType",
         meta: "TritonMetaParamsType",
         tx: Optional["InstructionTranslator"],
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
@@ -1176,7 +1176,7 @@ class TritonHOPifier:
             if self.is_callable(grid):
                 # Populate the special "meta" argument to call the grid function
                 meta = {**combined_args_raw, **config_args}
-                grid = self.call_grid(grid, meta, tx)
+                grid = self.call_grid(grid, meta, tx)  # type: ignore[arg-type]
             grids.append(self.check_grid(grid))
 
         for i in range(len(grids)):
@@ -1233,15 +1233,18 @@ class TracingTritonHOPifier(TritonHOPifier):
     def get_value(self, val: Any) -> Any:
         return val
 
-    def call_grid(self, grid, meta, tx: Optional["InstructionTranslator"]) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:  # type: ignore[no-untyped-def]
+    def call_grid(
+        self,
+        grid: "TritonGridCallableType",
+        meta: "TritonMetaParamsType",
+        tx: Optional["InstructionTranslator"],
+    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         assert tx is None
         return grid(meta)
 
     def check_grid(
         self, grid: "TritonGridType"
-    ) -> Tuple[
-        Union[int, sympy.Expr, SymInt], ...
-    ]:  # TODO(dberard) type: ignore[no-untyped-def]
+    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
                 "capture_triton can only handle grids that resolve to Sequence[int]."
