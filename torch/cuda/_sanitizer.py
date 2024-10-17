@@ -21,6 +21,7 @@ import textwrap
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
+import re
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
@@ -40,6 +41,10 @@ EventId = int
 SeqNum = int
 
 logger = logging.getLogger(__name__)
+
+# Note that this is only factories that take Tensor as input as they are
+# the ones we care about.
+FACTORY_FUNCTION_REGEX = re.compile("(new_.*|.*_like)")
 
 
 class AccessType(enum.Enum):
@@ -486,6 +491,7 @@ class ArgumentHandler:
         self,
         value: Any,
         is_write: bool,
+        metadata_only: bool,
         name: Optional[str] = None,
         is_output: bool = False,
     ) -> None:
@@ -493,7 +499,7 @@ class ArgumentHandler:
             data_ptr = value.data_ptr()
             if is_write:
                 self.dataptrs_written.add(data_ptr)
-            else:
+            elif not metadata_only:
                 self.dataptrs_read.add(data_ptr)
 
             self.tensor_aliases.setdefault(data_ptr, [])
@@ -507,21 +513,28 @@ class ArgumentHandler:
         schema: torch.FunctionSchema,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
+        *,
+        is_factory: bool
     ) -> None:
         for argument, value in zip_arguments(schema, args, kwargs):
             is_write = argument.alias_info is not None and argument.alias_info.is_write
+            # A change is metadata only if it is a view or a factory function that
+            # reads only metadata
+            metadata_only = is_factory or (argument.alias_info is not None and not argument.alias_info.is_write)
             pytree.tree_map_(
                 functools.partial(
-                    self._handle_argument, is_write=is_write, name=argument.name
+                    self._handle_argument, is_write=is_write, name=argument.name, metadata_only=metadata_only
                 ),
                 value,
             )
 
-    def parse_outputs(self, outputs: Any) -> None:
-        pytree.tree_map_(
-            functools.partial(self._handle_argument, is_write=True, is_output=True),
-            outputs,
-        )
+    def parse_outputs(self, schema: torch.FunctionSchema, outputs: Any, *, is_factory: bool) -> None:
+        for res, value in zip(schema.returns, (outputs,)):
+            metadata_only = is_factory or (res.alias_info is not None and not res.alias_info.is_write)
+            pytree.tree_map_(
+                functools.partial(self._handle_argument, is_write=not metadata_only, is_output=True, metadata_only=metadata_only),
+                value,
+            )
 
 
 class CUDASanitizerDispatchMode(TorchDispatchMode):
@@ -563,12 +576,14 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        is_factory = FACTORY_FUNCTION_REGEX.match(func._schema.name)
+
         argument_handler = ArgumentHandler()
-        argument_handler.parse_inputs(func._schema, args, kwargs)
+        argument_handler.parse_inputs(func._schema, args, kwargs, is_factory=is_factory)
 
         outputs = func(*args, **kwargs)
 
-        argument_handler.parse_outputs(outputs)
+        argument_handler.parse_outputs(func._schema, outputs, is_factory=is_factory)
         errors = self.event_handler._handle_kernel_launch(
             torch.cuda.current_stream().cuda_stream,
             argument_handler.dataptrs_read - argument_handler.dataptrs_written,
