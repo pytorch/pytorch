@@ -6,8 +6,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, List
 
-import requests
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 LAST_UPDATED = 0.0
@@ -85,6 +83,8 @@ def zip_and_upload_artifacts(failed: bool) -> None:
 
 
 def trigger_upload_test_stats_intermediate_workflow() -> None:
+    import requests
+
     # The GITHUB_TOKEN cannot trigger workflow so this isn't used for now
     print("Triggering upload_test_stats_intermediate workflow")
     x = requests.post(
