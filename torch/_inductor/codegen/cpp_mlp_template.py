@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 
 # TODO<Leslie>: We should merge this with GEMM Template to save redundant code
 GEMM_TEMPLATE = r"""
+
+{% macro generate_epilogue() %}
+  {{ kernel.silu_mul(tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name) }}
+{% endmacro %}
+
 {{template.header().getvalue()}}
 
 template <bool has_gate_bias, bool has_up_bias>
@@ -289,7 +294,7 @@ extern "C" {{export_declaration}}
 {%- set tile_inp1 = tile_Y %}
 {%- endif %}
                     // silu-mul epilogues
-                    {{ kernel.silu_mul(tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name) }}
+                    {{ generate_epilogue() }}
                 }
             }
         }
