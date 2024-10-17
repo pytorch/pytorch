@@ -32,7 +32,7 @@ GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
 
 template <bool has_gate_bias, bool has_up_bias>
-inline void silu_mul_epilogue_fusion(
+inline void {{micro_gemm.name}}_silu_mul_epilogue_fusion(
     float* in_ptr0,
     float* in_ptr1,
     const bfloat16* inp0,
@@ -289,7 +289,7 @@ extern "C" {{export_declaration}}
 {%- set tile_inp1 = tile_Y %}
 {%- endif %}
                     // silu-mul epilogues
-                    {{ kernel.silu_mul(tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias) }}
+                    {{ kernel.silu_mul(tile_acc, tile_acc1, tile_inp, tile_inp1, tile_Y, has_gate_bias, has_up_bias, micro_gemm.name) }}
                 }
             }
         }

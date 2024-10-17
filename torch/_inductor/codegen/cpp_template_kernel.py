@@ -197,7 +197,15 @@ class CppTemplateKernel(CppKernel):
         return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
 
     def silu_mul(
-        self, in_buf0, in_buf1, inp0, inp1, out_buf, has_gate_bias, has_up_bias
+        self,
+        in_buf0,
+        in_buf1,
+        inp0,
+        inp1,
+        out_buf,
+        has_gate_bias,
+        has_up_bias,
+        name_prefix,
     ):
         in_ptr0 = f"&({self.index(in_buf0, [0, 0])})"
         in_ptr1 = f"&({self.index(in_buf1, [0, 0])})"
@@ -210,7 +218,7 @@ class CppTemplateKernel(CppKernel):
         inp_ptr1 = f"&({self.index(inp1, [0, 0])})"
         template = f"{value_to_cpp(has_gate_bias, 'bool')}, {value_to_cpp(has_up_bias, 'bool')}"
         arguments = f"{in_ptr0}, {in_ptr1}, {inp_ptr0}, {inp_ptr1}, {out_ptr}, {M}, {N}, {in_lda}, {out_lda}"
-        return f"silu_mul_epilogue_fusion<{template}>({arguments});"
+        return f"{name_prefix}_silu_mul_epilogue_fusion<{template}>({arguments});"
 
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""

@@ -217,17 +217,21 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            if attr == "mlp_silu_mul":
-                assert isinstance(w, List)
-                assert isinstance(b, List)
-                return mlp_linear_silu_linear_mul(
-                    x, w, b, attr, scalars, algorithm, layout
-                )
-
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
+
+            if attr == "mlp_silu_mul":
+                assert isinstance(w, List)
+                assert isinstance(b, List)
+                result = mlp_linear_silu_linear_mul(
+                    x, w, b, attr, scalars, algorithm, layout
+                )
+                if len(x_size) > 2:
+                    result = view(result, (*x_size[:-1], result.get_size()[-1]))
+                return result
+
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: List[ChoiceCaller] = []
