@@ -648,6 +648,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(b(inp), inp + 2)
         self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
 
+        torch.compiler.set_stance("force_eager")
+        self.assertEqual(a(inp), inp + 2)
+        torch.compiler.set_stance("default")
+        self.assertEqual(a(inp), inp + 1)
+
     def test_set_stance_eager_on_recompile(self):
         @torch.compile(backend="eager", dynamic=False)
         def a(x, n):
