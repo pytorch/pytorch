@@ -231,9 +231,9 @@ def gen_conv_ops_library() -> List[CKGroupedConvFwdOp]:
     ]
     conv_specs = [
         "ConvolutionForwardSpecialization::Default",
-        # "ConvolutionForwardSpecialization::Filter1x1Pad0",
-        # "ConvolutionForwardSpecialization::Filter1x1Stride1Pad0",
-        # "ConvolutionForwardSpecialization::OddC",
+        "ConvolutionForwardSpecialization::Filter1x1Pad0",
+        "ConvolutionForwardSpecialization::Filter1x1Stride1Pad0",
+        "ConvolutionForwardSpecialization::OddC",
     ]
 
     # substitute templated args by looping through their domains
@@ -639,6 +639,12 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         if op.b_layout != torch_layout_to_ck_weight_layout(W_meta):
             return None
         if op.e_layout != torch_layout_to_ck_output_layout(Y_meta):
+            return None
+        # disable the instance if number of spatial dimensions doesn't match
+        if op.n_dim_spatial != self.n_spatial_dimensions:
+            return None
+        # disable 1x1 and odd-channels conv specializations for now
+        if "Default" not in op.conv_forward_specialization:
             return None
         return op
 
