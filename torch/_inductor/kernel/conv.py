@@ -6,7 +6,7 @@ import logging
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
-from torch._inductor.codegen.rocm.ck_conv_template import CKConvTemplate
+from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
 from ..lowering import (
@@ -666,7 +666,7 @@ def convolution(
     # import pdb; pdb.set_trace()
 
     if use_ck_conv_template(layout):
-        CKConvTemplate.add_ck_conv_choices(
+        CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
             input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
