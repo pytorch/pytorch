@@ -733,7 +733,7 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 def _call_name(base: str, n: int) -> str:
     # Given n >= 0, generate call names to a submodule `base` of the form
     # `base`, `base@1`, `base@2`, etc.
-    return base if n == 1 else f"{base}@{n-1}"
+    return base if n == 1 else f"{base}@{n - 1}"
 
 
 def _is_call_name(call_name: str, base: str) -> bool:
@@ -805,8 +805,7 @@ class _ModuleFrame:
         signature = module_call_graph.get(self.fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
-            args_spec = signature.in_spec.children_specs[0]
-            kwargs_spec = signature.in_spec.children_specs[1]
+            args_spec, kwargs_spec = signature.in_spec.children()
             assert args_spec.context is None
             assert kwargs_spec.context is not None
 
