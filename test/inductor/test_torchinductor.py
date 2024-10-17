@@ -11104,8 +11104,6 @@ class CommonTemplate:
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    # We only support dtypeview for abi_compatible aoti
-    @torch._inductor.config.patch(abi_compatible=True)
     @parametrize(
         "dtype_x, dtype_y",
         list(itertools.product(test_dtypes, test_dtypes)),
@@ -11140,7 +11138,6 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
-    @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
         @torch.compile
         def fn(x):
