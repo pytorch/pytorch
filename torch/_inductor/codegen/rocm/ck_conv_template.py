@@ -30,6 +30,33 @@ def torch_layout_to_ck_layouts(torch_layout):
     else:
         return None
 
+
+def torch_layout_to_ck_input_layout(torch_layout):
+    if torch_layout.stride[-1] == 1:
+        return "NGCHW"
+    elif torch_layout.stride[-3] == 1:
+        return "NHWGC"
+    else:
+        return None
+
+
+def torch_layout_to_ck_weight_layout(torch_layout):
+    if torch_layout.stride[-1] == 1:
+        return "GKCYX"
+    elif torch_layout.stride[-3] == 1:
+        return "GKYXC"
+    else:
+        return None
+
+
+def torch_layout_to_ck_output_layout(torch_layout):
+    if torch_layout.stride[-1] == 1:
+        return "NGKHW"
+    elif torch_layout.stride[-3] == 1:
+        return "NHWGK"
+    else:
+        return None
+
 @dataclass
 class CKConvOp:
     n_dim_spatial: int
@@ -609,11 +636,11 @@ class CKConvTemplate(CKTemplate):
         if op.e_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
         # disable the instance if layouts don't match
-        if op.a_layout not in torch_layout_to_ck_layouts(X_meta):
+        if op.a_layout != torch_layout_to_ck_input_layout(X_meta):
             return None
-        if op.b_layout not in torch_layout_to_ck_layouts(W_meta):
+        if op.b_layout != torch_layout_to_ck_weight_layout(W_meta):
             return None
-        if op.e_layout not in torch_layout_to_ck_layouts(Y_meta):
+        if op.e_layout != torch_layout_to_ck_output_layout(Y_meta):
             return None
         return op
 
