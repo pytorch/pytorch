@@ -4,7 +4,6 @@ import logging
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
@@ -23,6 +22,13 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
@@ -172,6 +178,9 @@ class FSDPParamGroup:
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
         self.unshard_async_op: bool = False
+        # Whether to unshard in backward: can be overridden by the user if the
+        # parameters in this group are not needed for backward (e.g. embedding)
+        self.unshard_in_backward: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -234,6 +243,11 @@ class FSDPParamGroup:
             return
         if self.is_unsharded:
             return  # no-op
+        if (
+            not self.unshard_in_backward
+            and self._training_state == TrainingState.PRE_BACKWARD
+        ):
+            return
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
