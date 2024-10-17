@@ -93,6 +93,10 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
       "cl_intel_" #member, &cl_version);
 
+#define ASSIGN_EXP_DEVICE_PROP(property) \
+  device_prop->property =                \
+      raw_device.get_info<oneapi::experimental::info::device::property>();
+
   AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
 
   device_prop->platform_name =
@@ -105,6 +109,9 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   // TODO: Remove cl_version since it is unnecessary.
   sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
+
+  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
+
   return;
 }
 

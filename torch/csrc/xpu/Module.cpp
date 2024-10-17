@@ -295,6 +295,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
+  auto get_device_architecture = [](const DeviceProp& prop) {
+    return static_cast<int64_t>(prop.architecture);
+  };
   auto m = py::handle(module).cast<py::module>();
 
 #define DEFINE_READONLY_MEMBER(member) \
@@ -323,6 +326,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+      .def_property_readonly("architecture", get_device_architecture)
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
