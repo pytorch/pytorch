@@ -1337,9 +1337,7 @@ class PythonWrapperCodegen(CodeGen):
                 indices=non_constant_indices,
                 argdefs=kernel.arg_names,
             ),
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1479,7 +1477,7 @@ class PythonWrapperCodegen(CodeGen):
 
         traverse(kernel)
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1627,7 +1625,7 @@ class PythonWrapperCodegen(CodeGen):
         call_args = [wrap_arg(arg) for arg in call_args]
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
 
         return device_index, call_args
