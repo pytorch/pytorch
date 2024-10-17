@@ -217,16 +217,15 @@ if python_pytree._cxx_pytree_exists:
 
     leafspec = PyTreeSpec((), None, None, (), None)
 
-    @substitute_in_graph(  # type: ignore[arg-type]
-        cxx_pytree._is_pytreespec_instance,
-        # We need to disable constant folding here because we want the function to reference the
-        # PyTreeSpec class defined above, not the one in the C++ module.
-        can_constant_fold_through=False,
-    )
     def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
 
-    @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)  # type: ignore[arg-type]
+    @substitute_in_graph(
+        cxx_pytree.tree_flatten,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )  # type: ignore[arg-type]
     def tree_flatten(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
@@ -262,7 +261,12 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_flatten"]
 
-    @substitute_in_graph(cxx_pytree.tree_structure, can_constant_fold_through=False)  # type: ignore[arg-type]
+    @substitute_in_graph(
+        cxx_pytree.tree_structure,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )  # type: ignore[arg-type]
     def tree_structure(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
@@ -271,9 +275,14 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_structure"]
 
-    @substitute_in_graph(cxx_pytree.tree_unflatten, can_constant_fold_through=False)  # type: ignore[arg-type]
+    @substitute_in_graph(
+        cxx_pytree.tree_unflatten,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )  # type: ignore[arg-type]
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
-        if not isinstance(treespec, PyTreeSpec):
+        if not _is_pytreespec_instance(treespec):
             raise TypeError(
                 f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
                 f"PyTreeSpec but got item of type {type(treespec)}."
