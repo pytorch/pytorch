@@ -1,4 +1,5 @@
 from typing import Any, Callable, List, Optional, Type
+from typing_extensions import deprecated
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import PyTree, TreeSpec
@@ -8,6 +9,11 @@ FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
 
+@deprecated(
+    "torch.fx._pytree.register_pytree_flatten_spec is deprecated and it is now a no-op. "
+    "Please register the flatten_with_keys function in pytree instead.",
+    category=FutureWarning,
+)
 def register_pytree_flatten_spec(
     cls: Type[Any],
     flatten_fn_spec: FlattenFuncSpec,
