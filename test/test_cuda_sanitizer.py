@@ -37,7 +37,9 @@ class TestArgumentHandler(TestCase):
         c = torch.rand(2, 7, 5, device="cuda")
 
         argument_handler = csan.ArgumentHandler()
-        argument_handler.parse_inputs(cat_func._schema, ([a, b, c], 1), {}, is_factory=False)
+        argument_handler.parse_inputs(
+            cat_func._schema, ([a, b, c], 1), {}, is_factory=False
+        )
         d = torch.cat((a, b, c), dim=1)
         argument_handler.parse_outputs(cat_func._schema, d, is_factory=False)
 
@@ -65,7 +67,9 @@ class TestArgumentHandler(TestCase):
         a = torch.rand(4, 2, device="cuda")
 
         argument_handler = csan.ArgumentHandler()
-        argument_handler.parse_inputs(add_inplace_func._schema, (a, 5), {}, is_factory=False)
+        argument_handler.parse_inputs(
+            add_inplace_func._schema, (a, 5), {}, is_factory=False
+        )
         a.add_(5)
         argument_handler.parse_outputs(add_inplace_func._schema, a, is_factory=False)
 
@@ -78,7 +82,9 @@ class TestArgumentHandler(TestCase):
         b = torch.empty(8, device="cuda")
 
         argument_handler = csan.ArgumentHandler()
-        argument_handler.parse_inputs(mul_out_func._schema, (a, 3), {"out": b}, is_factory=False)
+        argument_handler.parse_inputs(
+            mul_out_func._schema, (a, 3), {"out": b}, is_factory=False
+        )
         torch.mul(a, 3, out=b)
         argument_handler.parse_outputs(mul_out_func._schema, b, is_factory=False)
 
@@ -90,7 +96,9 @@ class TestArgumentHandler(TestCase):
         a = torch.ones(5, 3, 2, device="cuda")
 
         argument_handler = csan.ArgumentHandler()
-        argument_handler.parse_inputs(nonzero_func._schema, (a,), {"as_tuple": True}, is_factory=False)
+        argument_handler.parse_inputs(
+            nonzero_func._schema, (a,), {"as_tuple": True}, is_factory=False
+        )
         out = torch.nonzero(a, as_tuple=True)
         argument_handler.parse_outputs(nonzero_func._schema, out, is_factory=False)
 
@@ -104,7 +112,9 @@ class TestArgumentHandler(TestCase):
         M = torch.zeros(3, 3, device="cuda")
 
         argument_handler = csan.ArgumentHandler()
-        argument_handler.parse_inputs(addr_func._schema, (M, vec, vec), {}, is_factory=False)
+        argument_handler.parse_inputs(
+            addr_func._schema, (M, vec, vec), {}, is_factory=False
+        )
         out = torch.addr(M, vec, vec)
         argument_handler.parse_outputs(addr_func._schema, out, is_factory=False)
 

@@ -16,12 +16,12 @@ import functools
 import inspect
 import io
 import logging
+import re
 import sys
 import textwrap
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
-import re
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
@@ -514,25 +514,39 @@ class ArgumentHandler:
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
         *,
-        is_factory: bool
+        is_factory: bool,
     ) -> None:
         for argument, value in zip_arguments(schema, args, kwargs):
             is_write = argument.alias_info is not None and argument.alias_info.is_write
             # A change is metadata only if it is a view or a factory function that
             # reads only metadata
-            metadata_only = is_factory or (argument.alias_info is not None and not argument.alias_info.is_write)
+            metadata_only = is_factory or (
+                argument.alias_info is not None and not argument.alias_info.is_write
+            )
             pytree.tree_map_(
                 functools.partial(
-                    self._handle_argument, is_write=is_write, name=argument.name, metadata_only=metadata_only
+                    self._handle_argument,
+                    is_write=is_write,
+                    name=argument.name,
+                    metadata_only=metadata_only,
                 ),
                 value,
             )
 
-    def parse_outputs(self, schema: torch.FunctionSchema, outputs: Any, *, is_factory: bool) -> None:
+    def parse_outputs(
+        self, schema: torch.FunctionSchema, outputs: Any, *, is_factory: bool
+    ) -> None:
         for res, value in zip(schema.returns, (outputs,)):
-            metadata_only = is_factory or (res.alias_info is not None and not res.alias_info.is_write)
+            metadata_only = is_factory or (
+                res.alias_info is not None and not res.alias_info.is_write
+            )
             pytree.tree_map_(
-                functools.partial(self._handle_argument, is_write=not metadata_only, is_output=True, metadata_only=metadata_only),
+                functools.partial(
+                    self._handle_argument,
+                    is_write=not metadata_only,
+                    is_output=True,
+                    metadata_only=metadata_only,
+                ),
                 value,
             )
 
@@ -576,7 +590,7 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        is_factory = FACTORY_FUNCTION_REGEX.match(func._schema.name)
+        is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
 
         argument_handler = ArgumentHandler()
         argument_handler.parse_inputs(func._schema, args, kwargs, is_factory=is_factory)
