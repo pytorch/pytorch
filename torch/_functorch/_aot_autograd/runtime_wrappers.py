@@ -1859,14 +1859,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                     "The grad inputs should be same tensor subclass type as forward output"
                                 )
 
-                    # Get the number of tangents after unwrapping
-                    len_tangents = len(
-                        unwrap_tensor_subclasses(
-                            tangents,
-                            # any extra symint will be captured by the partitioner
-                            append_symints=False,
-                        )
-                    )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
