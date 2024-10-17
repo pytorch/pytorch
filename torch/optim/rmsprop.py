@@ -202,9 +202,10 @@ RMSprop.__doc__ = (
     .. math::
        \begin{aligned}
             &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
+            &\textbf{input}      : \alpha \text{ (alpha)}, \: \gamma \text{ (lr)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
-            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
+            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},
+                \: centered, \: \epsilon \text{ (epsilon)}                                       \\
             &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
                 \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
