@@ -768,7 +768,6 @@ def triton_kernel_wrapper_mutation_functionalize(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: Dict[str, Any],
 ) -> None:
-    assert isinstance(grid, list)  # TODO(dberard): remove
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
