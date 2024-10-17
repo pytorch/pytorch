@@ -19,10 +19,15 @@ def get_test_prioritizations(
         print(f"  {test}", file=file)
 
     for heuristic in HEURISTICS:
-        new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(tests)
-        aggregated_results.add_heuristic_results(heuristic, new_rankings)
+        try:
+            new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(
+                tests
+            )
+            aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
-        print(f"Results from {heuristic.__class__.__name__}")
-        print(new_rankings.get_info_str(verbose=False), file=file)
+            print(f"Results from {heuristic.__class__.__name__}")
+            print(new_rankings.get_info_str(verbose=False), file=file)
+        except Exception as e:
+            print(f"Error in {heuristic.__class__.__name__}: {e}", file=file)
 
     return aggregated_results
