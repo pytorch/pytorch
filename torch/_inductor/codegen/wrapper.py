@@ -841,6 +841,18 @@ class PythonWrapperCodegen(CodeGen):
             kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
 
+    def generate_tma_descriptor(self, desc):
+        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
+        prefix = "triton.tools.experimental_descriptor"
+        fn_name = f"create_{desc.rank}d_tma_descriptor"
+        call = f"{prefix}.{fn_name}"
+        args = f"{ptr}, {dims}, {block_dims}, {element_size}"
+        line = f"{desc.name} = {call}({args})"
+        self.writeline(line)
+
     def generate_scatter_fallback(
         self,
         output,
@@ -1290,7 +1302,7 @@ class PythonWrapperCodegen(CodeGen):
 
         original_name = kernel.__name__
 
-        from .common import KernelArgType, SizeArg, TensorArg
+        from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
 
         signature: List[KernelArgType] = []
         constants: Dict[str, Any] = {}
@@ -1304,7 +1316,13 @@ class PythonWrapperCodegen(CodeGen):
                 constants[key] = arg
             else:
                 non_constant_indices.append(idx)
-                if isinstance(arg, ir.Buffer):
+                if isinstance(arg, ir.TMADescriptor):
+                    signature.append(
+                        TMADescriptorArg(
+                            name=key,
+                        )
+                    )
+                elif isinstance(arg, ir.Buffer):
                     signature.append(
                         TensorArg(
                             name=key,
