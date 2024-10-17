@@ -5,7 +5,7 @@ set -ex
 # cuSPARSELt license: https://docs.nvidia.com/cuda/cusparselt/license.html
 mkdir tmp_cusparselt && cd tmp_cusparselt
 
-if [[ ${CUDA_VERSION:0:4} =~ ^12\.[2-4]$ ]]; then
+if [[ ${CUDA_VERSION:0:4} =~ ^12\.[2-6]$ ]]; then
     arch_path='sbsa'
     export TARGETARCH=${TARGETARCH:-$(uname -m)}
     if [ ${TARGETARCH} = 'amd64' ] || [ "${TARGETARCH}" = 'x86_64' ]; then

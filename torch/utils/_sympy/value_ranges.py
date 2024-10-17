@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import itertools
 import logging
 import math
@@ -87,7 +88,9 @@ def simple_sympify(e):
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
         assert isinstance(upper, sympy.Expr)
-        return lower <= upper
+        # instead of lower <= upper, we do upper >= lower since upper is mostly int_oo
+        # and we have better code paths there.
+        return upper >= lower
     else:
         # only negative condition is True > False
         assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
@@ -222,6 +225,8 @@ class ValueRanges(Generic[_T]):
         return ValueRanges.wrap(x).issubset(self)
 
     def issubset(self, other):
+        if other is self.unknown_int():
+            return True
         return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(
             self.upper, other.upper
         )
@@ -246,9 +251,9 @@ class ValueRanges(Generic[_T]):
         ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
-        if other == ValueRanges.unknown():
+        if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
             return self
-        if self == ValueRanges.unknown():
+        if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
             return other
         assert self.is_bool == other.is_bool, (self, other)
         assert self.is_int == other.is_int, (self, other)
@@ -296,14 +301,17 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -443,7 +451,7 @@ class SymPyValueRangeAnalysis:
             elif dtype.is_floating_point:
                 return ValueRanges.unknown()
             else:
-                return ValueRanges(-int_oo, int_oo)
+                return ValueRanges.unknown_int()
 
         if is_python:
             type_ = dtype_to_type(dtype)
@@ -1061,26 +1069,24 @@ def bound_sympy(
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
-        ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        if ranges:
+            ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        else:
+            ranges = context.fake_mode.shape_env.var_to_range
 
-    unbounded_vars = expr.free_symbols - ranges.keys()
-    if unbounded_vars:
-        # Give some bounds to the free variables via their SymPy assumptions
-        # TODO A better way of doing this would be to assign them a range upon creation, as
-        #      size variables can come with a lower bound of 2, as we specialize on 0 and 1
-        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
-        for s in unbounded_vars:
-            if s.is_integer:  # type: ignore[attr-defined]
-                if s.is_positive:  # type: ignore[attr-defined]
-                    vr = ValueRanges(1, int_oo)
-                elif s.is_nonnegative:  # type: ignore[attr-defined]
-                    vr = ValueRanges(0, int_oo)
-                else:
-                    vr = ValueRanges.unknown_int()
+    def missing_handler(s):
+        if s.is_integer:  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                vr = ValueRanges(1, int_oo)
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                vr = ValueRanges(0, int_oo)
             else:
-                # Don't bother trying very hard here
-                vr = ValueRanges.unknown()
-            unbounded_ranges[s] = vr  # type: ignore[index]
-        ranges = {**ranges, **unbounded_ranges}
+                vr = ValueRanges.unknown_int()
+        else:
+            # Don't bother trying very hard here
+            vr = ValueRanges.unknown()
+        return vr
 
-    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
+    return sympy_interp(
+        SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
+    )

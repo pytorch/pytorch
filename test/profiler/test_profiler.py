@@ -990,19 +990,41 @@ class TestProfiler(TestCase):
         # print(output)
 
         test_schedule = torch.profiler.schedule(
-            skip_first=2, wait=1, warmup=1, active=2, repeat=2
+            skip_first=3, wait=2, warmup=1, active=4, repeat=2
         )
         test_schedule_expected_outputs = [
+            # skip first 3
             ProfilerAction.NONE,
             ProfilerAction.NONE,
             ProfilerAction.NONE,
+            # ----
+            # repeat No. 1 begin
+            # wait 2
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
             ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
             ProfilerAction.RECORD,
             ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 1 end
+            # ---
+            # repeat No. 2 begin
+            # wait 2
             ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
             ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
             ProfilerAction.RECORD,
             ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 2 end
             ProfilerAction.NONE,
             ProfilerAction.NONE,
             ProfilerAction.NONE,
@@ -1644,7 +1666,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             cm = torch._C._profiler._RecordFunctionFast(
                 "add_test_kwinputs",
                 [x, y],
-                {"stream": 0, "grid": "lambda x : x + 1", "debug": 'debug"'},
+                {
+                    "stream": 0,
+                    "grid": "lambda x : x + 1",
+                    "debug": 'debug"',
+                    "boolean": True,
+                },
             )
             for _ in range(4):
                 with cm:
@@ -1658,12 +1685,38 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
+                        print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" in args)
                         self.assertTrue("grid" in args)
+                        self.assertTrue("boolean" in args)
                         self.assertTrue(args["stream"] == 0)
                         self.assertTrue(args["grid"] == "lambda x : x + 1")
                         self.assertTrue(args["debug"] == "None")
+                        self.assertTrue(args["boolean"])
+
+        with profile(record_shapes=True) as p1:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs",
+                [x, y],
+                {"stream": "test", "grid": [1, 2]},
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname1:
+            p1.export_chrome_trace(fname1)
+            with open(fname1) as f1:
+                j = json.load(f1)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    if e["name"] == "add_test_kwinputs":
+                        print(e["args"])
+                        args = e["args"]
+                        self.assertTrue("stream" not in args)
+                        self.assertTrue("grid" not in args)
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
@@ -1904,6 +1957,9 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             record_shapes=True,
             with_stack=True,
             schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                adjust_profiler_step=True
+            ),
         ) as prof:
             for i in range(5):
                 self._step_helper_func(prof)
@@ -1988,6 +2044,40 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         p.events()
         self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
         self.assertGreater(stats.number_of_events, 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(
+        torch.cuda.is_available(), "CUDA complains about forking after init"
+    )
+    @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    def test_forked_process(self):
+        # Induce a pid cache by running the profiler with payload
+        def validate_forked_json(profiler):
+            nonlocal cpu_op_found, parent_tid, child_pid
+            with TemporaryFileName(mode="w+") as fname:
+                profiler.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    for event in events:
+                        if "cat" in event and event["cat"] == "cpu_op":
+                            self.assertEqual(event["pid"], child_pid)
+                            self.assertNotEqual(event["tid"], parent_tid)
+                            cpu_op_found = True
+
+        cpu_op_found = False
+        parent_tid = threading.current_thread().ident
+        with profile() as p:
+            self.payload()
+        pid = os.fork()
+        if pid == 0:
+            child_pid = os.getpid()
+            with profile() as p:
+                self.payload()
+            validate_forked_json(p)
+            self.assertTrue(cpu_op_found)
+            os._exit(0)
+        else:
+            os.waitpid(pid, 0)
 
 
 class SimpleNet(nn.Module):

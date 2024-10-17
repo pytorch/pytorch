@@ -79,11 +79,6 @@ class BinaryBuildWorkflow:
             GITHUB_DIR
             / f"workflows/generated-{self.build_environment}-{self.branches}.yml"
         )
-        if self.use_split_build:
-            output_file_path = (
-                GITHUB_DIR
-                / f"workflows/generated-{self.build_environment}-{self.branches}"
-            )
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])

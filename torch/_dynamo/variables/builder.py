@@ -14,6 +14,7 @@ import operator
 import random
 import re
 import sys
+import time
 import types
 import warnings
 import weakref
@@ -33,10 +34,10 @@ from typing import (
 
 import torch
 from torch import SymInt
+from torch._dynamo.utils import get_chromium_event_logger
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
-from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -69,7 +70,6 @@ from ..source import (
     FloatTensorSource,
     GetItemSource,
     GradSource,
-    is_cell_contents,
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
@@ -141,6 +141,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
     UserFunctionVariable,
@@ -204,6 +205,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
+    torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
 )
 from .user_defined import (
@@ -524,7 +526,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton, has_triton_tma
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -537,6 +539,19 @@ class VariableBuilder:
             class Autotuner:
                 pass
 
+        if has_triton_tma():
+            from triton.tools.experimental_descriptor import (
+                create_1d_tma_descriptor,
+                create_2d_tma_descriptor,
+            )
+        else:
+
+            def create_1d_tma_descriptor():
+                pass
+
+            def create_2d_tma_descriptor():
+                pass
+
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
         if type_dispatch is not None:
@@ -546,11 +561,6 @@ class VariableBuilder:
         id_dispatch = self._id_dispatch().get(id(value))
         if id_dispatch is not None:
             return id_dispatch(self, value)
-
-        # Note - There are some nested values where types mismatch!
-        # We want to get those out and wrap those.
-        if is_function_or_wrapper(value):
-            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
@@ -644,7 +654,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value), source=self.source)
+                result = ConstDictVariable(
+                    result, user_cls=type(value), source=self.source
+                )
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
@@ -826,11 +838,11 @@ class VariableBuilder:
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
-        elif isinstance(value, _StreamBase):
+        elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch.cuda.Stream,
+                type(value),
                 (),
                 {
                     "stream_id": value.stream_id,
@@ -848,7 +860,10 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, _EventBase):
+        elif isinstance(value, torch._C._SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantVariable(value)
+        elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
             event_proxy = self.tx.output.create_proxy(
@@ -966,6 +981,10 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif value is create_1d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=1)
+        elif value is create_2d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=2)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -988,6 +1007,13 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+        elif is_function_or_wrapper(value) and inspect.getattr_static(
+            value, "_torchdynamo_inline", False
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "_torchdynamo_inline", source=self.source
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1425,7 +1451,6 @@ class VariableBuilder:
                 or self.source.guard_source().is_specialized_nn_module()
                 or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
-                or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
                 or (
@@ -1663,15 +1688,16 @@ class VariableBuilder:
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
 
-        try:
-            tensor_value = _util._try_convert_to_tensor(value)
-            if readonly:
-                from torch._prims_common import clone_preserve_strides
+        with torch_function_mode_stack_state_mgr.temp_restore_stack():
+            try:
+                tensor_value = _util._try_convert_to_tensor(value)
+                if readonly:
+                    from torch._prims_common import clone_preserve_strides
 
-                tensor_value = clone_preserve_strides(tensor_value)
-        except NotImplementedError as e:
-            # failed to convert to tensor, graph break
-            unimplemented(str(e))
+                    tensor_value = clone_preserve_strides(tensor_value)
+            except NotImplementedError as e:
+                # failed to convert to tensor, graph break
+                unimplemented(str(e))
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
@@ -1754,6 +1780,17 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        get_chromium_event_logger().log_instant_event(
+                            "automatic_dynamic",
+                            time.time_ns(),
+                            {
+                                "name": name,
+                                "dim_changed": "scalar",
+                                "reason": "scalar change",
+                                "cached": str(frame_state_entry.scalar),
+                                "new": str(value),
+                            },
+                        )
                         if self.source.guard_source().is_unspecialized_nn_module():
                             log.info(
                                 "%s",
@@ -1778,7 +1815,8 @@ class VariableBuilder:
             else:
                 # Apply the updates
                 for sub_state in st.all_states:
-                    update_frame_state(sub_state.input_sizes[name])
+                    if name in sub_state.input_sizes:
+                        update_frame_state(sub_state.input_sizes[name])
                 frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
@@ -2259,7 +2297,7 @@ def wrap_fx_proxy_cls(
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target)
-        and issubclass(proxy.node.target, _StreamBase)
+        and issubclass(proxy.node.target, torch.Stream)
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
@@ -2267,7 +2305,8 @@ def wrap_fx_proxy_cls(
         set_example_value(proxy.node, example_value)
         return StreamVariable(proxy, example_value, example_value.device, **options)
     elif (
-        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
+        inspect.isclass(proxy.node.target)
+        and issubclass(proxy.node.target, torch.Event)
     ) or proxy.node.target in [
         device_interface.Event
         for _, device_interface in get_registered_device_interfaces()
@@ -2279,7 +2318,7 @@ def wrap_fx_proxy_cls(
         return ConstantVariable(example_value, **options)
     elif (
         example_value is not None
-        and isinstance(example_value, _EventBase)
+        and isinstance(example_value, torch.Event)
         and proxy.node.target == "record_event"
         and proxy.node.op == "call_method"
     ):
@@ -2458,6 +2497,17 @@ def _automatic_dynamic(
                         len(size),
                         frame_state_entry.size,
                     )
+                    get_chromium_event_logger().log_instant_event(
+                        "automatic_dynamic",
+                        time.time_ns(),
+                        {
+                            "name": name,
+                            "dim_changed": "all",
+                            "reason": "dimensionality change",
+                            "cached": str(frame_state_entry.size),
+                            "new": str(size),
+                        },
+                    )
                     frame_state_entry.size = None
                     frame_state_entry.stride = None
                 else:
@@ -2474,6 +2524,17 @@ def _automatic_dynamic(
                                 i,
                                 size[i],
                                 dim,
+                            )
+                            get_chromium_event_logger().log_instant_event(
+                                "automatic_dynamic",
+                                time.time_ns(),
+                                {
+                                    "name": name,
+                                    "dim_changed": i,
+                                    "reason": "size change",
+                                    "cached": str(dim),
+                                    "new": str(size[i]),
+                                },
                             )
                             frame_state_entry.size[i] = None
                         has_size_changed = (
@@ -2504,6 +2565,17 @@ def _automatic_dynamic(
                                     i,
                                     stride[i],
                                     dim,
+                                )
+                                get_chromium_event_logger().log_instant_event(
+                                    "automatic_dynamic",
+                                    time.time_ns(),
+                                    {
+                                        "name": name,
+                                        "dim_changed": i,
+                                        "reason": "stride change",
+                                        "cached": str(dim),
+                                        "new": str(stride[i]),
+                                    },
                                 )
                                 frame_state_entry.stride[i] = None
         tx.output.frame_state[name] = frame_state_entry

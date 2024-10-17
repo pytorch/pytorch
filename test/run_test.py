@@ -170,9 +170,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_checkpoint"
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
@@ -183,7 +180,6 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
-    "test_transformers",
 ]
 
 XPU_BLOCKLIST = [
@@ -221,6 +217,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
+    "inductor/test_compiler_bisector",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -298,15 +295,17 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
-    if dist.is_ucc_available():
-        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
-            "UCX_TLS": "tcp,cuda",
-            "UCC_TLS": "nccl,ucp,cuda",
-            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
-            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
-        }
+    # Test with UCC backend is deprecated.
+    # See https://github.com/pytorch/pytorch/pull/137161
+    # if dist.is_ucc_available():
+    #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+    #         "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+    #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+    #         "UCX_TLS": "tcp,cuda",
+    #         "UCC_TLS": "nccl,ucp,cuda",
+    #         "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+    #         "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
+    #     }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -1418,7 +1417,16 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal", "test_modules", "test_nn"]
+        selected_tests = [
+            "test_mps",
+            "test_metal",
+            "test_modules",
+            "nn/test_convolution",
+            "nn/test_dropout",
+            "nn/test_pooling",
+            "test_view_ops",
+            "test_nn",
+        ]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
@@ -1760,6 +1768,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)

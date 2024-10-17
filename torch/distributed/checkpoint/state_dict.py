@@ -591,17 +591,17 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
         # The optimizer state is initialized.
         return
 
+    # There are some stateless optimizers like SGD. These optimizer will
+    # not return in the above condition. So if gradients exist, we should also
+    # return. If gradients do not exist, the following initialization should
+    # not disturb SGD because the gradients and lr are both zero.
     for param_group in optim.param_groups:
         for param in param_group[_PARAMS]:
             if param.grad is not None:
-                raise RuntimeError(
-                    "state_dict can only be used if the optimizer "
-                    "states are initialized (usually after one step() with "
-                    "gradients) or gradients are None. For the later case, "
-                    "state_dict will fake the gradients as zero "
-                    "to initialize the optimizer states. However, the "
-                    "gradients are not None."
-                )
+                return
+
+    for param_group in optim.param_groups:
+        for param in param_group[_PARAMS]:
             if param.requires_grad:
                 param.grad = torch.zeros_like(param)
 
