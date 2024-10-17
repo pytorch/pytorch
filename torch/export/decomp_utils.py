@@ -61,7 +61,7 @@ class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     def __delitem__(self, key) -> None:
         self.pop(key)
 
-    def update(self, other_dict):
+    def update(self, other_dict):  # type: ignore[override]
         for k, v in other_dict.items():
             self.decomp_table.__setitem__(k, v)
 
