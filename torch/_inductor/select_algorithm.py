@@ -1489,17 +1489,21 @@ class AlgorithmSelectorCache(PersistentCache):
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
             # Make sure that all workspace sizes for each choice are the same
+            triton_templates_choices = [
+                choice for choice in choices if isinstance(choice, TritonTemplateCaller)
+            ]
             needs_workspace = any(
-                choice.workspace_arg is not None for choice in choices
+                choice.workspace_arg is not None for choice in triton_templates_choices
             )
             if needs_workspace:
                 # TODO right now we only support the same workspace arg for all choices
                 assert (
-                    choices[0].workspace_arg is not None
-                ), "Workspace arg is not found for choice[0], expected all choices to have the same workspace arg."
-                workspace: WorkspaceArg = choices[0].workspace_arg
+                    triton_templates_choices[0].workspace_arg is not None
+                ), "Expected all triton templates choices to have the same workspace arg."
+                workspace: WorkspaceArg = triton_templates_choices[0].workspace_arg
                 assert all(
-                    choice.workspace_arg == workspace for choice in choices
+                    choice.workspace_arg == workspace
+                    for choice in triton_templates_choices
                 ), "All choices must have the same workspace argument."
                 size, zero_fill = workspace.nbytes, workspace.zero_fill
                 workspace_tensor = torch.empty_strided(
@@ -1508,7 +1512,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 if zero_fill:
                     workspace_tensor.zero_()
                 example_inputs.append(workspace_tensor)
-                example_inputs_extern.append(workspace_tensor)
 
             expected = None
             if VERIFY:
