@@ -351,7 +351,10 @@ class TritonTemplateKernel(TritonKernel):
             return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self,
+        subgraph_number: int,
+        output_name: str,
+        **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
@@ -396,15 +399,28 @@ class TritonTemplateKernel(TritonKernel):
                 def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
 
+                def store(self, name, index, value, mode):
+                    print("storing")
+                    add_input(name)
+                    return self._inner.store(name, index, value, mode)
+
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
                 assert isinstance(
-                    subgraph, ir.ComputedBuffer
+                    subgraph, (ir.ComputedBuffer, List)
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
-                if isinstance(subgraph.data, ir.InputBuffer):
+                # Handle scatter stores
+                if isinstance(subgraph, list):
+                    for scatter_graph in subgraph:
+                        assert isinstance(
+                            scatter_graph, ir.ComputedBuffer
+                        ), "Expected a scatter if subgraph is a list"
+                        scatter_graph.data.store_output("buf0", lambda x: x[0], [])
+
+                elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
                     out = subgraph.data.inner_fn(())
-
+            print(self.stores)
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
 
