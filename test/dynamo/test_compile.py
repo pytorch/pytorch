@@ -94,6 +94,19 @@ class InPlaceCompilationTests(TestCase):
 
         self.assertEqual(printed_output, "Compilation started.\nCompilation ended.")
 
+    def test_compile_eager_options(self):
+        @torch.compile(backend="eager", options={"foo": 2})
+        def f(x):
+            return x + x
+
+        f(torch.randn(3))
+
+        @torch.compile(backend="aot_eager", options={"foo": 2})
+        def g(x):
+            return x + x
+
+        g(torch.randn(3))
+
     def test_compilation_callback_with_graph_break(self):
         torch._dynamo.reset()
         counter = 0

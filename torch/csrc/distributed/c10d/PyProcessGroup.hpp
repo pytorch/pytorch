@@ -210,6 +210,7 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
   // Wraps a py::object hook and acquires Python GIL in dtor before
   // destructing the hook object.
   PythonOnCompletionHook(py::object hook) : hook_(std::move(hook)) {}
+  PythonOnCompletionHook(const PythonOnCompletionHook&) = default;
 
   ~PythonOnCompletionHook() {
     py::gil_scoped_acquire ag;

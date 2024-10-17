@@ -466,6 +466,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "dropout_p: float = 0.0",
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
+                            "enable_gqa: bool = False",
                         ]
                     )
                 )
@@ -779,6 +780,9 @@ def gen_pyi(
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+            ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
             ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."

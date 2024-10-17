@@ -29,6 +29,7 @@ from ._memory_viz import memory as _memory, segments as _segments
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -52,6 +53,7 @@ __all__ = [
     "change_current_allocator",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
 ]
 
 
@@ -64,8 +66,20 @@ if not hasattr(torch._C, "_MemPool"):
     # Define dummy base classes
     torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
     torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
+    torch._C.__dict__["_cuda_beginAllocateToPool"] = _dummy_type(
+        "_cuda_beginAllocateToPool"
+    )
+    torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
+        "_cuda_endAllocateCurrentStreamToPool"
+    )
 
-from torch._C import _cuda_CUDAAllocator, _MemPool, _MemPoolContext  # noqa: F401
+from torch._C import (  # noqa: F401
+    _cuda_beginAllocateToPool,
+    _cuda_CUDAAllocator,
+    _cuda_endAllocateCurrentStreamToPool,
+    _MemPool,
+    _MemPoolContext,
+)
 
 
 def _host_allocator():
@@ -133,6 +147,12 @@ def caching_allocator_delete(mem_ptr):
         management.
     """
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
+
+
+def caching_allocator_enable(value: bool = True) -> None:
+    r"""Enable or disable the CUDA memory allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_cudaCachingAllocator_enable(value)
 
 
 def set_per_process_memory_fraction(
@@ -684,9 +704,9 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device using cudaMemGetInfo.
 
     Args:
-        device (torch.device or int, optional): selected device. Returns
+        device (torch.device or int or str, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
+            if :attr:`device` is ``None`` (default) or if the device index is not specified.
 
     .. note::
         See :ref:`cuda-memory-management` for more
@@ -694,7 +714,8 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     """
     if device is None:
         device = torch.cuda.current_device()
-    device = _get_device_index(device)
+    # optional=True allows `device = torch.device('cuda')` for which device.index is None
+    device = _get_device_index(device, optional=True)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
 
@@ -1001,3 +1022,27 @@ class MemPoolContext(_MemPoolContext):
     def active_pool() -> Optional[_MemPool]:
         r"""Returns the active MemPool"""
         return _MemPoolContext.active_pool()
+
+
+@contextlib.contextmanager
+def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
+    r"""A context manager that routes allocations to a given pool.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+            allocations route to this pool.
+        device (torch.device or int, optional): selected device. Uses MemPool on
+            the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    """
+    ctx = MemPoolContext(pool)
+    device_index = (
+        torch.cuda.current_device() if device is None else _get_device_index(device)
+    )
+    _cuda_beginAllocateToPool(device_index, pool.id)
+    try:
+        yield
+    finally:
+        _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        del ctx

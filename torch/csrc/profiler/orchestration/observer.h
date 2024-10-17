@@ -5,9 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -20,6 +18,12 @@ enum class C10_API_ENUM ActivityType {
   PrivateUse1, // PrivateUse1 kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
+
+inline std::string actToString(ActivityType t) {
+  const std::string ActivityTypeNames[] = {
+      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  return ActivityTypeNames[static_cast<int>(t)];
+}
 
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
@@ -51,6 +55,7 @@ struct TORCH_API ExperimentalConfig {
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
+      bool adjust_profiler_step = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -68,6 +73,13 @@ struct TORCH_API ExperimentalConfig {
    * This feature is new and currently disabled by default.
    */
   bool enable_cuda_sync_events;
+  /*
+   * Controls whether or not timestamp adjustment for ProfilerStep and parent
+   * Python events occurs after profiling. This occurs at an O(n) cost and
+   * affects only the start of profiler step events.
+   */
+  bool adjust_profiler_step;
+
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
@@ -155,6 +167,4 @@ TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
