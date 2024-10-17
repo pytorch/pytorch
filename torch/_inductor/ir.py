@@ -357,7 +357,7 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
-    def _post_init_setattr(self, attr, value):
+    def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -369,10 +369,6 @@ class IRNode:
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
-
-    def _post_init_setattr(self, attr, value):
-        # Only use in __post_init__ for enforcing an invariant on a dataclass
-        object.__setattr__(self, attr, value)
 
     def get_read_names(self) -> OrderedSet[str]:
         raise NotImplementedError(f"NYI on {type(self)}")
@@ -1119,10 +1115,10 @@ class Reduction(Loops):
 
         if reduction_type in ("argmin", "argmax"):
             flatten_index = FixedLayout(
-                None,  # type: ignore[arg-type]
-                None,  # type: ignore[arg-type]
-                reduction_ranges,
-                FlexibleLayout.contiguous_strides(reduction_ranges),
+                device=None,  # type: ignore[arg-type]
+                dtype=None,  # type: ignore[arg-type]
+                size=reduction_ranges,
+                stride=FlexibleLayout.contiguous_strides(reduction_ranges),
             ).make_indexer()
 
             def value_fn(index, rindex):
@@ -2116,7 +2112,7 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
-            layout.pad_strides()
+            layout = layout.pad_strides()
         return layout.is_contiguous()
     except NotImplementedError:
         return False
@@ -2324,11 +2320,11 @@ class ExpandView(BaseView):
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(stride if size != 1 else sympy.Integer(0))
             new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                list(new_size),
-                new_stride,
-                old_layout.offset,
+                device=old_layout.device,
+                dtype=old_layout.dtype,
+                size=list(new_size),
+                stride=new_stride,
+                offset=old_layout.offset,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2423,11 +2419,11 @@ class SqueezeView(BaseView):
                         assert size == 1, "expected squeezed size to be 1"
 
             new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                new_size,
-                new_stride,
-                old_layout.offset,
+                device=old_layout.device,
+                dtype=old_layout.dtype,
+                size=new_size,
+                stride=new_stride,
+                offset=old_layout.offset,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2529,11 +2525,11 @@ class View(GenericView):
 
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                new_size,
-                FlexibleLayout.contiguous_strides(new_size),
-                old_layout.offset,
+                device=old_layout.device,
+                dtype=old_layout.dtype,
+                size=new_size,
+                stride=FlexibleLayout.contiguous_strides(new_size),
+                offset=old_layout.offset,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2731,11 +2727,11 @@ class DtypeView(BaseView):
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_layout = FixedLayout(
-                old_layout.device,
-                new_dtype,
-                old_layout.size,
-                old_layout.stride,
-                old_layout.offset,
+                device=old_layout.device,
+                dtype=new_dtype,
+                size=old_layout.size,
+                stride=old_layout.stride,
+                offset=old_layout.offset,
             )
             return ReinterpretView(data=storage, layout=new_layout)
         return DtypeView(data=x, target_dtype=new_dtype)
@@ -2819,11 +2815,11 @@ class SliceView(View):
             new_stride = list(old_layout.stride)
             new_stride[dim] = new_stride[dim] * step
             new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                new_size,
-                new_stride,
-                old_layout.offset + old_layout.stride[dim] * start,
+                device=old_layout.device,
+                dtype=old_layout.dtype,
+                size=new_size,
+                stride=new_stride,
+                offset=old_layout.offset + old_layout.stride[dim] * start,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2916,27 +2912,18 @@ def get_align_for_dtype(dtype: torch.dtype) -> int:
 
 @ir_dataclass
 class Layout(IRNode):
-    def __init__(
-        self,
-        device: torch.device,
-        dtype: torch.dtype,
-        size: List[Expr],
-        stride: Optional[Sequence[Union[Expr, int]]] = None,
-        offset: Expr = Integer(0),
-    ):
-        assert stride is None or len(size) == len(
-            stride
-        ), f"size={size}, stride={stride}"
-        self.device = device
-        self.dtype = dtype
-        assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size = size
-        self._stride = stride
-        self.offset = offset
+    device: torch.device
+    dtype: torch.dtype
+    size: List[Expr]
+    stride: List[Expr] = dataclasses.field(default_factory=list)
+    offset: Expr = Integer(0)
 
-    @property
-    def stride(self):
-        return self._stride
+    def __post_init__(self):
+        # If stride is empty (default), we compute it from size
+        if not self.stride:
+            self._post_init_setattr(
+                "stride", FlexibleLayout.contiguous_strides(self.size)
+            )
 
     def __str__(self) -> str:
         offset = ""
@@ -3069,10 +3056,10 @@ class Layout(IRNode):
         metrics.num_comprehensive_padding += 1
         return new_strides
 
-    def pad_strides(self):
+    def pad_strides(self) -> Layout:
         assert isinstance(self, FlexibleLayout)
-        assert self._stride is not None
-        self._stride = self._pad_strides(self._stride, self.size, self.dtype)
+        new_stride = self._pad_strides(self.stride, self.size, self.dtype)
+        return dataclasses.replace(self, stride=new_stride)
 
     def should_pad_strides(self):
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
@@ -3080,15 +3067,16 @@ class Layout(IRNode):
     def as_fixed(self):
         if isinstance(self, FixedLayout):
             return self
-
         if self.should_pad_strides():
-            self.pad_strides()
+            layout = self.pad_strides()
+        else:
+            layout = self
         return FixedLayout(
-            self.device,
-            self.dtype,
-            self.size,
-            self.stride,
-            self.offset,
+            device=layout.device,
+            dtype=layout.dtype,
+            size=layout.size,
+            stride=layout.stride,
+            offset=layout.offset,
         )
 
     def make_indexer(self):
@@ -3114,15 +3102,24 @@ class Layout(IRNode):
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
-    def __post_init__(self):
-        if self.stride is None:
-            # Enforces that FixedLayout always has a real stride
-            self._post_init_setattr(
-                "stride", FlexibleLayout.contiguous_strides(self.size)
-            )
+    # # We keep this an (almost) exact match of the dataclass's init so it works
+    # # with things like replace
+    # def __init__(
+    #     self,
+    #     device: torch.device,
+    #     dtype: torch.dtype,
+    #     size: List[Expr],
+    #     stride: Optional[List[Expr]] = None,
+    #     offset: Expr = Integer(0),
+    # ):
+    #     if stride is None:
+    #         stride = FlexibleLayout.contiguous_strides(self.size)
+    #     super().__init__(device=device, dtype=dtype, size=size, stride=stride, offset=offset)
 
     def make_indexer(self):
         """A closure containing math to read a given element"""
+
+        assert self.stride is not None
 
         def indexer(index):
             assert len(index) == len(self.stride)
@@ -3225,11 +3222,11 @@ class FlexibleLayout(Layout):
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
 
         return FixedLayout(
-            self.device,
-            self.dtype,
-            self.size,
-            new_stride,
-            self.offset,
+            device=self.device,
+            dtype=self.dtype,
+            size=self.size,
+            stride=new_stride,
+            offset=self.offset,
         )
 
     def as_exact_strides(self, exact_strides, allow_padding=False):
@@ -3238,11 +3235,11 @@ class FlexibleLayout(Layout):
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
 
         return FixedLayout(
-            self.device,
-            self.dtype,
-            self.size,
-            new_stride,
-            self.offset,
+            device=self.device,
+            dtype=self.dtype,
+            size=self.size,
+            stride=new_stride,
+            offset=self.offset,
         )
 
     def as_fill_order(self, order):
@@ -3250,11 +3247,11 @@ class FlexibleLayout(Layout):
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
-            self.device,
-            self.dtype,
-            self.size,
-            new_stride,
-            self.offset,
+            device=self.device,
+            dtype=self.dtype,
+            size=self.size,
+            stride=new_stride,
+            offset=self.offset,
         )
 
     def as_same_order(self, stride):
@@ -3262,19 +3259,20 @@ class FlexibleLayout(Layout):
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
-            self.device,
-            self.dtype,
-            self.size,
-            new_stride,
-            self.offset,
+            device=self.device,
+            dtype=self.dtype,
+            size=self.size,
+            stride=new_stride,
+            offset=self.offset,
         )
 
-    def __init__(self, device, dtype, size, stride_order=None):
+    @classmethod
+    def create(cls, device, dtype, size, stride_order=None):
         if stride_order:
-            strides = FlexibleLayout.fill_ordered(size, stride_order)
+            stride = FlexibleLayout.fill_ordered(size, stride_order)
         else:
-            strides = FlexibleLayout.contiguous_strides(size)
-        super().__init__(device, dtype, size, strides)
+            stride = FlexibleLayout.contiguous_strides(size)
+        return cls(device=device, dtype=dtype, size=size, stride=stride)
 
 
 @ir_dataclass
@@ -3303,6 +3301,7 @@ class NonOwningLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
 
+@ir_dataclass
 class NoneLayout(IRNode):
     # This is janky, I figured out what fields to populate by just running
     # the model I was interested in and adding properties/methods as needed.
@@ -3313,8 +3312,9 @@ class NoneLayout(IRNode):
     # dependencies manually in scheduler
 
     device: torch.device
-    size: List[int] = dataclasses.field(default_factory=lambda: [0])
-    stride: List[int] = dataclasses.field(default_factory=lambda: [0])
+    size: ClassVar[List[int]] = [0]  # dataclasses.field(default_factory=lambda: [0])
+    stride: ClassVar[List[int]] = [0]  # dataclasses.field(default_factory=lambda: [0])
+    # stride: List[int] = dataclasses.field(default_factory=lambda: [0])
 
     def storage_size(self):
         return 0
@@ -3329,15 +3329,15 @@ class MutationLayoutSHOULDREMOVE(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,
+            [],
         )
         self.target = target
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter  # type: ignore[attr-defined]
-    def stride(self):
-        return self.real_layout().stride
+    # @Layout.stride.getter  # type: ignore[attr-defined]
+    # def stride(self):
+    #     return self.real_layout().stride
 
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
@@ -3569,8 +3569,14 @@ class NoneAsConstantBuffer(IRNode):
 
 
 @ir_dataclass
-class ExprAsConstantBuffer(IRNode):
-    expr: Union[Expr, None]
+class ShapeAsConstantBuffer(IRNode):
+    def __init__(self, shape):
+        super().__init__()
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -4704,9 +4710,9 @@ class ExternKernel(InputsKernel):
     @classmethod
     def realize_input(cls, x):
         if x is None:
-            return ExprAsConstantBuffer(expr=None)
+            return NoneAsConstantBuffer()
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
-            return ExprAsConstantBuffer(expr=x)
+            return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -6172,10 +6178,10 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):
         return FixedLayout(
-            output.device,
-            output.dtype,
-            convert_shape_to_inductor(output.size()),
-            convert_shape_to_inductor(output.stride()),
+            device=output.device,
+            dtype=output.dtype,
+            size=convert_shape_to_inductor(output.size()),
+            stride=convert_shape_to_inductor(output.stride()),
         )
 
     @classmethod
@@ -6446,7 +6452,7 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
-    def has_exceeded_max_reads(self):
+    def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
@@ -6516,7 +6522,7 @@ class Conditional(ExternKernel):
         self.false_subgraph = false_subgraph
 
         inputs = []
-        if not isinstance(predicate, ExprAsConstantBuffer):
+        if not isinstance(predicate, ShapeAsConstantBuffer):
             inputs.append(predicate)
         inputs.extend(operands)
 
@@ -6573,7 +6579,7 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ExprAsConstantBuffer):
+        if not isinstance(predicate, ShapeAsConstantBuffer):
             # use predicate device for consistent codegen-ing
             device = predicate.get_device()
         else:

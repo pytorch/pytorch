@@ -4,7 +4,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 import torch._inductor as inductor
@@ -554,7 +554,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
         name=None,
-        layout=ir.FixedLayout(device, dtype, new_size),
+        layout=ir.FixedLayout(device=device, dtype=dtype, size=new_size),
         inputs=[],
     )
     kernel_tensor = ir.TensorBox.create(kernel)
