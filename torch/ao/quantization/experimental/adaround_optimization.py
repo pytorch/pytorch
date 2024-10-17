@@ -187,7 +187,7 @@ class AdaptiveRoundingOptimizer:
 
         print("==================== Before adaround ====================")
         assert (
-            torch.abs(out[0] - module(fp_in[0])).sum().item() == 0
+            torch.abs(out[0].to(self.device) - module(fp_in[0].to(self.device))).sum().item() == 0
         ), "In-placed activation is detected, please do not use activation in-placed"
         # Stack the tensors in each list into a single tensor
         # Assuming inp and out are your lists of tensors
@@ -196,30 +196,31 @@ class AdaptiveRoundingOptimizer:
         dataset = TensorDataset(inp_tensor, out_tensor)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        self._compute_and_display_local_losses(ada_quantizer, q_module, inp[0], out[0])
+        self._compute_and_display_local_losses(ada_quantizer, q_module, inp[0].to(self.device), out[0].to(self.device))
         global_idx = 0
         one_iter = len(out) // self.batch_size
         for iteration in range(self.max_iter // one_iter):
             reconstruction_loss = regularization_loss = torch.tensor(0)
             for q_inp, fp_out in dataloader:
+                fp_out_device = fp_out.device
                 optimizer.zero_grad()
                 q_weight = ada_quantizer(q_module.weight)
                 if isinstance(module, torch.nn.Conv1d):
                     q_out = torch.nn.functional.conv1d(
-                        q_inp,
+                        q_inp.to(self.device),
                         q_weight,
                         bias=q_module.bias,
                         stride=q_module.stride,
                         padding=q_module.padding,
                         dilation=q_module.dilation,
                         groups=q_module.groups,
-                    )
+                    ).to(fp_out_device)
                 elif isinstance(q_module, torch.nn.Linear):
                     q_out = torch.nn.functional.linear(
-                        q_inp,
+                        q_inp.to(self.device),
                         q_weight,
                         bias=q_module.bias,
-                    )
+                    ).to(fp_out_device)
                 else:
                     raise NotImplementedError
                 regularization_loss, reconstruction_loss = self.adaptive_round_loss_fn(
@@ -242,7 +243,7 @@ class AdaptiveRoundingOptimizer:
                     f"reconstruction_loss {reconstruction_loss.item()}"  # noqa: G004
                 )
         print("==================== After adaround ====================")
-        self._compute_and_display_local_losses(ada_quantizer, q_module, inp[0], out[0])
+        self._compute_and_display_local_losses(ada_quantizer, q_module, inp[0].to(self.device), out[0].to(self.device))
 
         ada_quantizer.use_soft_rounding = True
         ada_quantizer.V.requires_grad = False
