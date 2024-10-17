@@ -750,7 +750,7 @@ class _PyTreeCodeGen(CodeGen):
         #                          self._in_spec)
         #
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
-        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1,), self._in_spec)
+        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
 
@@ -762,21 +762,35 @@ class _PyTreeCodeGen(CodeGen):
 
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
-            has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                self.pytree_info.in_spec.num_children == 2 and \
-                self.pytree_info.in_spec.children_specs[0].type == tuple and \
-                self.pytree_info.in_spec.children_specs[1].type == dict
+            has_args_kwargs_tuple = (
+                self.pytree_info.in_spec.type == tuple
+                and self.pytree_info.in_spec.num_children == 2
+                and self.pytree_info.in_spec.children_specs[0].type == tuple
+                and self.pytree_info.in_spec.children_specs[1].type == dict
+            )
             if has_args_kwargs_tuple:
                 count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
-                fn_signature_args = '(' +', '.join(fn_args) + (',' if len(fn_args) == 1 else '') + ')'
-                fn_kwargs = '{' + ', '.join(f"'{k}': {v}" for k, v in zip(
-                                  self.pytree_info.in_spec.children_specs[1].context,
-                                  self.pytree_info.orig_args[count_args:])) + '}'
-                fn_signature = f"({fn_signature_args}, {fn_kwargs}), self._in_spec"
+                sig_args = (
+                    "(" + ", ".join(fn_args) + ("," if len(fn_args) == 1 else "") + ")"
+                )
+                sig_kwargs = (
+                    "{"
+                    + ", ".join(
+                        f"{k!r}: {v}"
+                        for k, v in zip(
+                            self.pytree_info.in_spec.children_specs[1].context,
+                            self.pytree_info.orig_args[count_args:],
+                        )
+                    )
+                    + "}"
+                )
+                fn_signature = f"({sig_args}, {sig_kwargs}), self._in_spec"
             else:
-                fn_signature_args = '(' +', '.join(fn_args) + (',' if len(fn_args) == 1 else '') + ')'
-                fn_signature = f"{fn_signature_args}, self._in_spec"
+                sig_args = (
+                    "(" + ", ".join(fn_args) + ("," if len(fn_args) == 1 else "") + ")"
+                )
+                fn_signature = f"{sig_args}, self._in_spec"
 
             # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
             # we need to split it to two lines:
