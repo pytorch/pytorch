@@ -523,10 +523,10 @@ def _tree_map_with_path(
                         f"`{tree_name}{rendered_path}` is a {tree.type}, "
                         f"but `dynamic_shapes{rendered_path}` is a {dynamic_shapes.type}"
                     )
-                if len(tree.children_specs) != len(dynamic_shapes.children_specs):
+                if tree.num_children != dynamic_shapes.num_children:
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` has {len(tree.children_specs)} elements, "
-                        f"but `dynamic_shapes{rendered_path}` has {len(dynamic_shapes.children_specs)} elements"
+                        f"`{tree_name}{rendered_path}` has {tree.num_children} elements, "
+                        f"but `dynamic_shapes{rendered_path}` has {dynamic_shapes.num_children} elements"
                     )
                 if tree.type is dict:
                     # context, children could be out of order
@@ -536,13 +536,13 @@ def _tree_map_with_path(
                             f"but `dynamic_shapes{rendered_path}` has keys {dynamic_shapes.context}"
                         )
                     _remap = dict(
-                        zip(dynamic_shapes.context, dynamic_shapes.children_specs)
+                        zip(dynamic_shapes.context, dynamic_shapes.children())
                     )
                     dynamic_shapes_children_specs = [_remap[k] for k in tree.context]
                 else:
-                    dynamic_shapes_children_specs = dynamic_shapes.children_specs
+                    dynamic_shapes_children_specs = dynamic_shapes.children()
                 for i, (tree_, dynamic_shapes_) in enumerate(
-                    zip(tree.children_specs, dynamic_shapes_children_specs)
+                    zip(tree.children(), dynamic_shapes_children_specs)
                 ):
                     _compare(
                         tree_,

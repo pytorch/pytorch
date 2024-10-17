@@ -192,7 +192,7 @@ def _construct_inputs(
 
     assert signature.in_spec.num_children == 2
 
-    args_spec = signature.in_spec.children_specs[0]
+    args_spec = signature.in_spec.child(0)
     assert args_spec.context is None
     args_node = gm.graph.call_function(operator.getitem, (unflatten_node, 0))
     args_nodes = [
@@ -200,7 +200,7 @@ def _construct_inputs(
         for i in range(args_spec.num_children)
     ]
 
-    kwargs_spec = signature.in_spec.children_specs[1]
+    kwargs_spec = signature.in_spec.child(1)
     assert kwargs_spec.context is not None
     kwargs_node = gm.graph.call_function(operator.getitem, (unflatten_node, 1))
     kwargs_nodes = {
