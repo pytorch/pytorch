@@ -299,7 +299,7 @@ sycl::event convolution_backward_weights(
   if(allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
-  
+
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,

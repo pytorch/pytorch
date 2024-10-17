@@ -901,9 +901,9 @@ PyObject* THPModule_setAllowTF32Mkldnn(PyObject* _unsued, PyObject* arg) {
 }
 
 PyObject* THPModule_allowTF32Mkldnn(PyObject* _unused, PyObject* noargs) {
-  if(at::globalContext().allowTF32Mkldnn()) 
+  if (at::globalContext().allowTF32Mkldnn())
     Py_RETURN_TRUE;
-  else 
+  else
     Py_RETURN_FALSE;
 }
 
