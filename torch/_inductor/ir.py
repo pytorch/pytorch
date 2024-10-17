@@ -5325,8 +5325,16 @@ class UserDefinedTritonKernel(ExternKernel):
         Filter out None args.
 
         see _precompile_config(...) and https://github.com/pytorch/pytorch/issues/115344
+
+        Two cases for a None arg:
+        1. The arg is already tl.constexpr, so leave it in
+        2. The arg is not tl.constexpr so we have to remove it
         """
-        raw_args = list(filter(lambda x: not x is None, raw_args))
+        constexpr_args_set = set(constexpr_indices)
+        raw_args = [
+                    arg for idx, arg in enumerate(raw_args)
+                    if (not arg is None) or (arg is None and idx in constexpr_args_set)
+                ]
 
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
