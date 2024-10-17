@@ -229,7 +229,18 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_") -> GraphModule:
-    for partition_id, partition in enumerate(partitions):
+    # For a unified model, the node order in the partition is not fixed,
+    # and it is easy to locate the subsequent problems after fixing it.
+
+    # 1. Sort each internal list by the name attribute
+    sorted_partitions = [
+        sorted(node_list, key=lambda node: node.name) for node_list in partitions
+    ]
+
+    # 2 .Sort the external list by the first element of each internal list
+    sorted_partitions = sorted(sorted_partitions, key=lambda x: x[0].name)
+
+    for partition_id, partition in enumerate(sorted_partitions):
         sorted_nodes = topo_sort(list(partition))
 
         submodule_name = prefix + str(partition_id)
