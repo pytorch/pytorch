@@ -745,7 +745,7 @@ class _PyTreeCodeGen(CodeGen):
         #   e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
         #
         # Within `forward`, `tree_flatten_spec``still parses args and kwargs separately
-        #   e.g. tree_flatten_spec(((mypos, myargs0, myargs1,),
+        #   e.g. tree_flatten_spec(((mypos, myargs0, myargs1),
         #                           {'mykey': mykey, 'mykwargs0': mykwargs0, 'mykwargs1': mykwargs1}),
         #                          self._in_spec)
         #
