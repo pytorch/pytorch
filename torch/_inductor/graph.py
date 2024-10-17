@@ -456,7 +456,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name: Dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
-        init_backend_registration()
+        init_backend_registration(
+            config.cpu_backend, config.cuda_backend, config.allow_stack_allocation
+        )
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
