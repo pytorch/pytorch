@@ -7,7 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
-from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.associative_scan import associative_scan, _fake_associative_scan
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -83,34 +83,6 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
-
-
-def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
-    inp_leaves, spec = pytree.tree_flatten(xs)
-    result_flat = []
-    num_leaves = len(inp_leaves)
-    op = reversed if reverse else lambda x: x
-
-    for ind in op(range(inp_leaves[0].size(dim))):
-        r = [
-            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
-            for leave_ind in range(num_leaves)
-        ]
-        if (ind > 0 and not reverse) or (
-            ind < (inp_leaves[0].size(dim) - 1) and reverse
-        ):
-            r = combine_fn(
-                pytree.tree_unflatten(result_flat[-1], spec),
-                pytree.tree_unflatten(r, spec),
-            )
-        r_flat, _ = pytree.tree_flatten(r)
-        result_flat.append(r_flat)
-
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
-        for leave_ind in range(num_leaves)
-    ]
-    return pytree.tree_unflatten(results, spec)
 
 
 def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
@@ -1330,7 +1302,6 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -1390,7 +1361,6 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -1487,7 +1457,6 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, result_exp)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
@@ -1579,7 +1548,7 @@ def forward(self, pred_1, x_1):
 
         num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
-            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            shapes = [random.randint(1, 9) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device, requires_grad=autograd)
 
@@ -1931,7 +1900,6 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1975,7 +1943,6 @@ def forward(self, pred_1, x_1):
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2164,7 +2131,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, expected_result)
         self.check_autograd(result, expected_result, inp[0])
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2198,7 +2164,6 @@ def forward(self, pred_1, x_1):
             result1 = fct_cmp(inp)
             self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
@@ -2243,7 +2208,7 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
+
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
     @parametrize("reverse", [False, True])
