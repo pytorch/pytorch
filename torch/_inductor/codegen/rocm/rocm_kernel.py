@@ -6,7 +6,7 @@ from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
-from ..common import Kernel, OpOverrides
+from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
@@ -170,14 +170,19 @@ class ROCmTemplateKernel(ROCmKernel):
             arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            ws = WorkspaceArg(
+                count=node.get_workspace_size(),
+                device=V.graph.scheduler.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
             )
-            data_ptr = "workspace.data_ptr()"
+            wrapper.generate_workspace_allocation(ws)
+            data_ptr = f"{ws.outer_name}.data_ptr()"
             kernel_args.append(
                 data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
             )
         else:
+            ws = None
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
@@ -191,8 +196,8 @@ class ROCmTemplateKernel(ROCmKernel):
             triton=False,
             arg_types=arg_types,
         )
-        if node.get_workspace_size() > 0:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if ws:
+            wrapper.generate_workspace_deallocation(ws)
 
 
 class ROCmTemplateCaller(ChoiceCaller):
