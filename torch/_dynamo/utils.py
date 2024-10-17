@@ -21,8 +21,10 @@ import operator
 import os
 import re
 import sys
+import textwrap
 import threading
 import time
+import traceback
 import types
 import typing
 import uuid
@@ -807,6 +809,7 @@ class CompilationMetrics:
     config_suppress_errors: Optional[bool]
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
+    dynamo_config: Optional[str]
 
 
 @dataclasses.dataclass
@@ -2778,10 +2781,34 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         h(x)))
         ^^^^^
 
-    We need our own implementation since `format_frame_summary` in
+    We need our own implementation in < 3.13 since `format_frame_summary` in
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
+    if sys.version_info >= (3, 13):
+        # multiline traceback implemented in 3.13+
+        frame_summary = traceback.FrameSummary(
+            code.co_filename,
+            inst.positions.lineno,
+            code.co_name,
+            end_lineno=inst.positions.end_lineno,
+            colno=inst.positions.col_offset,
+            end_colno=inst.positions.end_col_offset,
+        )
+        result = traceback.format_list([frame_summary])[0]
+        # remove first line containing filename info
+        result = "\n".join(result.splitlines()[1:])
+        # indent lines with original indentation
+        orig_lines = [
+            linecache.getline(code.co_filename, lineno).rstrip()
+            for lineno in range(inst.positions.lineno, inst.positions.end_lineno + 1)
+        ]
+        orig_lines_dedent = textwrap.dedent("\n".join(orig_lines)).splitlines()
+        indent_len = len(orig_lines[0]) - len(orig_lines_dedent[0])
+        indent = orig_lines[0][:indent_len]
+        result = textwrap.indent(textwrap.dedent(result), indent)
+        return result
+
     assert inst.positions is not None
     if inst.positions.lineno is None:
         return ""
