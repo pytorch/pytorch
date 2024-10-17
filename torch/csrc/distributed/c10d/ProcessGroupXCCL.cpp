@@ -1,5 +1,6 @@
 #ifdef USE_C10D_XCCL
 
+#include <comm/XPUGuard.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupXCCL.hpp>
 #include <fstream>
 #include <map>
@@ -9,21 +10,20 @@
 #include <unordered_set>
 #include <utility>
 
-#include <ATen/detail/FunctionTraits.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Optional.h>
 
 namespace c10d {
 
 namespace {
-std::map<c10d::ReduceOp, ccl::reduction> xcclOps = {
+const std::map<c10d::ReduceOp, ccl::reduction> xcclOps = {
     {ReduceOp::MIN, ccl::reduction::min},
     {ReduceOp::MAX, ccl::reduction::max},
     {ReduceOp::SUM, ccl::reduction::sum},
     {ReduceOp::PRODUCT, ccl::reduction::prod},
 };
 
-std::map<at::ScalarType, ccl::datatype> xcclDatatypes = {
+const std::map<at::ScalarType, ccl::datatype> xcclDatatypes = {
     {at::kByte, ccl::datatype::uint8},
     {at::kChar, ccl::datatype::int8},
     {at::kInt, ccl::datatype::int32},
@@ -35,16 +35,22 @@ std::map<at::ScalarType, ccl::datatype> xcclDatatypes = {
     {at::kBool, ccl::datatype::uint8},
 };
 
-void check_xpu_single_tensor(const at::Tensor& tensor) {
-  if (!tensor.is_xpu() || tensor.is_sparse()) {
-    C10_THROW_ERROR(ValueError, "Tensors must be XPU and dense");
-  }
-  if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+void checkXPUTensor(at::Tensor& tensor) {
+  if (!tensor.is_xpu() || tensor.is_sparse() || tensor.is_complex()) {
+    C10_THROW_ERROR(
+        ValueError, "Tensors must be XPU and dense and non-complex");
+    if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    }
   }
 }
 
-ccl::datatype getXcclDataType(at::ScalarType type) {
+ccl::datatype getXcclDataType(
+    at::ScalarType type,
+    bool is_reduction_op = false) {
+  TORCH_CHECK(
+      !isFloat8Type(type) && is_reduction_op,
+      "Float8 dtypes are not currenlty supported for XCCL reductions");
   auto it = xcclDatatypes.find(type);
   TORCH_CHECK_WITH(
       TypeError,
@@ -56,26 +62,27 @@ ccl::datatype getXcclDataType(at::ScalarType type) {
 
 ccl::reduction getXcclReduceOp(const ReduceOp& reduceOp, at::Tensor& input) {
   try {
-    if (input.scalar_type() == at::kBool) {
-      if (reduceOp == ReduceOp::SUM) {
-        // For bool tensors, map sum to max, which both represent a bitwise or.
-        // This is to prevent overflow issues with sum, since we use uint8 to
-        // represent a bool (see xcclDatatypes mapping align with cuda).
-        return ccl::reduction::max;
-      }
+    if (input.scalar_type() == at::kBool && reduceOp == ReduceOp::SUM) {
+      // Map sum to max for bool tensors to avoid overflow issues with sum.
+      return ccl::reduction::max;
     }
     return xcclOps.at(reduceOp);
   } catch (const std::out_of_range&) {
     C10_THROW_ERROR(
         ValueError,
-        "Cannot use ReduceOp." + reduce_op_to_string(reduceOp) + " with XCCL");
+        "Cannot use ReduceOp." + reduceOpToString(reduceOp) + " with XCCL");
   }
 }
 
+void syncStream(
+    at::Device& device,
+    at::xpu::XPUEvent& xcclEvent,
+    at::xpu::XPUStream& xcclStream) {
+  xcclEvent.record(at::xpu::getCurrentXPUStream(device.index()));
+  xcclEvent.block(xcclStream);
+}
 } // namespace
 
-static std::mutex xcclCommDevIdxMapMutex;
-static std::unordered_map<std::shared_ptr<xcclComm_t>, int> xcclCommDevIdxMap;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 
 ProcessGroupXCCL::WorkXCCL::WorkXCCL(
@@ -86,8 +93,7 @@ ProcessGroupXCCL::WorkXCCL::WorkXCCL(
     : Work(rank, opType, "profilingTitle", inputs),
       device_(device),
       workStartTime_(std::chrono::steady_clock::now()) {
-  unsigned char enable_timing = 0;
-  xcclEndEvent_ = std::make_shared<at::xpu::XPUEvent>(enable_timing);
+  xcclEndEvent_ = std::make_shared<at::xpu::XPUEvent>();
 }
 
 ProcessGroupXCCL::WorkXCCL::WorkXCCL(const WorkXCCL& w)
@@ -121,12 +127,9 @@ void ProcessGroupXCCL::WorkXCCL::synchronizeInternal(
           currentTimepoint - workStartTime_);
       if (timeElapsed >= timeout) {
         std::string exceptionMsg = c10::str(
-            "Work ran for ",
-            timeElapsed.count(),
-            " milliseconds before timing out.");
+            "Work ran time out after ", timeElapsed.count(), " milliseconds.");
         TORCH_CHECK(false, exceptionMsg)
       }
-
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
@@ -145,20 +148,6 @@ ProcessGroupXCCL::ProcessGroupXCCL(
     : Backend(rank, size), store_(store) {
   blockingWait_ = getCvarBool(TORCH_XCCL_BLOCKING_WAIT, false);
   init();
-
-  // Intel oneCCL requires passing CCL_LOCAL_RANK and CCL_LOCAL_SIZE for non-MPI
-  // launchers.
-  if (!with_mpirun()) {
-    int local_rank = getXCCLEnvVar("LOCAL_RANK");
-    int local_world_size = getXCCLEnvVar("LOCAL_WORLD_SIZE");
-    if (local_rank == -1 || local_world_size == -1) {
-      local_rank = rank;
-      local_world_size = size;
-    }
-    setXCCLEnvVar("CCL_PROCESS_LAUNCHER", "none");
-    setXCCLEnvVar("CCL_LOCAL_RANK", local_rank);
-    setXCCLEnvVar("CCL_LOCAL_SIZE", local_world_size);
-  }
 }
 
 ProcessGroupXCCL::~ProcessGroupXCCL() = default;
@@ -177,97 +166,74 @@ c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL> ProcessGroupXCCL::initWork(
 std::shared_ptr<xcclComm_t> ProcessGroupXCCL::getXCCLComm(
     const std::string& deviceKey,
     at::Device& device) {
-  if (deviceKey.empty()) {
-    C10_THROW_ERROR(
-        DistBackendError,
-        "Not able to create/get the XCCL Communicator since "
-        "the devices are empty ");
-  }
-
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      !deviceKey.empty(),
+      "Not able to create/get "
+      "XCCL Communicator since the devices are empty ");
   {
+    // todo: why do we need mutex here?
     std::lock_guard<std::mutex> lock(mutex_);
     if (devXCCLCommMap_.find(deviceKey) != devXCCLCommMap_.end()) {
       return devXCCLCommMap_[deviceKey];
     }
   }
 
-  std::shared_ptr<xcclComm_t> XCCLComm;
-
-  XCCL_KVS kvs = get_kvs(rank_, *store_);
-
   int numRanks, rank;
   numRanks = getSize();
   rank = getRank();
 
   c10::impl::VirtualGuardImpl impl(device.type());
-  c10::Stream stream = impl.getStream(device);
+  c10::Stream stream =
+      impl.getStreamFromGlobalPool(device, /*isHighPriority=*/false);
   sycl::queue& q = c10::xpu::XPUStream(stream).queue();
 
   auto ctx = ccl::create_context(q.get_context());
   ccl::vector_class<ccl::pair_class<int, ccl::device>> devs_rank;
   devs_rank.emplace_back(rank, ccl::create_device(q.get_device()));
 
-  auto comms = ccl::create_communicators(numRanks, devs_rank, ctx, kvs);
-  XCCLComm = std::make_shared<xcclComm_t>(std::move(comms[0]));
+  auto xccl_kvs = get_kvs(rank_, *store_);
+  auto comms = ccl::create_communicators(numRanks, devs_rank, ctx, xccl_kvs);
+  std::shared_ptr<xcclComm_t> XCCLComm =
+      std::make_shared<xcclComm_t>(std::move(comms[0]));
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    inInitializationCommMap_.emplace(deviceKey, XCCLComm);
-  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  devXCCLCommMap_.emplace(deviceKey, XCCLComm);
+  xcclStreamsMap_.emplace(deviceKey, std::move(stream));
+  xcclEventsMap_.emplace(deviceKey, at::xpu::XPUEvent());
 
-  xcclStreams_.emplace(deviceKey, std::move(stream));
-
-  auto it = inInitializationCommMap_.find(deviceKey);
-  if (it != inInitializationCommMap_.end()) {
-    devXCCLCommMap_.emplace(deviceKey, std::move(it->second));
-    inInitializationCommMap_.erase(deviceKey);
-
-    xcclCommDevIdxMapMutex.lock();
-    xcclCommDevIdxMap.emplace(XCCLComm, device.index());
-    xcclCommDevIdxMapMutex.unlock();
-  }
-
-  it = devXCCLCommMap_.find(deviceKey);
-  TORCH_INTERNAL_ASSERT(
-      it != devXCCLCommMap_.end(), "Communicators not populated in cache!");
-
-  return it->second;
+  return XCCLComm;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
-    at::Tensor& input,
-    at::Tensor& output,
+    std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
     Fn fn,
     PreProcess pre,
     PostProcess post,
     OpType opType) {
-  using traits = function_traits<Fn>;
-  using attr_t = typename traits::template arg<2>::type;
-  attr_t attr = ccl::create_operation_attr<attr_t>();
-
-  auto device = input.device();
+  auto device = inputs[0].device();
   const auto key = std::to_string(device.index());
   auto comm = getXCCLComm(key, device);
 
-  auto stream = xcclStreams_.at(key);
-  std::vector<at::Tensor> outputs{output};
+  auto stream = xcclStreamsMap_.at(key);
+  syncStream(device, xcclEventsMap_[key], stream);
 
   c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL> work;
-
   work = initWork(device, rank_, opType);
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
-  work->outputs_ =
-      std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
-  c10::xpu::XPUCachingAllocator::recordStream(
-      input.storage().data_ptr(), stream);
-
-  auto ccl_stream = ccl::create_stream(stream.queue());
-
-  fn(input, output, attr, *comm, ccl_stream);
+  at::xpu::OptionalXPUGuard gpuGuard(device);
+  pre(stream, work);
+  for (const auto i : c10::irange(inputs.size())) {
+    c10::xpu::XPUCachingAllocator::recordStream(
+        inputs[i].storage().data_ptr(), stream);
+    fn(inputs[i], outputs[i], *comm, stream);
+  }
+  post(stream, work);
 
   work->xcclEndEvent_->record(stream);
-
   std::vector<c10::Stream> streams = {stream.unwrap()};
   c10::MultiStreamGuard streamGuard(streams);
   std::vector<at::Device> devices{device};
@@ -279,51 +245,52 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
   return work;
 }
 
-template <typename Fn>
-c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
-    at::Tensor& input,
-    at::Tensor& output,
-    Fn fn,
-    OpType opType) {
-  return collective<Fn>(
-      input,
-      output,
-      fn,
-      [](at::xpu::XPUStream&,
-         c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL>& work) {},
-      [](at::xpu::XPUStream&,
-         c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL>& work) {},
-      opType);
-}
-
 c10::intrusive_ptr<Work> ProcessGroupXCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   TORCH_CHECK(
       tensors.size() == 1, "Expecting one tensor only but got multiple");
   auto tensor = tensors.back();
-  check_xpu_single_tensor(tensor);
+  checkXPUTensor(tensor);
+
+  RECORD_PARAM_COMMS_DATA(
+      // static_cast<int>(
+      //     this->getSequenceNumberForGroup() + 1), // seq + 1 to match
+      //     collective
+      1,
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      tensors, // inputTensors
+      tensors, // outputTensors
+      rank_, // rank
+      "allreduce", // collective name
+      tensor.numel(), // inNelems
+      tensor.numel(), // outNelems
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      0, // globalRankStart
+      1, // globalRankStride
+      this->getSize()); // worldSize
+
   return collective(
       tensor,
       tensor,
       [&](at::Tensor& input,
           at::Tensor& output,
-          ccl::allreduce_attr attr,
           xcclComm_t& comm,
-          ccl::stream& stream) {
-        auto xcclDataType = getXcclDataType(input.scalar_type());
+          at::xpu::XPUStream& stream) {
+        auto xcclDataType = getXcclDataType(input.scalar_type(), true);
         auto xcclReduceOp = getXcclReduceOp(opts.reduceOp, input);
-        ccl::event ret_evt;
-        ret_evt = ccl::allreduce(
+        auto ccl_stream = ccl::create_stream(stream.queue());
+        ccl::allreduce(
             input.data_ptr(),
             output.data_ptr(),
             (size_t)input.numel(),
             xcclDataType,
             xcclReduceOp,
             comm,
-            stream,
-            attr);
-        return ret_evt;
+            ccl_stream);
+        return;
       },
       OpType::ALLREDUCE);
 }

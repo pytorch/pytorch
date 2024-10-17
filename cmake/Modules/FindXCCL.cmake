@@ -6,9 +6,10 @@
 
 include(FindPackageHandleStandardArgs)
 
-set(XCCL_ROOT "")
-if(DEFINED ENV{CCL_ROOT})
-  set(XCCL_ROOT $ENV{CCL_ROOT})
+set(XCCL_ROOT "/opt/intel/oneapi/ccl/latest")
+if (NOT EXISTS "${XCCL_ROOT}")
+  message(STATUS "Default OneCCL not found, using current environment OneAPI")
+  set(XCCL_ROOT $ENV{ONEAPI_ROOT}/ccl/latest)
 endif()
 
 string(COMPARE EQUAL "${XCCL_ROOT}" "" nocclfound)

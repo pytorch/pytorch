@@ -557,7 +557,7 @@ size_t computeLengthsAndOffsets(
   return offset;
 }
 
-inline std::string reduce_op_to_string(c10d::ReduceOp op) {
+inline std::string reduceOpToString(c10d::ReduceOp op) {
   switch (op) {
     case c10d::ReduceOp::SUM:
       return "SUM";
