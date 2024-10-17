@@ -1796,8 +1796,6 @@ class SIMDScheduling(BaseScheduling):
             def __del__(self) -> None:
                 self.n.last_usage = self.last_usage
 
-        last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
-
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = OrderedSet()
