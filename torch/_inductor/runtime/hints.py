@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import typing
-from dataclasses import fields
 from enum import auto, Enum
 from typing import Dict, List, Optional, Union
 
@@ -27,48 +26,58 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-# Attempt to import AttrsDescriptor from Triton
-try:
-    from triton.compiler.compiler import AttrsDescriptor
+def _is_triton_available():
+    try:
+        import triton  # noqa: F401
 
-    attrs_descriptor_available = True
-    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
-    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
-    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
-except ImportError:
-    attrs_descriptor_available = False
+        return True
+    except ImportError:
+        return False
 
-# Define `instance_descriptor` function with clear conditional handling
-if attrs_descriptor_available:
 
-    def instance_descriptor(
-        divisible_by_16=None,
-        equal_to_1=None,
-        ids_of_folded_args=None,
-        divisible_by_8=None,
-    ):
-        # Prepare the arguments for AttrsDescriptor
-        kwargs = {
-            "divisible_by_16": divisible_by_16,
-            "equal_to_1": equal_to_1,
-        }
+# Define `AttrsDescriptorWrapper` function with clear conditional handling
+if _is_triton_available():
+    try:
+        from triton.backends.compiler import AttrsDescriptor
 
-        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
-        if ids_of_folded_args_available:
-            kwargs["ids_of_folded_args"] = ids_of_folded_args
-        if divisible_by_8_available:
-            kwargs["divisible_by_8"] = divisible_by_8
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            # Prepare the arguments for AttrsDescriptor
+            kwargs = {
+                "tt.divisibility": divisible_by_16,
+                "tt.equal_to": equal_to_1,
+            }
 
-        # Instantiate AttrsDescriptor with the prepared arguments
-        return AttrsDescriptor(**kwargs)
+            # Instantiate AttrsDescriptor with the prepared arguments
+            res = AttrsDescriptor.from_dict(kwargs)
+            assert res.property_values["tt.divisibility"] == 16
+            assert res.property_values["tt.equal_to"] == 1
+            return res
+
+    except ImportError:
+        from triton.compiler.compiler import AttrsDescriptor
+
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            # Prepare the arguments for AttrsDescriptor
+            kwargs = {
+                "divisible_by_16": divisible_by_16,
+                "equal_to_1": equal_to_1,
+            }
+
+            # Instantiate AttrsDescriptor with the prepared arguments
+            return AttrsDescriptor(**kwargs)
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
-        "instance_descriptor",
-        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[(), (), (), ()],
+    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
+        "AttrsDescriptor",
+        ["divisible_by_16", "equal_to_1"],
+        defaults=[(), ()],
     )
 
 
