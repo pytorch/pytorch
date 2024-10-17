@@ -583,13 +583,10 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         self,
         kernel_idx: int,
         constant_args_idx: int,
-        grid: List[
-            "TritonGridType"
-        ],  # TODO(dberard) this is correct. Need to update the other ones.
+        grid: List["TritonGridType"],
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: Dict[str, Any],
     ) -> Any:
-        assert isinstance(grid, list)  # TODO(dberard): remove
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -616,7 +613,6 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         kwargs: Dict[str, Any],
         tensors_to_clone: List[str],
     ) -> Dict[str, Any]:
-        assert isinstance(grid, list)  # TODO(dberard): remove
         ret = super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -640,7 +636,6 @@ def triton_kernel_wrapper_mutation_dense(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: Dict[str, Any],
 ) -> None:
-    assert isinstance(grid, list)  # TODO(dberard): remove
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
     kernel = kernel_side_table.get_kernel(kernel_idx)
@@ -693,9 +688,6 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: Dict[str, Any],
 ) -> None:
-    assert isinstance(grid, list)  # TODO(dberard): remove
-    if not isinstance(grid[0], tuple):
-        breakpoint()
     with mode:
         return None
 
@@ -709,11 +701,9 @@ def _(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: Dict[str, Any],
 ) -> None:
-    assert isinstance(grid, list)  # TODO(dberard): remove
     return None
 
 
-# TODO(dberard). I think we can define a callable type for func_overload and node_args is its arguments list...
 def trace_triton_kernel_wrapper(
     proxy_mode: ProxyTorchDispatchMode,
     func_overload: Callable,
