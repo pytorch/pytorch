@@ -6,19 +6,18 @@ from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
-from torch import dtype as torch_dtype, uint8
+from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
-from .. import config
 from ..codecache import CudaKernelParamCache
 from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
-from .cpp_utils import cexpr, DTYPE_TO_CPP
+from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import SymbolicCallArg
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -171,6 +170,14 @@ class CppWrapperGpu(CppWrapperCpu):
         super().__init__()
         self.grid_id = count()
 
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperGpu()
+
     def write_header(self):
         if V.graph.is_const_graph:
             # We do not write header for constant graph, it will be written by main module.
@@ -179,12 +186,7 @@ class CppWrapperGpu(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        if config.abi_compatible:
-            self.header.splice(self.device_codegen.abi_compatible_header())
-        else:
-            self.header.splice(
-                maybe_hipify_code_wrapper(self.device_codegen.kernel_header())
-            )
+        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
@@ -266,13 +268,15 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline(
             DeferredGpuKernelLine(
                 kernel_name,
-                """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
-                if V.graph.aot_mode
-                else """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s);""",
+                (
+                    """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                    if V.graph.aot_mode
+                    else """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s);"""
+                ),
                 keys,
             )
         )
@@ -286,44 +290,21 @@ class CppWrapperGpu(CppWrapperCpu):
             if isinstance(arg_type, torch_dtype):
                 if arg.endswith(".item()"):
                     # Need to declare a scalar in this case
-                    ctype = DTYPE_TO_CPP[arg_type]
                     arg = arg[:-7]
-                    if config.abi_compatible:
-                        self.codegen_tensor_item(
-                            arg_type,
-                            arg,
-                            var_name,
-                        )
-                    else:
-                        from torch import bfloat16, float16
-
-                        if arg_type in (float16, bfloat16):
-                            var_name_tmp = f"{var_name}_tmp"
-                            self.writeline(
-                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
-                            )
-                            self.writeline(f"float {var_name} = float({var_name_tmp});")
-                        else:
-                            self.writeline(
-                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
-                            )
+                    self.codegen_tensor_item(
+                        arg_type,
+                        arg,
+                        var_name,
+                    )
                 else:
-                    if config.abi_compatible:
-                        self.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{self.device_codegen.cpp_device_ptr()} {var_name};"
-                            )
+                    self.writeline(
+                        maybe_hipify_code_wrapper(
+                            f"{self.device_codegen.cpp_device_ptr()} {var_name};"
                         )
-                        self.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
-                        )
-                    else:
-                        self.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{self.device_codegen.cpp_device_ptr()} {var_name} = \
-                                    reinterpret_cast<{self.device_codegen.cpp_device_ptr()}>({arg}.data_ptr());"
-                            )
-                        )
+                    )
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
+                    )
             elif arg_type in (sympy.Integer, int):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
             elif arg_type in (sympy.Float, float):
@@ -390,73 +371,81 @@ class CppWrapperGpu(CppWrapperCpu):
                 grid_extra_kwargs,
             )
 
-        device_index, call_args = self.prepare_triton_kernel_call(
-            device_index, call_args
-        )
-        kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
-
-        # args with value 1 are added into equal_to_1 and constants
-        # in triton_meta (in the Python codegen) which makes them
-        # inlined in the PTX and compiled CUBIN
-        if (
-            triton_meta is not None
-            and "configs" in triton_meta
-            and triton_meta["configs"]
-        ):
-            equal_to_1 = triton_meta["configs"][0].equal_to_1
-            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
-            arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-
-        call_args_str = self.generate_args_decl(call_args, arg_types)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+        if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            device_index = current_device.index
         stream = (
             "stream"
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-        grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
-        self.writeline(
-            DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
-        )
 
-        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        # add debug printer code for all triton kernel related calls
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
-        with debug_printer_manager:
-            self.writeline(f"if ({grid_var}.is_non_zero()) {{")
-            self.writeline(
-                DeferredGpuKernelLine(
-                    kernel_name,
-                    r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                        kernel_var_name,
-                        f"{grid_var}.grid_x",
-                        f"{grid_var}.grid_y",
-                        f"{grid_var}.grid_z",
-                        kernel_args_var,
-                        stream,
-                    ),
-                    ("num_warps", "shared_mem"),
-                ),
+        if triton:
+            device_index, call_args = self.prepare_triton_kernel_call(
+                device_index, call_args
             )
-            self.writeline("}")
+            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
 
-    def generate_workspace_allocation(self, nbytes, device, zero_fill):
-        line = self.make_allocation(
-            "workspace", device, uint8, shape=(nbytes,), stride=(1,)
-        )
-        self.writeline(line)
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(line)
-        if zero_fill:
-            if config.abi_compatible:
-                # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
-                # default behavior is f"workspace.zero_(){self.ending}"
+            # args with value 1 are added into equal_to_1 and constants
+            # in triton_meta (in the Python codegen) which makes them
+            # inlined in the PTX and compiled CUBIN
+            if (
+                triton_meta is not None
+                and "configs" in triton_meta
+                and triton_meta["configs"]
+            ):
+                equal_to_1 = triton_meta["configs"][0].equal_to_1
+                call_args = [
+                    arg for i, arg in enumerate(call_args) if i not in equal_to_1
+                ]
+                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+
+            call_args_str = self.generate_args_decl(call_args, arg_types)
+            kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+
+            grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
+            self.writeline(
+                DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
+            )
+
+            kernel_var_name = (
+                f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+            )
+            # add debug printer code for all triton kernel related calls
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.set_printer_args(
+                call_args, kernel_name, arg_types, None
+            )
+            with debug_printer_manager:
+                self.writeline(f"if ({grid_var}.is_non_zero()) {{")
                 self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
+                    DeferredGpuKernelLine(
+                        kernel_name,
+                        r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                            kernel_var_name,
+                            f"{grid_var}.grid_x",
+                            f"{grid_var}.grid_y",
+                            f"{grid_var}.grid_z",
+                            kernel_args_var,
+                            stream,
+                        ),
+                        ("num_warps", "shared_mem"),
+                    ),
                 )
-            else:
-                self.writeline(f"workspace.zero_(){self.ending}")
-            if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
+                self.writeline("}")
+        else:
+            casted = []
+            for arg_type, arg in zip(arg_types, call_args):
+                new_arg = arg
+                if arg_type.endswith("*") and arg != "nullptr":
+                    new_arg = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"auto* {new_arg} = get_data_ptr_wrapper({arg});")
+                casted.append(f"({arg_type}){new_arg}")
+            call_args_str = ", ".join(casted)
+            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+
+    def make_zero_buffer(self, name):
+        return (
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_({name}.get())){self.ending}"
+        )

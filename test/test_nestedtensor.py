@@ -4234,35 +4234,41 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @onlyCUDA
     @dtypes(torch.float32)
     def test_record_stream(self, device, dtype):
-        values = torch.randn(500, 512, device=device, dtype=dtype)
-        step = 3
-        offsets = torch.arange(0, values.shape[0] + step, step, device=device)
-        lengths = offsets.diff()
-        nt_data_ptrs = {values.data_ptr(), offsets.data_ptr(), lengths.data_ptr()}
+        def _create_nt():
+            values = torch.ones(1024, 4 * 1024, device="cuda")
+            offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
+            lengths = offsets.diff()
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
+            data_ptrs = {
+                nt._values.data_ptr(),
+                nt._offsets.data_ptr(),
+                nt._lengths.data_ptr(),
+            }
+            return nt, data_ptrs
 
-        nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
-        s = torch.cuda.Stream()
+        def fn(record_stream):
+            nt, data_ptrs = _create_nt()
+            s = torch.cuda.Stream()
 
-        with torch.cuda.stream(s):
-            # do something long
-            torch.cuda._sleep(1_000_000_000)
-            # ensure nt's memory survives
-            nt.record_stream(s)
+            with torch.cuda.stream(s):
+                # emulate doing something long via sleep
+                per_ms = 2e7
+                torch.cuda._sleep(int(per_ms * 100))
+                if record_stream:
+                    nt.record_stream(s)
+            return data_ptrs
 
-        # allocate new NJT of same size, check that data_ptrs don't match any of previous NJT's.
-        # this indicates no memory reuse happens
-        nt2 = torch.nested.nested_tensor_from_jagged(
-            torch.randn_like(values),
-            torch.zeros_like(offsets),
-            torch.empty_like(lengths),
-        )
-        nt2_data_ptrs = {
-            nt2._values.data_ptr(),
-            nt2._offsets.data_ptr(),
-            nt2._lengths.data_ptr(),
-        }
-        for data_ptr in nt2_data_ptrs:
-            self.assertNotIn(data_ptr, nt_data_ptrs)
+        # expect memory reuse when record_stream() is not run
+        data_ptrs = fn(record_stream=False)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(data_ptrs, nt_data_ptrs)
+        del nt
+        torch.cuda.synchronize()
+
+        # expect memory to be preserved (no reuse) when record_stream() is run
+        data_ptrs = fn(record_stream=True)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(len(data_ptrs.intersection(nt_data_ptrs)), 0)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -7087,6 +7093,36 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt3._offsets.device, other_device)
         if nt._lengths is not None:
             self.assertEqual(nt3._lengths.device, other_device)
+
+    @dtypes(torch.float32)
+    def test_autograd_function_with_None_grad(self, device, dtype):
+        class MyFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                ctx.save_for_backward(inp)
+                out1 = inp + 1
+                out2 = inp * 2
+                return out1, out2
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                (inp,) = ctx.saved_tensors
+                return grad_out1 + grad_out2
+
+        f = MyFunction.apply
+        nt = random_nt_from_dims(
+            [5, None, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        # Only use one of the autograd.Function outputs downstream so that the grad
+        # for the other output is None. We're testing that the engine can allocate
+        # correctly-shaped (NJT) zeros for the grad of the other output in this case.
+        (out1, _) = f(nt)
+        out1.backward(torch.ones_like(out1))
 
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):

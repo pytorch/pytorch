@@ -488,7 +488,9 @@ main()
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
-        proxies, _, _ = compiler.begin_capture(inputs=inputs, sizes=[], scalars=[])
+        proxies, _, _ = compiler.begin_capture(
+            inputs=inputs, sizes=[], scalars=[], origins=[[], [], []]
+        )
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
@@ -2426,22 +2428,37 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             self.check_output_and_recompiles(fn)
 
         expected_logs = [
+            "torch::autograd::GraphRoot (NodeCall 0)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "ReluBackward0 (NodeCall 5)",
+            "TBackward0 (NodeCall 6)",
+            "torch::autograd::AccumulateGrad (NodeCall 7)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "TBackward0 (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
             "SumBackward0 (NodeCall 1)",
             "ReluBackward0 (NodeCall 2)",
             "AddmmBackward0 (NodeCall 3)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
             "TBackward0 (NodeCall 4)",
             "torch::autograd::AccumulateGrad (NodeCall 5)",
             "ReluBackward0 (NodeCall 6)",
             "AddmmBackward0 (NodeCall 7)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
             "TBackward0 (NodeCall 8)",
             "torch::autograd::AccumulateGrad (NodeCall 9)",
-            "torch::autograd::AccumulateGrad (NodeCall 10)",
             "torch::autograd::AccumulateGrad (NodeCall 11)",
         ]
 
-        self.assertEqual(
-            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
-        )
+        found = 0
+        for line in logs.getvalue().split("\n"):
+            if found == len(expected_logs):
+                break
+            if expected_logs[found] in line:
+                found += 1
+
+        self.assertEqual(found, len(expected_logs))
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
@@ -2474,7 +2491,41 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        self.assertTrue("CompiledFunctionBackward0" in logs.getvalue())
+        expected_logs = [
+            "code: CompiledFunctionBackward (NodeCall 2)",
+            "aot0_primals_3",
+            "aot0_relu",
+            "aot0_le",
+            "aot0_permute_2",
+            "code: CompiledFunctionBackward0 (NodeCall 2)",
+            "aot0_tangents_1",
+            "aot0_full_default",
+            "aot0_where",
+            "aot0_mm",
+            "aot0_permute_3",
+            "aot0_mm_1",
+            "aot0_permute_4",
+            "aot0_sum_1",
+            "aot0_view",
+            "aot0_permute_5",
+            "aot0_le_1",
+            "aot0_where_1",
+            "aot0_permute_6",
+            "aot0_mm_2",
+            "aot0_permute_7",
+            "aot0_sum_2",
+            "aot0_view_1",
+            "aot0_permute_8",
+        ]
+
+        found = 0
+        for line in logs.getvalue().split("\n"):
+            if found == len(expected_logs):
+                break
+            if expected_logs[found] in line:
+                found += 1
+
+        self.assertEqual(found, len(expected_logs))
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
@@ -2865,6 +2916,7 @@ known_failing_tests = {
     "test_grad_mode_restored_reentrant",  # hangs with graph breaks
     "test_no_grad_copy",  # setting static member in lifted backward
     "test_no_grad_copy_sparse",  # setting static member in lifted backward
+    "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
     "test_reentrant_priority",  # hangs with graph breaks
     "test_reentrant_with_callbacks_both_depths",  # hangs with graph breaks
     "test_reentrant_with_callbacks_depth_0",  # probably hangs with graph breaks
