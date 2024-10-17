@@ -98,8 +98,6 @@ struct uniform_real_distribution {
   C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) : from_(from), to_(to) {
     TORCH_CHECK_IF_NOT_ON_CUDA(from <= to);
     TORCH_CHECK_IF_NOT_ON_CUDA(to - from <= std::numeric_limits<T>::max());
-    
-    
   }
 
   template <typename RNG>
@@ -188,8 +186,6 @@ struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
-    
-    
   }
 
   template <typename RNG>
@@ -238,7 +234,6 @@ struct bernoulli_distribution {
 
   C10_HOST_DEVICE inline bernoulli_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
-    
   }
 
   template <typename RNG>
@@ -259,7 +254,6 @@ struct geometric_distribution {
 
   C10_HOST_DEVICE inline geometric_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in > 0 && p_in < 1);
-    
   }
 
   template <typename RNG>
@@ -319,8 +313,6 @@ struct lognormal_distribution {
 
   C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
-    
-    
   }
 
   template<typename RNG>
