@@ -16266,14 +16266,14 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             # for element 1, was torch.Size([4, 4, 0]) but real shape was torch.Size([16, 3, 0])
-            DecorateInfo(unittest.skip, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
                          dtypes=[torch.float16, torch.bfloat16, torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.skip, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
                          dtypes=[torch.float16, torch.bfloat16, torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
-            DecorateInfo(unittest.skip, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
                          device_type="cuda", dtypes=[torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),),
     ),
