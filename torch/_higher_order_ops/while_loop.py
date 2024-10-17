@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,7 +11,6 @@ from torch._higher_order_ops.utils import (
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
-    unique_graph_id,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -243,7 +242,6 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     return _trace_while_loop(
         mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     )
-
 
 
 @while_loop_op.py_impl(FakeTensorMode)

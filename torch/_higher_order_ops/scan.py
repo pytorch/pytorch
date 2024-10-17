@@ -187,10 +187,10 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     # There are no pytree restrictions on the second output of the operator
     out_leaves, tree_out = pytree.tree_flatten(out[1])
 
-    # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
     # TODO: Unify the list inputs of control flow ops to tuple.
+    # TODO: Support aot_compatible mode
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat,
@@ -202,10 +202,6 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     )
 
     def run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse):
-        if torch._inductor.config.cpp_wrapper:
-            raise RuntimeError(
-                "scan is not supported in cpp_wrapper and abi_compatible mode yet."
-            )
         return scan_op(
             combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
         )

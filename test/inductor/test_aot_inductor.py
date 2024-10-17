@@ -72,7 +72,6 @@ try:
             CondModels,
             prepend_counters,
             prepend_predicates,
-            ScanModels,
             WhileLoopModels,
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
@@ -84,7 +83,6 @@ try:
             CondModels,
             prepend_counters,
             prepend_predicates,
-            ScanModels,
             WhileLoopModels,
         )
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
@@ -1258,32 +1256,6 @@ class AOTInductorTestsTemplate:
             inputs,
             dynamic_shapes=dynamic_shapes,
         )
-
-    def test_scan_simple_pytree(self):
-        inputs = [
-            torch.randn(3, 3, 3, device=self.device),
-            torch.randn(4, 3, device=self.device),
-            torch.randn(3, device=self.device),
-        ]
-        dim0 = Dim("s0", min=2, max=1024)
-        dynamic_shapes = {
-            "_input": {0: Dim.STATIC, 1: dim0, 2: Dim.STATIC},
-            "weight": {0: Dim.STATIC, 1: Dim.STATIC},
-            "bias": {0: Dim.STATIC},
-        }
-        model = ScanModels.SimpleScan(reverse=False, dim=1)
-        if "non_abi_compatible" in str(self):
-            exc = torch._inductor.exc.LoweringException
-            err_msg = "scan is not supported with cpp_wrapper yet"
-        else:
-            exc = torch._dynamo.exc.Unsupported
-            err_msg = "Observed exception"
-        with self.assertRaisesRegex(exc, err_msg):
-            self.check_model_with_multiple_inputs(
-                model,
-                (tuple(inputs),),
-                dynamic_shapes=dynamic_shapes,
-            )
 
     def test_while_loop_simple(self):
         inputs = (
