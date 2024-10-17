@@ -106,14 +106,7 @@ from torch._inductor.compile_fx import (
     complex_memory_overlap,
 )
 from torch._inductor.utils import has_torchvision_roi_align
-from torch.testing._internal.common_utils import (
-    IS_JETSON,
-    IS_MACOS,
-    skipIfRocm,
-    skipIfWindows,
-    slowTest,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -1687,7 +1680,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
-      @skipWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
+    @skipIfWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
     def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
             return aten._unsafe_masked_index(a, mask, idx, 1)
@@ -3788,7 +3781,7 @@ class CommonTemplate:
             ),
         )
 
-    @skipWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
+    @skipIfWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
     def test_device_assert(self):
         def fn(x, y):
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
