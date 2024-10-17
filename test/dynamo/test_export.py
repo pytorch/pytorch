@@ -116,7 +116,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y,), {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     x = arg0
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
@@ -144,7 +144,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y,), {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     x = arg0
     return pytree.tree_unflatten([2], self._out_spec)""",
         )
@@ -699,7 +699,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y,), {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     arg0_1 = arg0
     return pytree.tree_unflatten([arg0_1], self._out_spec)""",
         )
@@ -727,7 +727,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y,), {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     arg0_1 = arg0
     return pytree.tree_unflatten([2], self._out_spec)""",
         )
@@ -3531,7 +3531,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
         arg1: "f32[s1, s2]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x,), {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
         l_x_ = arg1
 
         sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
@@ -3542,7 +3542,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
         arg1: "f32[s1, s2]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x,), {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
         l_x_ = arg1
 
         cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
@@ -3888,7 +3888,7 @@ G['macademia'], accessed at:
             out_graph.code.strip(),
             """\
 def forward(self, pred, x):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x,), {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
     l_pred_ = arg0
     l_x_ = arg1
     a = torch.ones(6, 4)
@@ -4538,7 +4538,7 @@ def forward(self, x):
             gm.code.strip(),
             """\
 def forward(self, x, b, y):
-    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y,), {}), self._in_spec)
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y), {}), self._in_spec)
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
@@ -4554,7 +4554,7 @@ def forward(self, x, b, y):
             gm.code.strip(),
             """\
 def forward(self, x, b, y):
-    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y,), {}), self._in_spec)
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y), {}), self._in_spec)
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
