@@ -3593,8 +3593,14 @@ class NoneAsConstantBuffer(IRNode):
 
 
 @ir_dataclass
-class ExprAsConstantBuffer(IRNode):
-    expr: Union[Expr, None]
+class ShapeAsConstantBuffer(IRNode):
+    def __init__(self, shape):
+        super().__init__()
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -4753,9 +4759,9 @@ class ExternKernel(InputsKernel):
     @classmethod
     def realize_input(cls, x):
         if x is None:
-            return ExprAsConstantBuffer(expr=None)
+            return NoneAsConstantBuffer()
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
-            return ExprAsConstantBuffer(expr=x)
+            return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -6574,7 +6580,7 @@ class Conditional(ExternKernel):
         self.false_subgraph = false_subgraph
 
         inputs = []
-        if not isinstance(predicate, ExprAsConstantBuffer):
+        if not isinstance(predicate, ShapeAsConstantBuffer):
             inputs.append(predicate)
         inputs.extend(operands)
 
@@ -6631,7 +6637,7 @@ class Conditional(ExternKernel):
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
-        if not isinstance(predicate, ExprAsConstantBuffer):
+        if not isinstance(predicate, ShapeAsConstantBuffer):
             # use predicate device for consistent codegen-ing
             device = predicate.get_device()
         else:
