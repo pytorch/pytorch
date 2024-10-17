@@ -404,8 +404,7 @@ if python_pytree._cxx_pytree_exists:
     ) -> PyTree:
         leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
         flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-        # TODO: change to deque(iterable, maxlen=0) instead when dynamo supports maxlen for deque
-        tuple(map(func, *flat_args))  # consume and exhaust the iterable
+        deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
         return tree
 
     __all__ += ["tree_map_"]
