@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 @instantiate_parametrized_tests
@@ -86,6 +87,24 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @unittest.expectedFailure
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_aot_runtime_trace_joint(self):
+        @torch.compile(backend="inductor")
+        def f(x):
+            tmp = x.sin()
+            s0 = tmp.shape[0]
+            return tmp.expand(s0, s0)
+
+        x_a = torch.randn(4, requires_grad=True)
+        x = TwoTensor(x_a, x_a.clone())
+        out = f(x)
+        out.sum().backward()
+
+        self._clear_dynamo_and_codecache()
+        out = f(x)
+        out.sum().backward()
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
