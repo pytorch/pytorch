@@ -142,7 +142,7 @@ class TestMaxAutotune(TestCase):
             out = AlgorithmSelectorCache.benchmark_example_value(layout)
             expected_out = (mat1 @ mat2) + (mat3 @ mat4)
 
-            choice = FailChoiceCaller("fail_choice_caller", [], None)
+            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
 
             # use a tensor since python list is not synced back
             timings = torch.zeros(3, dtype=torch.float32)
@@ -239,7 +239,7 @@ class TestMaxAutotune(TestCase):
 
         class FakeChoiceCaller(ChoiceCaller):
             def __init__(self) -> None:
-                super().__init__("none", [], Mock())
+                super().__init__("none", [], Mock(), description="")
                 self.thread_id = None
 
             def precompile(self):
