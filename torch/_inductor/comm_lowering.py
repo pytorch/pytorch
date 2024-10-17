@@ -7,7 +7,6 @@ import torch.utils._pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
-from .lowering import clone, copy_, register_lowering
 from .virtualized import V
 
 
@@ -174,6 +173,8 @@ def register_comm_lowerings():
         return
 
     assert c10d is not None
+
+    from .lowering import clone, copy_, register_lowering
 
     @register_lowering(c10d.all_reduce)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
