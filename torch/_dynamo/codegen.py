@@ -66,7 +66,10 @@ class PyCodegen:
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
-        self.overridden_sources = overridden_sources or {}
+        # This serves as a way for codegen to use a different source; we need
+        # this because sometimes we can't easily modify the original source
+        # without affecting other components, e.g., guards.
+        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
@@ -118,6 +121,7 @@ class PyCodegen:
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
+            # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
             self.call_reconstruct(source)
             self.clear_tos()
@@ -149,6 +153,7 @@ class PyCodegen:
                 return
 
         if value.source is not None and allow_cache and self.value_from_source:
+            # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value.source, value.source)
             self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(
