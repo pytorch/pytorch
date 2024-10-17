@@ -293,17 +293,11 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+        from .nested_tensor import nested_from_padded
 
         # handle broadcasting via padded dense -> jagged conversion
-        min_seqlen = None
-        if nt._min_seqlen_tensor is not None:
-            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
-
-        max_seqlen = None
-        if nt._max_seqlen_tensor is not None:
-            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
-
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
         padded_max_S = max_seqlen
         total_L = nt._values.shape[nt._ragged_idx - 1]
         if padded_max_S is None:
@@ -567,6 +561,9 @@ def to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
+    new_lengths = None
+    if inp._lengths is not None:
+        new_lengths = inp._lengths.to(device=new_values.device)
 
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import (
@@ -574,17 +571,21 @@ def to_copy_default(func, *args, **kwargs):
         mb_unwrap_functional_tensor,
     )
 
-    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
+    ragged_source = inp._offsets if inp._lengths is None else inp._lengths
+    new_thing = new_offsets if new_lengths is None else new_lengths
+    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
         # Temporary hack until we have the union find
-        tgt = mb_unwrap_functional_tensor(new_offsets)
-        src = mb_unwrap_functional_tensor(inp._offsets)
+        tgt = mb_unwrap_functional_tensor(new_thing)
+        src = mb_unwrap_functional_tensor(ragged_source)
         tgt.nested_int_memo = src.nested_int_memo
     else:
-        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+        _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
+    inp_kwargs["lengths"] = new_lengths
 
-    return NestedTensor(new_values, **inp_kwargs)
+    output = NestedTensor(new_values, **inp_kwargs)
+    return output
 
 
 @register_jagged_func(
@@ -968,7 +969,7 @@ def cat_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.matmul.default, "self: jt, other: any")
+@register_jagged_func(torch.ops.aten.matmul.default, "self: jt_all, other: any")
 def matmul_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -977,18 +978,93 @@ def matmul_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    if inp.is_nested and not other.is_nested:
-        return NestedTensor(
-            func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
+    def _unbind_impl(a, b):
+        return [
+            func(a_comp, b_comp) for (a_comp, b_comp) in zip(a.unbind(), b.unbind())
+        ]
+
+    def _padded_impl(a, b):
+        assert a.is_nested and not b.is_nested
+        nt, t = a, b
+
+        from .nested_tensor import nested_from_padded
+
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *nt.shape[: nt._ragged_idx],
+            padded_max_S,
+            *nt.shape[nt._ragged_idx + 1 :],
         )
+        padded_nt = nt.to_padded_tensor(0.0, output_size=padded_shape)
+        return nested_from_padded(
+            func(padded_nt, b),
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+    # TODO: Back these with proper kernels (e.g. grouped GEMM)
+    # NJT x dense
+    if inp.is_nested and not other.is_nested:
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        if inp.dim() >= 3 and inp.dim() == other.dim():
+            # convert to padded for this
+            return _padded_impl(inp, other)
+        # Support broadcasting the dense:
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        # etc.
+        elif other.dim() == 2 and inp.dim() > other.dim():
+            return NestedTensor(
+                func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
+            )
+    # NJT x NJT
     elif inp.is_nested and other.is_nested:
-        # BMM with equivalent ragged dims between the two inputs
+        # Support ragged batch dim:
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F), etc.
         if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
+        # Support reducing over ragged with dense output:
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+        elif (
+            inp.dim() == 3
+            and other.dim() == 3
+            and inp._ragged_idx == 2
+            and other._ragged_idx == 1
+            and inp.size(inp._ragged_idx) == other.size(other._ragged_idx)
+        ):
+            # do unbind for this; can't use padded conversion due to j1 in last dim
+            return torch.stack(_unbind_impl(inp, other))
 
     raise RuntimeError(
         f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
     )
+
+
+@register_jagged_func(torch.ops.aten.bmm.default, "self: jt_all, mat2: any")
+def bmm_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("mat2")
+
+    if inp.dim() != 3:
+        raise ValueError("bmm(): input must be 3D")
+    if other.dim() != 3:
+        raise ValueError("bmm(): mat2 must be 3D")
+
+    return matmul_default(torch.ops.aten.matmul.default, inp, other)
 
 
 @register_jagged_func(
@@ -1487,10 +1563,44 @@ def index_put_(func, *args, **kwargs):
     inp: NestedTensor = new_kwargs.pop("input")
 
     # For index_put_ to work, we add together the indices of the ragged dimension
-    # and the batch dimension right before it, changing the batch indices by
-    # the offsets of each ragged dimension
+    # and the batch dimension, adding the offsets of each ragged dimension to its
+    # indices
 
     indices = new_kwargs.pop("indices")
+
+    assert len(indices) <= inp.dim()
+
+    if len(indices) < inp._ragged_idx + 1:
+        assert (
+            inp.is_contiguous()
+        ), "If ragged dimension is not part of indices, this only works on contiguous NJTs"
+        # Ragged dim is NOT part of indices, we need to pad the nested tensor to apply func
+        from .nested_tensor import nested_from_padded
+
+        min_seqlen = inp._maybe_min_seqlen
+        max_seqlen = inp._maybe_max_seqlen
+        padded_max_S = max_seqlen
+        total_L = inp._values.shape[inp._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *inp.shape[: inp._ragged_idx],
+            padded_max_S,
+            *inp.shape[inp._ragged_idx + 1 :],
+        )
+        padded_inp = inp.to_padded_tensor(0.0, output_size=padded_shape)
+        return nested_from_padded(
+            func(padded_inp, indices, **new_kwargs),
+            offsets=inp._offsets,
+            ragged_idx=inp._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+    # We can run on the underlying values directly
 
     # Validate indices
     if inp.lengths() is None:
@@ -1503,12 +1613,13 @@ def index_put_(func, *args, **kwargs):
     )
 
     # Recompute indices for _values
-    ragged_indices = (
-        inp.offsets()[indices[inp._ragged_idx - 1]] + indices[inp._ragged_idx]
-    )
+    ragged_indices = inp.offsets()[indices[0]] + indices[inp._ragged_idx]
     func_indices = (
-        indices[: inp._ragged_idx - 1]
+        # before ragged dim
+        indices[1 : inp._ragged_idx]
+        # ragged dim (combined with batch)
         + [ragged_indices]
+        # after ragged dim
         + indices[inp._ragged_idx + 1 :]
     )
 

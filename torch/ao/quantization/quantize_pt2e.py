@@ -76,7 +76,7 @@ def prepare_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -148,7 +148,7 @@ def prepare_qat_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
