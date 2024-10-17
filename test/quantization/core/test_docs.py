@@ -6,15 +6,16 @@ from pathlib import Path
 
 import torch
 
-# import torch.ao.nn.quantized as nnq
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, IS_FBCODE
+import unittest
 
 
+@unittest.skipIf(IS_FBCODE, "some path issues in fbcode")
 class TestQuantizationDocs(QuantizationTestCase):
     r"""
     The tests in this section import code from the quantization docs and check that
