@@ -919,9 +919,7 @@ class ChromiumEventLogger:
             "B",
             metadata,
         )
-        is_compiler_phase = "fn_name" in metadata
-        if is_compiler_phase:
-            self.get_stack().append(event_name)
+        self.get_stack().append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
@@ -953,33 +951,28 @@ class ChromiumEventLogger:
             metadata,
         )
 
-        # Only internally log spans for major phases of the compiler
-        is_compiler_phase = "fn_name" in metadata
-        if is_compiler_phase:
-            # These stack health checks currently never happen,
-            # but they're written this way to future proof any weird event
-            # overlaps in the future.
-            stack = self.get_stack()
-            if event_name not in stack:
-                # Something went wrong, we never called start on this event,
-                # or it was skipped due to overlapping events below
-                log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
-                return
+        # These stack health checks currently never happen,
+        # but they're written this way to future proof any weird event
+        # overlaps in the future.
+        stack = self.get_stack()
+        if event_name not in stack:
+            # Something went wrong, we never called start on this event,
+            # or it was skipped due to overlapping events below
+            log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
+            return
 
-            while event_name != stack[-1]:
-                # If the event isn't the most recent one to end, pop
-                # off the stack until it is.
-                # Since event_name in self.stack, this pop is always safe
-                log.warning(
-                    "ChromiumEventLogger: Detected overlapping events, fixing stack"
-                )
-                stack.pop()
-
-            log_chromium_event_internal(
-                event, stack, compile_id, self.id_, start_time_ns
+        while event_name != stack[-1]:
+            # If the event isn't the most recent one to end, pop
+            # off the stack until it is.
+            # Since event_name in self.stack, this pop is always safe
+            log.warning(
+                "ChromiumEventLogger: Detected overlapping events, fixing stack"
             )
-            # Finally pop the actual event off the stack
             stack.pop()
+
+        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
+        # Finally pop the actual event off the stack
+        stack.pop()
 
     def _log_timed_event(
         self,
