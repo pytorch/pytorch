@@ -236,6 +236,7 @@ def _format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]) -
             if pipeline_order[rank][i] is None:
                 # TODO make a real 'None action' that prints as empty string and make mypy happy
                 pipeline_order[rank][i] = ""  # type: ignore[call-overload]
+
     # Calculate the maximum number of steps across all ranks
     num_steps = max(len(actions) for actions in pipeline_order.values())
     step_labels = [
