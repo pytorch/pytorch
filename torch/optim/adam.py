@@ -329,7 +329,7 @@ def _single_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: float,
+    beta1: Union[float, Tensor],
     beta2: float,
     lr: Union[float, Tensor],
     weight_decay: float,
@@ -345,6 +345,14 @@ def _single_tensor_adam(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
+
+    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    beta1_dict: Optional[DeviceDict] = (
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -375,7 +383,13 @@ def _single_tensor_adam(
             param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - beta1)
+        device = param[0].device
+        if beta1_dict is not None and device not in beta1_dict:
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+
+        device_beta1 = beta1_dict[device] if beta1_dict else beta1
+        exp_avg.lerp_(grad, 1 - device_beta1)
+
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -448,8 +462,8 @@ def _multi_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
@@ -483,6 +497,15 @@ def _multi_tensor_adam(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
+
+    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
+
     for (
         device_params_,
         device_grads_,
@@ -496,6 +519,12 @@ def _multi_tensor_adam(
         device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(List[Tensor], device_state_steps_)
+
+        device = device_params[0].device
+        if beta1_dict is not None and device not in beta1_dict:
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
+
+        device_beta1 = beta1_dict[device] if beta1_dict else beta1
 
         # Handle complex parameters
         if has_complex:
@@ -537,23 +566,37 @@ def _multi_tensor_adam(
                 )
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
+        # Use device beta1 if beta1 is a tensor to ensure all
+        # tensors are on the same device
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
+
+        # Due to the strictness of the _foreach_addcmul API, we can't have a single
+        # tensor scalar as the scalar arg (only python number is supported there)
+        # as a result, separate out the value mul
+        if isinstance(beta2, torch.Tensor):
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
+            value = 1.0
+        else:
+            scaled_device_grads = device_grads  # type: ignore[assignment]
+            value = 1 - beta2
+
         torch._foreach_addcmul_(
-            device_exp_avg_sqs, device_grads, device_grads, 1 - beta2
+            device_exp_avg_sqs, scaled_device_grads, device_grads, value
         )
 
-        # Delete the local intermediate since it won't be used anymore to save on peak memory
+        # Delete the local intermediate(s) since they won't be used anymore to save on peak memory
         del device_grads
+        del scaled_device_grads
 
         bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
