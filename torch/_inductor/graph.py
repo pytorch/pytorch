@@ -466,25 +466,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
-        self.semaphores_allocation_prior: Dict[
-            torch.device, Tuple[sympy.Expr, str]
-        ] = {}
-
-    def cached_allocate_semaphores(
-        self, count: sympy.Expr, device: torch.device
-    ) -> str:
-        """Attempt to share semaphore allocations across kernels"""
-        if device in self.semaphores_allocation_prior:
-            prior_count, prior_name = self.semaphores_allocation_prior[device]
-            if V.graph.sizevars.statically_known_leq(count, prior_count):
-                name = self.wrapper_code.generate_semaphores_allocation(
-                    count, device, is_cached=True
-                )
-                assert name == prior_name
-                return prior_name
-        name = self.wrapper_code.generate_semaphores_allocation(count, device)
-        self.semaphores_allocation_prior[device] = (count, name)
-        return name
+        # state used by wrapper.generate_workspace_allocation()
+        self.allocated_workspaces: Dict[str, Any] = {}
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
