@@ -1680,6 +1680,7 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    @skipIfWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
     def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
             return aten._unsafe_masked_index(a, mask, idx, 1)
@@ -3780,6 +3781,7 @@ class CommonTemplate:
             ),
         )
 
+    @skipIfWindows(msg="AOTI not support Windows: aoti_torch_check failed.")
     def test_device_assert(self):
         def fn(x, y):
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
