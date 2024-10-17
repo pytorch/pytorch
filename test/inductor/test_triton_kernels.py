@@ -2073,15 +2073,15 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     def test_triton_kernel_none_args(self):
         # https://github.com/pytorch/pytorch/issues/115344
-        @triton.autotune(  # E: Untyped decorator makes function "sin_kernel" untyped  [misc]
+        @triton.autotune(
             configs=[
                 triton.Config({"BLOCK_SIZE": 32}, num_stages=5, num_warps=2),
                 triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
             ],
             key=["n_elements"],
         )
-        @triton.jit  # E: Untyped decorator makes function "sin_kernel" untyped  [misc]
-        def sin_kernel(  # E: Function is missing a return type annotation  [no-untyped-def]
+        @triton.jit
+        def sin_kernel(
             in_ptr0,
             out_ptr,
             n_elements,
@@ -2106,10 +2106,14 @@ def forward(self, arg0_1, arg1_1):
         out = torch.empty_like(x)
         out_compiled = torch.empty_like(x)
         sin_triton_compiled = torch.compile(fullgraph=True)(sin_triton)
-        for first in (x, None):
-            sin_triton(first, out)
-            sin_triton_compiled(first, out_compiled)
-            torch.testing.assert_close(out, out_compiled)
+
+        sin_triton(x, out)
+        sin_triton_compiled(x, out_compiled)
+        self.assertEqual(out, out_compiled)
+
+        sin_triton(None, out)
+        sin_triton_compiled(None, out_compiled)
+        self.assertEqual(out, out_compiled)
 
 
 def make_mutation_test(fn):

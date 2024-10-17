@@ -5327,7 +5327,7 @@ class UserDefinedTritonKernel(ExternKernel):
         """
         Filter out None args.
 
-        see _precompile_config(...) and https://github.com/pytorch/pytorch/issues/115344
+        see https://github.com/pytorch/pytorch/issues/115344
 
         Two cases for a None arg:
         1. The arg is already tl.constexpr, so leave it in
