@@ -396,7 +396,9 @@ def local_scalar_dense(fake_mode, func, arg):
     return r
 
 
-@register_op_impl(torch.ops.aten.nonzero.default)
+@register_op_impl(
+    [torch.ops.aten.nonzero.default, torch.ops.aten.nonzero_numpy.default]
+)
 def nonzero(fake_mode, func, arg):
     if (
         fake_mode.shape_env is None
