@@ -821,14 +821,19 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 // This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
+  // register the deleter as a callback when the WorkNCCL object is destroyed.
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(this->cacheMutex_);
+    // We put the event back to the cache deque once the WorkNCCL object is
+    // destroyed.
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     auto& events = eventsArray_[timing ? 1 : 0];
+    // If we still have events in the cache, we reuse it. Otherwise, we create a
+    // new one.
     if (!events.empty()) {
       event = events.front();
       events.pop_front();
@@ -841,6 +846,7 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
 }
 
 ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
+  // Return a singleton instance of CUDAEventCache.
   static ProcessGroupNCCL::CUDAEventCache cache;
   return cache;
 }
@@ -1033,9 +1039,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
   // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
+  // Init for CUDA is called (and is a no-op if CUDA is already
+  // initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitCUDA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -1162,6 +1169,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     data.integers["pg_id"] = static_cast<int64_t>(local_id_);
     data.integers["rank"] = rank_;
     data.integers["global_rank"] = globalRank();
+    data.integers["world_size"] = getSize();
     data.strings["flight_recorder_version"] = c10d::version_val_str;
   }
 
