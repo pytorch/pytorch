@@ -882,7 +882,7 @@ def forward(self, x):
             new_gm.code.strip("\n"),
             """\
 def forward(self, x1, x2):
-    x1, x2, = fx_pytree.tree_flatten_spec(((x1, x2,), {}), self._in_spec)
+    x1, x2, = fx_pytree.tree_flatten_spec(((x1, x2), {}), self._in_spec)
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
