@@ -597,7 +597,7 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            # We always call .contiguous() on the input to all_reduce,
+            # We always call .contiguous() on the input to all_reduce_,
             # so input will not be a view anymore.
             .check(
                 "torch.ops._c10d_functional.all_reduce_.default(buf0"
