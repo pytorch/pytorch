@@ -356,8 +356,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "nn.functional.multilabel_margin_loss": {f16},
     "nn.functional.multi_margin_loss": {f16},
     "nn.functional.avg_pool3d": {f16},
-    # not implemented for 'Boolean'
-    "nn.functional.unfold": {b8},
 }
 
 
