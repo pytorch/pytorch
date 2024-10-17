@@ -478,12 +478,37 @@ class CachingAutotuner(KernelInterface):
                 raise
             binary._init_handles()
 
+        """
+        https://github.com/pytorch/pytorch/issues/115344
+
+        self.fn.constexprs doesn't properly deal with None args, so when we filter out
+        an arg in UserDefinedTritonKernel.codegen, we need to filter it here as well.
+        We also don't want to modify self.fn.
+
+        We know that we removed something from the signature if:
+            1. It's in compile_meta["constants"]
+            2. It isn't a constant we already know about
+                Note: The value of interest has already been added to compile_meta['constants'],
+                    so we use self.fn.constexprs instead.
+            3. It isn't in the compile_meta signature
+        """
+        self.arg_names = self.fn.arg_names
+        removed_from_sig = set(compile_meta["constants"].keys())
+        known_constants = {
+            arg
+            for i, arg in enumerate(self.arg_names)
+            if i in self.fn.constexprs
+        }
+        removed_from_sig = removed_from_sig.difference(known_constants)
+        removed_from_sig = removed_from_sig.difference(set(compile_meta["signature"].keys()))
+
         call_args = [
             arg
-            for i, arg in enumerate(self.fn.arg_names)
-            if i not in self.fn.constexprs
+            for i, arg in enumerate(self.arg_names)
+            if i not in self.fn.constexprs and not arg in removed_from_sig
         ]
-        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
+
+        def_args = [name for name in self.arg_names if name not in cfg.kwargs and not name in removed_from_sig]
 
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
@@ -742,7 +767,7 @@ class CachingAutotuner(KernelInterface):
                     budget -= size
 
         for i, arg in enumerate(args):
-            maybe_copy(self.fn.arg_names[i], arg)
+            maybe_copy(self.arg_names[i], arg)
 
         for name, arg in kwargs.items():
             maybe_copy(name, arg)
@@ -773,7 +798,7 @@ class CachingAutotuner(KernelInterface):
                 return arg
 
         cloned_args = [
-            prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
+            prepare_arg(self.arg_names[i], arg) for i, arg in enumerate(args)
         ]
         cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
 
@@ -1058,7 +1083,7 @@ class DebugAutotuner(CachingAutotuner):
             num_in_out_ptrs = len(
                 [
                     arg_name
-                    for arg_name in self.fn.arg_names
+                    for arg_name in self.arg_names
                     if arg_name.startswith("in_out_ptr")
                 ]
             )
@@ -1714,7 +1739,6 @@ def user_autotune(
             )
             for c in configs
         ]
-
     return cached_autotune(
         None,
         configs,
