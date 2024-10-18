@@ -624,6 +624,170 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_set_stance_force_eager(self):
+        @torch.compile(backend="eager")
+        def a(x):
+            if torch._dynamo.is_compiling():
+                return x + 1
+            return x + 2
+
+        @torch.compiler.set_stance("force_eager")
+        def b(x):
+            return a(x)
+
+        def c(x):
+            out0 = a(x)
+            with torch.compiler.set_stance("force_eager"):
+                out1 = a(x)
+            return out0, out1, a(x)
+
+        inp = torch.ones(3)
+        # test that decorating b has no overall side effect
+        self.assertEqual(a(inp), inp + 1)
+
+        self.assertEqual(b(inp), inp + 2)
+        self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
+
+        torch.compiler.set_stance("force_eager")
+        self.assertEqual(a(inp), inp + 2)
+        torch.compiler.set_stance("default")
+        self.assertEqual(a(inp), inp + 1)
+
+    def test_set_stance_eager_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            out2 = a(inp, 1)
+            out3 = a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+        self.assertEqual(out3, inp + 4)
+
+    def test_set_stance_fail_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            out2 = a(inp, 1)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+
+    def test_set_stance_forbid_in_graph(self):
+        @torch.compiler.set_stance("force_eager")
+        def a(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def b(x):
+            return a(x)
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            b(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def c(x):
+            with torch.compiler.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            c(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        @torch.compiler.set_stance("force_eager")
+        def d(x):
+            return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            d(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def e(x):
+            with torch._dynamo.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            e(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._dynamo.eval_frame._set_stance("force_eager")
+            return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            f(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def g(x):
+            # cause a skipped frame
+            try:
+                torch._dynamo.graph_break()
+            except Exception:
+                pass
+            # NOTE: torch._dynamo.is_compiling() will get traced
+            # and return true. torch.compiler.is_compiling() is skipped
+            # and will return false.
+            if torch.compiler.is_compiling():
+                raise RuntimeError("Expect this frame to be skipped")
+            # should not be traced, but eval frame callback is still set
+            with torch.compiler.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "set_stance in a torch.compile"):
+            g(torch.ones(3))
+
+    def test_set_stance_force_backend(self):
+        @torch.compile
+        def a(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compiler.set_stance("default", force_backend=cnts)
+        def b(x):
+            return a(x)
+
+        b(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 1)
+
+        @torch.compiler.set_stance("default", force_backend="eager")
+        def c(x):
+            return a(x)
+
+        # just make sure this doesn't crash
+        c(torch.ones(3))
+
+        with self.assertRaisesRegex(RuntimeError, "force_backend"):
+
+            @torch.compiler.set_stance("force_eager", force_backend="eager")
+            def d(x):
+                pass
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

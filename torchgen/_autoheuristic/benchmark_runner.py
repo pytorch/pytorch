@@ -68,12 +68,10 @@ class BenchmarkRunner:
         self.main(args.num_samples, args.num_reps)
 
     @abstractmethod
-    def run_benchmark(self, *args: Any) -> None:
-        ...
+    def run_benchmark(self, *args: Any) -> None: ...
 
     @abstractmethod
-    def create_input(self) -> Tuple[Any, ...]:
-        ...
+    def create_input(self) -> Tuple[Any, ...]: ...
 
     def main(self, num_samples: int, num_reps: int) -> None:
         for _ in tqdm(range(num_samples)):

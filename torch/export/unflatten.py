@@ -219,6 +219,19 @@ class UnflattenedModule(torch.nn.Module):
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
+        preserved_module_targets_with_multiple_calls = [
+            entry.fqn.split("@")[0]
+            for entry in export_module.module_call_graph
+            if "@" in entry.fqn
+        ]
+        for buf in export_module.graph_signature.buffers_to_mutate.values():
+            for fqn in preserved_module_targets_with_multiple_calls:
+                if buf.startswith(fqn + "."):
+                    raise ValueError(
+                        f"Found multiple calls of module {fqn} that mutate buffer {buf}. "
+                        "Unflattening while preserving signatures is NYI for this case."
+                    )
+
         fqn_list = [entry.fqn for entry in export_module.module_call_graph]
         assert fqn_list[0] == ""
         export_graph = deepcopy(export_module.graph)
@@ -749,7 +762,7 @@ class _ModuleFrame:
         seen_nodes,
         seen_modules,
         parent,
-        module_stack: List[str],
+        module_stack: List[Tuple[str, int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -765,7 +778,10 @@ class _ModuleFrame:
         self.module_call_graph = module_call_graph
         self.verbose = False
 
-        self.fqn = self.module_stack[-1]
+        self.fqn, num_calls = self.module_stack[-1]
+        # generate call name for self.fqn
+        self.child_fqn = _call_name(self.fqn, num_calls + 1)
+
         if module is not None:
             self.module = module
         else:
@@ -779,19 +795,7 @@ class _ModuleFrame:
 
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
-            num_calls = len(
-                [x for x in self.seen_modules[self.module_id] if x.fqn == self.fqn]
-            )
-            if self.fqn in module_call_graph and num_calls == 1:
-                raise ValueError(
-                    f"Cannot unflatten multiple calls to module {self.fqn} while preserving its signature "
-                    "because each of these calls might have generated a different specialized graph. "
-                    f"If the reason you want to preserve the signature is to swap {self.fqn} with another module, "
-                    "consider using _swap_modules() directly on the exported program instead of unflattening it."
-                )
-            # generate call name for self.fqn
-            child_fqn = _call_name(self.fqn, num_calls + 1)
-            accessor = _compute_accessor(parent.fqn, child_fqn)
+            accessor = _compute_accessor(parent.fqn, self.child_fqn)
             _add_submodule(parent.module, accessor, self.module)
             self.parent_call_module = parent.graph.call_module(accessor)
             self.seen_modules[self.module_id].append(
@@ -805,7 +809,7 @@ class _ModuleFrame:
                 )
             )
 
-        signature = module_call_graph.get(self.fqn)
+        signature = module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
             args_spec = signature.in_spec.children_specs[0]
@@ -952,7 +956,7 @@ class _ModuleFrame:
     def finalize_outputs(self):
         orig_outputs = []
 
-        signature = self.module_call_graph.get(self.fqn)
+        signature = self.module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(output, (TensorArgument, SymIntArgument)):
@@ -1068,8 +1072,9 @@ class _ModuleFrame:
             self.print()
             self.print("STEP", node_idx, node.format_node())
             self.print(self.module_stack)
+            depth = len(self.module_stack)
             if node.op == "output":
-                if len(self.module_stack) == 1:
+                if depth == 1:
                     # We want the output node of the original graph to be handled
                     # specially by the outermost stack frame (in run_outer). So
                     # skip finalization here.
@@ -1095,10 +1100,11 @@ class _ModuleFrame:
                 node_module_stack = self.module_stack
             else:
                 node_module_stack = [
-                    path for path, ty in node.meta["nn_module_stack"].values()
+                    (path, int(k.split("@")[-1]) if "@" in k else 0)
+                    for k, (path, ty) in node.meta["nn_module_stack"].items()
                 ]
 
-            if node_module_stack[: len(self.module_stack)] != self.module_stack:
+            if node_module_stack[:depth] != self.module_stack:
                 # This means that the current module is done executing and the
                 # current node is the beginning of a new module.
                 #
@@ -1114,10 +1120,11 @@ class _ModuleFrame:
             if _is_prefix(self.module_stack, node_module_stack):
                 # This means that the current node represents the execution of a new
                 # module.
-                next_module = node_module_stack[len(self.module_stack)]
+                next_module = node_module_stack[depth]
                 self.print("Creating new stack frame for", next_module)
                 # Run a nested version of module outliner from the current node
                 # counter. Once it is complete, continue from that point.
+                next_module_key = list(node.meta["nn_module_stack"].keys())[depth]
                 node_idx = _ModuleFrame(
                     self.flat_graph,
                     self.nodes,
@@ -1125,7 +1132,7 @@ class _ModuleFrame:
                     self.seen_modules,
                     self,
                     self.module_stack + [next_module],
-                    list(node.meta["nn_module_stack"].keys())[len(self.module_stack)],
+                    next_module_key.split("@")[0],
                     self.module_call_graph,
                 ).run_from(node_idx)
                 module_idx += 1
@@ -1157,7 +1164,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         seen_nodes,
         seen_modules,
         None,
-        [""],
+        [("", 0)],
         "",
         {
             entry.fqn: entry.signature
@@ -1294,7 +1301,7 @@ def _sink_params(
         state_name = None
         for sn in inputs_to_state[node.name]:
             sn_split = sn.split(".")
-            if sn_split[: len(scope)] == scope:
+            if sn_split[: len(scope)] == [x.split("@")[0] for x in scope]:
                 state_name = sn_split
                 break
 
