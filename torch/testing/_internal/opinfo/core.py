@@ -739,6 +739,9 @@ class OpInfo:
     # backward dtypes this function is expected to work with on CUDA
     backward_dtypesIfCUDA: _dispatch_dtypes = None
 
+    # backward dtypes this function is expected to work with on XPU
+    backward_dtypesIfXPU: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
 
@@ -963,6 +966,23 @@ class OpInfo:
                 else self.dtypes
             )
         )
+
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else (
+                self.backward_dtypesIfCUDA
+                if self.backward_dtypesIfCUDA is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfXPU
+                if self.dtypesIfXPU is not None
+                else self.dtypesIfCUDA
+                if self.dtypesIfCUDA is not None
+                else self.dtypes
+            )
+        )
+
         self.backward_dtypesIfHpu = (
             set(self.backward_dtypesIfHpu)
             if self.backward_dtypesIfHpu is not None
@@ -982,6 +1002,7 @@ class OpInfo:
         self.dtypesIfCUDA = (
             set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypes
         )
+
         self.dtypesIfROCM = (
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
@@ -1431,6 +1452,8 @@ class OpInfo:
                 if TEST_WITH_ROCM
                 else self.backward_dtypesIfCUDA
             )
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
         else:

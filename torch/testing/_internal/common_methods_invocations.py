@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR
+    TEST_WITH_TORCHINDUCTOR, TEST_XPU, get_backend_ops,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -24717,3 +24717,19 @@ def skipOps(test_case_name, base_test_name, to_skip):
     def wrapped(fn):
         return fn
     return wrapped
+
+def apply_op_db_for_xpu(op_db_list: List[OpInfo]):
+    # Get the supported op from yaml file.
+    supported_op_list = get_backend_ops(device='xpu')['supported_ops']
+
+    for op in op_db_list:
+        # For refs ops get the name of the related torch_opinfo.
+        torch_opinfo = op.torch_opinfo if hasattr(op, "torch_opinfo") else None
+        name = torch_opinfo.name if torch_opinfo is not None else op.name
+        if name not in supported_op_list:
+            # Update op_db, add unittest.skip decorators to skip the op for the backend.
+            op.decorators = (*op.decorators, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+
+def apply_op_db_for(op_db_list: List[OpInfo], device='xpu'):
+    if TEST_XPU and device == 'xpu':
+        apply_op_db_for_xpu(op_db_list)
