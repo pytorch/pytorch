@@ -6211,16 +6211,11 @@ graph():
         inp = (torch.ones(1),)
 
         class N(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.const = torch.ones(1) * 4
-                self.buf = torch.nn.Buffer(torch.ones(1) * 4)
-
             def forward(self, x, b):
                 if b:
-                    return x + self.const + 1
+                    return x + 1
                 else:
-                    return x + 2 * (self.buf + 1) - self.const
+                    return x + 2
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -6236,39 +6231,37 @@ graph():
         m = M()
         eager_result = m(*inp)
 
-        def test(ep, swap):
-            epm = ep.module()
-            ufm = torch.export.unflatten(ep)
-
-            exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
-
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-            for fqn, mod in swap.items():
-                ufm.set_submodule(fqn, mod)
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
         if not is_retracebility_test(self._testMethodName):
-            test(
-                export(M(), inp, preserve_module_call_signature=("n",)),
-                swap={"n": N(), "n@1": N()},
-            )
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot unflatten multiple calls to module n while preserving its signature",
+            ):
+                torch.export.unflatten(ep)
+
+        ep = export(M(), inp)
+        print(ep)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         class _N(torch.nn.Module):
             def forward(self, x):
-                return x + 5
+                return x + 1
 
         class _N_1(torch.nn.Module):
             def forward(self, x):
-                return x + 6
+                return x + 2
 
-        test(
-            export(M(), inp),
-            swap={"n": _N(), "n@1": _N_1()},
-        )
+        ufm.set_submodule("n", _N())
+        ufm.set_submodule("n@1", _N_1())
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
     def test_preserve_module_call_signature_unflatten_specialization(self):
         class N(torch.nn.Module):
@@ -6307,7 +6300,7 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
-    def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
+    def test_unflatten_multiple_graphs_preserve_signature_error(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
                 if b:
@@ -6321,31 +6314,33 @@ graph():
                 self.n = N()
 
             def forward(self, x):
-                x = x + 3
                 x = self.n(x, True)
-                x = x + 4
+                x = x + 1
                 x = self.n(x, False)
-                x = x + 5
+                x = x + 1
                 return x
 
         inp = (torch.ones(1),)
         m = M()
         eager_result = m(*inp)
 
-        def test(ep):
-            epm = ep.module()
-            ufm = torch.export.unflatten(ep)
-
-            exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
-
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
         if not is_retracebility_test(self._testMethodName):
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot unflatten multiple calls to module n while preserving its signature",
+            ):
+                torch.export.unflatten(ep)
 
-        test(export(M(), inp))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
@@ -6378,16 +6373,6 @@ graph():
         inp = (torch.ones(1),)
         m = M()
         eager_result = m(*inp)
-
-        if not is_retracebility_test(self._testMethodName):
-            with self.assertRaisesRegex(
-                ValueError,
-                r"Found multiple calls of module n that mutate buffer n.buf",
-            ):
-                # Unflattening while preserving signatures is NYI for this case.
-                torch.export.unflatten(
-                    export(M(), inp, preserve_module_call_signature=("n",))
-                )
 
         ep = export(M(), inp)
         epm = ep.module()

@@ -848,10 +848,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
-  static auto fast_math = []() {
-    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
-    return val && std::stoi(val) != 0;
-  }();
+  static const char* fast_math = std::getenv("PYTORCH_MPS_FAST_MATH");
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
   if (!options) {
@@ -859,15 +856,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     // Need 3.0 for atomic oprations, 3.1 introduces bfloat support
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion3_0];
-    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
-      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
-      options.mathFloatingPointFunctions =
-          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
-    } else {
-      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-      [options setFastMathEnabled:fast_math ? YES : NO];
-      C10_DIAGNOSTIC_POP()
-    }
+    [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];

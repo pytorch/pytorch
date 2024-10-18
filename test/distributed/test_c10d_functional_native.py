@@ -597,11 +597,14 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            # We always call .contiguous() on the input to all_reduce_,
-            # so input will not be a view anymore.
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("return (buf0")
+            # Ensure the all_reduce_ input is a view
+            .check(
+                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+            )
+            .check(
+                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+            )
+            .check("return (reinterpret_tensor(buf0")
             .run(code)
         )
 
@@ -615,16 +618,6 @@ class CompileTest(TestCase):
             return ar0
 
         arg = torch.rand(4, 4, device="cuda").T
-        compiled = torch.compile(func)
-
-        code = run_and_get_triton_code(compiled, arg)
-        # clone induced by non contig input
-        assert "torch.ops._c10d_functional.wait_tensor.default" in code
-
-        def func2(arg: torch.Tensor) -> torch.Tensor:
-            torch.ops._c10d_functional.all_reduce_(arg, "avg", "0")
-            return arg
-
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
