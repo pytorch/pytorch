@@ -61,6 +61,14 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
@@ -82,12 +90,26 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       sourceComm, // wait on parent comm
       std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout =
+        nccl_nonblocking_timeout() > 0 ? nccl_nonblocking_timeout() : 30 * 60;
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
+    }
+  }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
   // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
   // its initialization.
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
   return comm;
 }
 #endif
