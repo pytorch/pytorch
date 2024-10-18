@@ -2220,7 +2220,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
         for (const auto i : c10::irange(
                  (chunk_count + cross_chunk_shuffle_count - 1) /
                  cross_chunk_shuffle_count)) {
-          for (C10_UNUSED const auto j : c10::irange(chunk_size)) {
+          for ([[maybe_unused]] const auto j : c10::irange(chunk_size)) {
             for (const auto k : c10::irange(cross_chunk_shuffle_count)) {
               if (i * cross_chunk_shuffle_count + k < chunk_count) {
                 expected_result.push_back(i * cross_chunk_shuffle_count + k);

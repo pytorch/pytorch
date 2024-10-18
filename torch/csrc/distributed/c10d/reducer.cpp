@@ -2238,7 +2238,7 @@ void verify_params_across_processes(
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (C10_UNUSED const auto i : c10::irange(world_size)) {
+  for ([[maybe_unused]] const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }

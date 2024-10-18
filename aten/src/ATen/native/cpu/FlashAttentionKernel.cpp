@@ -473,7 +473,7 @@ void cpu_flash_attention(
         scalar_t* transpose_buffer_ptr = transpose_buffer.get();
         std::unique_ptr<scalar_t[]> v_copy_buffer = std::make_unique<scalar_t[]>(ekvSplitSize * packb_size);
         scalar_t* v_copy_buffer_ptr = v_copy_buffer.get();
-        for (C10_UNUSED auto z : c10::irange(begin, end)) {
+        for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
           n = l * kvSplitSize;
           int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
           int64_t ekvBlockSize = kvBlockSize % 2 == 0 ? kvBlockSize : kvBlockSize + 1;
@@ -566,7 +566,7 @@ void cpu_flash_attention(
             ? query_padding_ptr + ompIdx * qSplitSize * eheadSize
             : nullptr;
 
-    for (C10_UNUSED auto z : c10::irange(begin, end)) {
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
@@ -931,7 +931,7 @@ void cpu_flash_attention_backward(
 
     at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
     accum_t* dsum_data = dsum.data_ptr<accum_t>();
-    for (C10_UNUSED auto z : c10::irange(begin, end)) {
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       // rowsum of grad_out * out
       for (int64_t m = 0; m < qSize; m += qSplitSize) {
         int64_t qBlockSize = std::min(qSplitSize, qSize - m);

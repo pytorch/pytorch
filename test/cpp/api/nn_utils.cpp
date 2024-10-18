@@ -398,7 +398,8 @@ std::vector<torch::Tensor> PackedSequenceTest_ordered_sequence(
     torch::ScalarType tensor_type) {
   std::vector<torch::Tensor> seqs;
   seqs.reserve(PackedSequenceTest_batch_size);
-  for (C10_UNUSED const auto i : c10::irange(PackedSequenceTest_batch_size)) {
+  for ([[maybe_unused]] const auto i :
+       c10::irange(PackedSequenceTest_batch_size)) {
     seqs.emplace_back(torch::empty(
         {torch::randint(1, PackedSequenceTest_max_length, {1}).item<int64_t>()},
         tensor_type));

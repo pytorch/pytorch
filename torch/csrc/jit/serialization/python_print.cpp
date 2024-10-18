@@ -436,7 +436,7 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (C10_UNUSED const auto i : c10::irange(level)) {
+    for ([[maybe_unused]] const auto i : c10::irange(level)) {
       body_ << "  ";
     }
     return body_;
@@ -1298,7 +1298,7 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (C10_UNUSED const auto i : c10::irange(N)) {
+    for ([[maybe_unused]] const auto i : c10::irange(N)) {
       repeated.push_back(value);
     }
     return repeated;

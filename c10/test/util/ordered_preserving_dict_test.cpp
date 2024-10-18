@@ -35,12 +35,12 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  for (C10_UNUSED const auto i : c10::irange(20)) {
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     begin++;
   }
 
   auto end = begin;
-  for (C10_UNUSED const auto i : c10::irange(20)) {
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     erase_set.insert(end->first);
     end++;
   }
@@ -134,11 +134,11 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    for (C10_UNUSED const auto j : c10::irange(10)) {
+    for ([[maybe_unused]] const auto j : c10::irange(10)) {
       begin++;
     }
     auto end = begin;
-    for (C10_UNUSED const auto j : c10::irange(7)) {
+    for ([[maybe_unused]] const auto j : c10::irange(7)) {
       erase_set.insert(end->first);
       end++;
     }

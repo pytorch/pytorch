@@ -379,7 +379,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-C10_UNUSED void hashValue(Stack& stack) {
+[[maybe_unused]] void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }

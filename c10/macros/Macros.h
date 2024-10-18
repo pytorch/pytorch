@@ -118,9 +118,6 @@
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 #define C10_NODISCARD [[nodiscard]]
 
-// suppress an unused variable.
-#define C10_UNUSED [[maybe_unused]]
-
 #if !defined(__has_attribute)
 #define __has_attribute(x) 0
 #endif

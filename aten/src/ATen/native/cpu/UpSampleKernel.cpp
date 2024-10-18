@@ -733,8 +733,9 @@ struct HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (C10_UNUSED const auto j : c10::irange(interp_size)) {
-      output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
+      output.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       output.emplace_back(empty(new_shape, CPU(output_type)));
     }
   }
@@ -1047,8 +1048,9 @@ struct HelperInterpNearest : public HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (C10_UNUSED const auto j : c10::irange(interp_size)) {
-      output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
+      output.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
       output.emplace_back(at::ones(new_shape, CPU(output_type)));
     }

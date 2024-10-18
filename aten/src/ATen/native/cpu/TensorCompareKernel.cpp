@@ -83,7 +83,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
-    for (C10_UNUSED const auto i : c10::irange(n)) {
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
       f((scalar_t*)result1_data_bytes,
         (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes,
@@ -253,7 +253,7 @@ static void mode_kernel_impl(
 
           std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-          for (C10_UNUSED const auto k : c10::irange(n)) {
+          for ([[maybe_unused]] const auto k : c10::irange(n)) {
             scalar_t* values_data = (scalar_t*)values_data_bytes;
             int64_t* indices_data = (int64_t*)indices_data_bytes;
             const scalar_t* self_data = (scalar_t*)self_data_bytes;
