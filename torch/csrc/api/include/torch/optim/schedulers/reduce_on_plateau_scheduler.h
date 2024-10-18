@@ -5,9 +5,7 @@
 
 #include <torch/csrc/Export.h>
 
-
 #include <cmath>
-
 
 namespace torch::optim {
 

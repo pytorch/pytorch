@@ -7,9 +7,6 @@
 
 #include <torch/csrc/Export.h>
 
-#include <cstddef>
-#include <vector>
-
 namespace torch::nn {
 
 namespace detail {
@@ -17,7 +14,7 @@ namespace detail {
 template <typename Derived>
 class _DropoutNd : public torch::nn::Cloneable<Derived> {
  public:
-  _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)) {};
+  _DropoutNd(double p) : _DropoutNd(DropoutOptions().p(p)){};
 
   explicit _DropoutNd(const DropoutOptions& options_ = {}) : options(options_) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
