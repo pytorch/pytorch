@@ -1172,10 +1172,17 @@ class FSDPTest(MultiProcessTestCase):
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
+    # To be overridden by sub test classes per their needs.
+    # Note: skipTestForOldSm cannot be call before self.rank is set because it
+    # relies on the latter to determine the device
+    def skipTestForOldSm(self):
+        pass
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
         self = cls(test_name)
         self.rank = rank
+        self.skipTestForOldSm()
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
 
