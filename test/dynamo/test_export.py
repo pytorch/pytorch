@@ -3254,7 +3254,7 @@ def forward(self, x):
         self.assertEqual(gm(*true_inp), f(*true_inp))
         self.assertEqual(gm(*false_inp), f(*false_inp))
 
-    def test_cond_raise_user_error_on_missing_args(self):
+    def test_cond_no_raise_user_error_on_missing_args(self):
         def true_fn(x):
             return x.cos()
 
