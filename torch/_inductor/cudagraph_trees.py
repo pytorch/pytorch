@@ -191,9 +191,6 @@ def get_history_recording() -> ContextManager[None]:
     return enable_history_recording()
 
 
-graph_capture_lock = threading.Lock()
-
-
 class TreeManagerContainer:
     """
     Manages the lifetime of the tree manager. Like `PrivatePool` in cuda caching allocator,
@@ -288,7 +285,11 @@ class TreeManagerContainer:
             return self.tree_manager
 
 
-def set_tls(local):
+# this lock prevents concurrent graph capturing on multiple host threads
+graph_capture_lock = threading.Lock()
+
+
+def set_tls(local: threading.local) -> None:
     # one tree manager per device
     local.tree_manager_containers = {}
     local.tree_manager_locks = defaultdict(threading.Lock)
@@ -302,22 +303,10 @@ def set_tls(local):
 local = threading.local()
 set_tls(local)
 
-# # one tree manager per device
-# local.tree_manager_containers = {}
-# local.tree_manager_locks = defaultdict(threading.Lock)
-
-# breakpoint()
-
 
 # only incremented by user call of mark_step_begin
 class MarkStepBox:
     mark_step_counter = 0
-
-
-# # We need to register this as an object that will be copied over as TLS when new
-# # threads are created in autograd
-# torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-# torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin() -> None:
@@ -1868,7 +1857,7 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        # TODO: the order matters. graph_capture_lock must be acquired before torch.cuda.synchronize()
+        # lock before synchronize() since CUDAGraph capture does not allow synchronize().
         with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
@@ -2126,7 +2115,6 @@ class CUDAGraphTreeManager:
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-        # TODO: make lock area smaller.
         with graph_capture_lock:
             out = self.record_function(new_inputs, function_id)
 

@@ -2485,6 +2485,40 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
 
+        def test_multithreading(self):
+            import threading
+
+            def wrapper(x, y):
+                def foo(x, y):
+                    a = x * y
+                    b = x + y
+                    return a + b
+
+                opt_foo = torch.compile(foo, mode="reduce-overhead")
+
+                for i in range(10):
+                    z = opt_foo(x, y)
+
+            threads = []
+
+            for i in range(32):
+                threads.append(
+                    threading.Thread(
+                        target=wrapper,
+                        args=(
+                            torch.rand(256, 256).to("cuda"),
+                            torch.rand(256, 256).to("cuda"),
+                        ),
+                    )
+                )
+
+            for t in threads:
+                t.start()
+
+            for t in threads:
+                t.join()
+
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
