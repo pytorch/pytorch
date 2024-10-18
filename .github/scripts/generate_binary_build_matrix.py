@@ -370,7 +370,7 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm"
-                or os not in ["linux", "linux-s390x", "macos-arm64"]
+                or os not in ["linux", "linux-s390x", "macos-arm64", "windows"]
             ) and python_version in ["3.13", "3.13t"]:
                 continue
 
