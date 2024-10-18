@@ -50,13 +50,13 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def current_device() -> int:
+def current_device_idx() -> int:
     r"""Return the index of a currently selected device for the current :ref:`accelerator<accelerators>`.
 
     Returns:
         int: the index of a currently selected device.
     """
-    return torch._C._accelerator_getDevice()
+    return torch._C._accelerator_getDeviceIndex()
 
 
 def set_device(device: _device_t) -> None:
@@ -75,7 +75,7 @@ def current_stream(device: _device_t = None) -> torch.Stream:
 
     Args:
         device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given, use :func:`torch.acc.current_device` by default.
+            :ref:`accelerator<accelerators>` device type. If not given, use :func:`torch.acc.current_device_idx` by default.
     Returns:
         torch.Stream: the currently selected stream for a given device.
     """
@@ -99,7 +99,7 @@ def synchronize(device: _device_t = None) -> None:
     Args:
         device (:class:`torch.device`, str, int, optional): device for which to synchronize. It must match
             the current :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.acc.current_device` by default.
+            use :func:`torch.acc.current_device_idx` by default.
 
     Example::
 
@@ -118,96 +118,9 @@ def synchronize(device: _device_t = None) -> None:
     torch._C._accelerator_synchronizeDevice(device_index)
 
 
-class DeviceGuard:
-    r"""
-    Instances of :class:`DeviceGuard` serve as context managers that allow regions of with statement to run
-    in the given device index of the current :ref:`accelerator<accelerators>`. And switch back to the device
-    that was originally selected upon invocation.
-
-    Args:
-        device_index (int): a given device index of the current :ref:`accelerator<accelerators>`.
-
-    Example::
-
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
-        >>> assert torch.acc.is_available() "No available accelerators detected."
-        >>> assert torch.acc.device_count() > 1 "No multi-devices detected."
-        >>> orig_device = 0
-        >>> target_device = 1
-        >>> with torch.acc.DeviceGuard(target_device):
-        >>>     a = torch.randn(10, device=torch.acc.current_accelerator())
-        >>>     sum = torch.sum(a)
-        >>>     assert sum.device.index == target_device
-        >>>     assert torch.acc.current_device() == target_device
-        >>> assert torch.acc.current_device() == orig_device
-        >>> sum = sum.to(device=torch.acc.current_accelerator())
-        >>> assert sum.device.index == orig_device
-    """
-
-    def __init__(self, device_index: int):
-        self.idx = device_index
-        self.prev_idx = -1
-
-    def __enter__(self):
-        self.prev_idx = torch._C._accelerator_exchangeDevice(self.idx)
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
-        return False
-
-
-class StreamGuard:
-    r"""
-    Instances of :class:`StreamGuard` serve as context managers that allow regions of with statement to run
-    in the given stream. And switch back to the stream that was originally selected upon invocation.
-
-    Args:
-        stream (:class:`torch.Stream`): a given stream that must match the current
-            :ref:`accelerator<accelerators>` device type.
-
-    Example::
-
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> assert torch.acc.is_available() "No available accelerators detected."
-        >>> s1 = torch.Stream()
-        >>> s2 = torch.Stream()
-        >>> torch.acc.set_stream(s1)
-        >>> with torch.acc.StreamGuard(s2):
-        >>>     a = torch.randn(10, device=torch.acc.current_accelerator())
-        >>>     assert torch.acc.current_stream() == s2
-        >>> s1.wait_stream(s2)
-        >>> sum = torch.sum(a)
-        >>> assert torch.acc.current_stream() == s1
-    """
-
-    def __init__(self, stream: torch.Stream):
-        self.stream = stream
-        self.src_prev_stream = None
-        self.dst_prev_stream = None
-
-    def __enter__(self):
-        self.src_prev_stream = torch.acc.current_stream()  # type: ignore[assignment]
-
-        # If the stream is not on the current device, then
-        # set the current stream on the device
-        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            with DeviceGuard(self.stream.device.index):
-                self.dst_prev_stream = torch.acc.current_stream()  # type: ignore[assignment]
-        torch.acc.set_stream(self.stream)
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        # Reset the stream on the original device and destination device
-        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            torch.acc.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
-        torch.acc.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
-        return False
-
-
 __all__ = [
-    "DeviceGuard",
-    "StreamGuard",
     "current_accelerator",
-    "current_device",
+    "current_device_idx",
     "current_stream",
     "device_count",
     "is_available",
