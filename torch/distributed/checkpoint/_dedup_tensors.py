@@ -30,8 +30,21 @@ def init_logger() -> logging.Logger:
 logger = init_logger()
 
 
-# TODO add docstring for dedup_tensors
 def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
+    """
+    Remove duplicate tensor entries from a list of SavePlan objects.
+
+    This function identifies and removes duplicate tensor entries across multiple
+    SavePlan objects. It ensures that each tensor is only saved once by keeping
+    the first occurrence and removing subsequent duplicates.
+
+    Args:
+        all_plans (List[SavePlan]): A list of SavePlan objects, each containing
+                                    tensor entries to be saved.
+
+    Returns:
+        List[SavePlan]: A list of SavePlan objects with duplicate tensor entries removed.
+    """
     all_plans = list(all_plans)
     key_to_plan: Dict[MetadataIndex, List[int]] = {}
     for plan_idx, plan in enumerate(all_plans):
