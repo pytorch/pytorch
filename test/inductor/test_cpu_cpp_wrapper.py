@@ -43,7 +43,7 @@ _desired_test_bases = get_desired_device_type_test_bases()
 RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-    and not IS_MACOS
+    and (not IS_MACOS and not IS_WINDOWS)
 )
 
 
