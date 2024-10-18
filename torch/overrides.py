@@ -2085,6 +2085,16 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 
 
 @contextlib.contextmanager
+def EnableTorchFunction():
+    old_state = torch._C._get_torch_function_state()
+    try:
+        torch._C._set_torch_function_state(torch._C._TorchFunctionState.ENABLED)
+        yield
+    finally:
+        torch._C._set_torch_function_state(old_state)
+
+
+@contextlib.contextmanager
 def enable_reentrant_dispatch():
     # NB: this can't simply be
     # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`

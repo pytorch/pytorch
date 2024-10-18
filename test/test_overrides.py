@@ -1556,7 +1556,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = A(torch.randn(5))
         with torch._C.DisableTorchFunction():
-            with torch._C.EnableTorchFunction():
+            with torch.overrides.EnableTorchFunction():
                 self.assertIsInstance(torch.sum(x), A)
 
     def test_torch_function_all_disabled_api(self):
