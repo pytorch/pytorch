@@ -418,6 +418,11 @@ endif()
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
+if(USE_XPU AND LINUX)
+  target_link_options(torch_python PRIVATE "-Wl,-rpath,$ORIGIN")
+  target_link_options(torch_python PRIVATE "-Wl,-rpath,$ORIGIN/../../../../")
+  target_link_options(torch_python PRIVATE "-Wl,--disable-new-dtags")
+endif()
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
