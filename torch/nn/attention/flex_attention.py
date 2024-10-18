@@ -915,6 +915,10 @@ def _apply_kernel_options(
         output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
+    kernel_options.setdefault("Q_REQUIRES_GRAD", query.requires_grad)
+    kernel_options.setdefault("K_REQUIRES_GRAD", key.requires_grad)
+    kernel_options.setdefault("V_REQUIRES_GRAD", value.requires_grad)
+
     return kernel_options
 
 
