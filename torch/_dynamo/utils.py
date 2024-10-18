@@ -3271,3 +3271,9 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def realize_inputs(inputs: List[torch.fx.Node]):
+    for inp in inputs:
+        if isinstance(inp, torch.fx.node.Node):
+            inp.meta["inductor_realize_to_strides"] = True
