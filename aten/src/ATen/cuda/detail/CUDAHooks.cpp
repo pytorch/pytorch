@@ -444,6 +444,19 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
   return at::cuda::detail::current_device();
 }
 
+c10::Stream CUDAHooks::getCurrentStream(DeviceIndex device) const {
+  return at::cuda::getCurrentCUDAStream(device);
+}
+
+c10::Stream CUDAHooks::getDefaultStream(DeviceIndex device) const {
+  return at::cuda::getDefaultCUDAStream(device);
+}
+
+void CUDAHooks::setCurrentStream(const c10::Stream& stream) {
+  auto cudaStream = at::cuda::CUDAStream(stream);
+  at::cuda::setCurrentCUDAStream(cudaStream);
+}
+
 #ifdef USE_ROCM
 bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
   hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);

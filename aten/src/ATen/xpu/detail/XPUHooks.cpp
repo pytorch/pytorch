@@ -99,6 +99,15 @@ DeviceIndex XPUHooks::getCurrentDevice() const {
   return at::xpu::current_device();
 }
 
+c10::Stream XPUHooks::getCurrentStream(DeviceIndex device) const {
+  return at::xpu::getCurrentXPUStream(device);
+}
+
+void XPUHooks::setCurrentStream(const c10::Stream& stream) {
+  auto xpuStream = at::xpu::XPUStream(stream);
+  at::xpu::setCurrentXPUStream(xpuStream);
+}
+
 REGISTER_XPU_HOOKS(XPUHooks);
 
 } // namespace at::xpu::detail

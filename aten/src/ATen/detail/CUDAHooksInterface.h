@@ -117,6 +117,30 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 
+  DeviceIndex deviceCount() const override {
+    TORCH_CHECK(false, "Cannot call deviceCount() without ATen_cuda library. ", CUDA_HELP);
+    return 0;
+  }
+
+  DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK(false, "Cannot call getCurrentDevice() without ATen_cuda library. ", CUDA_HELP);
+    return -1;
+  }
+
+  c10::Stream getCurrentStream(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot call getCurrentStream(", device, ") without ATen_cuda library. ", CUDA_HELP);
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::CUDA);
+  }
+
+  c10::Stream getDefaultStream(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot call getDefaultStream(", device, ") without ATen_cuda library. ", CUDA_HELP);
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::CUDA);
+  }
+
+  void setCurrentStream(const c10::Stream& stream) override {
+    TORCH_CHECK(false, "Cannot call setCurrentStream(stream) without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual DeviceIndex current_device() const {
     return -1;
   }
