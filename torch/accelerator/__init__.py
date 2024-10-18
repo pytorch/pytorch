@@ -10,7 +10,7 @@ import torch
 from ._utils import _device_t, _get_device_index
 
 
-def current_accelerator() -> str:
+def current_accelerator() -> torch.device:
     r"""Return the device type of the current :ref:`accelerator<accelerators>`.
 
     Returns:
@@ -19,8 +19,9 @@ def current_accelerator() -> str:
 
     Example::
 
-        >>> if torch.acc.current_accelerator() == 'cuda':
-        >>>     stream = torch.cuda.default_stream()
+        >>> if torch.accelerator.current_accelerator() == 'cuda':
+        >>>     cc = torch.cuda.get_device_capability()
+        >>>     if cc.
         >>> else:
         >>>     stream = torch.Stream()
     """
