@@ -7,8 +7,6 @@ torch.accelerator
     :toctree: generated
     :nosignatures:
 
-    DeviceGuard
-    StreamGuard
     current_accelerator
     current_device_idx
     current_stream
