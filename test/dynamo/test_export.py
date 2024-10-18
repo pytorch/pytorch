@@ -3261,15 +3261,16 @@ def forward(self, x):
         def false_fn(x):
             return x.sin()
 
-        def f(x):
+        def fn(x):
             return cond(x.shape[0] > 10, true_fn, false_fn)
 
         example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(
-            TypeError,
-            r"cond\(\) missing 1 required positional argument: 'operands'",
-        ):
-            f(*example_inputs)
+
+        try:
+            # Now we allow torch.cond to handle empty args
+            fn(*example_inputs)
+        except TypeError as e:
+            self.fail(f"Unexpected TypeError raised with empty args: {e}")
 
     def test_cond_raise_user_error_on_unsupported_pred(self):
         def f_unsupported_pred(x):
