@@ -103,7 +103,7 @@ DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
-inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+C10_UNUSED inline std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -131,7 +131,7 @@ inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef in
   return {nbatch, channels, output_width};
 }
 
-inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+C10_UNUSED inline std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -167,7 +167,7 @@ inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
-inline C10_UNUSED
+C10_UNUSED inline
 std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
