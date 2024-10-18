@@ -111,6 +111,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   void freeze() {
     frozen_ = true;
   }
+  void partial_freeze() {
+    partial_frozen_ = true;
+  }
 
   c10::SymInt get_storage_size(bool before) {
     if (before) {
@@ -124,7 +127,11 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
 
   void mark_mutation() {
     mutation_counter_++;
+    if (partial_frozen_) {
+      after_partial_freeze_mutation_counter_++;
+    }
   }
+
   void mark_mutation_during_no_grad_or_inference_mode() {
     mutation_counter_during_no_grad_or_inference_mode_++;
   }
@@ -156,6 +163,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return inductor_storage_resized_;
   }
 
+  bool partial_frozen_mutated() const {
+    return partial_frozen_ && after_partial_freeze_mutation_counter_ > 0;
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.
@@ -174,6 +185,12 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // If frozen, no more mutations are allowed on this storage.  Once frozen, a
   // storage cannot be unfrozen.
   bool frozen_ = false;
+  // If partial frozen, mutations are still allowed on this storage, but no
+  // computation can be made using this storage (including returned) if it's
+  // mutated. Once partial frozen, a storage cannot be unfrozen.
+  // This is enforced at python level though.
+  bool partial_frozen_ = false;
+  uint64_t after_partial_freeze_mutation_counter_ = 0;
 
   // These mutation counters are bumped on the storage
   // whenever a FunctionalTensorWrapper experiences a mutation.
