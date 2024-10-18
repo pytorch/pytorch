@@ -887,11 +887,9 @@ class CUDAGraphNode:
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
-            (
-                get_expanded_dims(x)
-                if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
-                else []
-            )
+            get_expanded_dims(x)
+            if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
+            else []
             for idx, x in enumerate(inputs)
         ]
 
@@ -935,11 +933,9 @@ class CUDAGraphNode:
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
         self.reconstructed_inputs: List[InputType] = [
-            (
-                self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
-                if isinstance(x, torch.Tensor)
-                else x
-            )
+            self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
+            if isinstance(x, torch.Tensor)
+            else x
             for x in recording_inputs
         ]
 
