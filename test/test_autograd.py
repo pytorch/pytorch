@@ -556,8 +556,8 @@ class TestAutograd(TestCase):
             hint_msg = "Running forward AD for an OP that does not implement it should raise a NotImplementedError"
 
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                # if forward AD ends up being implemented for torch.igamma, choose a different op
-                torch.igamma(dual_x, dual_x)
+                # if forward AD ends up being implemented for torch.narrow_copy, choose a different op
+                torch.narrow_copy(dual_x, 0, 0, 0)
 
     def test_saved_tensor_hooks_extra_exit_during_bw_no_crash(self):
         # This usage of saved tensor is not supported, but should not crash

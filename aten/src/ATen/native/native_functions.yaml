@@ -9843,6 +9843,28 @@
   variants: method
   tags: pointwise
 
+- func: igamma_self_backward.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: igamma_self_backward_out
+  tags: pointwise
+
+- func: igamma_self_backward(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igamma_self_backward.out
+  tags: pointwise
+
+- func: igammac_self_backward.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: igammac_self_backward_out
+  tags: pointwise
+
+- func: igammac_self_backward(Tensor self, Tensor other) -> Tensor
+  structured_delegate: igammac_self_backward.out
+  tags: pointwise
+
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase

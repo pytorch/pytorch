@@ -1804,6 +1804,12 @@ class TestOperators(TestCase):
                     "_segment_reduce", "lengths"
                 ),  # NYI: forward-AD for _segment_reduce
                 xfail("native_dropout_backward"),  # NYI
+                xfail(
+                    "igamma"
+                ),  # NYI: forward AD with aten::igamma_self_backward that does not support it
+                xfail(
+                    "igammac"
+                ),  # NYI: forward AD with aten::igammac_self_backward that does not support it
             }
         ),
     )
@@ -2057,6 +2063,10 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
+                # NotImplementedError: Trying to use forward AD with
+                # aten::igamma_self_backward that does not support it.
+                xfail("igamma"),
+                xfail("igammac"),
             }
         ),
     )
