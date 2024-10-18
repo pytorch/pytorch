@@ -3186,6 +3186,34 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
+# Helper functions below are to prevent __torch_function__
+# calls from happening in the middle of __torch_function__
+# compiled bytecode
+# They will be skipped which is the desired result
+def call_size(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.size(i)
+
+    return fn(x, i)
+
+
+def call_stride(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.stride(i)
+
+    return fn(x, i)
+
+
+def call_storage_offset(x):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x):
+        return x.storage_offset()
+
+    return fn(x)
+
+
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
 def _extract_tensor_dict(t):
