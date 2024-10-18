@@ -736,8 +736,11 @@ cudaDataType getTensorCudaDataType(Tensor self) {
     case ScalarType::Double:
       cuda_data_type = CUDA_R_64F;
       break;
+    case ScalarType::BFloat16:
+      cuda_data_type = CUDA_R_32F;
+      break;
     default:
-      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
+      TORCH_CHECK(false, "Tensor types must be either float32, float64, or bfloat16");
       break;
   }
   return cuda_data_type;
@@ -833,8 +836,8 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-    values.scalar_type(), "bmm_sparse_cuda", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+    kBFloat16, values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
       uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
@@ -896,19 +899,75 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
             CUSPARSE_ORDER_COL
           ));
           size_t required_workspace_buffer_size = 0;
-          TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-            cusparse_handle,
-            CUSPARSE_OPERATION_NON_TRANSPOSE,
-            CUSPARSE_OPERATION_TRANSPOSE,
-            (void*)&alpha_val,
-            sparse_descr,
-            dense_descr,
-            (void*)&beta_val,
-            result_descr,
-            cuda_data_type,
-            mm_alg,
-            &required_workspace_buffer_size
-          ));
+          if (cuda_data_type == CUDA_R_16BF) {
+              Tensor self_half = self.to(at::kHalf);
+              Tensor mat2_half = mat2.to(at::kHalf);
+              Tensor result_half = result.to(at::kHalf);
+
+              cusparseSpMatDescr_t sparse_descr_fp16;
+              TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+                &sparse_descr_fp16,
+                dim_i,
+                dim_j,
+                sparse_nnz,
+                reinterpret_cast<void*>(row_indices_ptr),
+                reinterpret_cast<void*>(col_indices_ptr),
+                reinterpret_cast<void*>(values_ptr),
+                CUSPARSE_INDEX_32I,
+                CUSPARSE_INDEX_BASE_ZERO,
+                cuda_data_type
+              ));
+
+              cusparseDnMatDescr_t dense_descr_fp16;
+              TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+                &dense_descr_fp16,
+                dim_k,
+                dim_j,
+                dim_k,
+                reinterpret_cast<void*>(mat2_ptr),
+                cuda_data_type,
+                CUSPARSE_ORDER_COL
+              ));
+
+              cusparseDnMatDescr_t result_descr_fp16;
+              TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+                &result_descr_fp16,
+                dim_i,
+                dim_k,
+                dim_i,
+                reinterpret_cast<void*>(result_ptr),
+                cuda_data_type,
+                CUSPARSE_ORDER_COL
+              ));
+
+              TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
+                cusparse_handle,
+                CUSPARSE_OPERATION_NON_TRANSPOSE,
+                CUSPARSE_OPERATION_TRANSPOSE,
+                (void*)&alpha_val,
+                sparse_descr_fp16,
+                dense_descr_fp16,
+                (void*)&beta_val,
+                result_descr_fp16,
+                cuda_data_type,
+                mm_alg,
+                &required_workspace_buffer_size
+              ));
+          } else {
+              TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
+                cusparse_handle,
+                CUSPARSE_OPERATION_NON_TRANSPOSE,
+                CUSPARSE_OPERATION_TRANSPOSE,
+                (void*)&alpha_val,
+                sparse_descr,
+                dense_descr,
+                (void*)&beta_val,
+                result_descr,
+                cuda_data_type,
+                mm_alg,
+                &required_workspace_buffer_size
+              ));
+          }
           if (required_workspace_buffer_size > workspace_buffer_size) {
             workspace_buffer_size = required_workspace_buffer_size;
             dataPtr = allocator.allocate(workspace_buffer_size);
