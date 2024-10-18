@@ -65,7 +65,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 SUPPORTED_OPS = {
     torch.ops.aten.mul.Tensor,
-    torch.ops.aten.add.Tensor,
+    # torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor,
     torch.ops.aten.div.Tensor,
 }
@@ -247,6 +247,30 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
 
                     graph.erase_node(node)
+
+    # TODO: Add a new pass here that goes through and finds all item calls
+    # and converts them into constants by looking at the hint. You can do
+    # do this with SymFloats by simply calling calling float() on it and
+    # creating a constant instead.
+    for i, node in enumerate(nodes[:-1]):
+        with graph.inserting_before(
+            nodes[i + 1] if node not in placeholders else first_non_placeholder
+        ):
+            args = []
+            transform = False
+            for arg in node.args:
+                if isinstance(arg, fx.Node) and isinstance(zf := arg.meta["val"], torch.SymFloat):
+                    transform = True
+                    args.append(float(zf))
+                elif isinstance(arg, fx.Node):
+                    args.append(MetaProxy(arg, tracer=tracer, fake_mode=fake_mode))
+                else:
+                    args.append(arg)
+
+            if transform:
+                replacement_proxy = node.target(*args, **node.kwargs)
+                node.replace_all_uses_with(replacement_proxy.node)
+                graph.erase_node(node)
 
     # DCE symbols (which are guaranteed to be pure) only
     for proxy in reversed(expr_to_sym_proxy.values()):
