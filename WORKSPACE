@@ -180,6 +180,12 @@ new_local_repository(
     path = "third_party/tensorpipe",
 )
 
+new_local_repository(
+    name = "kleidiai",
+    build_file = "//third_party:kleidiai/BUILD.bazel",
+    path = "third_party/kleidiai",
+)
+
 http_archive(
     name = "mkl",
     build_file = "//third_party:mkl.BUILD",

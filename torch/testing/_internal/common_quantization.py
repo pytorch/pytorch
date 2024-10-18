@@ -495,6 +495,61 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     return out_uint8, scales_and_zeros
 
 
+def _group_quantize_tensor_symmetric(
+    w, n_bit=4, groupsize=32, scheme="symmetric_channelwise"
+):
+    # W is of shape [K x N]
+    # We transpose W as Quantization is applied on [N x K]
+    w = w.transpose(0, 1).contiguous()
+    assert w.dim() == 2
+    assert groupsize > 1
+    assert w.shape[-1] % groupsize == 0
+
+    # Calculate scale and zeros
+    to_quant = w.reshape(-1, groupsize)
+    max_val = to_quant.abs().amax(dim=1, keepdim=True)
+    max_int = 2 ** (n_bit - 1) - 1  # For 4-bit, this is 7
+    scales = max_val.clamp(min=1e-6) / max_int
+    zeros = torch.zeros_like(scales)
+
+    # Quantize the weight
+    scales = scales.to(torch.float32).reshape(w.shape[0], -1)
+    zeros = zeros.to(torch.float32).reshape(w.shape[0], -1)
+    scales = scales.reshape(-1, 1)
+    zeros = zeros.reshape(-1, 1)
+    max_int = 2**n_bit - 1
+    w_int8 = to_quant.div(scales).add(8.5).to(torch.int8).clamp(max=max_int)
+
+    # Pack the 4 bit weights and fp32/fp16 scales
+    if scheme == "symmetric_channelwise":
+        out_uint8 = (w_int8[::, 1::2] << 4 | w_int8[::, ::2]).to(torch.uint8)
+    else:
+        half_block_size = groupsize // 2
+        w_uint8 = torch.zeros((w_int8.shape[-2], half_block_size), dtype=torch.uint8)
+        for i in range(half_block_size):
+            # Get values from the first and second half of the block
+            first_half_values = w_int8[:, i]
+            second_half_values = w_int8[:, i + half_block_size]
+
+            # Combine values: second half values in upper 4 bits, first half values in lower 4 bits
+            combined = (second_half_values.to(torch.int32) << 4) | (
+                first_half_values.to(torch.int32) & 0x0F
+            )
+
+            # Store the combined values in w_uint8
+            w_uint8[:, i] = combined.to(torch.uint8)
+
+        # Pack one 16 bit scale as two 8 bits and store in front of each group
+        scales = scales.to(dtype=torch.float16)
+        scales = scales.view(torch.uint8)
+        out_uint8 = torch.cat((scales, w_uint8), dim=1)
+        scales_and_zeros = torch.empty(0)
+
+    scales_and_zeros = scales.squeeze().contiguous()
+
+    return out_uint8, scales_and_zeros
+
+
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
     # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
     # default setup for affine quantization of activations
@@ -525,7 +580,6 @@ def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
     quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
 
     return quant, scales.to(x_dtype), zero_points
-
 
 
 # QuantizationTestCase used as a base class for testing quantization on modules

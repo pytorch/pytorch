@@ -1093,12 +1093,12 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
 #endif
 
-
 at::Tensor _weight_int4pack_mm_cuda(
     const at::Tensor& A,
     const at::Tensor& B,
-    int64_t qGroupSize,
-    const at::Tensor& qScaleAndZeros) {
+    const int64_t qGroupSize,
+    const at::Tensor& qScaleAndZeros,
+    int64_t N) {
   c10::cuda::CUDAGuard g(A.device());
 
   TORCH_CHECK(
@@ -1285,7 +1285,11 @@ at::Tensor _weight_int4pack_mm_cuda(
 // output is [n / 8][k / (InnerKTiles * 16)][32][innerKTiles / 2] (int32 dtype)
 at::Tensor _convert_weight_to_int4pack_cuda(
     const at::Tensor& in,
-    int64_t innerKTiles) {
+    int64_t innerKTiles,
+    const int64_t qGroupSize,
+    int64_t N,
+    const Tensor& qScaleAndZeros,
+    const Tensor& bias) {
   c10::cuda::CUDAGuard g(in.device());
 
   TORCH_CHECK(in.dim() == 2);
@@ -1359,6 +1363,5 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
   return out;
 }
-
 
 } // namespace at::native
