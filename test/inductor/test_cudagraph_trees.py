@@ -2518,7 +2518,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for t in threads:
                 t.join()
 
-
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
