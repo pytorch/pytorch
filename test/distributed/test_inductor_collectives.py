@@ -15,7 +15,7 @@ from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
@@ -299,11 +299,16 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(
                     torch._C._distributed_c10d._get_work_registry_size(), 1
                 )
-                out_compiled = all_reduce_wait_compiled(work, y)
+                out_compiled, triton_codes = run_and_get_code(
+                    all_reduce_wait_compiled, work, y
+                )
                 # `wait_tensor(y)` will pop the work from the work registry immediately
                 self.assertEqual(
                     torch._C._distributed_c10d._get_work_registry_size(), 0
                 )
+                FileCheck().check(
+                    "torch.ops._c10d_functional.wait_tensor.default("
+                ).run(triton_codes[0])
             self.assertEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
