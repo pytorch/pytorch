@@ -208,16 +208,16 @@ class WorkRegistry {
   void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
     std::unique_lock lock(lock_);
     for (auto it = registry_.begin(); it != registry_.end();) {
-      std::vector<c10::intrusive_ptr<c10d::Work>> uncompleted_works;
+      std::vector<c10::intrusive_ptr<c10d::Work>> nonmatching_works;
       for (const auto& _work : it->second) {
         if (_work != work) {
-          uncompleted_works.push_back(_work);
+          nonmatching_works.push_back(_work);
         }
       }
-      if (uncompleted_works.empty()) {
+      if (nonmatching_works.empty()) {
         it = registry_.erase(it);
       } else {
-        it->second = std::move(uncompleted_works);
+        it->second = std::move(nonmatching_works);
         ++it;
       }
     }
