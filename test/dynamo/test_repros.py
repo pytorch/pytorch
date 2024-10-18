@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterator, List, Literal, Tuple, TypedDict
 from unittest import mock
 
 import numpy as np
+from omegaconf import OmegaConf
 
 import torch
 import torch._dynamo.test_case
@@ -6051,6 +6052,25 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_omegaconf_dictconfig(self):
+        def fn(cfg, x):
+            a = cfg["foo"].a * x
+            b = cfg.bar["b"] * a
+            cfg.__dict__["baz"] = 4
+            return b * cfg.baz
+
+        config = OmegaConf.create({"foo": {"a": 3}, "bar": {"b": 5}})
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(config, x)
+        cloned_config = copy.deepcopy(config)
+        res = opt_fn(cloned_config, x)
+
+        self.assertEqual(fn(config, x), opt_fn(config, x))
+        self.assertEqual(cloned_config.baz, 4)
 
     # https://github.com/pytorch/pytorch/issues/136257
     def test_overwriting_params(self):
