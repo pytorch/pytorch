@@ -91,6 +91,7 @@ from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
     TrackedFake,
+    VariableBuilder,
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
@@ -280,9 +281,6 @@ class OutputGraph:
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
-
-        # map symbols to their bound proxy placeholders.
-        self.bound_symbols: Dict[sympy.Symbol, torch.fx.Proxy] = {}
 
         shape_env = ShapeEnv(
             # Reference Cycle!
@@ -496,7 +494,7 @@ class OutputGraph:
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        result = VariableTracker.build(self.root_tx, example_value, source)
+        result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -538,6 +536,10 @@ class OutputGraph:
     @property
     def real_value_cache(self):
         return self.current_tracer.real_value_cache
+
+    @property
+    def bound_symbols(self):
+        return self.current_tracer.bound_symbols
 
     # If you are here, and you're looking for create_graph_input,
     # to avoid ambiguity, please call one of the following:
@@ -645,7 +647,7 @@ class OutputGraph:
     @property
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
-
+    
     def add_symbol_bindings(self, arg: GraphArg):
         # Insert implicit size vars as necessary.  With dynamic shapes, we
         # maintain the invariant that every sizevar gets a direct SymInt input
@@ -765,8 +767,8 @@ class OutputGraph:
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
             # Instead of returning UnspecializedNNModuleVariable, call
-            # VariableTracker.build so that it is tracked for mutation.
-            return VariableTracker.build(self.current_tx, target, **options)
+            # VariableBuilder so that it is tracked for mutation.
+            return VariableBuilder(self.current_tx, **options)(target)
 
         options = dict(options)
         assert "source" in options
@@ -858,8 +860,8 @@ class OutputGraph:
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
-                return VariableTracker.build(
-                    self, target, ConstantSource(source_name=module_key)
+                return VariableBuilder(self, ConstantSource(source_name=module_key))(
+                    target
                 )
 
         for k, v in self.nn_modules.items():
@@ -1832,6 +1834,10 @@ class SubgraphTracer(fx.Tracer):
         # rewrite the HigherOrderOperator call using the traced body_fn.
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
+
+        # map symbols to their bound proxy placeholders.
+        self.bound_symbols: Dict[sympy.Symbol, torch.fx.Proxy] = {}
+
         self.prev_inst = None
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
