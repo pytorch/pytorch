@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/saved_variable.h>
