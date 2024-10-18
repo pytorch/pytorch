@@ -28,7 +28,7 @@ _GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
 
 at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index) {
   TORCH_WARN_DEPRECATION(
-      "GetGeneratorForPrivateuse1 is deprecated. Please use \
+      "GetGeneratorForPrivateuse1() is deprecated. Please use \
       globalContext().getAcceleratorHooksInterface(device_type).getNewGenerator() instead.")
 
   TORCH_CHECK(
