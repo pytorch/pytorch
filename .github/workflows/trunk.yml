@@ -214,7 +214,7 @@ jobs:
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
 
-  win-vs2019-cuda12_1-py3-build:
+  win-vs2019-cuda12_1py3-build:
     name: win-vs2019-cuda12.1-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
