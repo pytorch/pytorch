@@ -323,6 +323,24 @@ def forward(self, x):
             self.assertEqual(node.inputs[0].name, "self")
             self.assertEqual(node.inputs[1].name, "dim")
 
+    def test_serialize_floordiv_ranges(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.view(-1, x.shape[0] - 1)
+
+        ep = torch.export._trace._export(
+            Foo(),
+            (torch.randn(4, 6),),
+            dynamic_shapes={
+                "x": (Dim("dx"), Dim("dy")),
+            },
+            allow_complex_guards_as_runtime_asserts=True,
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        load(buffer)
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
