@@ -88,6 +88,10 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   auto device = THPUtils_unpackLong(arg);
 
   torch::utils::device_lazy_init(at::kCUDA);
+#if defined(USE_ROCM)
+  TORCH_CHECK(at::detail::getCUDAHooks().isGPUArchBuilt(static_cast<c10::DeviceIndex>(device)),
+	      "unbuilt gpu used to SetDevice");
+#endif
   c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 
   Py_RETURN_NONE;

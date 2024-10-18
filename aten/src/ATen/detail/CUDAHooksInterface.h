@@ -190,6 +190,12 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
   }
+  virtual bool isGPUArchBuilt(DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot check GPU arch is built without ATen_cuda library. ", CUDA_HELP);
+  }
+  virtual std::vector<std::string> getBuiltGPUArch() const {
+    TORCH_CHECK(false, "Cannot get built GPU arch without ATen_cuda library. ", CUDA_HELP);
+  }
 #endif
 
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
