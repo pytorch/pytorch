@@ -821,27 +821,32 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 // This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
+  // register the deleter as a callback when the WorkNCCL object is destroyed.
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(this->cacheMutex_);
+    // We put the event back to the cache deque once the WorkNCCL object is
+    // destroyed.
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     auto& events = eventsArray_[timing ? 1 : 0];
+    // If we still have events in the cache, we reuse it. Otherwise, we create a
+    // new one.
     if (!events.empty()) {
-      event = events.back();
-      events.pop_back();
+      event = events.front();
+      events.pop_front();
+    } else {
+      event = new at::cuda::CUDAEvent(
+          timing ? cudaEventDefault : cudaEventDisableTiming);
     }
-  }
-  if (!event) {
-    event = new at::cuda::CUDAEvent(
-        timing ? cudaEventDefault : cudaEventDisableTiming);
   }
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
 ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
+  // Return a singleton instance of CUDAEventCache.
   static ProcessGroupNCCL::CUDAEventCache cache;
   return cache;
 }
@@ -1164,6 +1169,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     data.integers["pg_id"] = static_cast<int64_t>(local_id_);
     data.integers["rank"] = rank_;
     data.integers["global_rank"] = globalRank();
+    data.integers["world_size"] = getSize();
     data.strings["flight_recorder_version"] = c10d::version_val_str;
   }
 
@@ -1854,27 +1860,60 @@ void ProcessGroupNCCL::watchdogHandler() {
       // aborted, So cannot check exception based on them. But watchdog needs to
       // finish the check for the works that have already been enqueued to
       // workMetaList_
+
+      // check NCCL errors first
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
-      bool timedOut = work.checkTimeout();
-
-      // If work hits an exception (either an error or timeout)
       if (work.exception()) {
-        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
-          work.futureWorkResult_->markCompleted(
-              at::IValue(static_cast<uint8_t>(WorkResult::FAILURE)));
-        }
         // log as soon as exception is detected
         LOG(ERROR) << c10::str(
             logPrefix(),
-            "Exception (either an error or timeout) detected by watchdog at work: ",
+            "NCCL error is detected by watchdog at work: ",
             work.seq_,
             ", last enqueued NCCL work: ",
             pgStatus_->lastEnqueuedSeq,
             ", last completed NCCL work: ",
             pgStatus_->lastCompletedSeq,
             ".");
+        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
+        }
+      } else if (work.checkTimeout()) {
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            "Work timeout is detected by watchdog at work: ",
+            work.seq_,
+            ", last enqueued NCCL work: ",
+            pgStatus_->lastEnqueuedSeq,
+            ", last completed NCCL work: ",
+            pgStatus_->lastCompletedSeq,
+            ".");
+        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::TIMEOUT)));
+        }
+        // Report desync state in case of timeout
+        if (desyncDebug_) {
+          try {
+            collectiveDebugInfoMode_.store(true);
+            auto desyncMsg = getNCCLWatchdogDebugInfo();
+            LOG(ERROR) << logPrefix() << desyncMsg;
+          } catch (const std::exception& e) {
+            LOG(ERROR) << logPrefix()
+                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+                       << " Please file an issue. Error: " << e.what();
+          } catch (...) {
+            LOG(ERROR)
+                << logPrefix()
+                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
+                << " Please file an issue.";
+          }
+        }
+      }
+      // If work hits an exception (either an error or timeout)
+      if (work.exception()) {
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight
         // recorder behavior is independent of desync Debug.
@@ -1913,36 +1952,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           // PG level abort, which would abort all other communicators on this
           // rank
           abortComms();
-        }
-
-        // Report desync state in case of timeout
-        if (timedOut) {
-          LOG(ERROR) << c10::str(
-              logPrefix(),
-              "Timeout at NCCL work: ",
-              work.seq_,
-              ", last enqueued NCCL work: ",
-              pgStatus_->lastEnqueuedSeq,
-              ", last completed NCCL work: ",
-              pgStatus_->lastCompletedSeq,
-              ".");
-          if (desyncDebug_) {
-            try {
-              collectiveDebugInfoMode_.store(true);
-              auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << logPrefix() << desyncMsg;
-            } catch (const std::exception& e) {
-              LOG(ERROR)
-                  << logPrefix()
-                  << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
-                  << " Please file an issue. Error: " << e.what();
-            } catch (...) {
-              LOG(ERROR)
-                  << logPrefix()
-                  << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
-                  << " Please file an issue.";
-            }
-          }
         }
         // Throw exception
         work.handleException(asyncErrorHandling_);
