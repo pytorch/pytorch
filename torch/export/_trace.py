@@ -569,6 +569,7 @@ def _export_to_torch_ir(
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                    specialize_float=True,
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
