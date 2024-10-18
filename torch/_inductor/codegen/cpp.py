@@ -238,7 +238,7 @@ def reduction_project(reduction_type, acc):
     return acc
 
 
-def transform_kernel_codes_under_inner_loop(
+def move_code_under_inner_loop(
     code: IndentedBuffer,
     iter_var: sympy.Expr,
     new_iter_var: str,
@@ -510,11 +510,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
 
             assert loop_fusion_depth >= 1
             if (loop_fusion_depth := loop_fusion_depth - 1) > 0:
-                # If the next loop level is expected to undergo outer loop fusion,
-                # there should be no kernel present at the current loop level.
-                assert (
-                    left_loop_level.kernel is None and right_loop_level.kernel is None
-                )
                 # Check next loop level attr
                 current_checking_depth = current_checking_depth + 1
                 assert current_checking_depth < len(left_loop_nest.loops)
@@ -1789,7 +1784,7 @@ class CppKernel(Kernel):
         self.itervars: List[sympy.Symbol] = []
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
-        self.reduction_prefix_fn: List[Callable] = []  # type: ignore[type-arg]
+        self.reduction_prefix_generators: List[Callable] = []  # type: ignore[type-arg]
         self.reduction_suffix = IndentedBuffer()
         self.parallel_reduction_prefix = IndentedBuffer()
         self.parallel_reduction_suffix = IndentedBuffer()
@@ -1986,7 +1981,7 @@ class CppKernel(Kernel):
         dtype: torch.dtype,
         init_fn,
     ):
-        # gen preduction prefix
+        # gen reduction prefix
         # if size is None, we will define and init a single reduction var
         # => float tmp_acc0 = 0;
         # else, we will define and init a reduction array
@@ -2008,7 +2003,7 @@ class CppKernel(Kernel):
         return inner
 
     def finalize_reduction_prefix(self, size: Optional[int] = None):
-        for gen_fn in self.reduction_prefix_fn:
+        for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -2024,7 +2019,7 @@ class CppKernel(Kernel):
         self.is_reduction = True
         init_dtype = src_dtype if argmax_or_argmin else dtype
         acc_type = reduction_acc_type(reduction_type, init_dtype)
-        self.reduction_prefix_fn.append(
+        self.reduction_prefix_generators.append(
             self._gen_reduction_prefix(
                 acc, acc_type, reduction_type, init_dtype, reduction_init
             )
@@ -2117,14 +2112,13 @@ class CppKernel(Kernel):
                         stack.enter_context(code.indent())
                         kernel.gen_body(code)
 
-            def get_reduction_prefix_suffix(kernel, parallel=False, buffer="prefix"):
-                if buffer == "suffix":
+            def get_reduction_prefix_suffix(kernel, parallel=False, is_suffix=False):
+                if is_suffix:
                     suffix = kernel.reduction_suffix
                     if parallel:
                         suffix = kernel.parallel_reduction_suffix + suffix
                     return suffix
                 else:
-                    assert buffer == "prefix"
                     prefix = kernel.reduction_prefix
                     if parallel:
                         prefix = prefix + kernel.parallel_reduction_prefix
@@ -2141,7 +2135,7 @@ class CppKernel(Kernel):
                 with contextlib.ExitStack() as stack_outer:
                     if loop.is_reduction and not in_reduction:
                         reduction_prefix = get_reduction_prefix_suffix(
-                            kernel, loop.parallel, "prefix"
+                            kernel, loop.parallel
                         )
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
@@ -2160,7 +2154,7 @@ class CppKernel(Kernel):
                         worksharing.close()
                     if loop.is_reduction and not in_reduction:
                         code.splice(
-                            get_reduction_prefix_suffix(kernel, loop.parallel, "suffix")
+                            get_reduction_prefix_suffix(kernel, loop.parallel, True)
                         )
 
             def gen_loop_at(_loop_nest: LoopNest, depth: int = 0):
@@ -2171,9 +2165,8 @@ class CppKernel(Kernel):
                     if loop_lines is None:
                         return
                     code.writelines(loop_lines)
-                    depth += 1
                     stack.enter_context(code.indent())
-                    gen_loop_nest(_loop_nest, depth, loop.is_reduction)
+                    gen_loop_nest(_loop_nest, depth + 1, loop.is_reduction)
 
             def gen_loop_nest(
                 _loop_nest: LoopNest,
@@ -2186,31 +2179,31 @@ class CppKernel(Kernel):
                     gen_loop_with_reduction(_loop_nest, depth, in_reduction)
 
             stack.enter_context(code.indent())
-            if loop_nest.loops:
-                if (
-                    isinstance(loop_nest.kernel, OuterLoopFusedKernel)
-                    and isinstance(V.local_buffer_context, LocalBufferContext)
-                    and V.local_buffer_context.local_buffers
-                ):
-                    # Allocate local buffer
-                    local_buffers = V.local_buffer_context.local_buffers
-                    for local_buffer in local_buffers.values():
-                        # For dynamic size, rename s to ks
-                        local_buf_size = sympy_product(
-                            [
-                                self.rename_indexing(size_val)
-                                for size_val in local_buffer.get_layout().size
-                            ]
-                        )
-                        local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                        allocate = f"std::make_unique<{local_buf_dtype} []>({cexpr(local_buf_size)})"
-                        local_buffer_name = local_buffer.get_name()
-                        code.splice(
-                            f"std::unique_ptr<{local_buf_dtype} []> buf_{local_buffer_name} = {allocate};"
-                        )
-                        code.splice(
-                            f"{local_buf_dtype}* {local_buffer_name} = buf_{local_buffer_name}.get();"
-                        )
+
+            if (
+                isinstance(loop_nest.kernel, OuterLoopFusedKernel)
+                and isinstance(V.local_buffer_context, LocalBufferContext)
+                and V.local_buffer_context.local_buffers
+            ):
+                # Allocate local buffer
+                local_buffers = V.local_buffer_context.local_buffers
+                for local_buffer in local_buffers.values():
+                    # For dynamic size, rename s to ks
+                    local_buf_size = sympy_product(
+                        [
+                            self.rename_indexing(size_val)
+                            for size_val in local_buffer.get_layout().size
+                        ]
+                    )
+                    local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                    allocate = f"std::make_unique<{local_buf_dtype} []>({cexpr(local_buf_size)})"
+                    local_buffer_name = local_buffer.get_name()
+                    code.splice(
+                        f"std::unique_ptr<{local_buf_dtype} []> buf_{local_buffer_name} = {allocate};"
+                    )
+                    code.splice(
+                        f"{local_buf_dtype}* {local_buffer_name} = buf_{local_buffer_name}.get();"
+                    )
             gen_loop_nest(loop_nest)
 
     def codegen_loops(self, code, worksharing):
@@ -2681,12 +2674,12 @@ class CppVecKernel(CppKernel):
         masked_acc_vec = f"masked_{acc_vec}"
         self.reduction_var_names += [f"{acc}", acc_vec, masked_acc_vec]
         self.is_reduction = True
-        self.reduction_prefix_fn.append(
+        self.reduction_prefix_generators.append(
             self._gen_reduction_prefix(
                 acc, acc_type, reduction_type, init_dtype, reduction_init
             )
         )
-        self.reduction_prefix_fn.append(
+        self.reduction_prefix_generators.append(
             self._gen_reduction_prefix(
                 acc_vec,
                 acc_type_vec,
@@ -2702,7 +2695,7 @@ class CppVecKernel(CppKernel):
             # save the reciprocal of weights for welford reduce
             assert self.reduction_depth is not None
             # use masked acc_vec for tail vec kernel
-            self.reduction_prefix_fn.append(
+            self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
                     masked_acc_vec,
                     acc_type_vec,
@@ -3886,25 +3879,23 @@ class CppKernelProxy(CppKernel):
 
             if len(tiling_indices) == 1:
                 metrics.generated_cpp_vec_kernel_count += 1
-                loop = self.loop_nest.split_with_tiling(
-                    tiling_indices[0], factor=tiling_factors[0]
-                )
+                loop = self.loop_nest.tile(tiling_indices[0], factor=tiling_factors[0])
                 vec_kernel = codegen_kernel(
                     CppVecKernel, tiling_factors[0], tiling_indices[0]
                 )
-                tile_size = loop.size - loop.tiling_offset
-                vec_kernel.active_ranges = {loop.var: (0, loop.tiling_offset)}
+                tail_size = loop.size - loop.tiled_size
+                vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
                 if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     tail_kernel = codegen_kernel(
                         CppVecKernel,
                         tiling_factors[0],
                         tiling_indices[0],
-                        tile_size,
+                        tail_size,
                     )
                 else:
                     tail_kernel = scalar_kernel
                     scalar_kernel.inner_itervars = [loop.var]
-                tail_kernel.active_ranges = {loop.var: (loop.tiling_offset, loop.size)}
+                tail_kernel.active_ranges = {loop.var: (loop.tiled_size, loop.size)}
                 self.kernels = [vec_kernel, tail_kernel]
                 _outer_loop = loop
             elif len(tiling_indices) == 2:
@@ -3914,22 +3905,22 @@ class CppKernelProxy(CppKernel):
                 )
 
                 metrics.generated_cpp_vec_kernel_count += 2
-                outer_loop = self.loop_nest.split_with_tiling(
+                outer_loop = self.loop_nest.tile(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 outer_ranges = {
-                    "main": (0, outer_loop.tiling_offset),
-                    "tail": (outer_loop.tiling_offset, outer_loop.size),
+                    "main": (0, outer_loop.tiled_size),
+                    "tail": (outer_loop.tiled_size, outer_loop.size),
                 }
-                outer_tail_size = outer_loop.size - outer_loop.tiling_offset
-                inner_loop = self.loop_nest.split_with_tiling(
+                outer_tail_size = outer_loop.size - outer_loop.tiled_size
+                inner_loop = self.loop_nest.tile(
                     tiling_indices[1], factor=tiling_factors[0]
                 )
                 inner_ranges = {
-                    "main": (0, inner_loop.tiling_offset),
-                    "tail": (inner_loop.tiling_offset, inner_loop.size),
+                    "main": (0, inner_loop.tiled_size),
+                    "tail": (inner_loop.tiled_size, inner_loop.size),
                 }
-                inner_tail_size = inner_loop.size - inner_loop.tiling_offset
+                inner_tail_size = inner_loop.size - inner_loop.tiled_size
                 tile2d_kernel = codegen_kernel(
                     CppTile2DKernel,
                     tiling_factors[0],
@@ -4046,7 +4037,7 @@ class CppKernelProxy(CppKernel):
                     if kernel.inner_itervars:
                         for idx in kernel.inner_itervars:
                             start, end = kernel.active_ranges[idx]
-                            body = transform_kernel_codes_under_inner_loop(
+                            body = move_code_under_inner_loop(
                                 body, idx, f"{idx}_tail", start, end
                             )
                     code.splice(body)
@@ -4068,8 +4059,8 @@ class CppKernelProxy(CppKernel):
 
             # Prefix
             if type(tail_loop_kernel) == CppKernel:
-                # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] t
-                # hold the temporal inner loop acc result for outer tail loop
+                # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
+                # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
                     main_loop_kernel.tiling_factor
                 )
@@ -4097,17 +4088,17 @@ class CppKernelProxy(CppKernel):
                     if type(tail_loop_kernel) == CppKernel:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
-                            new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiling_offset)}]"
+                            new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
                             replace_acc_name(tail_loop_kernel.stores, name, new_name)
                             replace_acc_name(
                                 tail_loop_kernel.reduction_suffix, name, new_name
                             )
                         suffix_buf.splice(
-                            transform_kernel_codes_under_inner_loop(
+                            move_code_under_inner_loop(
                                 tail_loop_kernel.reduction_suffix,
                                 outer_loop.var,
                                 f"{outer_loop.var}_tail",
-                                outer_loop.tiling_offset,
+                                outer_loop.tiled_size,
                                 outer_loop.size,
                             )
                         )
@@ -4972,15 +4963,13 @@ class LoopLevel:
     var: Optional[sympy.Expr] = None
     size: Optional[sympy.Expr] = None
     offset: sympy.Expr = sympy.Integer(0)
-    tiling_offset: sympy.Expr = sympy.Integer(0)
+    tiled_size: sympy.Expr = sympy.Integer(0)
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
     simd_vec: bool = False
     collapsed: bool = False
     is_reduction: bool = False
-    # kernel assigned to this loop level, only valid when it is a leaf
-    kernel: Optional[CppKernel] = None
 
     def __post_init__(self):
         # Regarding the C++/OpenMP backend, `cpu_vec_isa.pick_vec_isa()` to check
@@ -4994,13 +4983,12 @@ class LoopLevel:
         picked_vec_isa: cpu_vec_isa.VecISA = cpu_vec_isa.pick_vec_isa()
         self.simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
 
-    def split_with_tiling(self, factor):
+    def tile(self, factor):
         sympy_factor = sympy.Integer(factor)
         loop = LoopLevel(self.var, self.size)
-        tiling_idx = FloorDiv(loop.size, sympy_factor) * sympy_factor
         loop.steps = sympy_factor
         loop.simd_vec = True
-        loop.tiling_offset = tiling_idx
+        loop.tiled_size = FloorDiv(loop.size, sympy_factor) * sympy_factor
         loop.parallel = self.parallel
         loop.collapsed = False
         loop.is_reduction = self.is_reduction
@@ -5054,7 +5042,7 @@ class LoopNest:
     A loop-nest like structure but with some loop level split along
     the loop range into the main tiling loop and the tail. It is built
     with the `build` method as a loop nest and then split with
-    `split_with_tiling` at some depth.
+    `tile` at some depth.
 
     A typical case is for vectorization where we typically split at the inner-most
     loop level. A more complicated case is 2D tiling where we split at
@@ -5125,7 +5113,7 @@ class LoopNest:
         for i in range(1, par_depth):
             self.loops[i].collapsed = True
 
-    def split_with_tiling(self, depth, factor):
+    def tile(self, depth, factor):
         """
         Split the loop into main and tail loops at given `depth` so that the range
         of the main loop has range `floor_div(range, factor) * factor` and
@@ -5133,7 +5121,7 @@ class LoopNest:
         according to the `factor`.
         """
         assert self.loops
-        self.loops[depth] = self.loops[depth].split_with_tiling(factor)
+        self.loops[depth] = self.loops[depth].tile(factor)
         return self.loops[depth]
 
     def get_kernel(self) -> CppKernel:
