@@ -542,13 +542,10 @@ def enable(compiler_fn):
             torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
-        prior_config = torch._dynamo.config.compiled_autograd
-        torch._dynamo.config.compiled_autograd = True
         try:
             with torch.autograd.set_multithreading_enabled(False):
                 yield
         finally:
-            torch._dynamo.config.compiled_autograd = prior_config
             if not prior:
                 compiled_autograd_enabled = False
             torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
