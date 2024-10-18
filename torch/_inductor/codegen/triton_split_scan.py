@@ -97,7 +97,7 @@ class TritonSplitScanKernel(TritonKernel):
             scratch_type_triton.primitive_bitwidth // 8
         )
 
-        cse_load = functools.partial(self.cse.generate, self.loads)
+        cse_load = functools.partial(self.cse.generate, self.loads, dtype=dtype)
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         assert len(self.numels) == 2, "Unexpected tiling"
@@ -117,15 +117,26 @@ class TritonSplitScanKernel(TritonKernel):
         self.filter_masks(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
-        value = cse_compute(f"{value}.to({compute_type})")
-        value = cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
+        value = cse_compute(
+            f"{value}.to({compute_type})",
+            dtype=dtype,
+        )
+        value = cse_compute(
+            f"tl.broadcast_to({value}, {self.dense_size_str()})",
+            dtype=dtype,
+        )
 
         combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
-        block_sum = cse_compute(f"tl.reduce({value}, {dim}, {combine_helper_fn})")
-        exclusive_prefix = self.cse.newvar()
+        block_sum = cse_compute(
+            f"tl.reduce({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
+        )
+        exclusive_prefix = self.cse.newvar(
+            dtype=dtype,
+        )
         if element_nbits == 64:
             self.compute.splice(
                 f"""
@@ -158,13 +169,18 @@ class TritonSplitScanKernel(TritonKernel):
             )
         # Compute final cumsum
         block_scan = cse_compute(
-            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})"
+            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
         )
         combined_result = cse_compute(
-            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"
+            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
+            dtype=dtype,
         )
         return (
-            cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})"),
+            cse_compute(
+                f"tl.where(roffset == 0, {block_scan}, {combined_result})",
+                dtype=dtype,
+            ),
         )
 
     def _get_heuristic(self):
