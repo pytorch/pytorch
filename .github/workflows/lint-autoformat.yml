@@ -2,9 +2,9 @@ name: Apply lint suggestions
 
 on:
 
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [main]
+  push:
+    tags:
+      - ciflow/autoformat/*
 
 jobs:
   lintrunner-autoformat:
@@ -12,7 +12,7 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
