@@ -205,17 +205,22 @@ struct MediumRadixSort {
 
     int64_t ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
     TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 4096);
+#ifdef USE_ROCM
+    constexpr int default_ipt = 8;
+#else
+    constexpr int default_ipt = 32;
+#endif
     switch (ceilPowerOf2) {
       case 4096:
-        HANDLE_CASE(4096, 32);
+        HANDLE_CASE(4096, default_ipt);
         break;
       case 2048:
-        HANDLE_CASE(2048, 32);
+        HANDLE_CASE(2048, default_ipt);
         break;
       case 1024:
       case 512:
       case 256:
-        HANDLE_CASE(1024, 32);
+        HANDLE_CASE(1024, default_ipt);
         break;
       case 128:
       case 64:
