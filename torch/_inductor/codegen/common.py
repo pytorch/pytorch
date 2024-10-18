@@ -39,6 +39,7 @@ from ..utils import (
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
+    ir_dataclass,
     sympy_dot,
     sympy_subs,
     unique,
@@ -74,7 +75,7 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
-@dataclasses.dataclass(frozen=True)
+@ir_dataclass(frozen=True)
 class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
