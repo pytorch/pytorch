@@ -1071,7 +1071,7 @@ def argmax(
     self: List[int], dim: Optional[int] = None, keepdim: bool = False
 ) -> List[int]:
     if dim is None:
-        return []
+        return [1] * len(self) if keepdim else []
     return _reduce_along_dim(self, dim, keepdim)
 
 
