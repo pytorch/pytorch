@@ -152,6 +152,7 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
+    is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -183,12 +184,19 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(export=is_export, _allow_token_discovery=True)
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
+
+        from torch.export._trace import register_aten_to_copy_py_functionalize_impl
+
+        with (
+            disable_above
+        ), mode, suppress_pending, register_aten_to_copy_py_functionalize_impl(
+            is_export
+        ):
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -224,6 +232,11 @@ def run_functionalized_fw_and_collect_metadata(
                     "Mutations on non-contiguous inputs are currently not allowed on "
                     "tensor subclasses"
                 )
+
+            if is_export and isinstance(f_arg, FunctionalTensor):
+                arg_storage = StorageWeakRef(f_arg.elem.untyped_storage())
+                if torch._partial_frozen_mutated(f_arg.elem) and arg_storage in mode._partial_frozen_storage:  # type: ignore[attr-defined]
+                    raise RuntimeError("Cannot mutate frozen input tensor")
 
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
@@ -298,6 +311,11 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(o, torch.Tensor):
                 curr_storage = StorageWeakRef(o.untyped_storage())
                 out_tensor_alias_counts[curr_storage] += 1
+
+                if is_export and isinstance(o, FunctionalTensor):
+                    out_storage = StorageWeakRef(o.elem.untyped_storage())
+                    if torch._partial_frozen_mutated(o.elem) and out_storage in mode._partial_frozen_storage:  # type: ignore[attr-defined]
+                        raise RuntimeError("Cannot return on mutated frozen tensor")
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
                 # This is an optimization on top of the "alias of intermediates" logic,
                 # which you can read more about under Note [AOT Autograd: outputs aliasing inputs or intermediates!]
