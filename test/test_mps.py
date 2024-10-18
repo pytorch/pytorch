@@ -11006,7 +11006,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         x = torch.rand(16, 16, device='mps', dtype=torch.float16)
         y = x[:,0:2].view(torch.float32) + 1
 
-
     def test_masked_select(self):
         x = torch.randn(3, 4)
         x_mps = x.to("mps")
