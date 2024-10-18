@@ -305,6 +305,181 @@ inline void tinygemm_kernel(
 }
 #endif
 
+#if defined(__riscv_v_intrinsic) && __riscv_v_intrinsic >= 12000
+#include <riscv_vector.h>
+
+inline float reduce(vfloat32m1_t x) {
+  vfloat32m2_t a_m2 = __riscv_vlmul_ext_v_f32m1_f32m2(x);
+  vfloat32m2_t ab = __riscv_vslideup_vx_f32m2(a_m2, a_m2, 4, 8);
+  vfloat32m2_t ab_s = __riscv_vslidedown_vx_f32m2(ab, 1, 8);
+  vfloat32m2_t ab_add = __riscv_vfadd_vv_f32m2(ab, ab_s, 8);
+  auto sum = __riscv_vreinterpret_v_u32m1_f32m1(__riscv_vncvt_x_x_w_u32m1(
+      __riscv_vreinterpret_v_u32m2_u64m2(
+          __riscv_vreinterpret_v_f32m2_u32m2(ab_add)),
+      4));
+
+  vfloat32m2_t sum_a_m2 = __riscv_vlmul_ext_v_f32m1_f32m2(sum);
+  vfloat32m2_t sum_ab = __riscv_vslideup_vx_f32m2(sum_a_m2, sum_a_m2, 4, 8);
+  vfloat32m2_t sum_ab_s = __riscv_vslidedown_vx_f32m2(sum_ab, 1, 8);
+  vfloat32m2_t sum_ab_add = __riscv_vfadd_vv_f32m2(sum_ab, sum_ab_s, 8);
+
+  return __riscv_vfmv_f_s_f32m1_f32(__riscv_vslidedown_vx_f32m1(
+      __riscv_vreinterpret_v_u32m1_f32m1(__riscv_vncvt_x_x_w_u32m1(
+          __riscv_vreinterpret_v_u32m2_u64m2(
+              __riscv_vreinterpret_v_f32m2_u32m2(sum_ab_add)),
+          4)),
+      0,
+      4));
+}
+
+inline vfloat32m1x2_t load_as_vfloat32m1x2(const BFloat16* ptr) {
+  vfloat32m1x2_t a_val;
+  vint32m1_t shift = __riscv_vmv_v_x_i32m1(16, 4);
+  vuint16m1_t u16_val =
+      __riscv_vle16_v_u16m1(reinterpret_cast<const uint16_t*>(ptr), 8);
+  vuint32m1_t int_low =
+      __riscv_vlmul_trunc_v_u32m2_u32m1(__riscv_vzext_vf2_u32m2(u16_val, 4));
+  vuint32m1_t int_high = __riscv_vlmul_trunc_v_u32m2_u32m1(
+      __riscv_vzext_vf2_u32m2(__riscv_vslidedown_vx_u16m1(u16_val, 4, 8), 4));
+
+  vbool32_t positive_mask = __riscv_vmsgt_vx_i32m1_b32(shift, 0, 4);
+  vuint32m1_t shl = __riscv_vsll_vv_u32m1(
+      int_low, __riscv_vreinterpret_v_i32m1_u32m1(shift), 4);
+  vuint64m2_t a_ext = __riscv_vzext_vf2_u64m2(int_low, 4);
+  vint32m1_t b_neg = __riscv_vneg_v_i32m1(shift, 4);
+  vuint32m1_t shr = __riscv_vnclipu_wv_u32m1(
+      a_ext, __riscv_vreinterpret_v_i32m1_u32m1(b_neg), __RISCV_VXRM_RDN, 4);
+  
+  a_val = __riscv_vset_v_f32m1_f32m1x2(a_val, 0, __riscv_vreinterpret_v_u32m1_f32m1(__riscv_vmerge_vvm_u32m1(shr, shl, positive_mask, 4)));
+
+  positive_mask = __riscv_vmsgt_vx_i32m1_b32(shift, 0, 4);
+  shl = __riscv_vsll_vv_u32m1(
+      int_high, __riscv_vreinterpret_v_i32m1_u32m1(shift), 4);
+  a_ext = __riscv_vzext_vf2_u64m2(int_high, 4);
+  b_neg = __riscv_vneg_v_i32m1(shift, 4);
+  shr = __riscv_vnclipu_wv_u32m1(
+      a_ext, __riscv_vreinterpret_v_i32m1_u32m1(b_neg), __RISCV_VXRM_RDN, 4);
+  a_val = __riscv_vset_v_f32m1_f32m1x2(a_val, 1, __riscv_vreinterpret_v_u32m1_f32m1(__riscv_vmerge_vvm_u32m1(shr, shl, positive_mask, 4)));
+  return a_val;
+}
+
+inline vfloat32m1_t load_as_vfloat32m1(const BFloat16* ptr) {
+  vint32m1_t shift = __riscv_vmv_v_x_i32m1(16, 4);
+  vuint32m1_t as_int =
+      __riscv_vlmul_trunc_v_u32m2_u32m1(__riscv_vzext_vf2_u32m2(
+          __riscv_vle16_v_u16m1(reinterpret_cast<const uint16_t*>(ptr), 4), 4));
+  vbool32_t positive_mask = __riscv_vmsgt_vx_i32m1_b32(shift, 0, 4);
+  vuint32m1_t shl = __riscv_vsll_vv_u32m1(
+      as_int, __riscv_vreinterpret_v_i32m1_u32m1(shift), 4);
+  vuint64m2_t a_ext = __riscv_vzext_vf2_u64m2(as_int, 4);
+  vint32m1_t b_neg = __riscv_vneg_v_i32m1(shift, 4);
+  vuint32m1_t shr = __riscv_vnclipu_wv_u32m1(
+      a_ext, __riscv_vreinterpret_v_i32m1_u32m1(b_neg), __RISCV_VXRM_RDN, 4);
+  return __riscv_vreinterpret_v_u32m1_f32m1(
+      __riscv_vmerge_vvm_u32m1(shr, shl, positive_mask, 4));
+}
+
+inline vfloat32m1_t load_as_vfloat32m1(const float* ptr) {
+  return __riscv_vle32_v_f32m1(ptr, 4);
+}
+
+inline vfloat32m1x2_t load_as_vfloat32m1x2(const float* ptr) {
+  vfloat32m1x2_t a_val;
+  a_val = __riscv_vset_v_f32m1_f32m1x2(a_val, 0, __riscv_vle32_v_f32m1(ptr, 4));
+  a_val =
+      __riscv_vset_v_f32m1_f32m1x2(a_val, 1, __riscv_vle32_v_f32m1(ptr + 4, 4));
+  return a_val;
+}
+
+template <int BLOCK_M, int BLOCK_N, typename T>
+inline void tinygemm_kernel_(
+    const T* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  for (const auto m : c10::irange(BLOCK_M)) {
+    vfloat32m1x4_t c_val;
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      vfloat32m1_t init_zero = __riscv_vfmv_v_f_f32m1(0.0, 4);
+      c_val = __riscv_vset_v_f32m1_f32m1x4(c_val, i, init_zero);
+    });
+    for (int k = 0; k < K; k += 8) {
+      auto a_val = load_as_vfloat32m1x2(A + m * lda + k);
+      c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        vint16m1_t b_val =
+            __riscv_vlmul_trunc_v_i16m2_i16m1(__riscv_vsext_vf2_i16m2(
+                __riscv_vle8_v_i8m1(B + i * ldb + k, 8), 8));
+        auto b_val_low = __riscv_vfcvt_f_x_v_f32m1(
+            __riscv_vlmul_trunc_v_i32m2_i32m1(
+                __riscv_vsext_vf2_i32m2(b_val, 4)),
+            4);
+        auto b_val_high = __riscv_vfcvt_f_x_v_f32m1(
+            __riscv_vlmul_trunc_v_i32m2_i32m1(__riscv_vsext_vf2_i32m2(
+                __riscv_vslidedown_vx_i16m1(b_val, 4, 8), 4)),
+            4);
+        vfloat32m1_t c_add_amulb = __riscv_vfmacc_vv_f32m1(
+            __riscv_vget_v_f32m1x4_f32m1(c_val, i),
+            __riscv_vget_v_f32m1x2_f32m1(a_val, 1),
+            b_val_high,
+            4);
+        c_val = __riscv_vset_v_f32m1_f32m1x4(c_val, i, c_add_amulb);
+        c_add_amulb = __riscv_vfmacc_vv_f32m1(
+            __riscv_vget_v_f32m1x4_f32m1(c_val, i),
+            __riscv_vget_v_f32m1x2_f32m1(a_val, 0),
+            b_val_low,
+            4);
+        c_val = __riscv_vset_v_f32m1_f32m1x4(c_val, i, c_add_amulb);
+      });
+    }
+
+#if __OPTIMIZE__
+    vfloat32m1_t scale_val = load_as_vfloat32m1(scales);
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] = reduce(__riscv_vget_v_f32m1x4_f32m1(c_val, i)) *
+          (__riscv_vfmv_f_s_f32m1_f32(
+              __riscv_vslidedown_vx_f32m1(scale_val, i, 4)));
+    });
+#else
+    // Workaround GCCs inability to infer lane index at compile time
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] =
+          reduce(__riscv_vget_v_f32m1x4_f32m1(c_val, i)) * float(scales[i]);
+    });
+#endif
+  }
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const BFloat16* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const BFloat16* RESTRICT scales,
+    BFloat16* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const float* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const float* RESTRICT scales,
+    float* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+  tinygemm_kernel_<BLOCK_M, BLOCK_N>(A, B, scales, C, lda, ldb, ldc, K);
+}
+#endif
+
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
