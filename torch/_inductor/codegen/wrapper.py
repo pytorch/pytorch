@@ -612,7 +612,14 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
+            from {triton_heuristics.__name__} import (
+                grid,
+                split_scan_grid,
+                grid_combo_kernels,
+                start_graph,
+                end_graph,
+                cooperative_reduction_grid,
+            )
             """
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
