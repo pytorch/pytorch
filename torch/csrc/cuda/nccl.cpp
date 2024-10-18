@@ -149,12 +149,11 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
 // Default value: on
 bool nccl_use_nonblocking() {
-  // c10::utils::check_env returns
-  // - true,              if set equal to "1"
-  // - false,             if set equal to "0"
-  // - nullopt,           otherwise
   static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") != false;
+      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
+  if (nccl_use_nonblocking_) {
+    TORCH_WARN("Using experimental non-blocking NCCL communicator.");
+  }
   return nccl_use_nonblocking_;
 }
 
