@@ -281,9 +281,8 @@ class OutputGraph:
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
 
-        # List of symbols for which we have exact bindings in the arguments
-        # already
-        self.bound_symbols: Set[sympy.Symbol] = set()
+        # map symbols to their bound proxy placeholders.
+        self.bound_symbols: Dict[sympy.Symbol, torch.fx.Proxy] = {}
 
         shape_env = ShapeEnv(
             # Reference Cycle!
@@ -665,7 +664,6 @@ class OutputGraph:
             s0 = s.node.expr
             if s0 in self.bound_symbols:
                 return
-            self.bound_symbols.add(s0)
             log.debug("bind_symint %s %s", s, prop.name())
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
@@ -675,6 +673,7 @@ class OutputGraph:
                 before=True,
                 source=prop,
             )
+            self.bound_symbols[s0] = proxy
             set_example_value(proxy.node, s)
             assert isinstance(s, torch.SymInt)
             proxy.node.meta["grapharg"] = GraphArg(
