@@ -1292,6 +1292,34 @@ class TestMemoryLeak(TestCaseMPS):
         driver_after = torch.mps.driver_allocated_memory()
         self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/132332
+    # TODO(hvaara): When this is fixed in macOS:
+    #   * Update `0` in the predicate below to the macOS version that fixes the issue.
+    #   * Remove this TODO.
+    #   * Close https://github.com/pytorch/pytorch/issues/132332.
+    #   * Worry about flakes.
+    @xfailIf(product_version > 0)
+    def test_linear_no_leak(self):
+        N, C, H, W = 64, 16, 64, 64
+        iters = 10
+
+        model = nn.Linear(H, W, device='mps')
+        input = torch.rand(N, C, H, W, device='mps')
+
+        # Warm up
+        model(input)
+        torch.mps.empty_cache()
+
+        # Begin test
+        driver_before = torch.mps.driver_allocated_memory()
+        model(input)
+        for _ in range(iters):
+            model(input)
+        torch.mps.empty_cache()
+        driver_after = torch.mps.driver_allocated_memory()
+        predicted_leaked = iters * 4 * N * C * H * W
+        self.assertEqual(driver_before, driver_after,
+                         f"Detected {driver_after - driver_before} bytes (predicted: {predicted_leaked}) leak of GPU memory")
 
 class TestPixelShuffle(TestCaseMPS):
     def test_pixel_shuffle_unshuffle(self):
