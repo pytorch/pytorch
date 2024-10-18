@@ -162,6 +162,11 @@ class ArrayRef final {
     return reverse_iterator(begin());
   }
 
+  /// Check if all elements in the array satisfy the given expression
+  constexpr bool allMatch(const std::function<bool(const T&)>& pred) const {
+    return std::all_of(cbegin(), cend(), pred);
+  }
+
   /// empty - Check if the array is empty.
   constexpr bool empty() const {
     return Length == 0;

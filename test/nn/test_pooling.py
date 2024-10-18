@@ -492,6 +492,16 @@ class TestPoolingNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.quantized_max_pool1d(temp_tensor, [])
 
+    def test_quantized_max_pool3d(self):
+        # This used to segfault when called with a negative dilation
+        # see https://github.com/pytorch/pytorch/issues/136716
+        input = torch.randn([1, 1, 1, 1, 1])
+        input = torch.quantize_per_tensor(input, -0.1, -10, torch.qint32)
+        with self.assertRaisesRegex(RuntimeError, "Expected dilation >= 1"):
+            torch.quantized_max_pool3d(
+                input, (1, 1, 1), (1, 1, 1), (0, 0, 0), (-3, 1, 1)
+            )
+
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
