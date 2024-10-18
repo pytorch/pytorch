@@ -1988,6 +1988,12 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
             )
         )
     )
+
+    torch._check_value(
+        all(index < coefs[0] * shape[0] for index in indices),
+        lambda: f"'indices' must be in range {[0, coefs[0] * shape[0] - 1]}, but got {indices} instead.",
+    )
+
     return indices.unsqueeze(-1).floor_divide(
         torch.tensor(coefs, device=indices.device, dtype=torch.int64)
     ) % torch.tensor(shape, device=indices.device, dtype=torch.int64)
