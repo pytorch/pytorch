@@ -115,9 +115,6 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
-/// C10_NODISCARD - Warn if a type or return value is discarded.
-#define C10_NODISCARD [[nodiscard]]
-
 // suppress an unused variable.
 #define C10_UNUSED [[maybe_unused]]
 

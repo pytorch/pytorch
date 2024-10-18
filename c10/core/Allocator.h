@@ -103,7 +103,7 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(
+  [[nodiscard]] bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);

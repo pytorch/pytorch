@@ -108,7 +108,7 @@ struct TORCH_API Argument {
     return is_out_;
   }
 
-  C10_NODISCARD const AliasInfo* alias_info() const {
+  [[nodiscard]] const AliasInfo* alias_info() const {
     return alias_info_.get();
   }
 

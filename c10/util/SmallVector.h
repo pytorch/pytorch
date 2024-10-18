@@ -81,7 +81,7 @@ class C10_API SmallVectorBase {
     return Capacity;
   }
 
-  C10_NODISCARD bool empty() const {
+  [[nodiscard]] bool empty() const {
     return !Size;
   }
 
@@ -710,7 +710,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     this->set_size(this->size() - NumItems);
   }
 
-  C10_NODISCARD T pop_back_val() {
+  [[nodiscard]] T pop_back_val() {
     T Result = ::std::move(this->back());
     this->pop_back();
     return Result;

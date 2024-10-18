@@ -43,7 +43,7 @@ class ProcessedNodeInputs {
     }
   }
 
-  C10_NODISCARD uint16_t size() const {
+  [[nodiscard]] uint16_t size() const {
     if (C10_LIKELY(repr_.is_inline())) {
       return repr_.inline_repr_.size;
     } else {
@@ -51,7 +51,7 @@ class ProcessedNodeInputs {
     }
   }
 
-  C10_NODISCARD bool empty() const {
+  [[nodiscard]] bool empty() const {
     return size() == 0;
   }
 
@@ -93,11 +93,11 @@ class ProcessedNodeInputs {
     HeapArrayPtr(HeapArrayPtr&&) noexcept = default;
     HeapArrayPtr& operator=(HeapArrayPtr&&) noexcept = default;
 
-    C10_NODISCARD bool empty() const {
+    [[nodiscard]] bool empty() const {
       return size() != 0;
     }
 
-    C10_NODISCARD uint16_t size() const {
+    [[nodiscard]] uint16_t size() const {
       return array_ ? array_[0] : 0;
     }
 
@@ -137,7 +137,7 @@ class ProcessedNodeInputs {
   // awkward.
 #pragma pack(push, 2)
   union Repr {
-    C10_NODISCARD bool is_inline() const {
+    [[nodiscard]] bool is_inline() const {
       uint8_t tag = 0;
       // Use of reinterpret_cast to pointer to char or unsigned char
       // is defined behavior; see
