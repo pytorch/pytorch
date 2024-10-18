@@ -170,29 +170,32 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 }
 #endif
 
-// Default value: on
 bool nccl_use_nonblocking() {
-  // c10::utils::check_env returns
-  // - true,              if set equal to "1"
-  // - false,             if set equal to "0"
-  // - nullopt,           otherwise
   static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") != false;
+      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
+  if (nccl_use_nonblocking_) {
+    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
+  }
   return nccl_use_nonblocking_;
 }
 
-// Default value: 30 minutes
-int nccl_nonblocking_timeout() {
-  static int timeout = -2; // -2 means not initialized
-  if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
-      timeout = strtol(val, nullptr, 0);
-    } else {
-      // Default value consistent with kBackendDefaultTimeout
-      timeout = 30 * 60;
+int _parse_nccl_nonblocking_timeout() {
+  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+  int timeout = -1;
+  if (val) {
+    const std::string config(val);
+    timeout = std::stoi(config);
+    if (!nccl_use_nonblocking() && timeout > 0) {
+      TORCH_WARN(
+          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
+      timeout = -1;
     }
   }
+  return timeout;
+}
+
+int nccl_nonblocking_timeout() {
+  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
