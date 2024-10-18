@@ -30,6 +30,7 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and, floa
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 import operator
+import string
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -2299,7 +2300,7 @@ class TestImports(TestCase):
         # Calling logging.basicConfig, among other things, modifies the global
         # logging state. It is not OK to modify the global logging state on
         # `import torch` (or other submodules we own) because users do not expect it.
-        expected = 'abcdefghijklmnopqrstuvwxyz'
+        expected = string.ascii_lowercase
         commands = [
             'import logging',
             f'import {path}',
