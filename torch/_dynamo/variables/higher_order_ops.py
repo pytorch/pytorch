@@ -2278,10 +2278,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tracer=fwd_tracer,
         )
 
-        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+        if ctx in tx.output.side_effects.store_attr_mutations:
             if (
                 "_materialize_non_diff_grads"
-                in tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+                in tx.output.side_effects.store_attr_mutations[ctx]
             ):
                 unimplemented("NYI")
 
