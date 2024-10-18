@@ -4,14 +4,17 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
 from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_H100
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
+@skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
 class AutoHeuristicTest(TestCase):
     def count_lines_in_file(self, file_path):
         with open(file_path) as file:
@@ -23,8 +26,8 @@ class AutoHeuristicTest(TestCase):
             return torch.mm(a, b)
 
         cf = torch.compile(f)
-        a = torch.randn(2047, 2048, device="cuda", dtype=torch.float16)
-        b = torch.randn(2048, 2048, device="cuda", dtype=torch.float16)
+        a = torch.randn(2047, 2048, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2048, 2048, device=GPU_TYPE, dtype=torch.float16)
         cf(a, b)
 
     def get_path_to_autoheuristic_log(self, name):
@@ -99,7 +102,7 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 5)
 
         shared_memory = get_gpu_shared_memory()
-        (fst, snd) = torch.cuda.get_device_capability()
+        (fst, snd) = get_interface_for_device(GPU_TYPE).get_device_capability()
 
         with open(path) as file:
             lines = file.readlines()
@@ -131,8 +134,10 @@ class AutoHeuristicTest(TestCase):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        a = torch.randn(8, 1024, device="cuda", dtype=torch.float16)
-        b = torch.randint(-128, 127, (1024, 1024), dtype=torch.int8, device="cuda").t()
+        a = torch.randn(8, 1024, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randint(
+            -128, 127, (1024, 1024), dtype=torch.int8, device=GPU_TYPE
+        ).t()
         torch.compile(fn, mode="max-autotune-no-cudagraphs")(a, b)
 
     # have to set autoheuristic_use="" because if autoheuristic_use="mixed_mm",
@@ -164,5 +169,5 @@ class AutoHeuristicTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()
