@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from inspect import getattr_static
 from typing import TYPE_CHECKING

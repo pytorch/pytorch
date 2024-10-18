@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from abc import abstractmethod
 import tempfile
