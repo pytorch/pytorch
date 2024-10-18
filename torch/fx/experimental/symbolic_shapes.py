@@ -442,6 +442,11 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
+
+            # We only care about rebinding unbacked SymInts
+            if not isinstance(u1, torch.SymInt):
+                continue
+
             # tensor_version ops get specialized after AOTAutograd, it's OK,
             # we don't actually want to do asserts on them.  This is all a bit
             # questionable though
