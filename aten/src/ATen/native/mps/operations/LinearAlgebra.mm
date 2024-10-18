@@ -13,6 +13,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/native/BatchLinearAlgebra.h>
+#include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
@@ -703,6 +705,97 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 
   return result;
 }
+
+static void cholesky_kernel_mps(const Tensor& A, const Tensor& status, bool upper) {
+  using namespace mps;
+
+  at::native::squareCheckInputs(A, "linalg.cholesky");
+  TORCH_CHECK(!A.is_complex(), "linalg.cholesky; Not supported for complex yet!");
+
+  uint64_t batchSize = A.sizes().size() > 2 ? A.size(0) : 1;
+  uint64_t aRows = A.size(-2);
+  uint64_t aCols = A.size(-1);
+  uint64_t aElemSize = A.element_size();
+
+  Tensor result = at::empty_like(A, A.options());
+  Tensor stat = at::zeros_like(status, status.options());
+  std::vector<Tensor> statusTensorsVector;
+  statusTensorsVector.reserve(batchSize);
+  for (const auto i : c10::irange(batchSize)) {
+    auto stat = at::zeros({1}, status.options());
+    statusTensorsVector.push_back(stat);
+  }
+
+  id<MTLBuffer> aBuffer = getMTLBufferStorage(A);
+  id<MTLBuffer> resultBuffer = getMTLBufferStorage(result);
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSMatrixDecompositionCholesky* decomposition =
+          [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device lower:upper order:aRows] autorelease];
+      getMPSProfiler().beginProfileKernel(decomposition, "linalg_cholesky_mps", {A, status});
+
+      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(A)];
+
+      MPSMatrixDescriptor* resultMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(A)];
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t batchOffset = i * aRows * aCols;
+        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                              offset:(A.storage_offset() + batchOffset) * aElemSize
+                                                          descriptor:sourceMatrixDesc] autorelease];
+
+        MPSMatrix* resultMatrix = [[[MPSMatrix alloc] initWithBuffer:resultBuffer
+                                                              offset:(result.storage_offset() + batchOffset) * aElemSize
+                                                          descriptor:resultMatrixDesc] autorelease];
+
+        [decomposition encodeToCommandBuffer:commandBuffer
+                                sourceMatrix:sourceMatrix
+                                resultMatrix:resultMatrix
+                                      status:getMTLBufferStorage(statusTensorsVector[i])];
+      }
+      getMPSProfiler().endProfileKernel(decomposition);
+    }
+  });
+
+  if (upper) {
+    result = result.triu();
+  } else {
+    result = result.tril();
+  }
+  A.copy_(result);
+  status.copy_(stat);
+
+  // MPS decomposition statuses only match the LAPACK scheme when successful
+  // Assert here to catch the failures with MPS error codes
+  for (const auto i : c10::irange(statusTensorsVector.size())) {
+    int status = statusTensorsVector[i].item<int>();
+    TORCH_CHECK(
+        status == 0,
+        "linalg.cholesky_ex(): Cholesky decomposition failure at the ",
+        i + 1,
+        " sample with status: ",
+        status,
+        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+  }
+}
+
+REGISTER_DISPATCH(cholesky_stub, &cholesky_kernel_mps);
 
 static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                 const Tensor& B,
