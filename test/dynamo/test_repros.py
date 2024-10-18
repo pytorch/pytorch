@@ -24,6 +24,7 @@ from copy import deepcopy
 from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Dict, Iterator, List, Tuple
+from typing import Literal, TypedDict
 from unittest import mock
 
 import numpy as np
@@ -6107,6 +6108,46 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.no_grad():
             y = model(x)
 
+
+    def test_typed_dict(self):
+        class LlavaImagePixelInputs(TypedDict):
+            type: Literal["pixel_values"]
+            data: torch.Tensor
+            """Shape: `(batch_size, num_channels, height, width)`"""
+
+
+        def fn(x, y):
+            obj = LlavaImagePixelInputs(type=int, data=y)
+            return x * obj["data"]
+
+        x, y = torch.randn(4), torch.randn(4)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+
+        self.assertEqual(ref, res)
+
+
+
+    def test_typed_dict_total(self):
+        class LlavaImagePixelInputs(TypedDict):
+            type: Literal["pixel_values"]
+            data: torch.Tensor
+            """Shape: `(batch_size, num_channels, height, width)`"""
+
+
+        def fn(x, y):
+            obj = LlavaImagePixelInputs(data=y, total=False)
+            return x * obj["data"]
+
+        x, y = torch.randn(4), torch.randn(4)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+
+        self.assertEqual(ref, res)
 
 instantiate_parametrized_tests(ReproTests)
 
