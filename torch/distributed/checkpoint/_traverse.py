@@ -95,7 +95,7 @@ def traverse_state_dict_v_2_3(
         state_dict (STATE_DICT_TYPE): The state dictionary to traverse.
         visitor (Callable[[OBJ_PATH, STATE_DICT_ITEM], None]): A function to apply to each leaf element.
         keep_traversing (Callable[[STATE_DICT_ITEM], bool], optional): A function to determine whether to
-            continue traversing a container. 
+            continue traversing a container.
 
     """
 
@@ -135,7 +135,7 @@ def set_element(
 ) -> None:
     """
     This function navigates through the `root_dict` following the sequence of keys
-    provided in `path` and sets the `value` at the final key. 
+    provided in `path` and sets the `value` at the final key.
 
     Args:
         root_dict (STATE_DICT_TYPE): The root dictionary to modify.

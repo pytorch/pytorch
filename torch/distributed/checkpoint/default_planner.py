@@ -64,7 +64,7 @@ __all__ = [
 
 class DefaultSavePlanner(SavePlanner):
     """
-    Default implementation used to plan the save process, recommended extend 
+    Default implementation used to plan the save process, recommended extend
     this class to add custom behaviors.
     """
 
