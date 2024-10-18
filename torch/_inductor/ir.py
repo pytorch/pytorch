@@ -237,8 +237,9 @@ def get_fill_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[in
     """
     Convert strides to fill order (argsort)
     """
-    sorted_idx: List[int] = argsort(seq)
+    sorted_idx: Sequence[int] = argsort(seq)
     return sorted_idx
+
 
 def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
@@ -256,7 +257,7 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     """
     Convert strides to stride order
     """
-    sorted_idx: List[int] = get_fill_order(seq)
+    sorted_idx: Sequence[int] = get_fill_order(seq)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
