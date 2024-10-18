@@ -439,7 +439,7 @@ class TestKernelBenchmark(TestCase):
 
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
-    @config.patch(compile_threads=1)
+    @config.patch(do_not_use_compile_threads=True)
     def test_remove_inductor_deps(self):
         @torch.compile
         def f(a):
@@ -452,7 +452,7 @@ class TestKernelBenchmark(TestCase):
 
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
-    @config.patch(compile_threads=1)
+    @config.patch(do_not_use_compile_threads=True)
     def test_remove_inductor_deps_multiple_kernels(self):
         @torch.compile
         def f(a):
@@ -470,7 +470,7 @@ class TestKernelBenchmark(TestCase):
     @config.patch("triton.unique_kernel_names", True)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
-    @config.patch(compile_threads=1)
+    @config.patch(do_not_use_compile_threads=True)
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_remove_inductor_deps_templates(self):
         @torch.compile
@@ -488,7 +488,7 @@ class TestKernelBenchmark(TestCase):
 
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
-    @config.patch(compile_threads=1)
+    @config.patch(do_not_use_compile_threads=True)
     def test_remove_inductor_deps_scalar(self):
         @torch.compile
         def f(a, b):

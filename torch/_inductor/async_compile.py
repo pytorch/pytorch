@@ -146,6 +146,8 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
         assert get_compile_threads() > 1
+        # Stop user from changing because of the use of lru_cache.
+        config.freeze_key("compile_threads")  # type: ignore[attr-defined]
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
@@ -157,6 +159,8 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
+        # Stop user from changing because of the use of lru_cache.
+        config.freeze_key("compile_threads")  # type: ignore[attr-defined]
         pool: AnyPool
         if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
@@ -182,6 +186,8 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
+        # Warm pool even if do_not_use_compile_threads is True as this option
+        # could be changed to False any time.
         if get_compile_threads() <= 1:
             return
         _compile_start()
@@ -190,13 +196,14 @@ class AsyncCompile:
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or config.do_not_use_compile_threads:
             return task()
         return cls.pool().submit(task)
 
     def _use_process_pool(self):
         return (
             get_compile_threads() > 1
+            and (not config.do_not_use_compile_threads)
             and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
@@ -231,7 +238,7 @@ class AsyncCompile:
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or config.do_not_use_compile_threads:
             return CppCodeCache.load(source_code).kernel
         else:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
@@ -239,7 +246,7 @@ class AsyncCompile:
 
     def cpp_pybinding(self, argtypes: List[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or config.do_not_use_compile_threads:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
             get_result = CppPythonBindingsCodeCache.load_pybinding_async(
@@ -271,7 +278,7 @@ class AsyncCompile:
 
     def halide(self, meta: HalideMeta, source_code: str):
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or config.do_not_use_compile_threads:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:
             get_result = HalideCodeCache.generate_halide_async(
@@ -293,6 +300,9 @@ class AsyncCompile:
             disable=config.disable_progress,
             delay=0,
         )
+
+        # Wait even if config.do_not_use_compile_threads is True as there may
+        # be threads to wait for from before the value was set to True.
         if get_compile_threads() > 1:
             for key, result in scope.items():
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):

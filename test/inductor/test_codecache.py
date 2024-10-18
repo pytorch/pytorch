@@ -68,7 +68,7 @@ class MyModel(torch.nn.Module):
 
 
 def _run_codecache_test(start_method):
-    with torch._inductor.config.patch(
+    with torch._inductor.config.patch_non_frozen(
         worker_start_method=start_method, compile_threads=16
     ):
         AsyncCompile.warm_pool()

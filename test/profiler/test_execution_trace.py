@@ -252,7 +252,7 @@ class TestExecutionTrace(TestCase):
         a, b, c = (torch.randn(4, 4, requires_grad=True).to(device) for _ in range(3))
 
         inputs = [a, b, c]
-        with torch._inductor.config.patch(compile_threads=1):
+        with torch._inductor.config.patch(do_not_use_compile_threads=True):
             fn(*inputs)
 
         # Create a temp file to save execution trace data.
