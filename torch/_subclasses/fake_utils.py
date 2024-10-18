@@ -47,6 +47,27 @@ def output_alias_each_other(outputs):
     return False
 
 
+def _check_alias_info(context, real_out, real_in, fake_out, fake_in):
+    r_aliasing = outputs_alias_inputs(real_out, real_in)
+    f_aliasing = outputs_alias_inputs(fake_out, fake_in)
+    assert (
+        r_aliasing == f_aliasing
+    ), f"{context} mismatch in outputs_alias_inputs check {f_aliasing} != {r_aliasing}"
+
+    r_identity_eq = outputs_are_inputs(real_out, real_in)
+    f_identity_eq = outputs_are_inputs(fake_out, fake_in)
+    assert (
+        r_identity_eq == f_identity_eq
+    ), f"{context} mismatch in outputs_are_inputs check {f_identity_eq} != {r_identity_eq}"
+
+    r_output_alias_each_other = output_alias_each_other(real_out)
+    f_output_alias_each_other = output_alias_each_other(fake_out)
+    assert r_output_alias_each_other == f_output_alias_each_other, (
+        f"{context} mismatch in outputs_alias_each_other check "
+        f"{f_output_alias_each_other} != {r_output_alias_each_other}"
+    )
+
+
 def is_sdpa_error(func, idx, e):
     if (
         (
@@ -138,23 +159,8 @@ class CrossRefFakeMode(TorchDispatchMode):
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
 
             if self.check_aliasing:
-                r_aliasing = outputs_alias_inputs(r, (args, kwargs))
-                f_aliasing = outputs_alias_inputs(fake_r, (fake_args, fake_kwargs))
-                assert (
-                    r_aliasing == f_aliasing
-                ), f"{context} mismatch in outputs_alias_inputs check {f_aliasing} != {r_aliasing}"
-
-                r_identity_eq = outputs_are_inputs(r, (args, kwargs))
-                f_identity_eq = outputs_are_inputs(fake_r, (fake_args, fake_kwargs))
-                assert (
-                    r_identity_eq == f_identity_eq
-                ), f"{context} mismatch in outputs_are_inputs check {f_identity_eq} != {r_identity_eq}"
-
-                r_output_alias_each_other = output_alias_each_other(r)
-                f_output_alias_each_other = output_alias_each_other(fake_r)
-                assert r_output_alias_each_other == f_output_alias_each_other, (
-                    f"{context} mismatch in outputs_alias_each_other check "
-                    f"{f_output_alias_each_other} != {r_output_alias_each_other}"
+                _check_alias_info(
+                    context, r, (args, kwargs), fake_r, (fake_args, fake_kwargs)
                 )
 
             for idx, (r_out, fake_out) in enumerate(
@@ -182,6 +188,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                         torch._prims.utils.compare_tensor_meta(
                             r_out,
                             fake_out,
+                            check_sizes=True,
                             check_strides=self.check_strides,
                             allow_rhs_unbacked=True,
                         )
