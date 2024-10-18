@@ -4272,7 +4272,10 @@ class ShapeEnv:
                 sympy_expr
             ) in config.extended_debug_create_symbol.split(",")
             maybe_more_info = ""
-            if not is_debug:
+            if (
+                not is_debug
+                and os.getenv("TORCH_DISABLE_EXTENDED_DEBUG_INFO") is not None
+            ):
                 maybe_more_info = (
                     ", for more info run with "
                     f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
