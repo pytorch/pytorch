@@ -490,22 +490,22 @@ class _SplitterBase:
 
             if self.operator_support.is_node_supported(submodules, node):
                 supported_nodes.append(node)
-                supported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
+                supported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple, node.name))
             else:
-                unsupported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
+                unsupported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple, node.name))
 
         if dump_graph:
             self._draw_graph_based_on_node_support(self.module, supported_nodes)
 
         reports = "\nSupported node types in the model:\n"
         for t, dtypes in supported_node_types.items():
-            for arg_dtypes_tuple, kwarg_dtypes_tuple in dtypes:
-                reports += f"{t}: ({arg_dtypes_tuple}, {dict(kwarg_dtypes_tuple)})\n"
+            for arg_dtypes_tuple, kwarg_dtypes_tuple, node_name in dtypes:
+                reports += f"{t}: ({arg_dtypes_tuple}, {dict(kwarg_dtypes_tuple)}) for node {node_name}\n"
 
         reports += "\nUnsupported node types in the model:\n"
         for t, dtypes in unsupported_node_types.items():
-            for arg_dtypes_tuple, kwarg_dtypes_tuple in dtypes:
-                reports += f"{t}: ({arg_dtypes_tuple}, {dict(kwarg_dtypes_tuple)})\n"
+            for arg_dtypes_tuple, kwarg_dtypes_tuple, node_name in dtypes:
+                reports += f"{t}: ({arg_dtypes_tuple}, {dict(kwarg_dtypes_tuple)}) for node {node_name}\n"
 
         print(reports)
 
