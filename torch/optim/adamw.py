@@ -272,10 +272,10 @@ AdamW.__doc__ = (
             &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
             &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
                 \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t - 1} - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t - 1} - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
