@@ -71,6 +71,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
+from .runtime.triton_bundler import TritonBundler, TritonKernelArtifacts
 from .utils import _align
 
 
@@ -1119,6 +1120,9 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        if bundle := graph._triton_bundle:
+            TritonBundler.write_bundle_to_file_system(bundle)
+
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
@@ -1464,6 +1468,7 @@ class FxGraphCache:
             compiled_graph._time_taken_ns = time_ns() - start_time
             cache_key = key_info[0]
             compiled_graph._fx_graph_cache_key = cache_key
+            compiled_graph._triton_bundle = TritonBundler.collect()
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
             FxGraphCache._save_graph(
                 cache_key,
@@ -1558,6 +1563,7 @@ class CompiledFxGraph:
     _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
+    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
         self,

@@ -44,6 +44,7 @@ from .runtime_utils import (
     triton_config_to_hashable,
     validate_triton_config,
 )
+from .triton_bundler import TritonBundler
 
 
 try:
@@ -665,6 +666,8 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
+
+        TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
 
         return binary, launcher
 
