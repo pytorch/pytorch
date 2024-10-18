@@ -575,7 +575,7 @@ def tuned_cslt_sparse_mm(
         searched_split_k,
         searched_split_k_one_kernel,
         _,
-    ) = torch._cslt_sparse_mm_search(
+    ) = torch._C._cusparselt.mm_search(
         AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.size_hints(mat1_compressed.get_size()),
             V.graph.sizevars.size_hints(mat1_compressed.get_stride()),
@@ -608,8 +608,8 @@ def tuned_cslt_sparse_mm(
         )
         if alpha is not None
         else None,
-        out_dtype=out_dtype,
-        transpose_result=transpose_result,
+        out_dtype,
+        transpose_result,
     )
 
     baseline = aten__cslt_sparse_mm.bind(

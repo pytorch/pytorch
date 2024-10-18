@@ -467,7 +467,7 @@ at::Tensor _cslt_sparse_mm(
     return std::get<0>(result);
 }
 
-std::tuple<int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_search(
+int64_t _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -476,6 +476,7 @@ std::tuple<int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_search(
     bool transpose_result
 )
 {
+    TORCH_WARN_ONCE("torch._cslt_sparse_mm_search is deprecated and will be removed in a future PyTorch release. Please use torch._C._cusparselt.mm_search instead.");
     int alg_id_int = 0;
     int split_k = 1;
     bool split_k_one_kernel= true;
@@ -490,9 +491,8 @@ std::tuple<int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_search(
         split_k,
         split_k_one_kernel,
         true);
-    return {(int64_t) std::get<1>(result), (int64_t) std::get<2>(result), (bool) std::get<3>(result), (int64_t) std::get<4>(result)};
+    return (int64_t) std::get<1>(result);
 }
-
 
 } // namespace at::native
 
