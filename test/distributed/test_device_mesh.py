@@ -88,7 +88,31 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaises(ValueError):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
-    @with_comms
+    @with_comms()
+    def test_2d_mesh_non_eager_init_subgroup(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+
+        # There is not bound_device_id right before the first collectives on a pg/sub_pg
+        # if the default group is not eagerly initialized.
+        self.assertEqual(mesh_2d.get_group(0).bound_device_id, None)
+        self.assertEqual(mesh_2d.get_group(1).bound_device_id, None)
+
+    # TODO: need to refactor the other tests in this file to test both
+    # eager_init=True and eager_init=False scenarios.
+    @with_comms(eager_init=True)
+    @skip_if_lt_x_gpu(4)
+    def test_2d_mesh_eager_init_subgroup(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+
+        curr_device = torch.cuda.current_device()
+        # With eager init, a sub_pg should already have a bound_device_id if the 
+        # default group it splitted from has been eagerly initialized. 
+        self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
+        self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
+
+    @with_comms()
     def test_get_group_and_get_all_groups(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
