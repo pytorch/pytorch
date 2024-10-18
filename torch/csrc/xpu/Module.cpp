@@ -363,7 +363,7 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
-  at::globalContext().lazyInitXPU();
+  at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
   if (!m)

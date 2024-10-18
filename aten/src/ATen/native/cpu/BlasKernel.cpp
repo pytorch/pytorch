@@ -96,7 +96,7 @@ auto sum(int64_t N, Func f) {
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -132,7 +132,7 @@ gemm_notrans_(
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -222,7 +222,7 @@ void gemm_transb_impl(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
     TransposeType transb,
     int64_t m,
@@ -244,7 +244,7 @@ gemm_transb_(
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
     TransposeType transb,
     int64_t m,

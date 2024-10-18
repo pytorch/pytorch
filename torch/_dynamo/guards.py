@@ -2086,8 +2086,9 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        # See D64140537 for why we are checking for tuple.
         if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, enum.Enum
+            guarded_object, (enum.Enum, tuple)
         ):
             obj_ref = weakref.ref(guarded_object)
 

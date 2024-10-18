@@ -17,13 +17,13 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
-    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     dtype_abbrs,
-    parametrize
+    parametrize,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -294,7 +294,7 @@ class TestMetaConverter(TestCase):
         meta.set_(storage, 0, (), ())
         self.assertEqual(storage.size(), ssize)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -334,7 +334,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 0)
         self.assertEqual(len(m.storage_memo), 0)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)

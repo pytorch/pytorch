@@ -456,20 +456,15 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
-add_custom_command(
-  OUTPUT ${TORCH_SRC_DIR}/version.py
-  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
-  COMMAND
-    "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
-      --is-debug=${TORCH_VERSION_DEBUG}
-      --cuda-version=${CUDA_VERSION}
-      --hip-version=${HIP_VERSION}
-  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
-  WORKING_DIRECTORY ${TORCH_ROOT}
-)
 add_custom_target(
   gen_torch_version ALL
-  DEPENDS ${TORCH_SRC_DIR}/version.py
+  "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+    --is-debug=${TORCH_VERSION_DEBUG}
+    --cuda-version=${CUDA_VERSION}
+    --hip-version=${HIP_VERSION}
+  BYPRODUCTS ${TORCH_SRC_DIR}/version.py
+  COMMENT "Regenerating version file..."
+  WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_dependencies(torch_python gen_torch_version)
 

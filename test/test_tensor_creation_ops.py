@@ -2506,7 +2506,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(d.shape[0], 800)
 
     # TODO: this test should be updated
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     @onlyCPU
     def test_arange_inference(self, device):
         # end only

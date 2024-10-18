@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
-#include <torch/csrc/dynamo/python_logger.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -70,17 +69,13 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
-// see https://github.com/pytorch/pytorch/pull/34845
-static void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-  throw err;
-}
-
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
-    throw_python_error();
+    // see https://github.com/pytorch/pytorch/pull/34845
+    python_error err;
+    err.persist();
+    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+    throw err;
   }
   return pyresult;
 }
@@ -92,15 +87,18 @@ static void check(bool result) {
 
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
-struct VerboseLogger : public PythonLogger {
+struct VerboseLogger {
   static std::optional<VerboseLogger> maybe_create() {
     if (python_verbose_logger == nullptr) {
       return std::nullopt;
     }
-    return VerboseLogger(python_verbose_logger);
+    return VerboseLogger();
   }
 
-  VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
+  void verbose_log_fn(std::string_view msg) const {
+    TORCH_CHECK(python_verbose_logger != nullptr);
+    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
+  }
 
   void log_node_check(
       const Node& fn,
@@ -139,7 +137,7 @@ struct VerboseLogger : public PythonLogger {
       }
     }
     oss << "]";
-    log(PythonLogger::DEBUG, oss.str());
+    verbose_log_fn(oss.str());
   }
 
   void log_dynamic_shapes_check(size_t size_idx) const {
@@ -151,10 +149,10 @@ struct VerboseLogger : public PythonLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    log(PythonLogger::DEBUG,
+    verbose_log_fn(
         "Cache miss due to changed shapes: marking size idx " +
-            std::to_string(size_idx - start_idx) + " of " + it->second +
-            " as dynamic");
+        std::to_string(size_idx - start_idx) + " of " + it->second +
+        " as dynamic");
   }
 
   // track which size index belongs to which node
@@ -349,7 +347,7 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* logger = nullptr;
   if (!PyArg_ParseTuple(args, "O", &logger)) {
-    throw_python_error();
+    Py_RETURN_FALSE;
   }
 
   if (logger == Py_None) {

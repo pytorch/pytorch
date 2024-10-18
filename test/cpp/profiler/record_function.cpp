@@ -303,3 +303,31 @@ TEST(RecordFunctionTest, MultipleCallbacks) {
   at::clearCallbacks();
   ASSERT_FALSE(at::hasCallbacks());
 }
+
+// Test that KwargsOnly callbacks are run in USER_SCOPE.
+TEST(RecordFunctionTest, KwargsOnly) {
+  at::clearCallbacks();
+  ASSERT_FALSE(at::hasCallbacks());
+  static const std::unordered_map<std::string, c10::IValue> myMap = {
+      {"a", 1}, {"b", 2.5}};
+
+#define REGISTER_CALLBACK()                                          \
+  at::addThreadLocalCallback(                                        \
+      at::RecordFunctionCallback(                                    \
+          [](const at::RecordFunction& fn)                           \
+              -> std::unique_ptr<at::ObserverContext> {              \
+            EXPECT_EQ(myMap, fn.kwinputs());                         \
+            return nullptr;                                          \
+          },                                                         \
+          [](const at::RecordFunction& fn, at::ObserverContext*) {}) \
+          .needsInputs(true)                                         \
+          .scopes({at::RecordScope::USER_SCOPE}))
+
+  REGISTER_CALLBACK();
+#undef REGISTER_CALLBACK
+
+  RECORD_USER_SCOPE_WITH_KWARGS_ONLY("Test", &myMap);
+
+  at::clearCallbacks();
+  ASSERT_FALSE(at::hasCallbacks());
+}
