@@ -483,3 +483,34 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class FilterVariable(MapVariable):
+    """
+    Represents filter(fn, iterable)
+    """
+
+    def __init__(
+            self,
+            fn: VariableTracker,
+            iterable: Union[List[VariableTracker], VariableTracker],
+            **kwargs,
+    ) -> None:
+        super().__init__(fn, [iterable, ], **kwargs)
+        self.fn = fn
+
+    def python_type(self):
+        return filter
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "filter"), call_function_ex=True
+        )
+        codegen(self.fn)
+        self.reconstruct_items(codegen)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+            ]
+        )
