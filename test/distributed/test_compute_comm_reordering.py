@@ -21,7 +21,7 @@ from torch._inductor.comm_analysis import (
     NCCL_PROTO,
     NVIDIA_GPU_TYPE,
 )
-from torch._inductor.utils import run_and_get_triton_code 
+from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
