@@ -25,7 +25,7 @@ from torch._inductor.select_algorithm import (
 
 aten = torch.ops.aten
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -75,6 +75,11 @@ class FailChoiceCaller(ChoiceCaller):
 
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not is_big_gpu(0):
+            return self.skipTest("Not enough SMs to run the MaxAutotune test.")
+
     def _create_buffer(self, name, shape):
         return Buffer(
             name=name,
@@ -772,11 +777,11 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y1 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x1 = rand_strided((50257, 1768), (1, 50304), device="cuda")
+        y1 = rand_strided((1768, 768), (768, 1), device="cuda")
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device="cuda")
-        y2 = rand_strided((32768, 768), (768, 1), device="cuda")
+        x2 = rand_strided((50257, 1768), (1, 50304), device="cuda")
+        y2 = rand_strided((1768, 768), (768, 1), device="cuda")
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -976,8 +981,6 @@ class TestTuningProcess(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
-
     # Set env to make it work in CI.
     if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()
