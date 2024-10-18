@@ -236,16 +236,6 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
     _add_time_spent(key, "remote_cache_time_saved", time_saved)
 
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get a bunch of metadata about cache hits and misses to use in chromium events"""
-    cache_stats = {
-        "fxgraph_cache_hit": counters["inductor"]["fxgraph_cache_hit"],
-        "fxgraph_cache_miss": counters["inductor"]["fxgraph_cache_miss"],
-        "fxgraph_cache_bypass": counters["inductor"]["fxgraph_cache_bypass"],
-    }
-    return cache_stats
-
-
 # dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -307,13 +297,11 @@ def dynamo_timed(
             chromium_log.log_event_end(
                 phase_name,
                 time.time_ns(),
-                {"cache_stats": get_cache_stats(), "fn_name": key},
+                {},
                 start,
             )
         else:
-            chromium_log.log_event_end(
-                key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-            )
+            chromium_log.log_event_end(key, time.time_ns(), {}, start)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
