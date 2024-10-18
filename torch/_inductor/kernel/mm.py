@@ -32,7 +32,7 @@ from ..select_algorithm import (
 from ..utils import (
     get_gpu_shared_memory,
     use_aten_gemm_kernels,
-    use_ck_template,
+    use_ck_gemm_template,
     use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
@@ -204,7 +204,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_ck_gemm_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    ):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -411,7 +415,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_ck_gemm_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    ):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
