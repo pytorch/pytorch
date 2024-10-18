@@ -243,7 +243,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"Unexpected number of `inductor.resize_storage_bytes_` ops (expected {resize_count}, got {actual_resize_count}) in graph: {graph}",  # noqa: B950
             )
 
-        if not torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             _check_count(fwd_copy_count, fwd_resize_count)  # fwd graph
         else:
             _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph
@@ -423,6 +423,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
+                # eager warmup for 1 iteration, so that all FSDP2 lazy-initialization is done in eager
+                torch.compiler.set_stance("force_eager" if i < 1 else "default")
                 inp = input_creation_fn()
                 loss = fwd_bwd_func(inp)
                 losses.append(loss.item())
@@ -433,8 +435,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def test_compiled():
             model, optim = model_init_fn()
             fwd_bwd_fn = functools.partial(fwd_bwd, model)
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(fwd_bwd_fn, optim, n_iter=1)
 
             counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
@@ -463,8 +463,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def test_eager():
             model, optim = model_init_fn()
             fwd_bwd_fn = functools.partial(fwd_bwd, model)
-            # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(fwd_bwd_fn, optim, n_iter=1)
 
             res = run_iters(fwd_bwd_fn, optim)
             return res
