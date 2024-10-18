@@ -675,7 +675,7 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    apply_runtime_assertion_pass(gm, graph_signature)
+    gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
 
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -1515,7 +1515,7 @@ def _export_to_aten_ir_make_fx(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    apply_runtime_assertion_pass(gm, graph_signature)
+    gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():
