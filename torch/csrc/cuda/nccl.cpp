@@ -11,6 +11,7 @@
 
 #include <nccl.h>
 
+#include <sched.h>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -146,6 +147,7 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 }
 
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
+// Default value: on
 bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
@@ -155,23 +157,18 @@ bool nccl_use_nonblocking() {
   return nccl_use_nonblocking_;
 }
 
-static int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+static int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      timeout = strtol(val, nullptr, 0);
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-static int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
@@ -180,15 +177,14 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
   while (result == ncclInProgress) {
-    if (nccl_nonblocking_timeout() > 0) {
-      auto currentTimepoint = std::chrono::steady_clock::now();
-      auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                             currentTimepoint - startTimepoint)
-                             .count();
-      if (timeElapsed > nccl_nonblocking_timeout()) {
-        throw std::runtime_error("NCCL timeout.");
-      }
+    auto currentTimepoint = std::chrono::steady_clock::now();
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                           currentTimepoint - startTimepoint)
+                           .count();
+    if (timeElapsed > nccl_nonblocking_timeout()) {
+      throw std::runtime_error("NCCL timeout.");
     }
+    sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
   }
   if (result != ncclSuccess) {
@@ -213,15 +209,14 @@ static inline void NCCL_CHECK_TIMEOUT(
   if (result == ncclInProgress) {
     for (const auto i : c10::irange(comms.size())) {
       do {
-        if (nccl_nonblocking_timeout() > 0) {
-          auto currentTimepoint = std::chrono::steady_clock::now();
-          auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                                 currentTimepoint - startTimepoint)
-                                 .count();
-          if (timeElapsed > nccl_nonblocking_timeout()) {
-            throw std::runtime_error("NCCL timeout.");
-          }
+        auto currentTimepoint = std::chrono::steady_clock::now();
+        auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               currentTimepoint - startTimepoint)
+                               .count();
+        if (timeElapsed > nccl_nonblocking_timeout()) {
+          throw std::runtime_error("NCCL timeout.");
         }
+        sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
