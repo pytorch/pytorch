@@ -647,17 +647,18 @@ class OutputGraph:
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
 
-    def add_symbol_bindings(self, arg: GraphArg):
-        # Insert implicit size vars as necessary.  With dynamic shapes, we
-        # maintain the invariant that every sizevar gets a direct SymInt input
-        # into the graph.  This means downstream graph transforms can assume
-        # every size variable is explicitly bound and accessible, instead of
-        # having to pull it out implicitly from tensors.
-
+    def add_symbol_bindings_maybe_no_source(
+        self, arg: torch.Tensor, source: Optional[Source]
+    ):
         if self.export:
             return
 
-        assert arg.fake_tensor is not None
+        if self.is_root_tracer():
+            assert (
+                source is not None
+            ), "When bound with top-level phs, symbols' source must be provided."
+
+        assert arg is not None
 
         def bind_symint(s: torch.SymInt, prop):
             if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
@@ -665,10 +666,13 @@ class OutputGraph:
             s0 = s.node.expr
             if s0 in self.bound_symbols:
                 return
-            log.debug("bind_symint %s %s", s, prop.name())
-            # TODO: don't readd symint if we already have it in graph
-            # (this is harmless because we do remove the unused ones later)
-            proxy = self.root_tracer.create_graph_input(
+            log.debug(
+                "bind_symint %s from %s at level %s",
+                s,
+                prop.name() if prop is not None else "subgraph inputs",
+                len(self.tracers),
+            )
+            proxy = self.current_tracer.create_graph_input(
                 str(s0),
                 torch.SymInt,
                 before=True,
@@ -677,23 +681,37 @@ class OutputGraph:
             self.bound_symbols[s0] = proxy
             set_example_value(proxy.node, s)
             assert isinstance(s, torch.SymInt)
-            proxy.node.meta["grapharg"] = GraphArg(
-                prop,
-                s,
-                pass_arg_as_tensor=False,
-                fake_tensor=None,
-                is_tensor=False,
-            )
+
+            if self.is_root_tracer():
+                proxy.node.meta["grapharg"] = GraphArg(
+                    prop,
+                    s,
+                    pass_arg_as_tensor=False,
+                    fake_tensor=None,
+                    is_tensor=False,
+                )
 
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
-                bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
+                bind_symint(
+                    s,
+                    TensorPropertySource(src, TensorProperty.SIZE, i)
+                    if src is not None
+                    else None,
+                )
             if t.layout is torch.strided:
                 for i, s in enumerate(t.stride()):
-                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
+                    bind_symint(
+                        s,
+                        TensorPropertySource(src, TensorProperty.STRIDE, i)
+                        if src is not None
+                        else None,
+                    )
                 bind_symint(
                     t.storage_offset(),
-                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET)
+                    if src is not None
+                    else None,
                 )
             elif t.layout is torch.sparse_coo:
                 handle_tensor(t._indices(), src)
@@ -708,9 +726,20 @@ class OutputGraph:
                 attrs, ctx = t.__tensor_flatten__()
                 for attr in attrs:
                     inner_t = getattr(t, attr)
-                    handle_tensor(inner_t, AttrSource(src, attr))
+                    handle_tensor(
+                        inner_t, AttrSource(src, attr) if src is not None else None
+                    )
 
-        handle_tensor(arg.fake_tensor, arg.source)
+        handle_tensor(arg, source)
+
+    def add_symbol_bindings(self, arg: GraphArg):
+        # Insert implicit size vars as necessary.  With dynamic shapes, we
+        # maintain the invariant that every sizevar gets a direct SymInt input
+        # into the graph.  This means downstream graph transforms can assume
+        # every size variable is explicitly bound and accessible, instead of
+        # having to pull it out implicitly from tensors.
+        assert arg.fake_tensor is not None
+        return self.add_symbol_bindings_maybe_no_source(arg.fake_tensor, arg.source)
 
     def count_calls(self):
         return count_calls(self.graph)
