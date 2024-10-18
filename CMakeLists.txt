@@ -789,6 +789,11 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE)
 endif()
 
+# Enable IPO for Release builds if not explicitly set
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # turns CMake LTO for OSS builds
+endif()
+
 # The below means we are cross compiling for arm64 or x86_64 on MacOSX
 if(NOT IOS
    AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
