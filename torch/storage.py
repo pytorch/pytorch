@@ -8,12 +8,25 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    Dict as _Dict,
+    Optional as _Optional,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
 
 
 __all__ = ["TypedStorage", "UntypedStorage"]
@@ -274,7 +287,7 @@ class _StorageBase:
         return storage
 
     def to(
-        self, *, device: torch.device, non_blocking: _bool = False
+        self, *, device: DeviceLikeType, non_blocking: _bool = False
     ) -> Union[_StorageBase, TypedStorage]:
         return _to(self, device, non_blocking)
 
@@ -342,7 +355,7 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: DeviceLikeType = "cuda"):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
@@ -357,7 +370,7 @@ class _StorageBase:
             .is_pinned(device)
         )
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: DeviceLikeType = "cuda"):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
@@ -1139,7 +1152,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: DeviceLikeType = "cuda"):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
@@ -1151,7 +1164,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: DeviceLikeType = "cuda"):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
@@ -1175,7 +1188,7 @@ class TypedStorage:
         self._untyped_storage.share_memory_()
         return self
 
-    def _new_shared(self, size, *, device=None):
+    def _new_shared(self, size, *, device: _Optional[DeviceLikeType] = None):
         """Create a new storage in shared memory with the same data type."""
         if device is None:
             device = "cpu"
