@@ -5,6 +5,7 @@ Python polyfills for itertools
 from __future__ import annotations
 
 import itertools
+import sys
 from typing import Iterable, Iterator, TypeVar
 
 from ..decorators import substitute_in_graph
@@ -63,6 +64,23 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
             if i == next_i:
                 yield element
                 next_i += step
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
+if sys.version_info >= (3, 10):
+
+    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
+    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+        a = None
+        first = True
+        for b in iterable:
+            if first:
+                first = False
+            else:
+                yield a, b  # type: ignore[misc]
+            a = b
+
+    __all__ += ["pairwise"]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee

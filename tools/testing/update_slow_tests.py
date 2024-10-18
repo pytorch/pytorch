@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, cast, Dict, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 import requests
 import rockset  # type: ignore[import]
@@ -93,7 +93,7 @@ PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 
 
 def git_api(
-    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
+    url: str, params: Dict[str, Any], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -144,6 +144,15 @@ def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
         params,
         type="post",
         token=PYTORCHBOT_TOKEN,
+    )
+
+
+def add_labels(source_repo: str, pr_number: int, labels: List[str]) -> None:
+    params = {"labels": labels}
+    git_api(
+        f"/repos/{source_repo}/issues/{pr_number}/labels",
+        params,
+        type="post",
     )
 
 
@@ -204,5 +213,6 @@ if __name__ == "__main__":
         # no existing pr, so make a new one and approve it
         pr_num = make_pr("pytorch/pytorch", params)
         time.sleep(5)
+        add_labels("pytorch/pytorch", pr_num, ["ciflow/slow", "ci-no-td"])
         approve_pr("pytorch/pytorch", pr_num)
     make_comment("pytorch/pytorch", pr_num, "@pytorchbot merge")

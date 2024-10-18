@@ -784,6 +784,26 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            if node.meta.get("has_backward_hook", False) and not any(
+                must_recompute(user) for user in node.users
+            ):
+                # If node is AC region output and has a backward hook on it, we intentionally choose to save it.
+                # This is to work around circular dependencies in Traceable FSDP2+AC.
+                # Example:
+                # ```
+                # out = fully_shard(utils.checkpoint(module))(x)
+                # norm_out = layer_norm(out)
+                # ```
+                # Here there is a circular dependency:
+                # 1. In backward, grad_input of layer_norm aka. `out_grad` is actually dependent on `out`.
+                # 2. `out` depends on `out`'s backward hook created by FSDP2 (which does all-gather for `module` weights)
+                #    in order to be recomputed.
+                # 3. `out`'s backward hook, as is the case for all eager backward hooks, depends on `out_grad`
+                #    -> circular dependency with (1)!
+                #
+                # Solution: check whether `out` has a backward hook, and if so, intentionally save `out`
+                # in forward graph outputs. With this, we can break the above circular dependency.
+                node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
     return joint_module
 
 
@@ -843,6 +863,14 @@ def solve_min_cut(
             return True
         if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
+        if (
+            a.target is operator.getitem
+            and a.args[0].target
+            is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            # if a is the output of a user triton kernel,
+            # then (by default) we will not be able to fuse b into it
+            return False
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
     try:
@@ -1272,6 +1300,7 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
+        aten.select,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1870,14 +1899,10 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
-        from torch._inductor.fx_utils import get_node_storage
-
-        storages = {get_node_storage(node) for node in saved_values}
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
         )
-        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }

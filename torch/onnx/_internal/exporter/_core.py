@@ -42,7 +42,7 @@ from torch.onnx._internal.exporter import (
 if typing.TYPE_CHECKING:
     import os
 
-    import numpy as np
+    import numpy.typing as npt
 
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
@@ -63,6 +63,9 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.int64: ir.DataType.INT64,
     torch.int8: ir.DataType.INT8,
     torch.uint8: ir.DataType.UINT8,
+    torch.uint16: ir.DataType.UINT16,
+    torch.uint32: ir.DataType.UINT32,
+    torch.uint64: ir.DataType.UINT64,
 }
 _BLUE = "\033[96m"
 _END = "\033[0m"
@@ -97,10 +100,10 @@ class TorchTensor(ir.Tensor):
             tensor, dtype=_torch_dtype_to_onnx_dtype(tensor.dtype), name=name
         )
 
-    def __array__(self, dtype: Any = None) -> np.ndarray:
-        # numpy() calls __array__ in ir.Tensor
+    def numpy(self) -> npt.NDArray:
+        self.raw: torch.Tensor
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).__array__(dtype)
+            return self.raw.view(torch.uint16).numpy(force=True)
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
@@ -108,8 +111,14 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
             # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).__array__(dtype)
-        return self.raw.__array__(dtype)
+            return self.raw.view(torch.uint8).numpy(force=True)
+        return self.raw.numpy(force=True)
+
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
+        del copy  # Unused, but needed for the signature
+        if dtype is None:
+            return self.numpy()
+        return self.numpy().__array__(dtype)
 
     def tobytes(self) -> bytes:
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
@@ -714,6 +723,13 @@ def _prepare_exported_program_for_export(
     registry: _registration.ONNXRegistry,
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
+    # Before decomposing, we search for the subsequence transpose + view and insert
+    # a node flatten in between to bypass the wrong decomposition.
+    # Remove before 2.6 release and after issue https://github.com/pytorch/pytorch/issues/136543 is fixed.
+    exported_program = _fx_passes.insert_contiguous_between_transpose_and_view(
+        exported_program
+    )
+
     # Decompose the graph given the implemented torch ops in ONNX
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
 

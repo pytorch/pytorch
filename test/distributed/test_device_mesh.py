@@ -5,12 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-    unpad_tensor,
-)
-from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -22,6 +16,12 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
+)
+from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -200,6 +200,15 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
+        # Check when `mesh` is passed as well
+        global_mesh = DeviceMesh.from_group(
+            mesh_pg, self.device_type, mesh=torch.arange(self.world_size)
+        )
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
 
     @with_comms
     def test_from_group_with_invalid_mesh(self):
@@ -236,7 +245,8 @@ class DeviceMeshTest(DTensorTestBase):
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
         mesh = DeviceMesh(device_type, mesh_tensor)
-        self.assertEqual(mesh.get_group(1)._get_backend_name(), "fake")
+        # Fake pg only have BackendType as BackendType::CUSTOM.
+        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
 
 class DeviceMeshTestNDim(DTensorTestBase):

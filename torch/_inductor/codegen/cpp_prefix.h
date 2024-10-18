@@ -26,8 +26,9 @@
 #include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -458,7 +459,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
   case 4:
     return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -480,7 +481,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -882,32 +883,6 @@ void mm_get_cache_blocking(
         num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size);
     cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
   }
-}
-
-inline void mm_get_thread_blocks(
-    int thread_id,
-    int64_t M_blocks,
-    int64_t N_blocks,
-    int64_t K_blocks,
-    int64_t Mt_blocks,
-    int64_t Nt_blocks,
-    int64_t Kt_blocks,
-    int64_t& m_block_start,
-    int64_t& m_block_end,
-    int64_t& n_block_start,
-    int64_t& n_block_end,
-    int64_t& k_block_start,
-    int64_t& k_block_end) {
-  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  k_block_start = (thread_id % num_Kt) * Kt_blocks;
-  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
-  thread_id /= num_Kt;
-  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  n_block_start = (thread_id % num_Nt) * Nt_blocks;
-  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
-  thread_id /= num_Nt;
-  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
-  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
 
 struct amx_tilecfg {

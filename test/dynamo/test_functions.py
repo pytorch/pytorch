@@ -28,6 +28,7 @@ from torch._dynamo.utils import ifdynstaticdefault, same
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
@@ -313,6 +314,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "itertools.pairwise was added at Python 3.10",
+    )
+    @make_test
+    def test_itertools_pairwise(a):
+        pairs = []
+        for size in itertools.pairwise((1, 2, 3, 4)):
+            pairs.append(torch.ones(size))
+        return pairs
 
     @make_test
     def test_np_iinfo(a):
@@ -688,6 +700,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_dict_update_kwargs(x):
+        d = {"a": 2}
+        d.update(b=4)
+        return x * d["a"] * d["b"]
+
+    @make_test
     def test_defaultdict_setdefault1(x):
         d = collections.defaultdict.fromkeys("a", "b")
         d["a"] = 1
@@ -919,6 +937,44 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_tensor_size(x):
+        fn = torch.Tensor.size
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_dim(x):
+        fn = torch.Tensor.dim
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_is_inference(x):
+        if x.is_inference():
+            return x + 1
+        else:
+            return x - 1
+
+    def test_is_inference_recompilation(self):
+        def fn(x):
+            if x.is_inference():
+                return x + 1
+            else:
+                return x - 1
+
+        with torch.inference_mode():
+            x_inference = torch.randn(2, 2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertEqual(fn(x_inference), opt_fn(x_inference))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
     @make_test
     def test_get_privateuse1_name(x):
@@ -3887,6 +3943,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys, zs[:1])
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_current_device(self):
+        def fn(x):
+            y = torch.empty(
+                (2, 3), dtype=torch.float32, device=torch.cuda.current_device()
+            )
+            y.copy_(x)
+            return torch.sin(y + y.device.index)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
+
+        with torch.cuda.device(0):
+            x = torch.randn(2, 3)
+            self.assertEqual(opt_fn(x), fn(x))
+            self.assertEqual(counter.frame_count, 1)
+            with torch.cuda.device(1):
+                self.assertEqual(opt_fn(x), fn(x))
+                self.assertEqual(counter.frame_count, 2)
 
     def test_fn_with_attr(self):
         def fn(x):

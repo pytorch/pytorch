@@ -17,13 +17,13 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
-    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     dtype_abbrs,
-    parametrize
+    parametrize,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -294,7 +294,7 @@ class TestMetaConverter(TestCase):
         meta.set_(storage, 0, (), ())
         self.assertEqual(storage.size(), ssize)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -334,7 +334,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(len(m.tensor_memo), 0)
         self.assertEqual(len(m.storage_memo), 0)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)
@@ -1635,6 +1635,42 @@ class TestMeta(TestCase):
             scale_grad_by_freq, mode, per_sample_weights, padding_idx
         )
         self.assertEqual(grad_weight.to('meta'), meta_grad_weight)
+
+    def test_segment_reduce_backward(self):
+        grad = torch.ones(16, dtype=torch.float)
+        output = torch.ones(16, dtype=torch.float)
+        data = torch.ones(16, dtype=torch.float)
+        reduce_str = 'max'
+        lengths = torch.ones(16, dtype=torch.long)
+
+        out = torch.ops.aten._segment_reduce_backward(grad, output, data, reduce_str, lengths=lengths)
+        out_meta = torch.ops.aten._segment_reduce_backward(
+            grad.to(device='meta'),
+            output.to(device='meta'),
+            data.to(device='meta'),
+            reduce_str,
+            lengths=lengths.to(device='meta'),
+        )
+        self.assertEqual(out.shape, out_meta.shape)
+        self.assertEqual(out.stride(), out_meta.stride())
+        self.assertEqual(out.dtype, out_meta.dtype)
+        self.assertEqual(out.layout, out_meta.layout)
+
+        # noncontiguous
+        grad = torch.ones(16, 2, dtype=torch.float)[:, 1]
+        data = torch.ones(16, 2, dtype=torch.float)[:, 1]
+        out = torch.ops.aten._segment_reduce_backward(grad, output, data, reduce_str, lengths=lengths)
+        out_meta = torch.ops.aten._segment_reduce_backward(
+            grad.to(device='meta'),
+            output.to(device='meta'),
+            data.to(device='meta'),
+            reduce_str,
+            lengths=lengths.to(device='meta'),
+        )
+        self.assertEqual(out.shape, out_meta.shape)
+        self.assertEqual(out.stride(), out_meta.stride())
+        self.assertEqual(out.dtype, out_meta.dtype)
+        self.assertEqual(out.layout, out_meta.layout)
 
     def test_embedding_bag_dense_backward_per_sample_weights(self):
         weight = torch.randn(4, 3, requires_grad=True)
