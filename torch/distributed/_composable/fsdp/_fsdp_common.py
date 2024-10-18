@@ -6,12 +6,27 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+
+if torch._running_with_deploy():
+
+    def compiled_autograd_enabled():
+        return False
+
+else:
+
+    def compiled_autograd_enabled():
+        if torch.compiler.is_compiling():
+            import torch._dynamo.compiled_autograd as ca
+
+            return ca.compiled_autograd_enabled or ca.in_compiled_autograd_region
+        else:
+            return False
 
 
 @dataclass
@@ -118,7 +133,7 @@ def _from_local_no_grad(
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
 
-    if not ca.compiled_autograd_enabled:
+    if not compiled_autograd_enabled():
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable

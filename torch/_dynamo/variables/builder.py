@@ -14,6 +14,7 @@ import operator
 import random
 import re
 import sys
+import time
 import types
 import warnings
 import weakref
@@ -33,6 +34,7 @@ from typing import (
 
 import torch
 from torch import SymInt
+from torch._dynamo.utils import get_chromium_event_logger
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -139,6 +141,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
     UserFunctionVariable,
@@ -523,7 +526,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton, has_triton_tma
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -534,6 +537,19 @@ class VariableBuilder:
                 pass
 
             class Autotuner:
+                pass
+
+        if has_triton_tma():
+            from triton.tools.experimental_descriptor import (
+                create_1d_tma_descriptor,
+                create_2d_tma_descriptor,
+            )
+        else:
+
+            def create_1d_tma_descriptor():
+                pass
+
+            def create_2d_tma_descriptor():
                 pass
 
         # Handle exact type() match
@@ -965,6 +981,10 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif value is create_1d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=1)
+        elif value is create_2d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=2)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1760,6 +1780,17 @@ class VariableBuilder:
                             value,
                             frame_state_entry.scalar,
                         )
+                        get_chromium_event_logger().log_instant_event(
+                            "automatic_dynamic",
+                            time.time_ns(),
+                            {
+                                "name": name,
+                                "dim_changed": "scalar",
+                                "reason": "scalar change",
+                                "cached": str(frame_state_entry.scalar),
+                                "new": str(value),
+                            },
+                        )
                         if self.source.guard_source().is_unspecialized_nn_module():
                             log.info(
                                 "%s",
@@ -2466,6 +2497,17 @@ def _automatic_dynamic(
                         len(size),
                         frame_state_entry.size,
                     )
+                    get_chromium_event_logger().log_instant_event(
+                        "automatic_dynamic",
+                        time.time_ns(),
+                        {
+                            "name": name,
+                            "dim_changed": "all",
+                            "reason": "dimensionality change",
+                            "cached": str(frame_state_entry.size),
+                            "new": str(size),
+                        },
+                    )
                     frame_state_entry.size = None
                     frame_state_entry.stride = None
                 else:
@@ -2482,6 +2524,17 @@ def _automatic_dynamic(
                                 i,
                                 size[i],
                                 dim,
+                            )
+                            get_chromium_event_logger().log_instant_event(
+                                "automatic_dynamic",
+                                time.time_ns(),
+                                {
+                                    "name": name,
+                                    "dim_changed": i,
+                                    "reason": "size change",
+                                    "cached": str(dim),
+                                    "new": str(size[i]),
+                                },
                             )
                             frame_state_entry.size[i] = None
                         has_size_changed = (
@@ -2512,6 +2565,17 @@ def _automatic_dynamic(
                                     i,
                                     stride[i],
                                     dim,
+                                )
+                                get_chromium_event_logger().log_instant_event(
+                                    "automatic_dynamic",
+                                    time.time_ns(),
+                                    {
+                                        "name": name,
+                                        "dim_changed": i,
+                                        "reason": "stride change",
+                                        "cached": str(dim),
+                                        "new": str(stride[i]),
+                                    },
                                 )
                                 frame_state_entry.stride[i] = None
         tx.output.frame_state[name] = frame_state_entry
