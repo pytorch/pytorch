@@ -560,7 +560,7 @@ class SymNumberMemoDescriptor:
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[Type[FakeTensor]] = None
-    ) -> Optional[torch.SymInt]:
+    ) -> Optional[Union[torch.SymInt, torch.SymFloat]]:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
 
@@ -579,7 +579,9 @@ class SymNumberMemoDescriptor:
             return None
         return r
 
-    def __set__(self, obj: FakeTensor, value: Optional[torch.SymInt]) -> None:
+    def __set__(
+        self, obj: FakeTensor, value: Optional[Union[torch.SymInt, torch.SymFloat]]
+    ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
@@ -893,6 +895,7 @@ class FakeTensor(Tensor):
             self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
                 nt_tensor_id=None
             )
+        assert isinstance(self.nested_int_memo, torch.SymInt)
         return self.nested_int_memo * coeff
 
     # Similar to FunctionalTensor.tolist

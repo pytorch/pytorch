@@ -207,7 +207,7 @@ def tensorify_python_scalars(
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args = []
+                args: List[Union[MetaProxy, int, float]] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -230,8 +230,10 @@ def tensorify_python_scalars(
                             )
 
                         args.append(proxy)
-                    else:
+                    elif isinstance(a, fx.Node):
                         args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
+                    else:
+                        args.append(a)
 
                 if transform:
                     replacement_proxy = node.target(*args)
@@ -258,14 +260,16 @@ def tensorify_python_scalars(
         ):
             args = []
             transform = False
-            for arg in node.args:
-                if isinstance(arg, fx.Node) and isinstance(zf := arg.meta["val"], torch.SymFloat):
+            for a in node.args:
+                if isinstance(a, fx.Node) and isinstance(
+                    zf := a.meta["val"], torch.SymFloat
+                ):
                     transform = True
                     args.append(float(zf))
-                elif isinstance(arg, fx.Node):
-                    args.append(MetaProxy(arg, tracer=tracer, fake_mode=fake_mode))
+                elif isinstance(a, fx.Node):
+                    args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
                 else:
-                    args.append(arg)
+                    args.append(a)
 
             if transform:
                 replacement_proxy = node.target(*args, **node.kwargs)
