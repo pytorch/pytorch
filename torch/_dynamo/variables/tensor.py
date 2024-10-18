@@ -661,10 +661,12 @@ class TensorVariable(VariableTracker):
             tensortype = next(
                 k for k, v in tensortype_to_dtype.items() if self.dtype in v
             )
-            if self.device.type == "cuda":
-                return ConstantVariable.create(f"torch.cuda.{tensortype.__name__}")
-            else:
+            if self.device.type == "cpu":
                 return ConstantVariable.create(f"torch.{tensortype.__name__}")
+            else:
+                return ConstantVariable.create(
+                    f"torch.{self.device.type}.{tensortype.__name__}"
+                )
         elif (
             dtype is not None
             and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
