@@ -385,3 +385,29 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.test-matrix }}
+  linux-jammy-xpu-py3_8-build:
+    name: linux-jammy-xpu-py3.8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-xpu-py3.8
+      docker-image-name: pytorch-linux-jammy-xpu-2024.0-py3
+      runner: linux.2xlarge
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
+        ]}
+
+  linux-jammy-xpu-py3_8-test:
+    name: linux-jammy-xpu-py3.8
+    uses: ./.github/workflows/_xpu-test.yml
+    needs: linux-jammy-xpu-py3_8-build
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      build-environment: linux-jammy-xpu-py3.8
+      docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.test-matrix }}
