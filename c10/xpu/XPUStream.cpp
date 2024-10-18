@@ -147,16 +147,6 @@ inline void initDeviceStreamOnce(DeviceIndex device) {
   c10::call_once(device_flags[device], initDeviceStreamState, device);
 }
 
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int16_t>(device),
-      ", total number of device is ",
-      static_cast<int16_t>(num_gpus),
-      ".");
-}
-
 uint32_t get_idx(std::atomic<uint32_t>& counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
