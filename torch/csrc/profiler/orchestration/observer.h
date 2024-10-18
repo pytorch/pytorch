@@ -93,7 +93,26 @@ struct TORCH_API ExperimentalConfig {
   bool adjust_timestamps;
 };
 
-struct TORCH_API ProfilerConfig {
+struct TORCH_API AbstractProfilerConfig {
+  /*
+  * This class is created to support custom profiling configurations
+  * on various platforms. It defines a common interface and shared state
+  * for different profiler implementations.
+  */
+  virtual ~AbstractProfilerConfig() = default;
+  AbstractProfilerConfig(const AbstractProfilerConfig&) = default;
+  AbstractProfilerConfig& operator=(const AbstractProfilerConfig&) = default;
+  AbstractProfilerConfig(AbstractProfilerConfig&&) = default;
+  AbstractProfilerConfig& operator=(AbstractProfilerConfig&&) = default;
+
+  virtual bool reportInputShapes() const = 0;
+
+protected:
+  // Protected default constructor
+  AbstractProfilerConfig() = default;
+};
+
+struct TORCH_API ProfilerConfig : public AbstractProfilerConfig {
   ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
@@ -113,6 +132,8 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+
+  bool reportInputShapes() const override;
 
   // For serialization
   at::IValue toIValue() const;
@@ -165,6 +186,6 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
 // Note: The following are only for the active *thread local* profiler.
 TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
-TORCH_API ProfilerConfig getProfilerConfig();
+TORCH_API const AbstractProfilerConfig* getProfilerConfig();
 
 } // namespace torch::profiler::impl

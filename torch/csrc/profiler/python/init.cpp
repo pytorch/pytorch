@@ -225,7 +225,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     std::vector<at::IValue> args;
     std::unordered_map<std::string, at::IValue> kwargs;
     bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
-        torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+        torch::autograd::profiler::getProfilerConfig()->reportInputShapes();
     // parse through args if they exist
     if (self->input_values != nullptr && profiler_need_input) {
       THPObjectPtr input_fast(

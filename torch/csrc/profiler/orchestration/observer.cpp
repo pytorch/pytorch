@@ -39,13 +39,18 @@ ProfilerConfig::ProfilerConfig(
     bool with_flops,
     bool with_modules,
     ExperimentalConfig experimental_config)
-    : state{state},
+    : AbstractProfilerConfig(),
+      state{state},
       experimental_config{std::move(experimental_config)},
       report_input_shapes{report_input_shapes},
       profile_memory{profile_memory},
       with_stack{with_stack},
       with_flops{with_flops},
       with_modules{with_modules} {}
+
+bool ProfilerConfig::reportInputShapes() const {
+    return report_input_shapes;
+}
 
 bool ProfilerConfig::disabled() const {
   return state == torch::profiler::impl::ProfilerState::Disabled;
@@ -174,12 +179,12 @@ TORCH_API ActiveProfilerType profilerType() {
                               : state_ptr->profilerType();
 }
 
-torch::profiler::impl::ProfilerConfig getProfilerConfig() {
+const torch::profiler::impl::AbstractProfilerConfig* getProfilerConfig() {
   auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
   TORCH_CHECK(
       state_ptr,
       "Tried to access profiler config, but profiler is not enabled!");
-  return state_ptr->config();
+  return &state_ptr->config();
 }
 
 } // namespace torch::profiler::impl

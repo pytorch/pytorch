@@ -885,7 +885,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
-      torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+      torch::autograd::profiler::getProfilerConfig()->reportInputShapes();
 
   for (const auto i : c10::irange(num_args)) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
