@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -3071,14 +3072,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point<T>::value, int> = 0>
+template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_h_forward(T x, T n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
-    return hermite_polynomial_h_forward(x, ((!std::isinf(n)) && (!std::isnan(n))) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
+template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+__ubsan_ignore_float_cast_overflow__ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+    return hermite_polynomial_h_forward(x, (!std::isinf(n) && !std::isnan(n)) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>
