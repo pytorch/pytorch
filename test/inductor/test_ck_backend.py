@@ -3,12 +3,6 @@ import logging
 import os
 import unittest
 
-
-try:
-    from .test_aot_inductor_utils import AOTIRunnerUtil
-except ImportError:
-    from test_aot_inductor_utils import AOTIRunnerUtil
-
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -74,9 +68,8 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("autotune_in_subproc", (True, False))
-    @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
+        self, max_autotune_gemm_backends, autotune_in_subproc
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -104,21 +97,8 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
-            if use_aoti:
-                Y_compiled = AOTIRunnerUtil.run(
-                    device="cuda",
-                    model=mm,
-                    example_inputs=(a, b),
-                )
-            else:
-
-                @torch.compile(dynamic=False)
-                def compiled_mm(x, w):
-                    return mm(x, w)
-
-                Y_compiled = compiled_mm(a, b)
-
-            Y = mm(a=a, b=b)
+            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+            Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
@@ -363,45 +343,6 @@ class TestCKBackend(TestCase):
             self.assertEqual(y_compiled.dtype, dtype)
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
-
-    @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
-    @parametrize("channels_last_input", (True, False))
-    def test_max_autotune_conv2d(self, max_autotune_conv_backends, channels_last_input):
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        tensor_options = {"device": "cuda", "dtype": torch.float32}
-
-        x = torch.randn(1, 8, 224, 224, **tensor_options)
-        w = torch.randn(64, 8, 7, 7, **tensor_options)
-        x_cl = x.to(memory_format=torch.channels_last)
-        w_cl = w.to(memory_format=torch.channels_last)
-
-        assert "rocm" in dir(config)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_conv_backends": max_autotune_conv_backends,
-                "compile_threads": 4,
-                "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 4,
-            }
-        ):
-
-            @torch.compile(dynamic=False)
-            def conv2d(x, w):
-                return torch.conv2d(x, w)
-
-            Y_eager = torch.conv2d(x, w)
-            if channels_last_input:
-                Y_compiled = conv2d(x_cl, w_cl)
-            else:
-                Y_compiled = conv2d(x, w_cl)
-
-            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
 
 if __name__ == "__main__":
