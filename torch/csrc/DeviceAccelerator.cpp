@@ -40,31 +40,6 @@ void initModule(PyObject* module) {
     return static_cast<c10::DeviceIndex>(impl.getDevice().index());
   });
 
-  m.def("_accelerator_exchangeDevice", [](c10::DeviceIndex device_index) {
-    const auto device_type = at::getAccelerator(true).value();
-    // If device index is negative, no-op
-    if (device_index < 0) {
-      return static_cast<c10::DeviceIndex>(-1);
-    }
-    torch::utils::maybe_initialize_device(device_type);
-    c10::impl::VirtualGuardImpl impl(device_type);
-    auto orig_device = impl.exchangeDevice({device_type, device_index});
-    return static_cast<c10::DeviceIndex>(orig_device.index());
-  });
-
-  m.def("_accelerator_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
-    const auto device_type = at::getAccelerator(true).value();
-    // If device index is negative, no-op
-    if (device_index < 0) {
-      return static_cast<c10::DeviceIndex>(-1);
-    }
-    torch::utils::maybe_initialize_device(device_type);
-    c10::impl::VirtualGuardImpl impl(device_type);
-    auto orig_device = impl.getDevice();
-    impl.uncheckedSetDevice({device_type, device_index});
-    return static_cast<c10::DeviceIndex>(orig_device.index());
-  });
-
   m.def("_accelerator_setStream", [](c10::Stream stream) {
     const auto device_type = at::getAccelerator(true).value();
     TORCH_CHECK(
