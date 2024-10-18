@@ -1794,6 +1794,9 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
 
 @lru_cache(256)
 def safe_expand(r: _SympyT) -> _SympyT:
+    """
+    TODO
+    """
     if hasattr(r, "expand"):
         try:
             return _fast_expand(r)
@@ -5399,6 +5402,7 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: _SympyT) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
+        expr = safe_expand(expr)
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
