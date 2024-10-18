@@ -100,8 +100,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config.shallow_copy_dict()
-            inductor_config = torch._inductor.config.shallow_copy_dict()
+            dynamo_config = torch._dynamo.config.get_config_copy()
+            inductor_config = torch._inductor.config.get_config_copy()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
