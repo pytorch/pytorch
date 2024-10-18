@@ -1,21 +1,25 @@
 # mypy: allow-untyped-defs
 import contextlib
-import copy
+import dataclasses
 import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..dependencies import Dep
+from ..loop_body import LoopBody
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -45,6 +49,8 @@ DTYPE_TO_CPP = {
     torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
+    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -646,18 +652,19 @@ class LocalBufferContext:
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
-            new_loops = copy.copy(loops)
+            new_inner_fn = self.localize_function(
+                loops.inner_fn,
+                rewrite_index,
+            )
+
+            new_loops = dataclasses.replace(loops, inner_fn=new_inner_fn)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    node.get_name(), node.get_layout(), new_loops
+                    name=node.get_name(), layout=node.get_layout(), data=new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_function(
-                new_loops.inner_fn,
-                rewrite_index,
-            )
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]
@@ -883,20 +890,19 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
 
 
 def _get_loop_body(fn_list):
-    loop_bodies = None
-    if all(isinstance(fn, ir.LoopBody) for fn in fn_list):
+    if all(isinstance(fn, LoopBody) for fn in fn_list):
         loop_bodies = fn_list
     else:
         if hasattr(fn_list[0], "original_fn"):
             # For the case of local buffer, we wrap the fn with localize_function
             assert all(hasattr(fn, "original_fn") for fn in fn_list)
             assert all(
-                isinstance(fn.original_fn.args[0]._body, ir.LoopBody) for fn in fn_list
+                isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
             )
             loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
         else:
             assert all(isinstance(fn, functools.partial) for fn in fn_list)
-            assert all(isinstance(fn.args[0]._body, ir.LoopBody) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
             loop_bodies = [fn.args[0]._body for fn in fn_list]
     assert loop_bodies is not None
     return loop_bodies
@@ -914,3 +920,71 @@ def _get_dtype_from_loopbodies(loop_bodies):
                     continue
                 dtypes.add(node.meta[OptimizationContext.key].dtype)
     return dtypes
+
+
+def template_fusion_with_epilogues_supported(
+    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+) -> Tuple[bool, bool]:
+    def _get_indexes_of_template_buf_read(
+        epilogue_node: ir.Operation, template_buf_names: List[str]
+    ) -> List[sympy.Expr]:
+        return [
+            read.index
+            for read in epilogue_node.get_reads()
+            if read.name in template_buf_names
+        ]
+
+    def _check_supported_and_same_indexes(
+        index_of_template_buf_read: Sequence[sympy.Expr],
+        epilogue_writes: OrderedSet[Dep],
+    ) -> Tuple[bool, bool]:
+        num_indexes = len(set(index_of_template_buf_read))
+
+        if num_indexes > 1:
+            same_index = False
+            supported = False  # Different read indexes not supported
+        elif num_indexes == 0:
+            same_index = True
+            supported = True  # No reads, automatically supported
+        elif num_indexes == 1:
+            iotbr = index_of_template_buf_read[0]
+            same_index = all(write.index == iotbr for write in epilogue_writes)
+            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+            # in the epilogue node don't have the same index and change supported to True
+            supported = same_index
+        else:
+            raise AssertionError("Should not reach here")
+
+        return supported, same_index
+
+    def _template_fusion_supported(
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
+    ) -> Tuple[bool, bool]:
+        template_buf_names = [x.get_name() for x in template_outputs]
+        indexes_of_template_buf_reads = [
+            _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
+            for epilogue_node in epilogue_nodes
+        ]
+        epilogue_nodes_writes = [
+            epilogue_node.get_read_writes().writes for epilogue_node in epilogue_nodes
+        ]
+
+        results = [
+            _check_supported_and_same_indexes(reads, writes)
+            for reads, writes in zip(
+                indexes_of_template_buf_reads, epilogue_nodes_writes
+            )
+        ]
+        supported, same_indexes = zip(*results)
+        return all(supported), all(same_indexes)
+
+    assert template.is_template()
+    template_outputs = template.get_outputs()
+
+    epilogue_nodes = [
+        n.node
+        for epilogue in epilogues
+        for n in epilogue.get_nodes()
+        if n.node is not None
+    ]
+    return _template_fusion_supported(template_outputs, epilogue_nodes)
