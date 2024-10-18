@@ -8,8 +8,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Returns the cosine similarity between :math:`x_1` and :math:`x_2`, computed
 /// along `dim`.
@@ -82,5 +81,4 @@ class TORCH_API PairwiseDistanceImpl : public Cloneable<PairwiseDistanceImpl> {
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(PairwiseDistance);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

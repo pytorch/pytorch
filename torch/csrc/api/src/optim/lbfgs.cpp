@@ -13,8 +13,7 @@
 #include <functional>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 LBFGSOptions::LBFGSOptions(double lr) : lr_(lr) {}
 
@@ -649,5 +648,4 @@ void LBFGS::load(serialize::InputArchive& archive) {
         std::move(state);
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

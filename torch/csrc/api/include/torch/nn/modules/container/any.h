@@ -18,8 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Stores a type erased `Module`.
 ///
@@ -346,7 +345,7 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
 
 template <typename ModuleType>
 ModuleType& AnyModule::get_() const {
-  using M = typename std::remove_reference<ModuleType>::type;
+  using M = std::remove_reference_t<ModuleType>;
   static_assert(
       torch::detail::has_forward<M>::value,
       "Can only call AnyModule::get<T> with a type T that has a forward method");
@@ -368,5 +367,4 @@ ModuleType& AnyModule::get_(
       c10::demangle(typeid(ModuleType).name()));
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

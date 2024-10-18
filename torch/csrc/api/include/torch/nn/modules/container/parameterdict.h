@@ -6,8 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
  public:
@@ -27,13 +26,13 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
   /// Pretty prints the `ParameterDict` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::ParameterDict(" << std::endl;
+    stream << "torch::nn::ParameterDict(" << '\n';
     for (const auto& pair : parameters_) {
       stream << "(" << pair.key() << ")"
              << ": Parameter containing: [" << pair.value().scalar_type()
              << " of size " << pair.value().sizes() << "]";
       ;
-      stream << std::endl;
+      stream << '\n';
     }
     stream << ")";
   }
@@ -144,5 +143,4 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
 TORCH_MODULE(ParameterDict);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

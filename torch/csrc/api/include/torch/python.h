@@ -21,8 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace python {
+namespace torch::python {
 namespace detail {
 inline Device py_object_to_device(py::object object) {
   PyObject* obj = object.ptr();
@@ -83,7 +82,9 @@ void bind_cpp_module_wrapper(
   // which replaces its methods with those of the C++ module.
   wrapper_class.attr("__init__") = py::cpp_function(
       [cpp_module, cpp_class](
-          py::object self, py::args args, py::kwargs kwargs) {
+          const py::object& self,
+          const py::args& args,
+          const py::kwargs& kwargs) {
         cpp_module.attr("__init__")(self, cpp_class(*args, **kwargs));
       },
       py::is_method(wrapper_class));
@@ -141,7 +142,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
-           [](ModuleType& module, py::object /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
+           [](ModuleType& module, const py::object& /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),
@@ -163,8 +164,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
           py::arg("non_blocking") = false)
       .def("to",
           [](ModuleType& module,
-             py::object device,
-             py::object dtype,
+             const py::object& device,
+             const py::object& dtype,
              bool non_blocking) {
               if (device.is_none()) {
                 module.to(detail::py_object_to_dtype(dtype), non_blocking);
@@ -257,5 +258,4 @@ detail::PyModuleClass<ModuleType> bind_module(
       .def("forward", &ModuleType::forward)
       .def("__call__", &ModuleType::forward);
 }
-} // namespace python
-} // namespace torch
+} // namespace torch::python
