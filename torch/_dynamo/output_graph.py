@@ -658,51 +658,9 @@ class OutputGraph:
 
         assert arg is not None
 
-        def bind_symint(s: torch.SymInt, prop):
-            if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
-                return
-            s0 = s.node.expr
-            # recursively bind symint to subgraphs until top-level.
-            tracer = self.current_tracer
-            while tracer is not None:
-                if s0 in tracer.bound_symbols:
-                    break
-
-                log.debug(
-                    "bind_symint %s from %s at level %s",
-                    s,
-                    prop.name() if prop is not None else "subgraph inputs",
-                    tracer.level,
-                )
-                proxy = tracer.create_graph_input(
-                    str(s0),
-                    torch.SymInt,
-                    before=True,
-                    source=prop,
-                )
-                tracer.bound_symbols[s0] = proxy
-                set_example_value(proxy.node, s)
-                assert isinstance(s, torch.SymInt)
-
-                if tracer is self.root_tracer:
-                    assert (
-                        source is not None
-                    ), "When bound with top-level phs, symbols' source must be provided."
-
-                if prop is not None:
-                    tracer.bound_symbols[s0].node.meta["grapharg"] = GraphArg(
-                        prop,
-                        s,
-                        pass_arg_as_tensor=False,
-                        fake_tensor=None,
-                        is_tensor=False,
-                    )
-
-                tracer = tracer.parent
-
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
-                bind_symint(
+                self.current_tracer.bind_symint(
                     s,
                     TensorPropertySource(src, TensorProperty.SIZE, i)
                     if src is not None
@@ -710,13 +668,13 @@ class OutputGraph:
                 )
             if t.layout is torch.strided:
                 for i, s in enumerate(t.stride()):
-                    bind_symint(
+                    self.current_tracer.bind_symint(
                         s,
                         TensorPropertySource(src, TensorProperty.STRIDE, i)
                         if src is not None
                         else None,
                     )
-                bind_symint(
+                self.current_tracer.bind_symint(
                     t.storage_offset(),
                     TensorPropertySource(src, TensorProperty.STORAGE_OFFSET)
                     if src is not None
@@ -2212,6 +2170,48 @@ class SubgraphTracer(fx.Tracer):
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
+
+    def bind_symint(self, s: torch.SymInt, source: Optional[Source]):
+        if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
+            return
+        assert isinstance(s, torch.SymInt)
+
+        s0 = s.node.expr
+        if s0 in self.bound_symbols:
+            return self.bound_symbols[s0]
+
+        log.debug(
+            "bind_symint %s from %s at level %s",
+            s,
+            source.name() if source is not None else "subgraph inputs",
+            self.level,
+        )
+        ph = self.create_graph_input(
+            str(s0),
+            torch.SymInt,
+            before=True,
+            source=source,
+        )
+        self.bound_symbols[s0] = ph
+        set_example_value(ph.node, s)
+
+        if self.parent is None:
+            assert (
+                source is not None
+            ), "When bound with top-level phs, symbols' source must be provided."
+            ph.node.meta["grapharg"] = GraphArg(
+                source,
+                s,
+                pass_arg_as_tensor=False,
+                fake_tensor=None,
+                is_tensor=False,
+            )
+            return ph
+
+        # Recursively bind symbols for parent tracer
+        parent_proxy = self.parent.bind_symint(s, source)
+        self.lifted_freevars[parent_proxy] = ph
+        return ph
 
 
 # NOTE: [HigherOrderOperator tracing design]

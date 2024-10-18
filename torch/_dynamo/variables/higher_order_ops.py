@@ -526,7 +526,15 @@ def speculate_subgraph(
                 graph = tx.output.graph
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
-
+                lifted_symbols = {}
+                for sym, proxy in subtracer.bound_symbols.items():
+                    assert (
+                        sym in subtracer.parent.bound_symbols
+                    ), "sym is bound in sub tracer but not in parent tracer."
+                    parent_proxy = subtracer.parent.bound_symbols[sym]
+                    lifted_symbols[parent_proxy] = proxy
+                all_lifted = lifted_freevars.update(lifted_symbols)
+                name_to_lifted_proxy = {}
                 return (
                     (output, treespec),
                     graph,
