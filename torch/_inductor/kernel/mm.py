@@ -575,7 +575,7 @@ def tuned_cslt_sparse_mm(
         searched_split_k,
         searched_split_k_one_kernel,
         _,
-    ) = torch._C._cusparselt.mm_search(
+    ) = torch._C._cusparselt.mm_search(  # type: ignore[attr-defined]
         AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.size_hints(mat1_compressed.get_size()),
             V.graph.sizevars.size_hints(mat1_compressed.get_stride()),

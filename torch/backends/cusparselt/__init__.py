@@ -30,7 +30,7 @@ if _cusparselt is not None:
             A = torch.zeros(128, 128, dtype=torch.float16).cuda()
             A = torch._cslt_compress(A)
             B = torch.zeros(128, 128, dtype=torch.float16).cuda()
-            _, _, _, __MAX_ALG_ID = torch._C._cusparselt.mm_search(A, B, None, None, None, False)
+            _, _, _, __MAX_ALG_ID = _cusparselt.mm_search(A, B, None, None, None, False)  # type: ignore[attr-defined]
         return True
 
 else:

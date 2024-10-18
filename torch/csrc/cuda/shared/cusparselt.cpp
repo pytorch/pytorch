@@ -1,8 +1,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #ifdef USE_CUSPARSELT
-#include <cusparseLt.h>
-#include <ATen/native/sparse/cuda/cuSPARSELtOps.cpp>
+#include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 
 namespace {
 
@@ -16,29 +15,26 @@ std::tuple<int64_t, int64_t, bool, int64_t> mmSearch(
     const std::optional<at::Tensor>& bias_opt,
     const std::optional<at::Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
-    bool transpose_result
-)
-{
-    int alg_id_int = 0;
-    int split_k = 1;
-    bool split_k_one_kernel= true;
-    auto result = at::native::_cslt_sparse_mm_impl(
-        compressed_A,
-        dense_B,
-        bias_opt,
-        alpha_opt,
-        out_dtype_opt,
-        transpose_result,
-        alg_id_int,
-        split_k,
-        split_k_one_kernel,
-        true);
-    return {
-      (int64_t) std::get<1>(result),
-      (int64_t) std::get<2>(result),
-      (bool) std::get<3>(result),
-      (int64_t) std::get<4>(result)
-    };
+    bool transpose_result) {
+  int alg_id_int = 0;
+  int split_k = 1;
+  bool split_k_one_kernel = true;
+  auto result = at::native::_cslt_sparse_mm_impl(
+      compressed_A,
+      dense_B,
+      bias_opt,
+      alpha_opt,
+      out_dtype_opt,
+      transpose_result,
+      alg_id_int,
+      split_k,
+      split_k_one_kernel,
+      true);
+  return {
+      (int64_t)std::get<1>(result),
+      (int64_t)std::get<2>(result),
+      (bool)std::get<3>(result),
+      (int64_t)std::get<4>(result)};
 }
 
 } // namespace

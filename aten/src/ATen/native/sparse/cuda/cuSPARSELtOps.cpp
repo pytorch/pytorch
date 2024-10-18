@@ -1,19 +1,6 @@
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
-#include <ATen/cuda/CUDAConfig.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/Half.h>
-#include <cusparse.h>
-#include <cstdint>
+#include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 
 #if AT_CUSPARSELT_ENABLED()
-
-#include <cusparseLt.h>
 
 namespace at::native {
 
