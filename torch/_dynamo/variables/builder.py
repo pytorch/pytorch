@@ -196,6 +196,7 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
@@ -526,18 +527,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton, has_triton_tma
-
-        if has_triton():
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
-        else:
-
-            class JITFunction:
-                pass
-
-            class Autotuner:
-                pass
+        from torch.utils._triton import Autotuner, has_triton_tma, JITFunction
 
         if has_triton_tma():
             from triton.tools.experimental_descriptor import (
@@ -2354,12 +2344,16 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
