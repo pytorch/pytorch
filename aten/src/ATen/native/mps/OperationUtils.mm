@@ -541,16 +541,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsShape = getMPSShape(_tensor);
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
 
-    IntArrayRef baseShape;
-    if (src.is_view()) {
-      baseShape = src._base().sizes();
-    } else {
-      baseShape = getIMPSAllocator()->getBufferShape(src.storage().data());
-    }
-    int flattenedShaped = 1;
-    for (const auto i : c10::irange(baseShape.size())) {
-      flattenedShaped *= baseShape[i];
-    }
+    auto flattenedShaped = [srcBuf length] / src.element_size();;
     MPSShape* mpsBaseShape = @[ @(flattenedShaped) ];
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsBaseShape];
     srcTensorDesc.preferPackedRows = YES;
