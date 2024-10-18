@@ -2907,7 +2907,7 @@ class TritonKernel(SIMDKernel):
             if tree.prefix != "r" or self.inside_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
+                    code.writeline(f"{tree.prefix}numel : tl.constexpr = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
                 val = self._get_persistent_RBLOCK(tree.numel)
