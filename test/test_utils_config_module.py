@@ -241,8 +241,8 @@ class TestConfigModule(TestCase):
 
         # Shallow + deep copy semantics
         config.e_dict[2] = 3
-        self.assertEqual(p["e_dict"], {1: 2, 2: 3})
-        self.assertEqual(p2["e_dict"], {1: 2, 2: 3})
+        self.assertEqual(p["e_dict"], {1: 2})
+        self.assertEqual(p2["e_dict"], {1: 2})
         self.assertEqual(p3["e_dict"], {1: 2})
         config.e_dict = {1: 2}
 

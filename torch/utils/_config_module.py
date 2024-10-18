@@ -207,15 +207,22 @@ class ConfigModule(ModuleType):
         return self._hash_digest
 
     @deprecated(
-        "`config.to_dict()` has been deprecated. It may no longer change the underlying config."
-        " use `config.shallow_copy_dict()` or `config.get_config_copy()` instead",
+        "`config.to_dict()` has been deprecated. It no longer changes the underlying config."
+        " use `config.get_config_copy()` instead if you just want a copy of the config, or "
+        "config.load_config if you need mutable access",
         category=FutureWarning,
     )
     def to_dict(self) -> Dict[str, Any]:
-        return self.shallow_copy_dict()
+        return self.get_config_copy()
 
+    @deprecated(
+        "`config.shallow_copy_dict()` has been deprecated. It no longer changes the underlying config."
+        " use `config.get_config_copy()` instead if you just want a copy of the config, or "
+        "config.load_config if you need mutable access",
+        category=FutureWarning,
+    )
     def shallow_copy_dict(self) -> Dict[str, Any]:
-        return {**self._config}
+        return self.get_config_copy()
 
     def load_config(self, maybe_pickled_config: Union[bytes, Dict[str, Any]]) -> None:
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
