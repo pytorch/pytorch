@@ -168,8 +168,7 @@ class IListRefTagImpl<IListRefTag::Boxed, at::OptionalTensorRef>
    */
   static IListRefConstRef<at::OptionalTensorRef> iterator_get(
       const typename list_type::const_iterator& it) {
-    const auto& elem = *it;
-    const auto& ivalue = elem.get();
+    const auto& ivalue = (*it).get();
     if (!ivalue.isNone()) {
         const auto& tensor = ivalue.toTensor();
         return (tensor.defined()) ? tensor : at::OptionalTensorRef{};
