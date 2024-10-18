@@ -4,7 +4,7 @@ import hashlib
 import re
 import typing
 from enum import IntEnum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -22,41 +22,64 @@ def _check(x, msg):
 def _staged_schema():
     ret: Dict[str, Any] = {}
     defs = {}
+    cpp_type_defs: List[str] = []
 
     def _handle_aggregate(ty):
         def dump_type(t):
             if isinstance(t, type):
-                return t.__name__
+                return t.__name__, t.__name__
             elif isinstance(t, str):
                 assert t in defs
-                return t
+                return t, t
             elif o := typing.get_origin(t):
                 # Lemme know if there's a better way to do this.
                 if o == list:
-                    head = "List"
+                    yaml_head, cpp_head = "List", "std::vector"
                 elif o == dict:
-                    head = "Dict"
+                    yaml_head, cpp_head = "Dict", "std::unordered_map"
                 elif o == tuple:
                     if typing.get_args(t) == ():
-                        return "Tuple[()]"
-                    head = "Tuple"
+                        return "Tuple[()]", "std::tuple<>"
+                    yaml_head, cpp_head = "Tuple", "std::tuple"
                 elif o == Union:
                     args = typing.get_args(t)
                     assert len(args) == 2 and args[1] == type(None)
-                    return f"Optional[{dump_type(args[0])}]"
+                    yaml_type, cpp_type = dump_type(args[0])
+                    return f"Optional[{yaml_type}]", f"std::optional<{cpp_type}>"
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")
+                yaml_arg_types, cpp_arg_types = zip(*[dump_type(x) for x in typing.get_args(t)])
                 return (
-                    f"{head}[{', '.join([dump_type(x) for x in typing.get_args(t)])}]"
+                    f"{yaml_head}[{', '.join(yaml_arg_types)}]"
+                ), (
+                    f"{cpp_head}<{', '.join(cpp_arg_types)}>"
                 )
             elif t == ():
-                return "()"
+                return "()", ""
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
+        def dump_cpp_value(v):
+            if v is None:
+                return "std::nullopt"
+            elif v == True:
+                return "true"
+            elif v == False:
+                return "false"
+            elif v == {}:
+                return "{}"
+            elif v == []:
+                return "{}"
+            elif v == ():
+                return "{}"
+            elif v == "":
+                return '""'
+            else:
+                raise AssertionError(f"Default value {v} is not supported yet in export schema.")
+
         def dump_field(f):
-            t = dump_type(f.type)
-            ret = {"type": t}
+            t, cpp = dump_type(f.type)
+            ret = {"type": t, "cpp_type": cpp}
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -72,6 +95,7 @@ def _staged_schema():
             if value is not dataclasses.MISSING:
                 default = str(value)
                 ret["default"] = default
+                ret["cpp_default"] = _dump_cpp_value(value)
             return ret
 
         return {f.name: dump_field(f) for f in dataclasses.fields(ty)}
@@ -81,6 +105,14 @@ def _staged_schema():
 
     def _handle_struct(name, ty):
         ret[name] = {"kind": "struct", "fields": _handle_aggregate(ty)}
+        cpp_type_defs.append(f"""
+class {name} {{
+ private:
+  
+ public:
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT({name}, {", ".join(f.name for f in dataclasses.fields(ty))});
+}};
+""")
 
     def _handle_union(name, ty):
         ret[name] = {"kind": "union", "fields": _handle_aggregate(ty)}
@@ -116,7 +148,20 @@ def _staged_schema():
     assert all(x > 0 for x in ret["SCHEMA_VERSION"])
     ret["TREESPEC_VERSION"] = defs["TREESPEC_VERSION"]
     assert ret["TREESPEC_VERSION"] > 0
-    return ret
+
+    cpp_header = f"""
+#pragma once
+
+#include <nlohmann/json.hpp>
+
+namespace torch {{
+namespace runtime {{
+{"\n".join(cpp_type_defs)}
+}} // namespace runtime
+}} // namespace torch
+"""
+
+    return ret, cpp_header
 
 
 def _diff_schema(dst, src):
@@ -192,11 +237,13 @@ def _hash_schema(s):
 class _Commit:
     result: Dict[str, Any]
     checksum_result: str
-    path: str
+    yaml_path: str
     additions: Dict[str, Any]
     subtractions: Dict[str, Any]
     base: Dict[str, Any]
     checksum_base: Optional[str]
+    cpp_header: str
+    cpp_header_path: str
 
 
 def update_schema():
@@ -216,16 +263,22 @@ def update_schema():
         checksum_base = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
-    src = _staged_schema()
+    src, cpp_header = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
+    yaml_path = __package__.replace(".", "/") + "/schema.yaml"
+    torch_prefix = "torch/"
+    assert yaml_path.startswith(torch_prefix)  # sanity check
+
     return _Commit(
         result=src,
         checksum_result=_hash_schema(src),
-        path=__package__.replace(".", "/") + "/schema.yaml",
+        yaml_path=yaml_path,
         additions=additions,
         subtractions=subtractions,
         base=dst,
         checksum_base=checksum_base,
+        cpp_header=cpp_header,
+        cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
     )
 
 
