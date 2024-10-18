@@ -1569,12 +1569,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
   LOG(ERROR) << errorMsg;
 
-  auto& cpp_dumper = get_cpp_trace_dumper();
-  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces:";
-    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
-  }
-
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
@@ -1590,6 +1584,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         true);
   }
 
+  auto& cpp_dumper = get_cpp_trace_dumper();
+  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
+    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
+    cpp_dumper.value()(
+        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
+    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
+  }
+
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
     auto kGilCheckTimeout = std::chrono::milliseconds(300);
@@ -1599,10 +1601,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           futStatus != std::future_status::deferred,
           "Expected the future to have been launched eagerly.");
       LOG(ERROR)
+          << logPrefix()
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
     LOG(INFO)
+        << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
