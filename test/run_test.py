@@ -248,7 +248,6 @@ CI_SERIAL_LIST = [
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
     "inductor/test_flex_attention",  # OOM
-    "inductor/test_cudacodecache",  # The test times out flakily
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
