@@ -29,6 +29,7 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 
+#include <c10/cuda/CUDADeviceAssertion.h>
 #include <c10/macros/Macros.h>
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
@@ -64,7 +65,8 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     index_t *bag_size, index_t *max_indices,
-    index_t padding_idx, int64_t numRows) {
+    index_t padding_idx, int64_t numRows,
+    TORCH_DSA_KERNEL_ARGS) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -80,13 +82,13 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      CUDA_KERNEL_ASSERT(end >= begin);
+      CUDA_KERNEL_ASSERT2(end >= begin);
       scalar_t weightFeatMax = 0;
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
         bool pad = (input[emb] == padding_idx);
-        CUDA_KERNEL_ASSERT(input[emb] < numRows);
+        CUDA_KERNEL_ASSERT2(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         if (bag_size_ == 0 || weightValue > weightFeatMax) {
@@ -115,7 +117,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, index_t *bag_size,
     const scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    index_t padding_idx, int64_t numRows) {
+    index_t padding_idx, int64_t numRows, TORCH_DSA_KERNEL_ARGS) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -132,12 +134,12 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      CUDA_KERNEL_ASSERT(end >= begin);
+      CUDA_KERNEL_ASSERT2(end >= begin);
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
         bool pad = (input[emb] == padding_idx);
-        CUDA_KERNEL_ASSERT(input[emb] < numRows);
+        CUDA_KERNEL_ASSERT2(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
@@ -391,15 +393,17 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
   }
 
 #if defined(USE_ROCM)
-  dim3 block = dim3(64, 4);
+  const dim3 block = dim3(64, 4);
 #else
-  dim3 block = dim3(32, 8);
+  const dim3 block = dim3(32, 8);
 #endif
-  int grid = 1024;
+  constexpr int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_cuda", [&] {
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
       if (mode == EmbeddingBagMode::MAX) {
-        EmbeddingBag_updateOutputKernel_max<scalar_t, index_t><<<grid, block, 0, stream>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+            (EmbeddingBag_updateOutputKernel_max<scalar_t, index_t>),
+            grid, block, 0, stream,
             indices.const_data_ptr<index_t>(), offsets.const_data_ptr<index_t>(),
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
@@ -408,7 +412,9 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
-        EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+            (EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t>),
+            grid, block, 0, stream,
             indices.const_data_ptr<index_t>(), offsets.const_data_ptr<index_t>(),
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
