@@ -471,3 +471,52 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class FilterVariable(ZipVariable):
+    """
+    Represents filter(fn, iterable)
+    """
+
+    def __init__(
+        self,
+        fn: VariableTracker,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            [
+                iterable,
+            ],
+            **kwargs,
+        )
+        self.fn = fn
+
+    def python_type(self):
+        return filter
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return False
+
+    def next_variable(self, tx):
+        # A do-while loop to find elements that make fn return true
+        while True:
+            args = super().next_variable(tx)
+            assert len(args.items) == 1
+            res = self.fn.call_function(tx, args.items, {})
+            if res.is_python_constant() and res.as_python_constant():
+                return args.items[0]
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("builtins", "filter"),
+            call_function_ex=True,
+        )
+        codegen(self.fn)
+        self.reconstruct_items(codegen)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+            ]
+        )
