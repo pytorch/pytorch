@@ -108,7 +108,6 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -142,7 +141,6 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
         }
     ):
@@ -373,7 +371,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_conv_freezing(self):
-        for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype, groups in itertools.product(dtypes, [1, 2]):
             iC = 2
             oC = 3
 
@@ -427,7 +426,8 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_linear_freezing(self):
-        for dtype in [torch.float32, torch.bfloat16]:
+        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        for dtype in dtypes:
 
             class LinearModel(torch.nn.Module):
                 def __init__(self, device):
@@ -1551,7 +1551,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
+        with torch.cuda.device(0):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -1642,16 +1642,12 @@ class AOTInductorTestsTemplate:
         inputs = (torch.randn(10, 10), torch.randn(10, 10))
         result_cpu = Model(weight)(*inputs)
 
-        with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), torch.no_grad():
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
-        with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(1), torch.no_grad():
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
@@ -2811,7 +2807,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":
@@ -2951,23 +2946,33 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
-                return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+            if SM80OrLater:
+
+                def forward(self, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
+            else:
+
+                def forward(self, x0, x1, x2, x4, x5, x6, x7, x8, x9):
+                    return (x0, x1, x2, x4, x5, x6, x7, x8, x9)
 
         inputs = []
-        for dtype in (
+        dtypes = [
             torch.float16,
             torch.float32,
             torch.float64,
-            torch.bfloat16,
             torch.bool,
             torch.int8,
             torch.int16,
             torch.int32,
             torch.int64,
             torch.uint8,
-        ):
+        ]
+        if SM80OrLater:
+            dtypes.append(torch.bfloat16)
+        for dtype in dtypes:
             inputs.append(torch.ones(4, 8, 10, dtype=dtype, device=self.device))
+
         dim0 = Dim("s0", min=2, max=1024)
         dim1 = Dim("s1", min=2, max=512)
         dim2 = Dim("s2", min=2, max=128)
@@ -2975,7 +2980,6 @@ class AOTInductorTestsTemplate:
             "x0": {0: dim0},
             "x1": {0: dim0},
             "x2": {0: dim0},
-            "x3": {1: dim1},
             "x4": {1: dim1},
             "x5": {1: dim1},
             "x6": {},
@@ -2983,11 +2987,13 @@ class AOTInductorTestsTemplate:
             "x8": {2: dim2},
             "x9": {2: dim2},
         }
+        if SM80OrLater:
+            dynamic_shapes["x3"] = {1: dim1}
+
         m = Model()
         inputs = tuple(inputs)
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -2996,22 +3002,28 @@ class AOTInductorTestsTemplate:
             src_code = cpp.read()
             FileCheck().check_count(
                 "unmatched dtype",
-                10,
+                10 if SM80OrLater else 9,
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21,  # we have 9 dynamic dims for which we generate different checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18,  # we have 9 dynamic dims for which we generate two checks
+                18
+                if SM80OrLater
+                else 16,  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21,  # we have 9 symbolic strides for which we don't generate checks
+                21
+                if SM80OrLater
+                else 19,  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
@@ -3051,7 +3063,6 @@ class AOTInductorTestsTemplate:
         }
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3088,7 +3099,6 @@ class AOTInductorTestsTemplate:
         }
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3112,7 +3122,6 @@ class AOTInductorTestsTemplate:
         model = Model()
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3136,11 +3145,7 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "abi_compatible": self.abi_compatible,
-            }
-        ):
+        with torch.no_grad():
             result = AOTIRunnerUtil.run(
                 self.device,
                 model,
@@ -3165,11 +3170,7 @@ class AOTInductorTestsTemplate:
         x = torch.randn(3, 4, dtype=torch.float32, device=self.device)
         model = Model()
 
-        with torch.no_grad(), config.patch(
-            {
-                "abi_compatible": self.abi_compatible,
-            }
-        ):
+        with torch.no_grad():
             result = AOTIRunnerUtil.run(
                 self.device,
                 model,
@@ -3208,7 +3209,6 @@ class AOTInductorTestsTemplate:
         model = Model()
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3628,7 +3628,6 @@ class AOTITestCase(TestCase):
 
 class AOTInductorTestABICompatibleCpu(AOTITestCase):
     device = "cpu"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3639,9 +3638,9 @@ class AOTInductorTestABICompatibleCpu(AOTITestCase):
 def fail_with_and_without_stack_allocation(is_skip=False):
     return TestFailure(
         (
-            "abi_compatible_cpu",
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+            "cpu",
+            "cpu_with_stack_allocation",
+            "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         ),
         is_skip=is_skip,
     )
@@ -3650,8 +3649,8 @@ def fail_with_and_without_stack_allocation(is_skip=False):
 def fail_stack_allocation(is_skip=False):
     return TestFailure(
         (
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+            "cpu_with_stack_allocation",
+            "cpu_with_stack_allocation_and_minimal_arrayref_interface",
         ),
         is_skip=is_skip,
     )
@@ -3659,28 +3658,14 @@ def fail_stack_allocation(is_skip=False):
 
 def fail_minimal_arrayref_interface(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
+        ("cpu_with_stack_allocation_and_minimal_arrayref_interface",),
         is_skip=is_skip,
     )
 
 
 def fail_cuda(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cuda", "non_abi_compatible_cuda"),
-        is_skip=is_skip,
-    )
-
-
-def fail_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("abi_compatible_cuda",),
-        is_skip=is_skip,
-    )
-
-
-def fail_non_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("non_abi_compatible_cuda",),
+        ("cuda"),
         is_skip=is_skip,
     )
 
@@ -3796,32 +3781,10 @@ CPU_TEST_FAILURES = {
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
-    # no runtime checks for non_abi_compatible mode
-    "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
+    "test_normal_functional": fail_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quanatized_int8_linear": fail_cuda(is_skip=True),
-    "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
-    # non-abi compatible mode aoti debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3892,14 +3855,13 @@ if not IS_FBCODE:
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
-    "abi_compatible_cpu",
+    "cpu",
     CPU_TEST_FAILURES,
 )
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
     device = "cpu"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3910,7 +3872,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpuWithStackAllocation,
-    "abi_compatible_cpu_with_stack_allocation",
+    "cpu_with_stack_allocation",
     CPU_TEST_FAILURES,
 )
 
@@ -3919,7 +3881,6 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     device = "cpu"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = True
@@ -3929,7 +3890,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
-    "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    "cpu_with_stack_allocation_and_minimal_arrayref_interface",
     CPU_TEST_FAILURES,
 )
 
@@ -3937,7 +3898,6 @@ copy_tests(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(AOTITestCase):
     device = "cuda"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3948,89 +3908,9 @@ class AOTInductorTestABICompatibleCuda(AOTITestCase):
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCuda,
-    "abi_compatible_cuda",
+    "cuda",
     CUDA_TEST_FAILURES,
 )
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCpu(AOTITestCase):
-    device = "cpu"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCpu,
-    "non_abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_duplicate_constant_folding": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        # no runtime checks for non_abi_compatible mode
-        "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_runtime_checks_dtype_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_runtime_checks_shape_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_aoti_debug_printer_codegen": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_all_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_missing_arg_with_default_value": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_concat_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_multiple_outputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_reinterpret_view_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_aoti_debug_printer_cpp_kernel": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-    },
-)
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCuda(AOTITestCase):
-    device = "cuda"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCuda,
-    "non_abi_compatible_cuda",
-    CUDA_TEST_FAILURES,
-)
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

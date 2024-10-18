@@ -91,6 +91,8 @@ from .lowering import (
     needs_realized_inputs,
     unsupported_output_tensor,
 )
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -1561,20 +1563,20 @@ class GraphLowering(torch.fx.Interpreter):
         # the origin_node here.
         if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
             if isinstance(result.data.data, ir.Loops):
-                result.data.data.origin_node = n
+                result.data.data._post_init_setattr("origin_node", n)
             elif isinstance(result.data.data, ir.Buffer):
-                result.data.data.origin_node = n
+                result.data.data._post_init_setattr("origin_node", n)
                 if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
                     result.data.data.data, ir.Loops
                 ):
-                    result.data.data.data.origin_node = n
+                    result.data.data.data._post_init_setattr("origin_node", n)
                 # Not really multi-output, can straightforwardly recurse in
                 elif (
                     isinstance(result.data.data, ir.MultiOutput)
                     and not result.data.data.indices
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0].origin_node = n
+                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
 
         self.register_users_of(result)
 
@@ -1915,6 +1917,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
