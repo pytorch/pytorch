@@ -62,9 +62,14 @@ autotune_local_cache = True
 # None: Not set -- Off for OSS, JustKnobs based for internal
 autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 
-# enable bundled autotune cache
+# Enable bundled autotune cache.
+#
+# Note that if the autotune_local_cache is off then the bundled autotune cache
+# will also be disabled because the bundler emits the bundle cached artifacts
+# into the local cache.
+#
 # False: Disables the cache
-# True: Enables the cache
+# True: Enables the cache (requires autotune_local_cache)
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
