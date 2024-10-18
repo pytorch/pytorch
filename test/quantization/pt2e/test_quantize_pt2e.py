@@ -40,6 +40,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 )
 from torch.export import export_for_training
 from torch.fx import Node
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -49,8 +50,10 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfHpu,
     TemporaryFileName,
     TEST_CUDA,
+    TEST_HPU,
 )
 
 
@@ -1170,6 +1173,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
+    @skipIfHpu
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("quant_dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
     def test_quantization_dtype(self, dtype, quant_dtype):
@@ -1859,7 +1863,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.batch_norm.default,
         )
 
-    def test_move_exported_model_bn(self):
+    def test_move_exported_model_bn(self, device):
         """
         Test switching batch_norm behavior between train and eval modes using
         `move_exported_model_to_eval` and `move_exported_model_to_train` APIs.
@@ -1873,9 +1877,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        if TEST_CUDA:
-            m = M().train().cuda()
-            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+        if TEST_CUDA or TEST_HPU:
+            m = M().train().to(device)
+            example_inputs = (torch.randn((1, 3, 3, 3), device=device),)
+
         else:
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
@@ -1932,6 +1937,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
+    @skipIfHpu
     def test_allow_exported_model_train_eval(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -2335,3 +2341,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)
+
+devices = ["cpu", "cuda"]
+if TEST_HPU:
+    devices.append("hpu")
+instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)
