@@ -196,6 +196,11 @@ def split(
                  [6, 7],
                  [8, 9]]))
     """
+    # Return an empty tuple if the tensor is empty or split size is 0
+    if isinstance(split_size_or_sections, int) and split_size_or_sections == 0:
+        if tensor.numel() == 0:
+            return (torch.tensor([]),)
+
     if has_torch_function_unary(tensor):
         return handle_torch_function(
             split, (tensor,), tensor, split_size_or_sections, dim=dim
