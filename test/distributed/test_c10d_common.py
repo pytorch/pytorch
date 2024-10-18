@@ -66,8 +66,13 @@ def gpus_for_rank(world_size):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // world_size
+    device_count = (
+        torch.xpu.device_count()
+        if torch.xpu.is_available()
+        else torch.cuda.device_count()
+    )
+    visible_devices = list(range(device_count))
+    gpus_per_process = device_count // world_size
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
@@ -1833,6 +1838,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                     continue
             elif backend == dist.Backend.UCC:
                 if not dist.is_ucc_available():
+                    continue
+            elif backend == dist.Backend.XCCL:
+                if not dist.is_xccl_available():
                     continue
             # Multi-threaded PG is defined as a pure python class.
             # Its pg.name() does not going through Pybind, so its backend name

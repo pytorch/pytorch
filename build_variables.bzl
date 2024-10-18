@@ -703,6 +703,10 @@ libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_s
     "torch/csrc/cuda/nccl.cpp",
 ]
 
+libtorch_xpu_distributed_extra_sources = [
+    "torch/csrc/distributed/c10d/ProcessGroupXCCL.cpp",
+]
+
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
     "torch/csrc/api/src/data/datasets/mnist.cpp",
