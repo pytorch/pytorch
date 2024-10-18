@@ -139,6 +139,7 @@ int Constructable::numMoveAssignmentCalls;
 
 struct NonCopyable {
   NonCopyable() = default;
+  ~NonCopyable() = default;
   NonCopyable(NonCopyable&&) noexcept = default;
   NonCopyable& operator=(NonCopyable&&) noexcept = default;
 
@@ -885,9 +886,12 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
 struct MovedFrom {
   bool hasValue{true};
   MovedFrom() = default;
+  ~MovedFrom() = default;
+  MovedFrom(const MovedFrom& m) = delete;
   MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
     m.hasValue = false;
   }
+  MovedFrom& operator=(const MovedFrom& m) = delete;
   MovedFrom& operator=(MovedFrom&& m) noexcept {
     hasValue = m.hasValue;
     m.hasValue = false;
@@ -919,6 +923,7 @@ struct EmplaceableArg {
   EmplaceableArg(EmplaceableArg& X)
       : State(X.State == EAS_Arg ? EAS_LValue : EAS_Failure) {}
 
+  ~EmplaceableArg() = default;
   explicit EmplaceableArg(bool) : State(EAS_Arg) {}
 
   EmplaceableArg& operator=(EmplaceableArg&&) = delete;
@@ -934,6 +939,7 @@ struct Emplaceable {
   EmplaceableState State;
 
   Emplaceable() : State(ES_Emplaced) {}
+  ~Emplaceable() = default;
 
   template <class A0Ty>
   explicit Emplaceable(A0Ty&& A0)
