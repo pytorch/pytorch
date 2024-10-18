@@ -300,23 +300,19 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior: Dict[str, Any] = {}
         config = self
-        dirty = False
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self) -> None:
                 assert not prior
-                nonlocal dirty
                 for key in changes.keys():
                     # KeyError on invalid entry
-                    prior[key] = config._config[key]
-                    dirty = key not in config._compile_ignored_keys
-                config._config.update(changes)
-                config._is_dirty = dirty
+                    prior[key] = config.__getattr__(key)
+                for k, v in changes.items():
+                    config.__setattr__(k, v)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                nonlocal dirty
-                config._config.update(prior)
-                config._is_dirty = dirty
+                for k, v in prior.items():
+                    config.__setattr__(k, v)
                 prior.clear()
 
         return ConfigPatch()
