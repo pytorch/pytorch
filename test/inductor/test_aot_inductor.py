@@ -3608,6 +3608,32 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_tensor_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(4, 4)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(
+                    a, self.weight, torch.tensor([0.0, 1.1, 2.2, 3.3])
+                )
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        m = Model()
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.compile(m, example_inputs)
+
+        with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check('constants_info_[0].name = "L__self___weight";').check(
+                "constants_info_[0].type = static_cast<int32_t>(torch::aot_inductor::ConstantType::Buffer);"
+            ).check('constants_info_[1].name = "_tensor_constant0";').check(
+                "constants_info_[1].type = static_cast<int32_t>(torch::aot_inductor::ConstantType::TensorConstant);"
+            ).run(
+                src_code
+            )
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -3785,6 +3811,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quanatized_int8_linear": fail_cuda(is_skip=True),
+    "test_tensor_constant": fail_cuda(is_skip=True),
 }
 
 
