@@ -64,9 +64,6 @@ runner_types:
     max_available: 50
     os: linux
     ami: al2023-ami-2023.5.202*-kernel-6.1-x86_64
-    variants:
-      am2:
-        ami: amzn2-ami-hvm-2.0.20240306.2-x86_64-ebs
   lf.c.linux.12xlarge.ephemeral:
     disk_size: 200
     instance_type: c5.12xlarge
