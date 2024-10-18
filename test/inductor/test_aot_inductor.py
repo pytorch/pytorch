@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import itertools
+import logging
 import os
 import sys
 import tempfile
@@ -16,6 +17,7 @@ import torch._inductor.config
 import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -3607,6 +3609,24 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(8, device=self.device),)
         self.check_model(Model(), example_inputs)
+
+
+class AOTInductorLoggingTest(LoggingTestCase):
+    @make_logging_test(dynamic=logging.DEBUG)
+    def test_shape_env_reuse(self, records):
+        # make sure ShapeEnv is only created once and reused afterwards
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 4),)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        with torch.no_grad():
+            torch._inductor.aot_compile(ep.module(), inputs)
+        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
