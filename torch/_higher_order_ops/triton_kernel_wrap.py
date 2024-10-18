@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     )
 
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch._dynamo.variables.base import VariableTracker
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
@@ -968,25 +967,25 @@ class TritonHOPifier:
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
 
-    def call_grid(
+    def call_grid(  # type: ignore[no-untyped-def]
         self,
-        grid: Union["TritonGridCallableType", "VariableTracker"],
-        meta: Union["TritonMetaParamsType", "VariableTracker"],
-        tx: Optional["InstructionTranslator"],
+        grid,
+        meta,
+        tx,
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
-    def call_HOP(
+    def call_HOP(  # type: ignore[no-untyped-def]
         self,
-        variable: Union["TraceableTritonKernelWrapper", "TritonKernelVariable"],
-        grids: List["TritonGridTupleType"],
+        variable,
+        grids,
         combined_args: Dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx,
     ) -> Optional["ConstantVariable"]:
         raise NotImplementedError("abstract method")
 
-    def check_grid(
-        self, grid: Union["TritonGridType", "VariableTracker"]
+    def check_grid(  # type: ignore[no-untyped-def]
+        self, grid
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
@@ -1246,9 +1245,9 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def call_grid(
         self,
-        grid: Union["TritonGridCallableType", "VariableTracker"],
-        meta: Union["TritonMetaParamsType", "VariableTracker"],
-        tx: Optional["InstructionTranslator"],
+        grid: "TritonGridCallableType",
+        meta: "TritonMetaParamsType",
+        tx: None,
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         assert tx is None
         assert isinstance(meta, dict)
@@ -1257,7 +1256,7 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def check_grid(
         self,
-        grid: Union["TritonGridType", "VariableTracker"],
+        grid: "TritonGridType",
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
@@ -1268,10 +1267,10 @@ class TracingTritonHOPifier(TritonHOPifier):
 
     def call_HOP(
         self,
-        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
+        variable: "TraceableTritonKernelWrapper",
         grids: List["TritonGridTupleType"],
         combined_args: Dict[str, Any],
-        tx: Optional["InstructionTranslator"],
+        tx: None,
     ) -> None:
         assert tx is None
         assert isinstance(variable, TraceableTritonKernelWrapper)
