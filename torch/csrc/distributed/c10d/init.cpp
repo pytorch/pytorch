@@ -933,10 +933,6 @@ This class does not support ``__members__`` property.)");
       py::arg("tensor"),
       py::arg("work"));
 
-  //   module.def("_unregister_completed_works", []() {
-  //     ::c10d::unregister_completed_works();
-  //   });
-
   module.def("_get_work_registry_size", []() {
     return ::c10d::get_work_registry_size();
   });

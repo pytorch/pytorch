@@ -406,10 +406,11 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
-    def test_work_registry(self) -> None:
+    def test_wait_tensor(self) -> None:
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         output = torch.ops._c10d_functional.all_reduce(
             input,
             "avg",
@@ -427,11 +428,13 @@ class TestWithNCCL(MultiProcessTestCase):
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         output = torch.ops._c10d_functional.all_reduce(
             input,
             "avg",
             "default",
         )
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
 
     @skip_if_lt_x_gpu(2)
     def test_py_work(self) -> None:

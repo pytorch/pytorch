@@ -149,13 +149,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 }
 
-bool CUDAGraph::is_capturing(CUDAStream stream) {
-  cudaStreamCaptureStatus status;
-  CaptureId_t capture_id_ = 0;
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
-  return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive;
-}
-
 void CUDAGraph::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 

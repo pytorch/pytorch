@@ -3082,22 +3082,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_work_registry(self) -> None:
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
-        work = dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
-        work.wait(timedelta(seconds=10))
-        # `work.wait()` will pop the work from the work registry immediately
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
     def test_unwaited(self) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
@@ -3124,12 +3108,18 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
 
         input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
         torch.ops.c10d_functional.wait_tensor(input1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
         input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
         work.wait()
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         self.assertEqual(input1, input2)
 
     @requires_nccl()

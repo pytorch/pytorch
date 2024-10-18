@@ -45,10 +45,6 @@ OpType Work::retrieveOpType() const {
 
 Work::~Work() = default;
 
-bool Work::canCheckIsCompleted() {
-  return true;
-}
-
 bool Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
   return completed_;
@@ -144,10 +140,6 @@ float Work::getDuration() const {
 
 uint64_t Work::getSequencenumber() const {
   TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
-}
-
-std::string Work::getBackendType() const {
-  return "undefined";
 }
 
 class FutureWrappingWork : public Work {
