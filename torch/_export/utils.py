@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import ast
 import dataclasses
+import functools
 import inspect
 import math
 import operator
@@ -20,8 +21,11 @@ from typing import (
 )
 
 import torch
+from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
@@ -527,6 +531,34 @@ def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.Graph
 def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
     """Returns the nodes that match the node_call_back as a list."""
     return [node for node in nodes if node_call_back(node)]
+
+
+def apply_runtime_assertion_pass(gm, graph_signature):
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            shape_env = _get_shape_env_from_gm(gm)
+            if shape_env:
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+    # update output specs
+    gm.recompile()
+    graph_signature.user_outputs = _graph_output_names(gm)
+    return gm, graph_signature
 
 
 def nodes_first(
