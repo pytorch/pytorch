@@ -46,7 +46,7 @@ def is_available() -> bool:
 
     Example::
 
-        >>> assert torch.acc.is_available() "No available accelerators detected."
+        >>> assert torch.accelerator.is_available() "No available accelerators detected."
     """
     return device_count() > 0
 
@@ -76,7 +76,8 @@ def current_stream(device: _device_t = None) -> torch.Stream:
 
     Args:
         device (:class:`torch.device`, str, int, optional): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. If not given, use :func:`torch.acc.current_device_idx` by default.
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_idx` by default.
     Returns:
         torch.Stream: the currently selected stream for a given device.
     """
@@ -100,19 +101,19 @@ def synchronize(device: _device_t = None) -> None:
     Args:
         device (:class:`torch.device`, str, int, optional): device for which to synchronize. It must match
             the current :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.acc.current_device_idx` by default.
+            use :func:`torch.accelerator.current_device_idx` by default.
 
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> assert torch.acc.is_available() "No available accelerators detected."
+        >>> assert torch.accelerator.is_available() "No available accelerators detected."
         >>> start_event = torch.Event(enable_timing=True)
         >>> end_event = torch.Event(enable_timing=True)
         >>> start_event.record()
-        >>> tensor = torch.randn(100, device=torch.acc.current_accelerator())
+        >>> tensor = torch.randn(100, device=torch.accelerator.current_accelerator())
         >>> sum = torch.sum(tensor)
         >>> end_event.record()
-        >>> torch.acc.synchronize()
+        >>> torch.accelerator.synchronize()
         >>> elapsed_time_ms = start_event.elapsed_time(end_event)
     """
     device_index = _get_device_index(device, True)
