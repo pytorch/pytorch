@@ -224,6 +224,11 @@ def get_dtype_as_int(tensor):
     return _TORCH_DTYPE_TO_ENUM[dtype]
 
 
+def as_tensor(data, dtype, device):
+    dtype = _TORCH_ENUM_TO_DTYPE[dtype] if isinstance(dtype, int) else dtype
+    return torch.tensor(data, dtype=dtype, device=device)
+
+
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
@@ -243,6 +248,7 @@ kind_to_standard_operators = {
     "aten::size": torch.ops.aten.sym_size,
     "aten::storage_offset": torch.ops.aten.sym_storage_offset,
     "aten::stride": torch.ops.aten.sym_stride,
+    "aten::as_tensor": as_tensor,
 }
 
 
