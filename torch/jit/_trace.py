@@ -940,7 +940,7 @@ def trace(
         containing the traced code.  The returned `ScriptModule` will
         have the same set of sub-modules and parameters as the original
         ``nn.Module``.  If ``func`` is a standalone function, ``trace``
-        returns `ScriptFunction`.
+        returns a :class:`ScriptFunction` object.
 
     Example (tracing a function):
 
