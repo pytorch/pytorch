@@ -18,11 +18,11 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
-from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -1076,6 +1076,8 @@ class TypedStorage:
 
     def to(self, *, device: DeviceLikeType, non_blocking: bool = False) -> Self:
         _warn_typed_storage_removal()
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         if self.dtype in [
             torch.quint8,
             torch.quint4x2,
