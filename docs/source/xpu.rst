@@ -13,9 +13,11 @@ torch.xpu
     device
     device_count
     device_of
+    get_arch_list
     get_device_capability
     get_device_name
     get_device_properties
+    get_gencode_flags
     init
     is_available
     is_initialized

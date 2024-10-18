@@ -91,7 +91,6 @@ from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
     TrackedFake,
-    VariableBuilder,
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
@@ -498,7 +497,7 @@ class OutputGraph:
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        result = VariableBuilder(self.root_tx, source)(example_value)
+        result = VariableTracker.build(self.root_tx, example_value, source)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -767,8 +766,8 @@ class OutputGraph:
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
             # Instead of returning UnspecializedNNModuleVariable, call
-            # VariableBuilder so that it is tracked for mutation.
-            return VariableBuilder(self.current_tx, **options)(target)
+            # VariableTracker.build so that it is tracked for mutation.
+            return VariableTracker.build(self.current_tx, target, **options)
 
         options = dict(options)
         assert "source" in options
@@ -860,8 +859,8 @@ class OutputGraph:
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
-                return VariableBuilder(self, ConstantSource(source_name=module_key))(
-                    target
+                return VariableTracker.build(
+                    self, target, ConstantSource(source_name=module_key)
                 )
 
         for k, v in self.nn_modules.items():
