@@ -63,6 +63,8 @@ TORCH_IMPL_FUNC(gather_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, getMPSShape(self));
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->indexTensor_ = indexTensor;
 
       MPSGraphTensor* getInput = inputTensor;
 
@@ -83,6 +85,22 @@ TORCH_IMPL_FUNC(gather_out_mps)
         getInput = [mpsGraph sliceTensor:inputTensor starts:starts ends:ends strides:strides name:nil];
       }
 
+      // PyTorch issue #135240: MPS reshape underneath goes haywire in
+      // gatherAlongAxis. Fix is coming in future OS, until then requires workaround.
+      // If this op is failing and isMacos15_3 = 1, the OS level fix has not
+      // landed and we'll need to increment the version check until it does.
+      bool workaroundSingleDim = (self_arg.squeeze().sizes().size() == 1 && self_arg.sizes().size() > 1);
+      bool isMacos15_3 = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_3_PLUS);
+      if (workaroundSingleDim && !isMacos15_3) {
+        const int64_t dims = self_arg.sizes().size();
+        int64_t size = self_arg.squeeze().sizes()[0];
+        auto shape = [[NSMutableArray alloc] initWithCapacity:dims];
+        for (int i = 0; i < dims; ++i) {
+          [shape addObject:[NSNumber numberWithInt:size]];
+        }
+        getInput = [mpsGraph broadcastTensor:getInput toShape:shape name:nil];
+        indexTensor = [mpsGraph broadcastTensor:indexTensor toShape:shape name:nil];
+      }
       MPSGraphTensor* castIndexTensor = [mpsGraph castTensor:indexTensor
                                                       toType:MPSDataTypeInt32
                                                         name:(NSString* _Nonnull)nil];
@@ -93,8 +111,10 @@ TORCH_IMPL_FUNC(gather_out_mps)
                                                  indicesTensor:castIndexTensor
                                                           name:nil];
       C10_DIAGNOSTIC_POP()
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
+
+      if (workaroundSingleDim) {
+        outputTensor = [mpsGraph sliceTensor:outputTensor dimension:0 start:0 length:output.sizes()[0] name:nil];
+      }
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
