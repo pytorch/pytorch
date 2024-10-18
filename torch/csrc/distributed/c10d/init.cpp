@@ -2916,8 +2916,7 @@ Example::
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")
       .value("SUCCESS", ::c10d::WorkResult::SUCCESS)
-      .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
-      .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
+      .value("FAILURE", ::c10d::WorkResult::FAILURE)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(

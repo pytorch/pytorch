@@ -2,9 +2,9 @@ name: Apply lint suggestions
 
 on:
 
-  push:
-    tags:
-      - ciflow/autoformat/*
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
 
 jobs:
   lintrunner-autoformat:

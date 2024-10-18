@@ -85,18 +85,13 @@ class SizeArg:
 
 
 @dataclasses.dataclass
-class TMADescriptorArg:
-    name: str
-
-
-@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: Any
     wrapper_codegen: type
     cpp_wrapper_codegen: type = type(None)
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
 
 device_codegens: Dict[str, DeviceCodegen] = {}
 

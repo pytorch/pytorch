@@ -135,8 +135,10 @@ class BaseListVariable(VariableTracker):
             assert not kwargs
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
+            from .builder import SourcelessBuilder
+
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
