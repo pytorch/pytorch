@@ -2485,6 +2485,35 @@ def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt,
     return (_remove_batch_dim_3,)""",  # noqa: B950
             )
 
+    # https://github.com/pytorch/pytorch/issues/137061
+    def test_dynamic_shapes_over_vmap_batch_size(self):
+        def gn(a, b, c, d):
+            return a + b + c + d
+
+        def fn(func, a, b, c, d):
+            a = torch.arange(a)
+            b = torch.arange(b)
+            c = torch.arange(c)
+            d = torch.arange(d)
+            func = torch.vmap(func, in_dims=(0, None, None, None))
+            func = torch.vmap(func, in_dims=(None, 0, None, None))
+            func = torch.vmap(func, in_dims=(None, None, 0, None))
+            func = torch.vmap(func, in_dims=(None, None, None, 0))
+            return func(a, b, c, d)
+
+        cnt = CompileCounterWithBackend("inductor")
+        # We generate corresponding dynamic shapes test case at
+        # `test/dynamo/test_dynamic_shapes.py` automatically.
+        compiled_fn = torch.compile(fn, backend=cnt)
+        a, b, c, d = 2, 4, 8, 8
+        self.assertEqual(fn(gn, a, b, c, d), compiled_fn(gn, a, b, c, d))
+        self.assertEqual(cnt.frame_count, 1)
+
+        a, b, c, d = 4, 8, 16, 16
+        self.assertEqual(fn(gn, a, b, c, d), compiled_fn(gn, a, b, c, d))
+        # Ensure no recompile if dynamic shapes enabled.
+        self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
     def test_cond_pytree_operands(self):
         def _construct_pytree():
             a = torch.randn(3, 3)

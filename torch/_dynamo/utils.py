@@ -1394,6 +1394,16 @@ def is_safe_constant(v):
     )
 
 
+def unwrap_sym_or_const(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        return arg.sym_num
+    else:
+        assert isinstance(arg, ConstantVariable)
+        return arg.as_python_constant()
+
+
 def specialize_symnode(arg):
     from .variables import ConstantVariable, SymNodeVariable
 
