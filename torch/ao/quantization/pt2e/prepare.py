@@ -373,7 +373,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     # otherwise, we'll insert a new observer/fake_quant node
 
-    existing_obs_node = None
     # skip inserting new observers if the same observer instance is inserted before for another user
     # Example:
     # conv1 -> obs1 -> existing_obs -> conv2

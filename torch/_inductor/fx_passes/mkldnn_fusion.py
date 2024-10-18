@@ -1077,7 +1077,6 @@ if torch._C._has_mkldnn:
 
             graph = match.graph
             lstm_node = match.output_node()
-            input = args[0]
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
             packed_lstm_op = aten.mkldnn_rnn_layer.default
