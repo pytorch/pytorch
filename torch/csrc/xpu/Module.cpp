@@ -39,6 +39,17 @@ static void poison_fork() {
 
 // XPU management methods
 
+PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#ifdef XPU_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(in_bad_fork);
@@ -404,6 +415,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      THXPModule_getDeviceCount_wrap,
      METH_NOARGS,
      nullptr},
+    {"_xpu_getArchFlags", THXPModule_getArchFlags, METH_NOARGS, nullptr},
     {"_xpu_isInBadFork", THXPModule_isInBadFork_wrap, METH_NOARGS, nullptr},
     {"_xpu_getCurrentStream",
      THXPModule_getCurrentStream_wrap,
