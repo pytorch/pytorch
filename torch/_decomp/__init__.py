@@ -652,6 +652,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.triu,
             aten.triu_,
             aten.unbind,
+            aten.unbind_copy.int,
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,

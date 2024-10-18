@@ -115,6 +115,10 @@ struct TLSCurrentInterpreterGuard {
   InterpreterStateImpl* prev_state_;
 };
 
+bool in_torchscript_runtime() {
+  return tls_int_state_ptr_ != nullptr;
+}
+
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)

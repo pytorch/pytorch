@@ -385,7 +385,7 @@ class TestDebugInfoWriter : public c10d::DebugInfoWriter {
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   int heartBeatIntervalInSec = 2;
   std::string timeInterval = std::to_string(heartBeatIntervalInSec);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
   ASSERT_TRUE(
       setenv(
           c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC[0].c_str(),
