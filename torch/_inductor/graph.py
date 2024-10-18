@@ -466,6 +466,10 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
+        # state used by wrapper.generate_workspace_allocation()
+        self.allocated_workspaces: Dict[str, Any] = {}
+        self.workspace_id = itertools.count()
+
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
     ) -> bool:
