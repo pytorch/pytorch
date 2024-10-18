@@ -260,8 +260,10 @@ def tensorify_python_scalars(
             args = []
             transform = False
             for a in node.args:
-                if isinstance(a, fx.Node) and isinstance(
-                    zf := a.meta["val"], torch.SymFloat
+                if (
+                    isinstance(a, fx.Node)
+                    and "val" in a.meta
+                    and isinstance(zf := a.meta["val"], torch.SymFloat)
                 ):
                     transform = True
                     args.append(float(zf))
