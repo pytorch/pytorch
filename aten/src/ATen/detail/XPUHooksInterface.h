@@ -17,13 +17,6 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
   }
 
-  // Perserved for BC
-  virtual void initXPU() const {
-    TORCH_WARN_DEPRECATION(
-        "initXPU() is deprecated. Please use init() directly instead.")
-    init();
-  }
-
   virtual bool hasXPU() const {
     return false;
   }
