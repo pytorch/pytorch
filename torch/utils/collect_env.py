@@ -318,11 +318,9 @@ def get_cpu_info(run_lambda):
                 if type(obj) is list:
                     for o in obj:
                         lst.append("----------------------")
-                        for key in o.keys():
-                            lst.append(f"{key}: {o[key]}")
+                        lst.extend([f"{k}: {v}" for (k, v) in o.items()])
                 else:
-                    for key in obj.keys():
-                        lst.append(f"{key}: {obj[key]}")
+                    lst.extend([f"{k}: {v}" for (k, v) in obj.items()])
             except ValueError as e:
                 lst.append(out)
                 lst.append(str(e))
