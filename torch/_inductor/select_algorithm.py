@@ -141,8 +141,10 @@ class TritonTemplateKernel(TritonKernel):
         index_dtype,
     ) -> None:
         super().__init__(
-            sympy_product(output_node.get_size()),
-            sympy.Integer(1),
+            {
+                "x": sympy_product(output_node.get_size()),
+                "r0_": sympy.Integer(1),
+            },
             index_dtype=index_dtype,
         )
         self.input_nodes = input_nodes
