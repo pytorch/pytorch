@@ -56,7 +56,13 @@ fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 # enable autotune local cache
 autotune_local_cache = True
 
-# enable autotune remote cache
+# Enable autotune remote cache.
+#
+# Enables/disables the autotune remote cache regardless of the state of
+# autotune_local_cache. If both local and remote are enabled then on write both
+# are written and on read local is checked first and only on a cache miss is
+# remote read.
+#
 # False: Disables the cache
 # True: Enables the cache
 # None: Not set -- Off for OSS, JustKnobs based for internal
@@ -64,9 +70,9 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 
 # Enable bundled autotune cache.
 #
-# Note that if the autotune_local_cache is off then the bundled autotune cache
-# will also be disabled because the bundler emits the bundle cached artifacts
-# into the local cache.
+# The bundled_autotune_remote_cache depends on the local cache for local state
+# management. As a result if the local cache is disabled this will also disable
+# the bundled autotune cache.
 #
 # False: Disables the cache
 # True: Enables the cache (requires autotune_local_cache)
