@@ -491,12 +491,18 @@ class FilterVariable(MapVariable):
     """
 
     def __init__(
-            self,
-            fn: VariableTracker,
-            iterable: Union[List[VariableTracker], VariableTracker],
-            **kwargs,
+        self,
+        fn: VariableTracker,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        **kwargs,
     ) -> None:
-        super().__init__(fn, [iterable, ], **kwargs)
+        super().__init__(
+            fn,
+            [
+                iterable,
+            ],
+            **kwargs,
+        )
         self.fn = fn
 
     def python_type(self):
@@ -504,7 +510,8 @@ class FilterVariable(MapVariable):
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
-            lambda: codegen.load_import_from("builtins", "filter"), call_function_ex=True
+            lambda: codegen.load_import_from("builtins", "filter"),
+            call_function_ex=True,
         )
         codegen(self.fn)
         self.reconstruct_items(codegen)
