@@ -4833,6 +4833,21 @@ def _new_group_with_tag(
             raise ValueError(
                 "MPI backend doesn't support use_local_synchronization=True"
             )
+        if backend == Backend.NCCL:
+            # When there is a device bound to the default group,
+            # 'ncclCommSplit' will be used instead of 'ncclCommInitRank'.
+            # The API 'ncclCommSplit' requires all the ranks from the parent
+            # communicator to participate.
+            # Ranks not part of this sub-group will call 'perform_nocolor_split'.
+            if (
+                is_initialized()
+                and _get_default_group().bound_device_id
+                and len(ranks) < _get_default_group().size()
+            ):
+                raise ValueError(
+                    "NCCL backend doesn't support use_local_synchronization=True "
+                    "in sub-groups when device_id is used with init_process_group"
+                )
         if ranks is not None and get_rank() not in ranks:
             return None
 
