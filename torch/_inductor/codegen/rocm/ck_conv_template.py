@@ -6,16 +6,22 @@ from typing import Tuple
 
 
 try:
-    import ck4inductor  # type: ignore[import-untyped]
+    import ck4inductor  # type: ignore[import]
 except ImportError:
     ck4inductor = None
 
 if ck4inductor is not None:
-    from ck4inductor.grouped_conv_fwd.gen_instances import gen_conv_ops_library  # type: ignore[import-untyped]
-    from ck4inductor.grouped_conv_fwd.op import CKGroupedConvFwdOp  # type: ignore[import-untyped] # noqa: TCH002
+    from ck4inductor.grouped_conv_fwd.gen_instances import (
+        gen_conv_ops_library,  # type: ignore[import]
+    )
+    from ck4inductor.grouped_conv_fwd.op import (  # type: ignore[import]  # noqa: TCH002
+        CKGroupedConvFwdOp,
+    )
 else:
+
     def gen_conv_ops_library():
         return []
+
 
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
