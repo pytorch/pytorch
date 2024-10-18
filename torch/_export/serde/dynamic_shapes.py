@@ -158,7 +158,7 @@ def _dump_dynamic_shapes(
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
         if isinstance(val, _DimHint):  # store enum as string
-            return val.__class__.__name__ + "." + val.name
+            return val.__class__.__name__ + "." + val.type.name
 
         assert isinstance(val, _Dim)
 
@@ -301,9 +301,11 @@ def _load_dynamic_shapes(
         if val is None or isinstance(val, int):
             return val
         elif val == "_DimHint.AUTO":
-            return _DimHint.AUTO
+            return Dim.AUTO  # type: ignore[attr-defined]
         elif val == "_DimHint.STATIC":
-            return _DimHint.STATIC
+            return Dim.STATIC  # type: ignore[attr-defined]
+        elif val == "_DimHint.DYNAMIC":
+            return Dim.DYNAMIC  # type: ignore[attr-defined]
         if not isinstance(val, str):
             raise UserError(
                 UserErrorType.INVALID_INPUT,
