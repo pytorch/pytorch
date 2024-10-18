@@ -1053,6 +1053,12 @@ def _compile(
                         "auto_functionalize",
                         {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
                     )
+                remote_fx_graph_cache_get_time = frame_phase_timing[frame_key].get(
+                    "remote_fx_graph_cache_get", None
+                )
+                remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
+                    "remote_fx_graph_cache_put", None
+                )
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1070,6 +1076,8 @@ def _compile(
                 dynamo_time_before_restart = time.time() - start_time
                 possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
+                remote_fx_graph_cache_get_time = None
+                remote_fx_graph_cache_put_time = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1121,6 +1129,8 @@ def _compile(
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
                 json.dumps(config_dict),
+                int(remote_fx_graph_cache_get_time * 1000),
+                int(remote_fx_graph_cache_put_time * 1000),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
