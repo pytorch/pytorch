@@ -85,13 +85,18 @@ class SizeArg:
 
 
 @dataclasses.dataclass
+class TMADescriptorArg:
+    name: str
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: Any
     wrapper_codegen: type
     cpp_wrapper_codegen: type = type(None)
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
 
 device_codegens: Dict[str, DeviceCodegen] = {}
 
@@ -287,11 +292,7 @@ def init_backend_registration():
             device_scheduling = _get_custom_mod_func("Scheduling")
             wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
             cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
-            if (
-                device_scheduling is not None
-                and wrapper_codegen is not None
-                and cpp_wrapper_codegen is not None
-            ):
+            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:  # type: ignore[truthy-function]
                 register_backend_for_device(
                     private_backend,
                     device_scheduling,
