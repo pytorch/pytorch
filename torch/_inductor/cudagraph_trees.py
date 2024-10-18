@@ -1670,13 +1670,6 @@ class CUDAGraphNode:
         for idx in self.cudagraph_managed_idxs:
             inputs[idx] = None  # type: ignore[call-overload]
 
-        torch._check(
-            self._check_liveness(
-                self.expected_dead_indices_after_graph, self.path_weakrefs
-            ),
-            lambda: "TODO: graph recording observed an input tensor deallocate during graph "
-            " recording that did not occur during replay. Please file an issue.",
-        )
         return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def num_descendants(self) -> int:
