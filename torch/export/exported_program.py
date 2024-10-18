@@ -44,18 +44,24 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
+    _decomp_table_to_post_autograd_aten,
     _detect_fake_mode_from_gm,
+    _get_decomp_for_cia,
+    _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
+    _special_op_to_preserve_cia,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
+from torch.export.decomp_utils import CustomDecompTable
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -79,7 +85,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "core_aten_decompositions",
+    "default_decompositions",
 ]
 
 
@@ -196,8 +202,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # replace their CompositeImplicitAutograd kernels with NotImplemented.
     # The only current users of this mode are variants of aten::to that we will
     # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
-    from torch._decomp import _get_decomp_for_cia
-
     saved_tables = {}
     patched_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
@@ -248,13 +252,6 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op._dispatch_cache.clear()
 
 
-def _special_op_to_preserve_cia(*args, **kwargs):
-    """
-    This is an special marker that tells our infra that we shouldn't decompose this op.
-    """
-    return NotImplemented
-
-
 @contextmanager
 def _override_decomp_aten_to_variants():
     # Preserve variants of aten::to understanding that they are mutating/aliasing
@@ -273,8 +270,6 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import _collect_all_valid_cia_ops, _is_preservable_cia_op
-
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
 
@@ -316,15 +311,13 @@ def _split_decomp_table_to_cia_and_python_decomp(
     return cia_ops_to_callable, decomp_table
 
 
-def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+def default_decompositions() -> "CustomDecompTable":
     """
     This is the default decomposition table which contains decomposition of
     all ATEN operators to core aten opset. Use this API together with
     :func:`run_decompositions()`
     """
-    from torch._decomp import core_aten_decompositions
-
-    return core_aten_decompositions()
+    return CustomDecompTable()
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
@@ -1059,15 +1052,10 @@ class ExportedProgram:
         .. code-block:: python
 
             ep = torch.export.export(model, ...)
-            decomp_table = torch.export.core_aten_decompositions()
+            decomp_table = torch.export.default_decompositions()
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._decomp import (
-            _decomp_table_to_post_autograd_aten,
-            _is_preservable_cia_op,
-            core_aten_decompositions,
-        )
         from torch._inductor import config
 
         # FIXME delete this option after PTC, Executorch syncing is
@@ -1080,7 +1068,7 @@ class ExportedProgram:
             )
 
         _decomp_table = (
-            core_aten_decompositions() if decomp_table is None else dict(decomp_table)
+            default_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
         if config.is_fbcode():
@@ -1092,10 +1080,9 @@ class ExportedProgram:
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
-            # This is needed when the op they want to preserve is a
-            # CIA op.
-            elif _is_preservable_cia_op(op):
-                _decomp_table[op] = _special_op_to_preserve_cia
+
+        if isinstance(_decomp_table, CustomDecompTable):
+            _decomp_table = _decomp_table.materialize()
 
         # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
