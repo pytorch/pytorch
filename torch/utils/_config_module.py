@@ -6,15 +6,15 @@ import io
 import pickle
 import tokenize
 import unittest
-import warnings
-from types import FunctionType, ModuleType
-from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
+import warnings 
+from types import FunctionType, ModuleType 
+from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union 
 from typing_extensions import deprecated
-from unittest import mock
-
+from unittest import mock 
+from torch._utils_internal import JustKnobsConfig
 
 # Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict, JustKnobsConfig)
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -38,6 +38,8 @@ def install_config_module(module: ModuleType) -> None:
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
+                # Handle from torch.utils_internal import JustKnobsConfig
+                or (isinstance(value, type) and issubclass(value, JustKnobsConfig))
             ):
                 continue
 
@@ -48,7 +50,7 @@ def install_config_module(module: ModuleType) -> None:
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                assert value.__module__ == module.__name__
+                assert value.__module__ == module.__name__, f"bad class type {key}={value}, {value.__module__} != {module.__name__}"
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
@@ -174,7 +176,12 @@ class ConfigModule(ModuleType):
                 key.startswith(e) for e in self._config["_cache_config_ignore_prefix"]
             ):
                 continue
-            config[key] = self._config[key]
+            # If the config has been manually set to a value we should save it, otherwise ignore it.
+            if isinstance(self._config[key], JustKnobsConfig):
+                if self._config[key]._override_set():
+                    config[key] = self._config[key].get()
+            else:
+                config[key] = self._config[key]
         return config
 
     def codegen_config(self) -> str:
@@ -188,6 +195,9 @@ class ConfigModule(ModuleType):
                 if v != self._default[k]:
                     warnings.warn(f"Skipping serialization of {k} value {v}")
                 continue
+            if isinstance(v, JustKnobsConfig):
+                if v._override_set():
+                    v = v.get()
             if v == self._default[k]:
                 continue
             lines.append(f"{mod}.{k} = {v!r}")
