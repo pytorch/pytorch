@@ -142,7 +142,7 @@ class TestMaxAutotune(TestCase):
             out = AlgorithmSelectorCache.benchmark_example_value(layout)
             expected_out = (mat1 @ mat2) + (mat3 @ mat4)
 
-            choice = FailChoiceCaller("fail_choice_caller", [], None)
+            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
 
             # use a tensor since python list is not synced back
             timings = torch.zeros(3, dtype=torch.float32)
@@ -239,7 +239,7 @@ class TestMaxAutotune(TestCase):
 
         class FakeChoiceCaller(ChoiceCaller):
             def __init__(self) -> None:
-                super().__init__("none", [], Mock())
+                super().__init__("none", [], Mock(), description="")
                 self.thread_id = None
 
             def precompile(self):
@@ -580,6 +580,32 @@ class TestMaxAutotune(TestCase):
     @config.patch(max_autotune=True)
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
+
+    @config.patch(max_autotune_gemm_backends="TRITON")
+    def test_baddmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(64, 64, 192, dtype=torch.float16)
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(64, 1, 192, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return torch.ops.aten.baddbmm.default(self.bias, x, self.weight)
+
+        x = torch.randn(
+            64, 2048, 64, dtype=torch.float16, requires_grad=False, device="cuda"
+        )
+        mod = M().cuda()
+
+        m_c = torch.compile(mode="max-autotune")(mod)
+        out, code = run_and_get_code(m_c, x)
+        self.assertEqual(out, mod(x))
+
+        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
