@@ -78,8 +78,11 @@ def zip_and_upload_artifacts(failed: bool) -> None:
     global LAST_UPDATED
 
     if failed or time.time() - LAST_UPDATED > 20 * 60:
-        upload_to_s3_artifacts()
-        LAST_UPDATED = time.time()
+        try:
+            upload_to_s3_artifacts()
+            LAST_UPDATED = time.time()
+        except Exception as e:
+            print(f"Failed to upload artifacts: {e}")
 
 
 def trigger_upload_test_stats_intermediate_workflow() -> None:

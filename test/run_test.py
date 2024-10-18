@@ -1683,7 +1683,10 @@ def run_tests(
     def parallel_test_completion_callback(failure):
         test_failed = handle_error_messages(failure)
         if IS_CI and options.upload_artifacts_while_running:
+            start = time.time()
             zip_and_upload_artifacts(test_failed)
+            end = time.time()
+            print(f"Uploading artifacts took {end - start} seconds")
         if (
             test_failed
             and not options.continue_through_error
