@@ -144,6 +144,7 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
             self._config[name] = value
+            self._is_dirty = True
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -153,6 +154,7 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
+        self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         del self._config[name]
