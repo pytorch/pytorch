@@ -647,7 +647,7 @@ class OutputGraph:
     @property
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
-    
+
     def add_symbol_bindings(self, arg: GraphArg):
         # Insert implicit size vars as necessary.  With dynamic shapes, we
         # maintain the invariant that every sizevar gets a direct SymInt input
