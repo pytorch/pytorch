@@ -2791,7 +2791,12 @@ class TritonKernel(SIMDKernel):
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
 
+        static_numels = IndentedBuffer()
+        self.codegen_static_numels(static_numels)  # sets suppress_kernel_arg
+
         for tree in self.active_range_trees():
+            if tree.suppress_kernel_arg:
+                continue
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
             triton_meta_signature[sizearg.name] = signature_of(
@@ -2864,7 +2869,7 @@ class TritonKernel(SIMDKernel):
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
         )
         with code.indent():
-            self.codegen_static_numels(code)
+            code.splice(static_numels)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -2907,7 +2912,10 @@ class TritonKernel(SIMDKernel):
             if tree.prefix != "r" or self.inside_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    code.writeline(f"{tree.prefix}numel : tl.constexpr = {int(simplified_tree_numel)}")
+                    tree.suppress_kernel_arg = True
+                    code.writeline(
+                        f"{tree.prefix}numel : tl.constexpr = {int(simplified_tree_numel)}"
+                    )
 
             if tree.prefix == "r" and self.persistent_reduction:
                 val = self._get_persistent_RBLOCK(tree.numel)
@@ -2923,14 +2931,15 @@ class TritonKernel(SIMDKernel):
         return default_grid_fn
 
     def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
-        # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
-            if tree.prefix != "r" or self.inside_reduction:
+            if (
+                tree.prefix != "r" or self.inside_reduction
+            ) and not tree.suppress_kernel_arg:
                 call_args.append(expr)
                 arg_types.append(type(expr))
             if tree.grid_dim is not None:

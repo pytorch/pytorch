@@ -165,6 +165,8 @@ class IterationRangesRoot(IterationRanges):
         # Index of corresponding dimension in the triton grid
         self.grid_dim = grid_dim
         self.has_zdim = has_zdim
+        # don't add numel to kernel args
+        self.suppress_kernel_arg = False
 
     def __repr__(self) -> str:
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
