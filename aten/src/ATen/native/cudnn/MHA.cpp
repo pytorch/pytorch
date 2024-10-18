@@ -553,7 +553,12 @@ void run_cudnn_SDP_fprop(
     Tensor& dropoutoffset) {
   cudnnHandle_t handle = getCudnnHandle();
   if (!o.defined()) {
-    o = at::empty({b, h, s_q, d_v}, q.options());
+    // q is passed to us in BHSD dim order
+    if (q.is_contiguous()) {
+      o = at::empty({b, h, s_q, d_v}, q.options());
+    } else {
+      o = at::empty({b, s_q, h, d_v}, q.options()).transpose(1, 2);
+    }
   }
 
   if (return_softmaxstats && !softmaxstats.defined()) {
