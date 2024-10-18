@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import itertools
 import logging
@@ -15,6 +16,7 @@ from typing import (
     DefaultDict,
     Dict,
     Iterable,
+    Iterator,
     List,
     NoReturn,
     Optional,
@@ -429,6 +431,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
+
+        # current_device is set only during codegen of a device-specific kernel
+        # a graph can have many devices
+        self.current_device: Optional[torch.device] = None
+
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
@@ -475,6 +482,21 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_current_device_or_throw(self) -> torch.device:
+        if device := self.current_device:
+            return device
+        else:
+            raise RuntimeError("No current device")
+
+    @contextlib.contextmanager
+    def set_current_device(self, device: torch.device) -> Iterator[None]:
+        prior = self.current_device
+        self.current_device = device
+        try:
+            yield
+        finally:
+            self.current_device = prior
 
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
