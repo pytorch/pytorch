@@ -271,11 +271,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
-        if callable(real_value):
-            # Callables have more nuanced handling, and we should let the existing system delegate here.
-            # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle
-            raise NotImplementedError
 
         from ..guards import GuardBuilder
         from .builder import VariableBuilder
@@ -519,16 +514,16 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        has_torch_function_override = False
+        is_base_tensor_method = False
         try:
             inspect.getattr_static(torch.Tensor, name)
-            has_torch_function_override = True
+            is_base_tensor_method = True
         except AttributeError:
-            has_torch_function_override = False
+            is_base_tensor_method = False
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
-            and has_torch_function_override
+            and is_base_tensor_method
         ):
             if self.source:
                 func_var = VariableBuilder(
