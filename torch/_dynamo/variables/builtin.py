@@ -7,6 +7,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView
@@ -92,6 +93,7 @@ IN_PLACE_DESUGARING_MAP = {
     operator.iand: operator.and_,
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
+    operator.iconcat: operator.concat,
 }
 
 
@@ -153,6 +155,9 @@ class BuiltinVariable(VariableTracker):
             operator.and_,
             operator.or_,
             operator.xor,
+            operator.concat,
+            operator.contains,
+            operator.countOf,
             operator.ipow,
             operator.imul,
             operator.imatmul,
@@ -167,6 +172,7 @@ class BuiltinVariable(VariableTracker):
             operator.ixor,
             operator.ior,
             operator.index,
+            operator.iconcat,
         }
         from .tensor import supported_comparison_ops
 
@@ -176,6 +182,20 @@ class BuiltinVariable(VariableTracker):
 
     def can_constant_fold_through(self):
         return self.fn in self._constant_fold_functions()
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _unfoldable_ops():
+        unfs = {
+            operator.delitem,
+            operator.setitem,
+        }
+        if sys.version_info >= (3, 11):
+            unfs.add(operator.call)
+        return unfs
+
+    def is_unfoldable_op(self):
+        return self.fn in self._unfoldable_ops()
 
     @staticmethod
     @functools.lru_cache(None)
@@ -206,6 +226,9 @@ class BuiltinVariable(VariableTracker):
             operator.and_,
             operator.or_,
             operator.xor,
+            operator.concat,
+            operator.contains,
+            operator.countOf,
             operator.ipow,
             operator.imul,
             operator.imatmul,
@@ -220,6 +243,7 @@ class BuiltinVariable(VariableTracker):
             operator.iand,
             operator.ixor,
             operator.ior,
+            operator.iconcat,
         }
         return fns
 
@@ -249,6 +273,10 @@ class BuiltinVariable(VariableTracker):
             operator.rshift: (
                 ["__rshift__", "__rrshift__", "__irshift__"],
                 operator.irshift,
+            ),
+            operator.concat: (
+                ["__concat__", "__rconcat__", "__iconcat__"],
+                operator.iconcat,
             ),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
@@ -828,6 +856,27 @@ class BuiltinVariable(VariableTracker):
                         return builder(tx, res)
 
             handlers.append(constant_fold_handler)
+
+        elif obj.is_unfoldable_op():
+            builder = SourcelessBuilder.create
+
+            def unfoldable_handler(tx: "InstructionTranslator", args, kwargs):
+                try:
+                    res = fn(
+                        *[x.as_python_constant() for x in args],
+                        **{
+                            k: v.as_python_constant() for k, v in kwargs.items()
+                        },
+                    )
+                except TypeError as exc:
+                    unimplemented(f"wrong type/number of arguments given to the unfoldable op {fn.__name__}")
+                except IndexError as exc:
+                    unimplemented(f"list index out of range given to the unfoldable op {fn.__name__}")
+                except Exception as exc:
+                    unimplemented(f"unfoldable op exception: {repr(exc)}")
+                return builder(tx, res)
+
+            handlers.append(unfoldable_handler)
 
         error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
         if len(handlers) == 0:
