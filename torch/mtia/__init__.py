@@ -342,3 +342,4 @@ __all__ = [
     "set_rng_state",
     "get_rng_state",
 ]
+# Testing sensitive information filter: banned_word_test_string
