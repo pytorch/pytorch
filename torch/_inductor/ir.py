@@ -5320,10 +5320,6 @@ class UserDefinedTritonKernel(ExternKernel):
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
-
-        # Call to kernel
-        self.codegen_comment(wrapper)
-
         """
         Filter out None args.
 
@@ -5333,12 +5329,16 @@ class UserDefinedTritonKernel(ExternKernel):
         1. The arg is already tl.constexpr, so leave it in
         2. The arg is not tl.constexpr so we have to remove it
         """
-        constexpr_args_set = set(constexpr_indices)
+        constexpr_indices_set = set(constexpr_indices)
         raw_args = [
             arg
             for idx, arg in enumerate(raw_args)
-            if (arg is not None) or (arg is None and idx in constexpr_args_set)
+            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
         ]
+
+        # Call to kernel
+        self.codegen_comment(wrapper)
+
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )

@@ -495,28 +495,24 @@ class CachingAutotuner(KernelInterface):
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        self.arg_names = self.fn.arg_names
-        removed_from_sig = set(compile_meta["constants"].keys())
+        none_args = set(compile_meta["constants"].keys())
         known_constants = {
-            arg for i, arg in enumerate(self.arg_names) if i in self.fn.constexprs
+            arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
         }
-        removed_from_sig = removed_from_sig.difference(known_constants)
-        removed_from_sig = removed_from_sig.difference(
-            set(compile_meta["signature"].keys())
-        )
+        none_args = none_args.difference(known_constants)
+        none_args = none_args.difference(set(compile_meta["signature"].keys()))
 
         call_args = [
             arg
-            for i, arg in enumerate(self.arg_names)
-            if i not in self.fn.constexprs and arg not in removed_from_sig
+            for i, arg in enumerate(self.fn.arg_names)
+            if i not in self.fn.constexprs and arg not in none_args
         ]
 
         def_args = [
             name
-            for name in self.arg_names
-            if name not in cfg.kwargs and name not in removed_from_sig
+            for name in self.fn.arg_names
+            if name not in cfg.kwargs and name not in none_args
         ]
-
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
@@ -776,7 +772,7 @@ class CachingAutotuner(KernelInterface):
                     budget -= size
 
         for i, arg in enumerate(args):
-            maybe_copy(self.arg_names[i], arg)
+            maybe_copy(self.fn.arg_names[i], arg)
 
         for name, arg in kwargs.items():
             maybe_copy(name, arg)
@@ -807,7 +803,7 @@ class CachingAutotuner(KernelInterface):
                 return arg
 
         cloned_args = [
-            prepare_arg(self.arg_names[i], arg) for i, arg in enumerate(args)
+            prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
         ]
         cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
 
@@ -1098,7 +1094,7 @@ class DebugAutotuner(CachingAutotuner):
             num_in_out_ptrs = len(
                 [
                     arg_name
-                    for arg_name in self.arg_names
+                    for arg_name in self.fn.arg_names
                     if arg_name.startswith("in_out_ptr")
                 ]
             )
