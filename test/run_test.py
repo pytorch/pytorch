@@ -607,8 +607,12 @@ def run_test_retries(
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
+        cov_args = [
+            "--cov=torch",
+            f"--cov-report=json:{REPO_ROOT}/test/test-reports/{stepcurrent_key}_{os.urandom(8).hex()}.json"
+        ]
         ret_code, _ = retry_shell(
-            command + [sc_command] + print_items,
+            command + [sc_command] + print_items + cov_args,
             test_directory,
             stdout=output,
             stderr=output,
@@ -1755,6 +1759,7 @@ def check_pip_packages() -> None:
 
 
 def main():
+    subprocess.run(["pip", "install", "pytest-cov"])
     check_pip_packages()
 
     options = parse_args()
