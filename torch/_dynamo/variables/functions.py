@@ -16,6 +16,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Never
 
 import torch
 
@@ -1060,7 +1061,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
-    def raise_unsupported(self, msg: str) -> None:
+    def raise_unsupported(self, msg: str) -> Never:
         raise Unsupported(msg)
 
     def is_callable(self, maybe_callable: Any) -> bool:
@@ -1072,7 +1073,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         return val.value
 
     def check_grid(
-        self, grid: "Union[TritonGridType, VariableTracker]"
+        self, grid: Union["TritonGridType", "VariableTracker"]
     ) -> Tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
@@ -1083,8 +1084,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
     def call_grid(
         self,
-        grid: "Union[TritonGridType, VariableTracker]",
-        meta: "Union[TritonMetaParamsType, VariableTracker]",
+        grid: Union["TritonGridType", "VariableTracker"],
+        meta: Union["TritonMetaParamsType", "VariableTracker"],
         tx,
     ):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
