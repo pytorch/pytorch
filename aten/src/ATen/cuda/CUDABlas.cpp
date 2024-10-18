@@ -1409,7 +1409,8 @@ void scaled_gemm(
     const void *result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    bool use_fast_accum) {
+    bool use_fast_accum,
+    bool use_rowwise) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
@@ -1419,8 +1420,16 @@ void scaled_gemm(
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+  cublasLtMatmulDescAttributes_t scaleA = CUBLASLT_MATMUL_DESC_A_SCALE_POINTER;
+  cublasLtMatmulDescAttributes_t scaleB = CUBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+#if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+  if (use_rowwise) {
+    scaleA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
+    scaleB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
+  }
+#endif
+  computeDesc.setAttribute(scaleA, mat1_scale_ptr);
+  computeDesc.setAttribute(scaleB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }

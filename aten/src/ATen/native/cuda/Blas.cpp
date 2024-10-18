@@ -920,8 +920,8 @@ ScalingType get_scaling_type(
   // Check for RowWise scaling
   if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
       scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
-#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
-    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || \
+    (defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT))
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
         "Both scale_a and scale_b must be contiguous for RowWise scaling.");
@@ -1044,6 +1044,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   IntArrayRef mat2_sizes = mat2.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
+  // ROCm's hipblaslt supports rowwise, so skip this check that sends this to cutlass.
+#ifndef USE_ROCM
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");
@@ -1057,6 +1059,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out);
     return out;
   }
+#endif
 
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
@@ -1118,6 +1121,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;
+      params.use_rowwise = scaling_choice == ScalingType::RowWise;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
       }
@@ -1160,7 +1164,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         scale_result ? scale_result->data_ptr() : nullptr,
         args.result_ld,
         out_dtype_,
-        use_fast_accum);
+        use_fast_accum,
+        scaling_choice == ScalingType::RowWise);
   }
 
   return out;
