@@ -94,7 +94,11 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     // Waiting for parent comm above still does not seem to guarantee the child
     // comm ptr is valid. Therefore we add a manual wait here for safety.
     // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout =
+        nccl_nonblocking_timeout() > 0 ? nccl_nonblocking_timeout() : 30 * 60;
     while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
       C10D_SCHED_SLEEP();
     }
   }
