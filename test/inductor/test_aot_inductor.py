@@ -14,6 +14,7 @@ import torch._export
 import torch._inductor
 import torch._inductor.config
 import torch.nn as nn
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -3606,6 +3607,54 @@ class AOTInductorTestsTemplate:
                 return self.relu(_x), _i
 
         example_inputs = (torch.randn(8, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_sym_i64_input_codegen(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                x_symint = x.item()
+                a = torch.ones(x_symint, device="cuda")
+                b = torch.ones(x_symint, device="cuda")
+                out = torch.zeros_like(a)
+                # unbacked symint in grid
+                add_kernel[(1, 1, x_symint)](a, b, out, x_symint, 32)
+                return out
+
+        example_inputs = (
+            torch.randint(high=1024, size=(1,), device=self.device, dtype=torch.int32),
+        )
+        # This simple unit test case model generates two triton kernels:
+        # 1. triton_poi_fused_ones_1:
+        # triton_meta={'signature': {'out_ptr0': '*fp32', 'xnumel': 'i64'}
+        # 2. add_kernel:
+        # triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr': '*fp32', 'n_elements': 'i64'}
+        # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
+        # it gets explicitly declared using its data types in the cpp wrapper codegen code.
+        expected_scalar_args = [
+            "int64_t var_1 = u0;",
+            "int64_t var_3 = u0;",
+            "int64_t var_5 = u0;",
+            "int64_t var_9 = u0;",
+        ]
+        # check the new behavior of codegen is expected
+        result, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, Model(), example_inputs
+        )
+        for scalar_line in expected_scalar_args:
+            FileCheck().check_count(
+                scalar_line,
+                1,
+            ).run(code)
+
         self.check_model(Model(), example_inputs)
 
 
