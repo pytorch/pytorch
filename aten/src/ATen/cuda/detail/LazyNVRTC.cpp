@@ -169,6 +169,10 @@ CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
 CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
 CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12040
+CUDA_STUB4(cuFuncGetParamInfo, CUfunction, size_t, size_t*, size_t*);
+CUDA_STUB2(cuFuncGetName, const char**, CUfunction);
+#endif
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 CUresult CUDAAPI
