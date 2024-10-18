@@ -207,7 +207,7 @@ def tensorify_python_scalars(
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args = []
+                args: List[Union[MetaProxy, int, float]] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -230,8 +230,10 @@ def tensorify_python_scalars(
                             )
 
                         args.append(proxy)
-                    else:
+                    elif isinstance(a, fx.Node):
                         args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
+                    else:
+                        args.append(a)
 
                 if transform:
                     replacement_proxy = node.target(*args)
@@ -247,6 +249,32 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
 
                     graph.erase_node(node)
+
+    # TODO: Add a new pass here that goes through and finds all item calls
+    # and converts them into constants by looking at the hint. You can do
+    # do this with SymFloats by simply calling calling float() on it and
+    # creating a constant instead.
+    for i, node in enumerate(nodes[:-1]):
+        with graph.inserting_before(
+            nodes[i + 1] if node not in placeholders else first_non_placeholder
+        ):
+            args = []
+            transform = False
+            for a in node.args:
+                if isinstance(a, fx.Node) and isinstance(
+                    zf := a.meta["val"], torch.SymFloat
+                ):
+                    transform = True
+                    args.append(float(zf))
+                elif isinstance(a, fx.Node):
+                    args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
+                else:
+                    args.append(a)
+
+            if transform:
+                replacement_proxy = node.target(*args, **node.kwargs)
+                node.replace_all_uses_with(replacement_proxy.node)
+                graph.erase_node(node)
 
     # DCE symbols (which are guaranteed to be pure) only
     for proxy in reversed(expr_to_sym_proxy.values()):
