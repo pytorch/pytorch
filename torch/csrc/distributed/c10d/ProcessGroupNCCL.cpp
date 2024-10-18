@@ -2297,9 +2297,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
-    TORCH_CHECK(
-        options_->split_color != 0,
-        "Must specify a non-zero color when splitting");
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
@@ -2307,6 +2304,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
+        LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
+                  << parentComm->repr();
         ncclComm = NCCLComm::split(
             parentComm.get(),
             options_->split_color,

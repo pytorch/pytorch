@@ -104,6 +104,20 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
     }                                                                         \
   } while (0)
 
+// Error out if (current time - startTime) is greater than timeout (sec).
+#define C10D_CHECK_TIMEOUT(startTime, timeout)                              \
+  do {                                                                      \
+    auto currentTime = std::chrono::steady_clock::now();                    \
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(    \
+                           currentTime - startTime)                         \
+                           .count();                                        \
+    if (timeElapsed > timeout) {                                            \
+      std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" + \
+          std::to_string(__LINE__);                                         \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                       \
+    }                                                                       \
+  } while (0)
+
 // Macro to throw on a non-successful NCCL return value, non-blocking.
 #define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
   ncclResult_t result = cmd;                                                  \
@@ -559,7 +573,7 @@ class NCCLComm {
 #endif
 
  private:
-  ncclComm_t ncclComm_;
+  ncclComm_t ncclComm_{nullptr};
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized();
 };
