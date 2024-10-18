@@ -48,10 +48,9 @@ __all__ = [
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
-    "CustomDecompTable",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "default_decompositions",
+    "core_aten_decompositions",
     "dims",
     "export",
     "export_for_training",
@@ -65,10 +64,9 @@ __all__ = [
 ]
 
 
-from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
-    default_decompositions,
+    core_aten_decompositions,
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
