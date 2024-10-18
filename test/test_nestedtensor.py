@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
+    reparametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -61,7 +62,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
 )
-from torch.testing._internal.opinfo.definitions.nested import njt_op_db
+from torch.testing._internal.opinfo.definitions.nested import (
+    include_dim_type_and_contiguity,
+    njt_op_db,
+)
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
@@ -7733,21 +7737,33 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             return (torch.ones_like(out_val),)
 
     @withXFails(FORWARD_FAILURES)
-    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
-    def test_forward(self, device, dtype, op):
-        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
+    @reparametrize(
+        ops(
+            [op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,)
+        ),
+        include_dim_type_and_contiguity,
+    )
+    def test_forward(self, device, dtype, op, dim_type, contiguity):
+        for sample in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=False, dim_type=dim_type
+        ):
             # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
     @withXFails(BACKWARD_FAILURES)
-    @ops(
-        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
-        allowed_dtypes=(torch.float32,),
+    @reparametrize(
+        ops(
+            [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+            allowed_dtypes=(torch.float32,),
+        ),
+        include_dim_type_and_contiguity,
     )
-    def test_backward(self, device, dtype, op):
-        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
+    def test_backward(self, device, dtype, op, dim_type, contiguity):
+        for sample in op.sample_inputs(
+            device=device, dtype=dtype, requires_grad=True, dim_type=dim_type
+        ):
             # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
             out_ref = op.ref(op, sample)
