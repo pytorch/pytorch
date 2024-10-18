@@ -664,7 +664,7 @@ def _softmax_default(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         (new_kwargs["dim"],),
@@ -985,7 +985,7 @@ def matmul_default(func, *args, **kwargs):
 
     def _padded_impl(a, b):
         assert a.is_nested and not b.is_nested
-        nt, t = a, b
+        nt = a
 
         from .nested_tensor import nested_from_padded
 
@@ -1588,7 +1588,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],

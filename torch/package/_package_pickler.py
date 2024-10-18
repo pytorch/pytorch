@@ -49,6 +49,7 @@ class PackagePickler(_PyTorchLegacyPickler):
         self.dispatch[FunctionType] = PackagePickler.save_global  # type: ignore[assignment]
 
     def save_global(self, obj, name=None):
+        # ruff: noqa: F841
         # unfortunately the pickler code is factored in a way that
         # forces us to copy/paste this function. The only change is marked
         # CHANGED below.

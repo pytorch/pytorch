@@ -89,7 +89,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                             self.references[(name, alias)] = True
                         else:
                             self.references[(name, None)] = True
-            except Exception as e:
+            except Exception:
                 return
 
 
