@@ -9,7 +9,7 @@ extern "C"
 __attribute__((visibility("default"))) PyObject* PyInit__C(void);
 #endif
 
-extern "C" TORCH_API void global_kineto_init();
+extern void global_kineto_init();
 
 PyMODINIT_FUNC PyInit__C(void)
 {

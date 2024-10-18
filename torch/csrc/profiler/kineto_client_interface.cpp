@@ -72,12 +72,14 @@ class LibKinetoClient : public libkineto::ClientInterface {
 } // namespace profiler::impl
 
 extern "C" TORCH_API void global_kineto_init() {
+#if ENABLE_GLOBAL_OBSERVER
   if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
     libkineto_init(
         /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
         /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
+#endif
 }
 
 #if ENABLE_GLOBAL_OBSERVER
