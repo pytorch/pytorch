@@ -92,7 +92,7 @@ TEST(StringViewTest, testStringViewConstructor) {
 
   test_std_string_view_conversion_is_implicit(hello_std_sv);
 }
-} // namespace test_string_view_constructor
+} // namespace test_std_string_view_constructor
 
 namespace test_conversion_to_string {
 TEST(StringViewTest, testConversionToString) {
@@ -114,7 +114,7 @@ TEST(StringViewTest, testConversionToString) {
   EXPECT_EQ(5, hello_str.size());
   EXPECT_EQ(std::string_view("hello"), hello_str);
 }
-} // namespace test_conversion_to_string
+} // namespace test_conversion_to_std_string_view
 
 namespace test_copy_constructor {
 constexpr string_view hello = "hello";
