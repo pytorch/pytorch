@@ -3033,6 +3033,8 @@ class TestCase(expecttest.TestCase):
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
+        torch.compiler.set_stance("default")
+
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
         # When strict mode is False, suppress_errors is True
@@ -3138,7 +3140,6 @@ class TestCase(expecttest.TestCase):
 
         # attempt to reset some global state at the end of the test
         self._prev_grad_state = torch.is_grad_enabled()
-        self._prev_compiler_stance = torch._dynamo.eval_frame._get_stance()
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
@@ -3157,8 +3158,6 @@ class TestCase(expecttest.TestCase):
         # attribute may not be defined, per above
         if hasattr(self, '_prev_grad_state'):
             torch.set_grad_enabled(self._prev_grad_state)
-        if hasattr(self, '_prev_compiler_stance'):
-            torch._dynamo.eval_frame._set_stance(self._prev_compiler_stance)
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
