@@ -163,6 +163,9 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
+    def __len__(self):
+        return self.size(0)
+
     # Private accessor functions for min / max sequence length. They're
     # purposefully not @properties because those don't work with PT2 (yet).
     # These compute / cache if not present.
