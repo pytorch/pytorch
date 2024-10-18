@@ -85,13 +85,18 @@ class SizeArg:
 
 
 @dataclasses.dataclass
+class TMADescriptorArg:
+    name: str
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: Any
     wrapper_codegen: type
     cpp_wrapper_codegen: type = type(None)
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
 
 device_codegens: Dict[str, DeviceCodegen] = {}
 
@@ -1503,16 +1508,6 @@ class CSEVariable:
 
 
 class CppWrapperKernelArgs(KernelArgs):
-    def wrap_ptr_arg(self, buf, dtype):
-        from .cpp_utils import DTYPE_TO_CPP
-
-        if config.abi_compatible:
-            # In the abi_compatible model, we just return the buf here.
-            # We will form correct call args later in wrapper.generate_kernel_all.
-            return buf
-        else:
-            return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
-
     def wrap_size_arg(self, size):
         return f"{size}"
 
