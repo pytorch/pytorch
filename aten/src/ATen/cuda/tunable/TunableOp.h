@@ -135,8 +135,15 @@ class TunableOp {
 
       // calcaulte a reference answer for numerical check
       if (do_numerics_check) {
-        reference_params = params->DeepCopy(false);
-        TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+        if (params->IsReferenceSupported()) {
+          // CPU float32 reference is possible
+          reference_params = params->GetReference();
+        }
+        else {
+          // use 'Default' GPU implementation
+          reference_params = params->DeepCopy(false);
+          TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+        }
       }
 
       // need copies of params to reuse

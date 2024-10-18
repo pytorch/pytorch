@@ -13,6 +13,8 @@
 
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/native/CPUBlas.h>
+#include <ATen/native/TransposeType.h>
 #include <c10/util/StringUtil.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -42,14 +44,23 @@ inline char BlasOpToString(BlasOp op) {
   return 'N';
 }
 
+inline bool BlasCharToBool(char a) {
+  return a == 'T' || a == 't';
+}
+
+inline at::native::TransposeType BlasCharToType(char a) {
+  if (a == 'T' || a == 't') {
+    return at::native::TransposeType::Transpose;
+  }
+  return at::native::TransposeType::NoTranspose;
+}
+
 namespace detail {
 
-static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
-  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+static bool NumericalCheck(ScalarType dtype, at::Tensor ref, void* other_c, int64_t size) {
+  auto gpu_options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
   // comparison done as 1D tensor
-  at::Tensor ref = at::from_blob(c,       {size}, options);
-  at::Tensor oth = at::from_blob(other_c, {size}, options);
-  at::Tensor ref_float = ref.to(at::kFloat);
+  at::Tensor oth = at::from_blob(other_c, {size}, gpu_options);
   at::Tensor oth_float = oth.to(at::kFloat);
   std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
   std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
@@ -57,7 +68,7 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
   double last_succeed_rtol = 1;
   for (auto& atol : atols) {
     for (auto& rtol : rtols) {
-      if (at::allclose(ref_float, oth_float, rtol, atol)) {
+      if (at::allclose(ref, oth_float, rtol, atol)) {
         last_succeed_atol = atol;
         last_succeed_rtol = rtol;
       }
@@ -73,28 +84,49 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
   return true;
 }
 
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
+  auto gpu_options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+  // comparison done as 1D tensor
+  at::Tensor ref = at::from_blob(c,       {size}, gpu_options);
+  at::Tensor ref_float = ref.to(at::kFloat);
+  return NumericalCheck(dtype, ref_float, other_c, size);
+}
+
 }
 
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() {
     duplicate_inputs_ = false;
+    is_reference_ = false;
   }
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
+  int64_t _GetCountA() const {
+    return lda * ((transa == 'n' || transa == 'N') ? k : m);
+  }
+
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+    return sizeof(T) * _GetCountA();
+  }
+
+  int64_t _GetCountB() const {
+    return ldb * ((transb == 'n' || transb == 'N') ? n : k);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    return sizeof(T) * _GetCountB();
+  }
+
+  int64_t _GetCountC() const {
+    return ldc * n;
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n;
+    return sizeof(T) * _GetCountC();
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -104,6 +136,63 @@ struct GemmParams : OpParams {
       size += GetSizeB();
     }
     return size;
+  }
+
+  bool IsReferenceSupported() const {
+    return true;
+  }
+
+  GemmParams* GetReference() const {
+    // wrap the raw A/B/C pointers in simple 1D Tensors to transfer to CPU
+    auto dtype = c10::CppTypeToScalarType<T>::value;
+    auto gpu_options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+    auto tensorA = at::from_blob(const_cast<T*>(a), {_GetCountA()}, gpu_options);
+    auto tensorB = at::from_blob(const_cast<T*>(b), {_GetCountB()}, gpu_options);
+    auto tensorC = at::from_blob(c, {_GetCountC()}, gpu_options);
+    tensorA = tensorA.to(at::kCPU);
+    tensorB = tensorB.to(at::kCPU);
+    tensorC = tensorC.to(at::kCPU);
+    if constexpr (std::is_same_v<T, c10::complex<float>> || std::is_same_v<T, c10::complex<double>>) {
+      // perform cpublas on the host buffers, no cast
+      at::native::cpublas::gemm_stub(
+          kCPU,
+          dtype,
+          BlasCharToType(transa),
+          BlasCharToType(transb),
+          m, n, k,
+          alpha,
+          tensorA.data_ptr(), lda,
+          tensorB.data_ptr(), ldb,
+          beta,
+          tensorC.data_ptr(), ldc);
+    }
+    else {
+      // perform cpublas on the host buffers, cast all inputs to float
+      float falpha = alpha;
+      float fbeta = beta;
+      tensorA = tensorA.to(at::kFloat);
+      tensorB = tensorB.to(at::kFloat);
+      tensorC = tensorC.to(at::kFloat);
+      at::native::cpublas::gemm_stub(
+          kCPU,
+          c10::CppTypeToScalarType<float>::value,
+          BlasCharToType(transa),
+          BlasCharToType(transb),
+          m, n, k,
+          falpha,
+          tensorA.data_ptr(), lda,
+          tensorB.data_ptr(), ldb,
+          fbeta,
+          tensorC.data_ptr(), ldc);
+    }
+    // put the reference back on the GPU, for performance reasons
+    tensorC = tensorC.to(at::kCUDA);
+    // store the result in C and return
+    GemmParams* copy = new GemmParams;
+    *copy = *this;
+    copy->is_reference_ = true;
+    copy->cpu_reference_ = tensorC;
+    return copy;
   }
 
   GemmParams* DeepCopy(bool duplicate_inputs) const {
@@ -127,6 +216,10 @@ struct GemmParams : OpParams {
 
   // only call on object returned by DeepCopy
   void Delete() {
+    if (is_reference_) {
+      // nothing to delete
+      return;
+    }
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
@@ -136,7 +229,7 @@ struct GemmParams : OpParams {
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, cpu_reference_, other->c, _GetCountC()) ? OK : FAIL;
   }
 
   char transa;
@@ -154,6 +247,8 @@ struct GemmParams : OpParams {
   int64_t ldc;
 private:
   bool duplicate_inputs_;
+  bool is_reference_;
+  at::Tensor cpu_reference_;
 };
 
 template <typename T>
@@ -226,22 +321,35 @@ template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   GemmStridedBatchedParams() {
     duplicate_inputs_ = false;
+    is_reference_ = false;
   }
 
   std::string Signature() const override {
     return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
   }
 
+  int64_t _GetCountA() const {
+    return std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+  }
+
   size_t GetSizeA() const {
-    return sizeof(T) * std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    return sizeof(T) * _GetCountA();
+  }
+
+  int64_t _GetCountB() const {
+    return std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    return sizeof(T) * _GetCountB();
+  }
+
+  int64_t _GetCountC() const {
+    return std::min(ldc, stride_c) * n * batch;
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * std::min(ldc, stride_c) * n * batch;
+    return sizeof(T) * _GetCountC();
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -251,6 +359,79 @@ struct GemmStridedBatchedParams : OpParams {
       size += GetSizeB();
     }
     return size;
+  }
+
+  bool IsReferenceSupported() const {
+    return true;
+  }
+
+  GemmStridedBatchedParams* GetReference() const {
+    // wrap the raw A/B/C pointers in simple 1D Tensors to transfer to CPU
+    auto dtype = c10::CppTypeToScalarType<T>::value;
+    auto gpu_options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+    auto tensorA = at::from_blob(const_cast<T*>(a), {_GetCountA()}, gpu_options);
+    auto tensorB = at::from_blob(const_cast<T*>(b), {_GetCountB()}, gpu_options);
+    auto tensorC = at::from_blob(c, {_GetCountC()}, gpu_options);
+    tensorA = tensorA.to(at::kCPU);
+    tensorB = tensorB.to(at::kCPU);
+    tensorC = tensorC.to(at::kCPU);
+    if constexpr (std::is_same_v<T, c10::complex<float>> || std::is_same_v<T, c10::complex<double>>) {
+      // perform cpublas on the host buffers, no cast
+      T *a = tensorA.template data_ptr<T>();
+      T *b = tensorB.template data_ptr<T>();
+      T *c = tensorC.template data_ptr<T>();
+      for (const auto batch : c10::irange(batch)) {
+        const auto a_batch = a + stride_a * batch;
+        const auto b_batch = b + stride_b * batch;
+        const auto c_batch = c + stride_c * batch;
+        at::native::cpublas::gemm_stub(
+            kCPU,
+            dtype,
+            BlasCharToType(transa),
+            BlasCharToType(transb),
+            m, n, k,
+            alpha,
+            a_batch, lda,
+            b_batch, ldb,
+            beta,
+            c_batch, ldc);
+      }
+    }
+    else {
+      // perform cpublas on the host buffers, cast all inputs to float
+      float falpha = alpha;
+      float fbeta = beta;
+      tensorA = tensorA.to(at::kFloat);
+      tensorB = tensorB.to(at::kFloat);
+      tensorC = tensorC.to(at::kFloat);
+      float *a = tensorA.template data_ptr<float>();
+      float *b = tensorB.template data_ptr<float>();
+      float *c = tensorC.template data_ptr<float>();
+      for (const auto batch : c10::irange(batch)) {
+        const auto a_batch = a + stride_a * batch;
+        const auto b_batch = b + stride_b * batch;
+        const auto c_batch = c + stride_c * batch;
+        at::native::cpublas::gemm_stub(
+            kCPU,
+            c10::CppTypeToScalarType<float>::value,
+            BlasCharToType(transa),
+            BlasCharToType(transb),
+            m, n, k,
+            falpha,
+            a_batch, lda,
+            b_batch, ldb,
+            fbeta,
+            c_batch, ldc);
+      }
+    }
+    // put the reference back on the GPU, for performance reasons
+    tensorC = tensorC.to(at::kCUDA);
+    // store the result in C and return
+    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
+    *copy = *this;
+    copy->is_reference_ = true;
+    copy->cpu_reference_ = tensorC;
+    return copy;
   }
 
   GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
@@ -274,6 +455,10 @@ struct GemmStridedBatchedParams : OpParams {
 
   // only call on object returned by DeepCopy
   void Delete() {
+    if (is_reference_) {
+      // nothing to delete
+      return;
+    }
     c10::cuda::CUDACachingAllocator::raw_delete(c);
     if (duplicate_inputs_) {
       c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
@@ -283,7 +468,7 @@ struct GemmStridedBatchedParams : OpParams {
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, batch*stride_c) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, cpu_reference_, other->c, _GetCountC()) ? OK : FAIL;
   }
 
   char transa;
@@ -305,6 +490,8 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t batch;
 private:
   bool duplicate_inputs_;
+  bool is_reference_;
+  at::Tensor cpu_reference_;
 };
 
 template <typename T>
@@ -336,6 +523,14 @@ struct ScaledGemmParams : OpParams {
       size += GetSizeB();
     }
     return size;
+  }
+
+  bool IsReferenceSupported() const {
+    return false;
+  }
+
+  ScaledGemmParams* GetReference() const {
+    return nullptr;
   }
 
   ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
