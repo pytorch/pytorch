@@ -1,11 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import copy
 import csv
 import logging
 import os
 from typing import List
 
 import torch
+from model_registry import MultiMLP
 from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
@@ -18,6 +20,7 @@ from torch.distributed.pipelining.schedules import (
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
+    _PipelineScheduleRuntime,
     _simulate_comms_compute,
     _validate_pipeline_order,
     B,
@@ -30,14 +33,16 @@ from torch.distributed.pipelining.schedules import (
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase
+from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
+from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import (
+    check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
-
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
@@ -327,6 +332,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: stage_idx,
                 "num_stages": 2,
+                "simulated_steps": 9,
             },
             {
                 "compute": {
@@ -412,6 +418,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
                 "num_stages": 4,
+                "simulated_steps": 21,
             },
         ],
     )
@@ -452,7 +459,7 @@ class TestScheduleLowering(TestCase):
         # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
-        self.assertEqual(num_steps, 9)
+        self.assertEqual(num_steps, test_info["simulated_steps"])
 
     @parametrize("csv_name", ["zb1p_2rank_2stagep"])
     def test_csv(self, csv_name):
@@ -506,6 +513,132 @@ class TestScheduleLowering(TestCase):
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 96)
+
+    @requires_nccl()
+    def test_grad_with_v_schedule(self):
+        """
+        We have a special case for V schedules where 2 adjacent stages are on the same rank.
+        E.g.
+        rank0:  stage 0,                 stage3
+        rank1:          stage 1, stage 2,
+
+        The special case involves not using send/recv ops but directly passing tensors between colocated stages.
+
+        This test runs on a single rank and just tests the 'stage1, stage2' portion for both F and B, comparing
+        gradients to a reference model with 2 layers.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        d_hid = 512
+        batch_size = 256
+        n_stages = 2
+        device = "cuda"
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=device)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        stage_indices = [0, 1]
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
+        ]
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = 2
+        input_args = x.chunk(num_microbatches)[0]
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                device,
+                # TODO(whc) shape inference shouldn't have needed to run communications in this 1-rank, 2-stage scenario,
+                # but it was failing on fakePG recv data unpiclking error, so something is wrong. Work around for now.
+                input_args=input_args,
+                output_args=input_args,
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+        ]
+
+        # Attach to a schedule
+        schedule = _PipelineScheduleRuntime(
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            stage_index_to_group_rank=[0, 0],
+            # TODO should we test both T/F?
+            use_full_backward=True,
+        )
+        schedule._load_actions(
+            {
+                0: self._parse_actions(
+                    [
+                        "0F0",
+                        "0F1",
+                        "1F0",
+                        "1F1",
+                        "1B0",
+                        "1B1",
+                        "0B0",
+                        "0B1",
+                    ]
+                ),
+            },
+            format="compute_comms",
+        )
+
+        # Run
+        with check_leaked_tensors() as garbage_tensors:
+            for _ in range(2):
+                # Zero gradients
+                for stage_module in stage_modules:
+                    stage_module.zero_grad()
+                losses = []
+                out = schedule.step(x, target=target, losses=losses)
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
+
+        # Check output
+        torch.testing.assert_close(out, ref_out)
+        # Check loss
+        # Since the reduction used in the loss function above is "sum", we use
+        # "sum" here to reduce microbatch losses into a single value too.
+        pipe_loss = sum(losses)
+        torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Check gradients
+        for stage_module, submod_name in zip(stage_modules, submod_names):
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                try:
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                except AssertionError:
+                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                    raise
+
+        torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(TestScheduleLowering)

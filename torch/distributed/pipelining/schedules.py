@@ -2238,6 +2238,15 @@ def get_schedule_class(schedule_name: str):
 def _simulate_comms_compute(
     pipeline_order, stage_to_rank: Callable[[int], int], num_stages: int
 ):
+    """This function dry-run simulates the actions in the schedule from the perspective of all ranks, and flags
+    any deadlocks caused by missing or misordered communications.  It also simulates any bubbles in time where a rank
+    can not execute any action due to waiting for unmet dependencies.  The total number of simulator steps can be used
+    as a metric for unit tests involving IR optimization passes as reordering and merging of IR can reduce the number
+    of simulated steps.
+
+    The simulation is not high-fidelity and does not model overlapping of compute and communication, or cuda streams.
+    Future work may be to enhance this and model the compute time, comms overlap, and even memory.
+    """
     pipeline_order = {
         rank: [a for a in pipeline_order[rank] if a is not None]
         for rank in sorted(pipeline_order)
@@ -2273,6 +2282,12 @@ def _simulate_comms_compute(
                     and p.microbatch_index == action.microbatch_index
                 ):
                     return True
+                elif (
+                    p.computation_type == F
+                    and p.stage_index == action.stage_index - 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
             return False
         elif action.computation_type in (B, BW):
             if action.stage_index == num_stages - 1:
@@ -2283,6 +2298,12 @@ def _simulate_comms_compute(
                 elif (
                     p.computation_type == RECV_B
                     and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type in (B, BW)
+                    and p.stage_index == action.stage_index + 1
                     and p.microbatch_index == action.microbatch_index
                 ):
                     return True
@@ -2357,6 +2378,15 @@ def _simulate_comms_compute(
 
 
 def _dump_chrometrace(schedule, filename):
+    """
+    This function dumps a schedule IR into a chrometrace format so it can be visualized.
+
+    It is currently very basic and only serves as a graphical alternative to dumping the schedule IR as text.
+
+    As future work we may extend this to include more accurate heuristics for durations, or let users input durations,
+    add 'flow events' to let the UI show the connection between sends and recvs, and model cuda streams for comm/compute
+    as separate streams on the chrometrace view.
+    """
     events = []
     for rank in sorted(schedule):
         for timestep, action in enumerate(schedule[rank]):
