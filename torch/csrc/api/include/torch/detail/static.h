@@ -43,7 +43,7 @@ constexpr bool check_not_lvalue_references() {
   return (
       !std::is_lvalue_reference_v<Head> ||
       std::is_const_v<std::remove_reference_t<
-          Head>>) && check_not_lvalue_references<Tail...>();
+          Head>>)&&check_not_lvalue_references<Tail...>();
 }
 
 template <>

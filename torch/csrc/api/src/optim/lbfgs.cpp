@@ -195,13 +195,8 @@ static double _cubic_interpolate(
     std::optional<std::tuple<double, double>> bounds = std::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
-  double xmin_bound = 0, xmax_bound = 0;
-  if (bounds != std::nullopt) {
-    std::tie(xmin_bound, xmax_bound) = *bounds;
-  } else {
-    std::tie(xmin_bound, xmax_bound) =
-        (x1 <= x2) ? std::make_tuple(x1, x2) : std::make_tuple(x2, x1);
-  }
+  auto [xmin_bound, xmax_bound] =
+      (bounds != std::nullopt) ? (*bounds) : std::minmax({x1, x2});
   // Code for most common case: cubic interpolation of 2 points
   //   w/ function and derivative values for both
   // Solution in this case (where x2 is the farthest point):
