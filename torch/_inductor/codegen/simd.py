@@ -330,6 +330,7 @@ class SIMDKernel(Kernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
+        override_cooperative_reduction=None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -348,6 +349,11 @@ class SIMDKernel(Kernel):
         self.index_dtype: str = index_dtype
         self.last_usage: OrderedSet[str] = OrderedSet()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
+        self.cooperative_reduction: bool = (
+            override_cooperative_reduction
+            if override_cooperative_reduction is not None
+            else self.should_use_cooperative_reduction()
+        )
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -420,6 +426,9 @@ class SIMDKernel(Kernel):
             return self.store(name, index, value)
         finally:
             self.inside_reduction = prior
+
+    def should_use_cooperative_reduction(self) -> bool:
+        return False  # defined in subclass
 
     def should_use_persistent_reduction(self) -> bool:
         return False  # defined in subclass
@@ -506,7 +515,7 @@ class SIMDKernel(Kernel):
         )
 
     def disable_reduction(self):
-        should_flush = self.range_trees[-1].is_loop
+        should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
 
         @contextlib.contextmanager
         def ctx():

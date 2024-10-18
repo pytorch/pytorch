@@ -1655,7 +1655,7 @@ class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel  # type: ignore[arg-type]
+    kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

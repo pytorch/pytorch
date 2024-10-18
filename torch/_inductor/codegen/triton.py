@@ -1365,16 +1365,9 @@ class TritonKernel(SIMDKernel):
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        self.cooperative_reduction = override_cooperative_reduction or (
-            not override_persistent_reduction
-            and override_cooperative_reduction is None
-            and not pid_cache  # foreach kernels
-            and V.graph.get_current_device_or_throw().type != "cpu"
-            and self.should_use_cooperative_reduction(groups)
-        )
-        if self.cooperative_reduction:
-            # TODO(jansel): cooperative+persistent reductions does not work yet
-            override_persistent_reduction = False
+        if pid_cache or override_persistent_reduction:
+            # foreach kernels don't work with cooperative reductions
+            override_cooperative_reduction = False
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -1382,6 +1375,7 @@ class TritonKernel(SIMDKernel):
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
             override_persistent_reduction=override_persistent_reduction,
+            override_cooperative_reduction=override_cooperative_reduction,
         )
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -1399,18 +1393,19 @@ class TritonKernel(SIMDKernel):
 
         self.codegen_range_tree()
 
-    def should_use_cooperative_reduction(self, groups) -> bool:
+    def should_use_cooperative_reduction(self) -> bool:
         """Heuristic to decide self.cooperative_reduction should be used."""
-        if len(groups) != 2:
-            return False
-        xnumel, rnumel = groups
-        if rnumel == 1:
+        if not self.inside_reduction:
             return False
         if config.triton.force_cooperative_reductions:
             return True
-        if not config.triton.cooperative_reductions:
+        if (
+            not config.triton.cooperative_reductions
+            or V.graph.get_current_device_or_throw().type == "cpu"
+        ):
             return False
 
+        xnumel, rnumel = self.numels
         # TODO(jansel): base this on num_bytes_read rather than numel
         xhint = V.graph.sizevars.size_hint(xnumel, fallback=2)
         if xhint <= 8:
@@ -1425,7 +1420,6 @@ class TritonKernel(SIMDKernel):
     def init_cooperative_reduction(self):
         """One time setup code for cooperative reductions."""
         assert self.cooperative_reduction
-        assert not self.persistent_reduction
 
         # shift all the grids over since tl.program_id(0) is for rsplit
         for tree in self.range_trees:
@@ -1479,7 +1473,10 @@ class TritonKernel(SIMDKernel):
         Heuristic to set self.persistent_reduction and add guards
         if needed.
         """
-        if not (self.inside_reduction and config.triton.persistent_reductions):
+        if (
+            not (self.inside_reduction and config.triton.persistent_reductions)
+            or self.cooperative_reduction
+        ):
             return False
         threshold = {
             ReductionHint.INNER: 1024,
@@ -2390,7 +2387,6 @@ class TritonKernel(SIMDKernel):
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
                     result_weight, upcast_acc_dtype(src_dtype)
                 )
-                assert dim == 1
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,
                     result_mean,
