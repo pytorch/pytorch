@@ -288,31 +288,3 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
-
-  linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build:
-    name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      use_split_build: true
-      build-environment: linux-focal-cuda11.8-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.nvidia.gpu" },
-        ]}
-
-  linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build-test:
-    name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build
-      - target-determination
-    with:
-      timeout-minutes: 360
-      build-environment: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
-      docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
