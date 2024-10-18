@@ -401,6 +401,17 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    def test_symint_output(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                z, y = x.size()
+                return z + y + x[0], z
+
+        inputs = (torch.ones(2, 3),)
+        dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):

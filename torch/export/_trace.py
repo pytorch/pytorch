@@ -28,10 +28,6 @@ from torch._export.non_strict_utils import (
     make_fake_inputs,
     produce_guards_and_solve_constraints,
 )
-from torch._export.passes._node_metadata_hook import (
-    _node_metadata_hook,
-    _set_node_metadata_hook,
-)
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
@@ -40,9 +36,9 @@ from torch._export.passes.lift_constants_pass import (
 )
 from torch._export.utils import (
     _collect_param_buffer_metadata,
-    _get_shape_env_from_gm,
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
+    apply_runtime_assertion_pass,
     placeholder_naming_pass,
     placeholder_prefixes,
 )
@@ -70,7 +66,6 @@ from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
-from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -80,7 +75,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.graph_module import _get_attr
-from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -681,26 +675,7 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    if not torch._dynamo.config.do_not_emit_runtime_asserts:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            shape_env = _get_shape_env_from_gm(gm)
-            if shape_env:
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
-
-    # update output specs
-    gm.recompile()
-    graph_signature.user_outputs = _graph_output_names(gm)
+    apply_runtime_assertion_pass(gm, graph_signature)
 
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -1532,11 +1507,6 @@ def _export_to_aten_ir_make_fx(
             gm.meta.update(mod.meta)
 
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    set_missing_meta_vals(gm, flat_args, params_len)
-
-    export_graph_signature = _convert_to_export_graph_signature(
-        graph_signature, gm, _get_non_persistent_buffers(mod)
-    )
 
     # See comment in _export_to_aten_ir()
     if produce_guards_callback:
@@ -1545,22 +1515,7 @@ def _export_to_aten_ir_make_fx(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    fake_mode = detect_fake_mode(flat_args)
-
-    if not torch._dynamo.config.do_not_emit_runtime_asserts:
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-        ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
+    apply_runtime_assertion_pass(gm, graph_signature)
 
     # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
     for _mod in gm.modules():
@@ -1570,6 +1525,12 @@ def _export_to_aten_ir_make_fx(
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
                 node.meta.pop("stack_trace", None)
+
+    set_missing_meta_vals(gm, flat_args, params_len)
+
+    export_graph_signature = _convert_to_export_graph_signature(
+        graph_signature, gm, _get_non_persistent_buffers(mod)
+    )
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
