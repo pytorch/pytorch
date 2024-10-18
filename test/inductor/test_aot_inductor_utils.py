@@ -9,7 +9,7 @@ import torch._export
 import torch._inductor
 import torch.export._trace
 import torch.fx._pytree as fx_pytree
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.utils import _pytree as pytree
 
 
@@ -149,3 +149,7 @@ class AOTIRunnerUtil:
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors
+
+
+if __name__ == "__main__":
+    run_tests()

@@ -49,6 +49,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
     TemporaryFileName,
     TEST_CUDA,
 )
@@ -2335,3 +2336,5 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

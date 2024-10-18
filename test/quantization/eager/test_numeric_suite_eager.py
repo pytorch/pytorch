@@ -36,7 +36,9 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
 )
 from torch.testing._internal.common_quantized import override_qengines
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, raise_on_run_directly
+
+
 
 class SubModule(torch.nn.Module):
     def __init__(self) -> None:
@@ -585,3 +587,5 @@ class TestNumericSuiteEager(QuantizationTestCase):
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
         self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))
+if __name__ == '__main__':
+    raise_on_run_directly("test/test_quantization.py")

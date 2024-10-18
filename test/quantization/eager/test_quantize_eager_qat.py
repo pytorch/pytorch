@@ -57,7 +57,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
 )
 
-from torch.testing._internal.common_utils import skipIfNoXNNPACK
+from torch.testing._internal.common_utils import raise_on_run_directly, skipIfNoXNNPACK
 
 hu.assert_deadline_disabled()
 from functools import reduce
@@ -1127,7 +1127,5 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         self.assertTrue(m_ref._weight_bias()[0].q_scale != m_ref_copy._weight_bias()[0].q_scale)
 
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

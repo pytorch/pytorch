@@ -18,16 +18,12 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TEST_CUDA,
+)
 from torch.testing._internal.jit_utils import JitTestCase, make_global
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestList(JitTestCase):
@@ -2995,3 +2991,7 @@ class TestScriptList(JitTestCase):
         for i in range(300):
             test = Test()
             test_script = torch.jit.script(test)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

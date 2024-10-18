@@ -38,6 +38,7 @@ from torch.testing._internal.common_quantization import (
     TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 @skipIfNoQNNPACK
@@ -1057,3 +1058,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
             self.assertTrue(
                 compute_sqnr(after_quant_result, after_quant_result_fx) > 35
             )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

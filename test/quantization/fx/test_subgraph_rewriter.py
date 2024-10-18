@@ -12,12 +12,9 @@ from torch.fx.experimental.rewriter import RewritingTracer
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_fx.py TESTNAME\n\n"
-                       "instead.")
 
 class TestSubgraphRewriter(JitTestCase):
 
@@ -487,3 +484,5 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

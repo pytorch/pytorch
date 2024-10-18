@@ -2,15 +2,8 @@
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestBatchMM(JitTestCase):
@@ -288,3 +281,7 @@ class TestBatchMM(JitTestCase):
         FileCheck().check_count("aten::mm", 10, exactly=True).check_not(
             "prim::MMBatchSide"
         ).run(test_batch_mm.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

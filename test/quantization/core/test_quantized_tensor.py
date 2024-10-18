@@ -9,9 +9,9 @@ import unittest
 from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
-from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, DeterministicGuard
+
+from torch.testing._internal.common_utils import raise_on_run_directly, TemporaryFileName, TestCase, DeterministicGuard
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_quantization import get_supported_device_types
 
@@ -1667,7 +1667,5 @@ class TestQuantizedTensor(TestCase):
         torch.testing.assert_close(dq, fq, rtol=0, atol=0)
 
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

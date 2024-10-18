@@ -34,7 +34,6 @@ from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.rendezvous.api import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.distributed import get_free_port
-from torch.testing._internal.common_utils import run_tests
 
 
 def do_nothing():
@@ -648,4 +647,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

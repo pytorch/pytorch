@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
     skipIfTorchDynamo,
@@ -31,12 +32,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 
@@ -3460,3 +3455,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         mod = self.freezeAndConvert(mod_eager)
         FileCheck().check("aten::add_").run(mod.graph)
         self.checkResults(mod_eager, mod)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

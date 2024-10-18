@@ -5,6 +5,7 @@ import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.quantized.reference as nnqr
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -15,6 +16,7 @@ from torch.ao.quantization.backend_config import (
 )
 from torch.ao.quantization.fuser_method_mappings import _sequential_wrapper2
 from torch.ao.quantization.fx.quantize_handler import _default_root_node_getter
+
 
 
 class TestBackendConfig(QuantizationTestCase):
@@ -323,8 +325,5 @@ class TestBackendConfig(QuantizationTestCase):
             "configs": [op_dict1, op_dict2],
         }
         self.assertEqual(conf.to_dict(), conf_dict)
-
 if __name__ == '__main__':
-    raise RuntimeError("This _test file is not meant to be run directly, use:\n\n"
-                       "\tpython _test/_test_quantization.py TESTNAME\n\n"
-                       "instead.")
+    raise_on_run_directly("test/test_quantization.py")

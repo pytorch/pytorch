@@ -37,5 +37,6 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor_data))
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in test_quantization.py if required.")

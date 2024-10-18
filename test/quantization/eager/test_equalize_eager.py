@@ -4,11 +4,13 @@ import torch
 import torch.nn as nn
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.ao.quantization.fuse_modules import fuse_modules
 
 import torch.ao.quantization._equalize as _equalize
 
 import copy
+
 
 class TestEqualizeEager(QuantizationTestCase):
     def checkChannelsEqualized(self, tensor1, tensor2, output_axis, input_axis):
@@ -188,3 +190,5 @@ class TestEqualizeEager(QuantizationTestCase):
         input = torch.randn(20, 3)
         self.assertEqual(fused_model1(input), fused_model2(input))
         self.assertEqual(fused_model1(input), model(input))
+if __name__ == '__main__':
+    raise_on_run_directly("test/test_quantization.py")

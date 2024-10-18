@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
     num_profiled_runs,
     ProfilingMode,
+    raise_on_run_directly,
 )
 
 
@@ -24,14 +25,6 @@ from torch.testing._internal.jit_utils import (
     disable_autodiff_subgraph_inlining,
     JitTestCase,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 @unittest.skipIf(
@@ -590,3 +583,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("= prim::DifferentiableGraph").check(
             "with prim::DifferentiableGraph"
         ).check(" = aten::relu").check("requires_grad=0").check("aten::relu").run(graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -43,7 +43,6 @@ from torch.ao.quantization.quantize import _get_observer_dict
 
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-
 from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     DeFusedEmbeddingBagLinear,
@@ -60,7 +59,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     to_tensor,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo, TestCase
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
@@ -1500,7 +1499,5 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
                              obs2match)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

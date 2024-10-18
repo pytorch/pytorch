@@ -43,6 +43,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class PT2EQATTestCase(QuantizationTestCase):
@@ -1260,3 +1261,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         self.checkGraphModuleNodes(
             exported_model.graph_module, expected_node_occurrence=node_occurrence
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

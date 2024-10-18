@@ -6,7 +6,11 @@ from typing import Set, Type
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import IS_MACOS, TestCase
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestDCE(TestCase):
@@ -293,3 +297,7 @@ class TestDCE(TestCase):
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
         torch.distributed.destroy_process_group()
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

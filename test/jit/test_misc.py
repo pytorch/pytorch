@@ -11,20 +11,13 @@ import torch.testing._internal.jit_utils
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from torch import jit
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.common_utils import freeze_rng_state, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global, RUN_CUDA_HALF
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestMisc(JitTestCase):
@@ -503,3 +496,7 @@ class TestMisc(JitTestCase):
         self.assertTrue(len(complex_indices) > 0)
         self.assertTrue(len(Scalar_indices) > 0)
         self.assertTrue(complex_indices[0] > Scalar_indices[0])
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

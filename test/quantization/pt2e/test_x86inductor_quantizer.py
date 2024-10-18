@@ -25,7 +25,12 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 
 
 if IS_WINDOWS and IS_CI:
@@ -2703,3 +2708,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

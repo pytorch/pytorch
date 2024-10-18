@@ -61,5 +61,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         self.assertTrue(torch.equal(apot_linear_result, fp_linear_result))
 
-if __name__ == '__main__':
-    unittest.main()
+
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in test_quantization.py if required.")

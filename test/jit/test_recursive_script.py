@@ -14,6 +14,7 @@ import torch.jit.frontend
 import torch.nn as nn
 from torch import Tensor
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 # Make the helper files in test/ importable
@@ -23,14 +24,6 @@ from torch.testing._internal.jit_utils import (
     _tmp_donotuse_dont_inline_everything,
     JitTestCase,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestRecursiveScript(JitTestCase):
@@ -798,3 +791,7 @@ class TestRecursiveScript(JitTestCase):
         # ScriptModule should correctly reflect the override.
         s = torch.jit.script(m)
         self.assertEqual(s.i_am_ignored(), "new")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

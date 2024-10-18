@@ -31,6 +31,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 import torch.fx
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -41,6 +42,7 @@ import copy
 import io
 import numpy as np
 import itertools
+
 
 """
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -2096,3 +2098,5 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                 self.assertTrue(qmax == 127)
                 found += 1
         self.assertTrue(found == 2)
+if __name__ == '__main__':
+    raise_on_run_directly("test/test_quantization.py")

@@ -5,6 +5,7 @@ import torch.ao.quantization
 from torch.testing._internal.common_utils import TestCase
 
 
+
 class TestDefaultObservers(TestCase):
     observers = [
         "default_affine_fixed_qparams_observer",
@@ -91,3 +92,6 @@ class TestQConfig(TestCase):
 
                 fake_quantize_weight = qconfig.weight()
                 self.assertEqual(fake_quantize_weight.reduce_range, reduce_ranges[1])
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in test_quantization.py if required.")

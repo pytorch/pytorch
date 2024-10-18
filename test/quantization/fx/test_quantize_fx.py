@@ -191,6 +191,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
+    raise_on_run_directly,
     skipIfTorchDynamo,
 )
 
@@ -9730,7 +9731,5 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted_ref(inp)
 
             torch.testing.assert_close(out, out_ref)
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

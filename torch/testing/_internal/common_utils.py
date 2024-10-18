@@ -106,6 +106,27 @@ except ImportError:
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
 
+# Set by parse_cmd_line_args() if called
+UNITTEST_ARGS = None
+GRAPH_EXECUTOR = None
+RERUN_DISABLED_TESTS = None
+SLOW_TESTS_FILE = None
+DISABLED_TESTS_FILE = None
+LOG_SUFFIX = None
+RUN_PARALLEL = None
+TEST_BAILOUTS = None
+USE_PYTEST = None
+PYTEST_SINGLE_TEST = None
+TEST_DISCOVER = None
+TEST_IN_SUBPROCESS = None
+TEST_SAVE_XML = None
+REPEAT_COUNT = None
+SEED = None
+SHOWLOCALS = None
+UNITTEST_ARGS = None
+CI_TEST_PREFIX = None
+CI_PT_ROOT = None
+CI_FUNCTORCH_ROOT = None
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -842,76 +863,6 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
-parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
-parser.add_argument('--subprocess', action='store_true',
-                    help='whether to run each test in a subprocess')
-parser.add_argument('--seed', type=int, default=1234)
-parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit-executor', '--jit_executor', type=str)
-parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
-parser.add_argument('--use-pytest', action='store_true')
-parser.add_argument('--save-xml', nargs='?', type=str,
-                    const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_CI else None)
-parser.add_argument('--discover-tests', action='store_true')
-parser.add_argument('--log-suffix', type=str, default="")
-parser.add_argument('--run-parallel', type=int, default=1)
-parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
-parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
-parser.add_argument('--rerun-disabled-tests', action='store_true')
-parser.add_argument('--pytest-single-test', type=str, nargs=1)
-if sys.version_info >= (3, 9):
-    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
-else:
-    parser.add_argument('--showlocals', action='store_true', default=False)
-    parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
-
-# Only run when -h or --help flag is active to display both unittest and parser help messages.
-def run_unittest_help(argv):
-    unittest.main(argv=argv)
-
-if '-h' in sys.argv or '--help' in sys.argv:
-    help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
-    help_thread.start()
-    help_thread.join()
-
-args, remaining = parser.parse_known_args()
-if args.jit_executor == 'legacy':
-    GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.jit_executor == 'profiling':
-    GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.jit_executor == 'simple':
-    GRAPH_EXECUTOR = ProfilingMode.SIMPLE
-else:
-    # infer flags based on the default settings
-    GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
-
-RERUN_DISABLED_TESTS = args.rerun_disabled_tests
-
-SLOW_TESTS_FILE = args.import_slow_tests
-DISABLED_TESTS_FILE = args.import_disabled_tests
-LOG_SUFFIX = args.log_suffix
-RUN_PARALLEL = args.run_parallel
-TEST_BAILOUTS = args.test_bailouts
-USE_PYTEST = args.use_pytest
-PYTEST_SINGLE_TEST = args.pytest_single_test
-TEST_DISCOVER = args.discover_tests
-TEST_IN_SUBPROCESS = args.subprocess
-TEST_SAVE_XML = args.save_xml
-REPEAT_COUNT = args.repeat
-SEED = args.seed
-SHOWLOCALS = args.showlocals
-if not getattr(expecttest, "ACCEPT", False):
-    expecttest.ACCEPT = args.accept
-UNITTEST_ARGS = [sys.argv[0]] + remaining
-torch.manual_seed(SEED)
-
-# CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
-CI_PT_ROOT = str(Path(os.getcwd()).parent)
-CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1060,7 +1011,10 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(argv=UNITTEST_ARGS, pytest=False):
+def get_report_path(argv=None, pytest=False):
+    if argv is None:
+        argv = UNITTEST_ARGS
+
     test_filename = sanitize_test_filename(argv[0])
     test_report_path = TEST_SAVE_XML + LOG_SUFFIX
     test_report_path = os.path.join(test_report_path, test_filename)
@@ -1111,7 +1065,113 @@ def get_pytest_test_cases(argv: List[str]) -> List[str]:
     return test_collector_plugin.tests
 
 
-def run_tests(argv=UNITTEST_ARGS):
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
+
+
+
+def parse_cmd_line_args():
+    global GRAPH_EXECUTOR
+    global RERUN_DISABLED_TESTS
+    global SLOW_TESTS_FILE
+    global DISABLED_TESTS_FILE
+    global LOG_SUFFIX
+    global RUN_PARALLEL
+    global TEST_BAILOUTS
+    global USE_PYTEST
+    global PYTEST_SINGLE_TEST
+    global TEST_DISCOVER
+    global TEST_IN_SUBPROCESS
+    global TEST_SAVE_XML
+    global REPEAT_COUNT
+    global SEED
+    global SHOWLOCALS
+    global UNITTEST_ARGS
+    global CI_TEST_PREFIX
+    global CI_PT_ROOT
+    global CI_FUNCTORCH_ROOT
+
+    is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
+    parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
+    parser.add_argument('--subprocess', action='store_true',
+                        help='whether to run each test in a subprocess')
+    parser.add_argument('--seed', type=int, default=1234)
+    parser.add_argument('--accept', action='store_true')
+    parser.add_argument('--jit-executor', '--jit_executor', type=str)
+    parser.add_argument('--repeat', type=int, default=1)
+    parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
+    parser.add_argument('--use-pytest', action='store_true')
+    parser.add_argument('--save-xml', nargs='?', type=str,
+                        const=_get_test_report_path(),
+                        default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--discover-tests', action='store_true')
+    parser.add_argument('--log-suffix', type=str, default="")
+    parser.add_argument('--run-parallel', type=int, default=1)
+    parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
+    parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+    parser.add_argument('--rerun-disabled-tests', action='store_true')
+    parser.add_argument('--pytest-single-test', type=str, nargs=1)
+    if sys.version_info >= (3, 9):
+        parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
+    else:
+        parser.add_argument('--showlocals', action='store_true', default=False)
+        parser.add_argument('--no-showlocals', dest='showlocals', action='store_false')
+
+    # Only run when -h or --help flag is active to display both unittest and parser help messages.
+    def run_unittest_help(argv):
+        unittest.main(argv=argv)
+
+    if '-h' in sys.argv or '--help' in sys.argv:
+        help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
+        help_thread.start()
+        help_thread.join()
+
+    args, remaining = parser.parse_known_args()
+    if args.jit_executor == 'legacy':
+        GRAPH_EXECUTOR = ProfilingMode.LEGACY
+    elif args.jit_executor == 'profiling':
+        GRAPH_EXECUTOR = ProfilingMode.PROFILING
+    elif args.jit_executor == 'simple':
+        GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+    else:
+        # infer flags based on the default settings
+        GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
+
+    RERUN_DISABLED_TESTS = args.rerun_disabled_tests
+
+    SLOW_TESTS_FILE = args.import_slow_tests
+    DISABLED_TESTS_FILE = args.import_disabled_tests
+    LOG_SUFFIX = args.log_suffix
+    RUN_PARALLEL = args.run_parallel
+    TEST_BAILOUTS = args.test_bailouts
+    USE_PYTEST = args.use_pytest
+    PYTEST_SINGLE_TEST = args.pytest_single_test
+    TEST_DISCOVER = args.discover_tests
+    TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_XML = args.save_xml
+    REPEAT_COUNT = args.repeat
+    SEED = args.seed
+    SHOWLOCALS = args.showlocals
+    if not getattr(expecttest, "ACCEPT", False):
+        expecttest.ACCEPT = args.accept
+    UNITTEST_ARGS = [sys.argv[0]] + remaining
+    torch.manual_seed(SEED)
+
+    # CI Prefix path used only on CI environment
+    CI_TEST_PREFIX = str(Path(os.getcwd()))
+    CI_PT_ROOT = str(Path(os.getcwd()).parent)
+    CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
+
+
+def run_tests(argv=None):
+    parse_cmd_line_args()
+
+    if argv is None:
+        argv = UNITTEST_ARGS
+
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
@@ -1158,7 +1218,7 @@ def run_tests(argv=UNITTEST_ARGS):
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
+            other_args += ['--save-xml', TEST_SAVE_XML]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else

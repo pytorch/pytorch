@@ -4,7 +4,7 @@ import torch
 import torch._lazy
 import torch._lazy.ts_backend
 from torch import float16, float32
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 torch._lazy.ts_backend.init()
@@ -37,3 +37,7 @@ class TestMetaKernel(TestCase):
     def test_add_invalid_device(self):
         with self.assertRaisesRegex(RuntimeError, ".*not a lazy tensor.*"):
             _ = torch.tensor([1], device="cpu") + torch.tensor([1], device="lazy")
+
+
+if __name__ == "__main__":
+    run_tests()

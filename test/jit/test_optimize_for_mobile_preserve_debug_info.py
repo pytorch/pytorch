@@ -3,7 +3,7 @@
 import torch
 import torch._C
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import skipIfNoXNNPACK
+from torch.testing._internal.common_utils import raise_on_run_directly, skipIfNoXNNPACK
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -265,3 +265,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             conv2d_activation=F.relu,
             conv2d_activation_kind="aten::relu",
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit_fuser_te.py")

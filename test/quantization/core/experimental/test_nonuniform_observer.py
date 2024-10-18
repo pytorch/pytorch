@@ -214,5 +214,6 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(alpha, expected_alpha)
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in test_quantization.py if required.")

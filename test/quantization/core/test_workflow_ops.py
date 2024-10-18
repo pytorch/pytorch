@@ -30,7 +30,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
@@ -1295,7 +1295,5 @@ class TestFusedObsFakeQuant(TestCase):
         self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

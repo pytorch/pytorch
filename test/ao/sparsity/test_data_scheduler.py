@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
 from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 logging.basicConfig(
@@ -181,3 +181,7 @@ class TestBaseDataScheduler(TestCase):
             name, _, _ = self._get_name_data_config(some_data, defaults)
             assert scheduler1.base_param[name] == scheduler2.base_param[name]
             assert scheduler1._last_param[name] == scheduler2._last_param[name]
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

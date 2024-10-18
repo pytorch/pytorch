@@ -13,7 +13,11 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTATOR
 from torch.fx import Node
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfCrossRef,
+)
 
 
 class TestHelperModules:
@@ -519,3 +523,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             BackendAQuantizer(),
             node_tags,
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

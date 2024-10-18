@@ -88,5 +88,7 @@ class TestFakeQuantize(unittest.TestCase):
 
         test = gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices), atol=1e-4)
 
-if __name__ == '__main__':
-    unittest.main()
+
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in test_quantization.py if required.")

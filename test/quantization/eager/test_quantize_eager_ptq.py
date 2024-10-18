@@ -26,6 +26,8 @@ from torch.ao.quantization import (
     QConfig,
 )
 
+from torch.testing._internal.common_utils import raise_on_run_directly
+
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -1521,7 +1523,5 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         self.assertTrue('DynamicQuantizedLinear' in str(q_model.fc))
         q_model(indices, torch.randn(5, 5))
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
