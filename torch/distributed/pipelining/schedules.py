@@ -1093,6 +1093,9 @@ def _add_send_recv(
         progress = False
         # go in order of ranks even if dict keys aren't ordered
         for rank in sorted(compute_actions):
+            if rank not in compute_actions:
+                continue
+
             assert (
                 len(compute_actions[rank]) > 0
             ), f"{rank=}, {len(compute_actions[rank])=}"
