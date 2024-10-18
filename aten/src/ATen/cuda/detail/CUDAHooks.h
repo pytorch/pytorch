@@ -56,6 +56,16 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
+  std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
+  StorageShareDevice(const c10::Storage& storage) const override;
+  c10::DataPtr StorageNewSharedDevice(c10::DeviceIndex device,
+                                      bool event_sync_required,
+                                      std::string s_ipc_event_handle,
+                                      std::string s_handle,
+                                      std::string ref_counter_handle,
+                                      ptrdiff_t ref_counter_offset,
+                                      ptrdiff_t storage_offset_bytes) const override;
+  int64_t getIpcRefCounterFileSize() const override;
 };
 
 } // at::cuda::detail
