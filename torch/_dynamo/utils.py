@@ -227,8 +227,13 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
 def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -> None:
     key = None
     if is_backward:
-        # Use compile id as the frame key for backwards compilation
-        key = str(torch._guards.CompileContext.current_compile_id())
+        # Use aot_graph_name as the frame key for backwards compilation
+        if tracing_context := torch._guards.TracingContext.try_get():
+            key = str(tracing_context.aot_graph_name)
+        else:
+            # This should never happen. If we don't have a tracing context,
+            # we don't log the backward metrics anyway (see dynamo_timed).
+            key = "None"
     else:
         key = str(curr_frame)
     # Convert to seconds (as a float)
@@ -322,7 +327,11 @@ def dynamo_timed(
             else:
                 # fwd + bwd compilation stages: inductor_compile, code_gen.
                 # use frame_key as time aggregation key for fwd graphs;
-                # use compile_id as time aggregation key for bwd graphs.
+                # use aot_graph_name as time aggregation key for bwd graphs.
+                # bwd graphs are usually (but not always) compiled outside
+                # dynamo. We previously used compile_id as the key, but with
+                # DDPOptimizer, we can have many bwd graphs with the same id.
+                # aot_graph_name is guaranteed to be unique.
                 if torch._guards.TracingContext.try_get() is not None:
                     aot_graph_name = str(
                         torch._guards.TracingContext.get().aot_graph_name
@@ -332,24 +341,21 @@ def dynamo_timed(
                     ) and fail_type is None:
                         _add_time_spent(frame_key, phase_name, time_spent)
                     elif "backward" in aot_graph_name:
-                        compile_id = str(
-                            torch._guards.CompileContext.current_compile_id()
-                        )
                         if fail_type is None:
-                            _add_time_spent(compile_id, phase_name, time_spent)
+                            _add_time_spent(aot_graph_name, phase_name, time_spent)
 
                         # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
                         # one record for one bwd graph.
                         if phase_name == "inductor_compile":
                             if fail_type is None:
                                 inductor_compile_time = frame_phase_timing[
-                                    compile_id
+                                    aot_graph_name
                                 ].get("inductor_compile", None)
-                                code_gen_time = frame_phase_timing[compile_id].get(
+                                code_gen_time = frame_phase_timing[aot_graph_name].get(
                                     "code_gen", None
                                 )
                                 remote_cache_time_saved = frame_phase_timing[
-                                    compile_id
+                                    aot_graph_name
                                 ].get("remote_cache_time_saved", None)
                             else:
                                 inductor_compile_time = None
@@ -357,6 +363,9 @@ def dynamo_timed(
                                 remote_cache_time_saved = None
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
+                            )
+                            compile_id = str(
+                                torch._guards.CompileContext.current_compile_id()
                             )
                             metrics = BwdCompilationMetrics(
                                 compile_id,
