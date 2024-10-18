@@ -1,12 +1,11 @@
 # mypy: allow-untyped-defs
 import abc
-import collections
 import dataclasses
 import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -26,6 +25,8 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -229,6 +230,8 @@ class MemoryDep(Dep):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        if isinstance(self.index, sympy.Integer):
+            return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
     def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
@@ -356,9 +359,6 @@ class ReadWrites:
     index_exprs: OrderedSet[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
-    op_counts: typing.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -367,7 +367,6 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
-            op_counts=self.op_counts,
         )
 
     def with_read(self, dep: Union[Dep, Set[Dep]]) -> "ReadWrites":
@@ -380,28 +379,20 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
-            op_counts=self.op_counts,
         )
 
     def merge(self, other: "ReadWrites"):
         reads = OrderedSet.union(self.reads, other.reads)
         writes = OrderedSet.union(self.writes, other.writes)
         index_exprs = OrderedSet.union(self.index_exprs, other.index_exprs)
-        op_counts = collections.Counter(self.op_counts)
-        op_counts.update(other.op_counts)
-        return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
+        return ReadWrites(reads - writes, writes, index_exprs)
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
         all_writes = OrderedSet.union(*[rw.writes for rw in read_writes])
         all_reads = OrderedSet.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = OrderedSet.union(*[rw.index_exprs for rw in read_writes])
-
-        op_counts: typing.Counter[Any] = collections.Counter()
-        for rw in read_writes:
-            op_counts.update(rw.op_counts)
-
-        return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
+        return ReadWrites(all_reads, all_writes, all_index_exprs)
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
@@ -410,7 +401,6 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
-            op_counts=self.op_counts,
         )
 
     def reads_and_writes(self):
@@ -461,7 +451,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
-        free_symbols = index.free_symbols
         index_vars = [*var_ranges.keys()]
         sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
@@ -521,27 +510,18 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def bucketize(
         self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        values: T,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
-        self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
-
-
-class _OpCounter:
-    """Shim to count how many times each op is used"""
-
-    def __init__(self, inner) -> None:
-        super().__init__()
-        self.parent_handler = inner
-        self._op_counts: typing.Counter[Any] = collections.Counter()
-
-    def __getattr__(self, name):
-        self._op_counts[name] += 1
-        return getattr(self.parent_handler, name)
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> None:
+        """Records the names of the buffers that bucketize will read from."""
+        self._reads.add(StarDep(boundaries[0]))
+        if sorter is not None:
+            self._reads.add(StarDep(sorter[0]))
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -549,7 +529,6 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         parent_handler = _RecordLoadStoreInner(
             var_ranges=var_ranges, normalize=normalize
         )
-        parent_handler = _OpCounter(parent_handler)
         super().__init__(parent_handler=parent_handler)
 
 
@@ -592,25 +571,59 @@ def extract_read_writes(
     *argsizes: Tuple[sympy.Expr, ...],
     normalize: bool = False,
     prefix: str = "d",
+    hidden_args=(),
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
-    rw = RecordLoadStore(var_ranges, normalize=normalize)
-    with V.set_ops_handler(rw):
-        fn(*args)
+
+    from .loop_body import LoopBody, MemoryUsageType
+
+    if isinstance(fn, LoopBody):
+        # Fast path to avoid tracing when we already have a LoopBody
+        inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
+        name_to_index = fn.indexing_from_args([*args, *hidden_args])
+        if fn.indirect_vars:
+            # mimic the `tmpX` naming tracing gives us
+            repl = {v: sympy.Symbol(f"tmp{i}") for i, v in enumerate(fn.indirect_vars)}
+            name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+        for entry in fn.memory_usage[MemoryUsageType.LOAD]:
+            inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
+        for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
+            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
+        for entry in fn.memory_usage[MemoryUsageType.STORE]:
+            inner.store(
+                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+            )
+        for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
+            inner.store_reduction(
+                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+            )
+        for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
+            inner.index_expr(name_to_index[entry.index_name], None)
+        for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+            # All that matters is that we record the buffer name, so place it in the
+            # "boundaries" name position to ensure that it's recorded.
+            inner.bucketize(
+                None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
+            )
+        # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+    else:
+        # Slow path tracing the function
+        rw = RecordLoadStore(var_ranges, normalize=normalize)
+        with V.set_ops_handler(rw):
+            fn(*args, *hidden_args)
+        inner = rw.parent_handler
 
     if normalize:
         range_vars = []  # Number of vars could differ due to normalization
     else:
-        range_vars = list(itertools.chain.from_iterable(args))
+        range_vars = [*itertools.chain.from_iterable(args)]
 
-    inner = rw.parent_handler.parent_handler
     return ReadWrites(
         OrderedSet(inner._reads),
         OrderedSet(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
-        rw.parent_handler._op_counts,
     )
 
 

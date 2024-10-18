@@ -19,7 +19,13 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfRocm,
+    TEST_MKL,
+)
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
 
 
@@ -1451,9 +1457,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             inputs,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
-            matcher_check_fn=matcher_check_fn
-            if matcher_check_fn is not None
-            else _default_matcher_check_fn,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else _default_matcher_check_fn
+            ),
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
@@ -1681,7 +1689,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
             )
 
-    def _qlinear_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
+    def _qlinear_add_cpu_test_helper(
+        self, use_relu=False, int8_mixed_bf16=False, is_qat=True, is_dynamic=True
+    ):
         r"""
         This testcase will quantize two consecutive Linear->Add(->relu) patterns as:
                  X
@@ -1783,72 +1793,65 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     (4 if is_dynamic else 5) + 2 * use_relu + to_bf16_after_binary,
                 )
 
-            is_qat_list = [False, True]
-            is_dynamic_list = [False, True]
-            cases = itertools.product(is_qat_list, is_dynamic_list)
-            for is_qat, is_dynamic in cases:
-                self._test_common(
+            self._test_common(
+                mod,
+                (v,),
+                check_quantization=True,
+                check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+                matcher_check_fn=matcher_check_fn,
+                is_qat=is_qat,
+                is_dynamic=is_dynamic,
+            )
+            if torch._inductor.config.cpp_wrapper:
+                # For CPP wrapper
+                self._test_code_common(
                     mod,
                     (v,),
+                    [
+                        "torch.ops.onednn.qlinear_pointwise.tensor",
+                        "torch.ops.onednn.qlinear_pointwise.binary",
+                    ],
+                    [],
                     check_quantization=True,
-                    check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
-                    matcher_check_fn=matcher_check_fn,
-                    is_qat=is_qat,
-                    is_dynamic=is_dynamic,
+                    num_include_ops=[4, 4],
                 )
-                if torch._inductor.config.cpp_wrapper:
-                    # For CPP wrapper
-                    self._test_code_common(
-                        mod,
-                        (v,),
-                        [
-                            "torch.ops.onednn.qlinear_pointwise.tensor",
-                            "torch.ops.onednn.qlinear_pointwise.binary",
-                        ]
-                        if config.abi_compatible
-                        else [
-                            "op_onednn_qlinear_pointwise_tensor.call",
-                            "op_onednn_qlinear_pointwise_binary_tensor.call",
-                        ],
-                        [],
-                        check_quantization=True,
-                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
-                    )
-                else:
-                    # For python wrapper
-                    self._test_code_common(
-                        mod,
-                        (v,),
-                        [
-                            "torch.ops.onednn.qlinear_pointwise.tensor",
-                            "torch.ops.onednn.qlinear_pointwise.binary",
-                        ],
-                        [],
-                        check_quantization=True,
-                        num_include_ops=[2, 2],
-                    )
+            else:
+                # For python wrapper
+                self._test_code_common(
+                    mod,
+                    (v,),
+                    [
+                        "torch.ops.onednn.qlinear_pointwise.tensor",
+                        "torch.ops.onednn.qlinear_pointwise.binary",
+                    ],
+                    [],
+                    check_quantization=True,
+                    num_include_ops=[2, 2],
+                )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qlinear_add_cpu(self):
-        self._qlinear_add_cpu_test_helper()
+    @parametrize("use_relu", [True, False])
+    @parametrize("is_qat", [True, False])
+    @parametrize("is_dynamic", [True, False])
+    def test_qlinear_add_cpu(self, use_relu, is_qat, is_dynamic):
+        self._qlinear_add_cpu_test_helper(
+            use_relu=use_relu, is_qat=is_qat, is_dynamic=is_dynamic
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    def test_qlinear_add_int8_mixed_bf16(self):
-        self._qlinear_add_cpu_test_helper(int8_mixed_bf16=True)
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    def test_qlinear_add_relu_cpu(self):
-        self._qlinear_add_cpu_test_helper(use_relu=True)
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNNBF16
-    @skipIfNoONEDNN
-    def test_qlinear_add_relu_int8_mixed_bf16(self):
-        self._qlinear_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
+    @parametrize("use_relu", [True, False])
+    @parametrize("is_qat", [True, False])
+    @parametrize("is_dynamic", [True, False])
+    def test_qlinear_add_int8_mixed_bf16(self, use_relu, is_qat, is_dynamic):
+        self._qlinear_add_cpu_test_helper(
+            int8_mixed_bf16=True,
+            use_relu=use_relu,
+            is_qat=is_qat,
+            is_dynamic=is_dynamic,
+        )
 
     def _qlinear_dequant_promotion_cpu_test_helper(
         self,
@@ -1889,9 +1892,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             inputs,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
-            matcher_check_fn=matcher_check_fn
-            if matcher_check_fn is not None
-            else default_matcher_check_fn,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else default_matcher_check_fn
+            ),
             is_dynamic=is_dynamic,
         )
 
@@ -2084,7 +2089,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_qflatten(self):
         r"""
-        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten->cat pattern.
         """
 
         class M(torch.nn.Module):
@@ -2099,8 +2104,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
-                return torch.flatten(
-                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                return torch.cat(
+                    [
+                        torch.flatten(
+                            self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                        )
+                    ]
                 )
 
         mod = M().eval()
@@ -2585,19 +2594,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_woq_int8(self):
         class M(torch.nn.Module):
-            def forward(self, x, weight, scales):
-                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
 
-        mod = M().eval()
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
         x_shape = (1, 1, 256)
-        w_shape = (12, 256)
         s_shape = 12
         x_strides = [
             (256, 256, 1),  # linear dispatching to mm
             (256, 32, 1),  # linear dispatching to bmm
         ]
-        for x_stride in x_strides:
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
             x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w_shape = (12, 256)
             w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
             s = torch.randn(s_shape, dtype=torch.bfloat16)
 
@@ -2831,6 +2857,8 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 quantizer=quantizer,
             )
 
+
+instantiate_parametrized_tests(TestPatternMatcher)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():

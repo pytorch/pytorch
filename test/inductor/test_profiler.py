@@ -172,7 +172,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_hooks(self):
-        from triton.compiler import CompiledKernel
+        from triton.compiler import CompiledKernel  # @manual
 
         hooks_called = {"enter": False, "exit": False}
 

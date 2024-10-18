@@ -2,7 +2,16 @@
 import inspect
 import warnings
 from functools import wraps
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple, TypeVar
+from typing import (
+    Callable,
+    List,
+    NamedTuple,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 from typing_extensions import ParamSpec
 
 import torch
@@ -189,16 +198,21 @@ def is_cpu_scalar(x: TensorLikeType) -> bool:
     return x.dim() == 0 and x.device.type == "cpu"
 
 
-def _safe_copy_out(
-    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
-):
-    # Checks same device
-    if not is_cpu_scalar(copy_from) and copy_from.device != copy_to.device:
+def check_copy_devices(*, copy_from: TensorLikeType, copy_to: TensorLikeType) -> None:
+    if copy_from.device != copy_to.device:
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
+
+
+def _safe_copy_out(
+    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+):
+    # Checks same device
+    if not is_cpu_scalar(copy_from):
+        check_copy_devices(copy_from=copy_from, copy_to=copy_to)
 
     # Checks safe cast
     if exact_dtype:
@@ -267,16 +281,33 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
+
+            def maybe_check_copy_devices(out):
+                if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
+                    check_copy_devices(copy_from=args[0], copy_to=out)
+
+            if isinstance(out, (tuple, list)):
+                for o in out:
+                    maybe_check_copy_devices(o)
+            else:
+                maybe_check_copy_devices(out)
+
             if pass_is_out:
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
             assert (
-                isinstance(result, TensorLike)
-                and is_tensor
-                or isinstance(result, Tuple)  # type: ignore[arg-type]
-                and len(result) == len(out_names)  # type: ignore[arg-type]
+                (isinstance(result, TensorLike) and is_tensor)
+                or (
+                    isinstance(result, Tuple)  # type: ignore[arg-type]
+                    and len(result) == len(out_names)  # type: ignore[arg-type]
+                )
+                or (
+                    fn.__name__ == "unbind"
+                    and isinstance(result, (List, Tuple))  # type: ignore[arg-type]
+                )
             )
+            # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
             if out is not None:
                 # Naively you might expect this assert to be true, but
                 # it's not:
@@ -294,7 +325,7 @@ def out_wrapper(
                 # the output tensor, but not the result--which will
                 # be a normal meta tensor, but this is perfectly
                 # harmless.
-                if is_tensor:
+                if is_tensor and fn.__name__ != "unbind":
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
@@ -302,7 +333,10 @@ def out_wrapper(
                     )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
-                    assert isinstance(out, Tuple)  # type: ignore[arg-type]
+                    if fn.__name__ != "unbind":
+                        assert isinstance(out, Tuple)  # type: ignore[arg-type]
+                    else:
+                        assert isinstance(out, (List, Tuple))  # type: ignore[arg-type]
                     torch._check_type(
                         len(out) == len(result),  # type: ignore[arg-type]
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]

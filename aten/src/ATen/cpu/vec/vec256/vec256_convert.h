@@ -208,8 +208,27 @@ struct VecConvert<
             (is_reduced_floating_point_v<src_t> && is_8bit_integer_v<dst_t>),
         void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<src_t, 1>& src) {
-    VectorizedN<float, 1> tmp_fp32 = VecConvert<float, 1, src_t, 1>::apply(src);
-    return VecConvert<dst_t, 1, float, 1>::apply(tmp_fp32);
+    VectorizedN<float, 2> tmp_fp32 = VecConvert<float, 2, src_t, 1>::apply(src);
+    return VecConvert<dst_t, 1, float, 2>::apply(tmp_fp32);
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<
+    dst_t,
+    1,
+    float,
+    2,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 2>& src) {
+    at::vec::Vectorized<dst_t> vec1 = convert_float_to_int8<dst_t>(src[0]);
+    at::vec::Vectorized<dst_t> vec2 = convert_float_to_int8<dst_t>(src[1]);
+    __m128 lane2 = _mm256_castps256_ps128(_mm256_castsi256_ps(vec2));
+    __m256 combined = _mm256_insertf128_ps(_mm256_castsi256_ps(vec1), lane2, 1);
+    // Shuffle [191:128] bit from combined in to [127:64] bit of result
+    __m256i result = _mm256_permute4x64_epi64(_mm256_castps_si256(combined), 0b11011000);
+    return at::vec::Vectorized<dst_t>(result);
   }
 };
 
@@ -226,6 +245,25 @@ struct VecConvert<
   }
 };
 
+template <typename src_t>
+struct VecConvert<
+    float,
+    2,
+    src_t,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
+        void>> {
+  static inline VectorizedN<float, 2> apply(const VectorizedN<src_t, 1>& src) {
+    // Shuffle [127:64] bit from src[0] in to [191:128] bit of shuffled
+    __m256i shuffled = _mm256_permute4x64_epi64(src[0], 0b11011000);
+    __m256i src2 = _mm256_castsi128_si256(
+      _mm_castps_si128(
+        _mm256_extractf128_ps(_mm256_castsi256_ps(shuffled), 1) // Extract the second 128-bit lane
+      )
+    );
+    return VectorizedN<float, 2>(convert_int8_to_float<src_t>(src[0]), convert_int8_to_float<src_t>(src2));
+  }
+};
 
 template <typename dst_t>
 struct VecConvert<
@@ -233,9 +271,9 @@ struct VecConvert<
     1,
     int64_t,
     2,
-    typename std::enable_if<
+    std::enable_if_t<
         std::is_same_v<dst_t, int8_t> ||
-        std::is_same_v<dst_t, uint8_t>>::type> {
+        std::is_same_v<dst_t, uint8_t>>> {
   static inline VectorizedN<dst_t, 1> apply(
       const VectorizedN<int64_t, 2>& src) {
     return VecConvert<dst_t, 1, int32_t, 1>::apply(
@@ -246,7 +284,7 @@ struct VecConvert<
 #endif /* defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) */
 
 
-#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || defined(CPU_CAPABILITY_NEON)
+#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <typename src_t>
 struct VecConvert<
     float,
@@ -261,18 +299,17 @@ struct VecConvert<
 };
 #endif
 
-#if defined(CPU_CAPABILITY_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <>
 struct VecConvert<float, 1, BFloat16, 1> {
   static inline VectorizedN<float, 1> apply(
       const VectorizedN<BFloat16, 1>& src) {
     VectorizedN<float, 1> result;
     uint16x8_t u16_8 = vld1q_u16(reinterpret_cast<const uint16_t*>(&src[0]));
-    int32x4_t shift = vdupq_n_s32(16);
     auto u16_low1 = vget_low_u16(u16_8);
     auto u16_high1 = vget_high_u16(u16_8);
-    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_low1), shift));
-    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_high1), shift));
+    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_low1), 16));
+    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_high1), 16));
     result[0] = {f32x4_0, f32x4_1};
     return result;
   }

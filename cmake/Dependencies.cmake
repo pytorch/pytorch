@@ -372,9 +372,6 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
-  # Always use third_party/pthreadpool.
-  set(USE_INTERNAL_PTHREADPOOL_IMPL OFF CACHE BOOL "" FORCE)
-
   if(NOT TARGET pthreadpool)
     if(USE_SYSTEM_PTHREADPOOL)
       add_library(pthreadpool SHARED IMPORTED)
@@ -384,7 +381,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
         message(FATAL_ERROR "Cannot find pthreadpool")
       endif()
       message("-- Found pthreadpool: ${PTHREADPOOL_LIBRARY}")
-    elseif(NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    else()
       if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
         set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
         set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -400,11 +397,7 @@ if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
-    if(USE_INTERNAL_PTHREADPOOL_IMPL)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
-    else()
-      list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
-    endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS pthreadpool)
   endif()
 else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
@@ -458,10 +451,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     if(NOT TARGET pytorch_qnnpack)
-      if(NOT USE_SYSTEM_PTHREADPOOL AND USE_INTERNAL_PTHREADPOOL_IMPL)
-        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-      endif()
-
       set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
       set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
@@ -474,28 +463,6 @@ if(USE_PYTORCH_QNNPACK)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
       # QNNPACK depends on gemmlowp headers
       target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-
-      if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
-        target_compile_definitions(
-          pytorch_qnnpack PRIVATE
-          pthreadpool_t=legacy_pthreadpool_t
-          pthreadpool_function_1d_t=legacy_pthreadpool_function_1d_t
-          pthreadpool_function_1d_tiled_t=legacy_pthreadpool_function_1d_tiled_t
-          pthreadpool_function_2d_t=legacy_pthreadpool_function_2d_t
-          pthreadpool_function_2d_tiled_t=legacy_pthreadpool_function_2d_tiled_t
-          pthreadpool_function_3d_tiled_t=legacy_pthreadpool_function_3d_tiled_t
-          pthreadpool_function_4d_tiled_t=legacy_pthreadpool_function_4d_tiled_t
-          pthreadpool_create=legacy_pthreadpool_create
-          pthreadpool_destroy=legacy_pthreadpool_destroy
-          pthreadpool_get_threads_count=legacy_pthreadpool_get_threads_count
-          pthreadpool_compute_1d=legacy_pthreadpool_compute_1d
-          pthreadpool_parallelize_1d=legacy_pthreadpool_parallelize_1d
-          pthreadpool_compute_1d_tiled=legacy_pthreadpool_compute_1d_tiled
-          pthreadpool_compute_2d=legacy_pthreadpool_compute_2d
-          pthreadpool_compute_2d_tiled=legacy_pthreadpool_compute_2d_tiled
-          pthreadpool_compute_3d_tiled=legacy_pthreadpool_compute_3d_tiled
-          pthreadpool_compute_4d_tiled=legacy_pthreadpool_compute_4d_tiled)
-      endif()
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -1093,8 +1060,8 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1358,6 +1325,15 @@ if(NOT INTERN_BUILD_MOBILE)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+  else()
+    if(WERROR)
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
+      endif()
+    endif()
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")

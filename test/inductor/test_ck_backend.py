@@ -3,6 +3,12 @@ import logging
 import os
 import unittest
 
+
+try:
+    from .test_aot_inductor_utils import AOTIRunnerUtil
+except ImportError:
+    from test_aot_inductor_utils import AOTIRunnerUtil
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -11,6 +17,12 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+
+try:
+    from .test_fp8 import _quantize_rowwise, _quantize_tensorwise
+except ImportError:
+    from test_fp8 import _quantize_rowwise, _quantize_tensorwise
 
 
 torch.set_float32_matmul_precision("high")
@@ -43,7 +55,7 @@ class TestCKBackend(TestCase):
 
         torch.random.manual_seed(1234)
         try:
-            import ck4inductor
+            import ck4inductor  # @manual
 
             self.ck_dir = os.path.dirname(ck4inductor.__file__)
             os.environ["TORCHINDUCTOR_CK_DIR"] = self.ck_dir
@@ -59,12 +71,12 @@ class TestCKBackend(TestCase):
             ] = old_disable_fresh_cache_envvar
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("autotune_in_subproc", (True, False))
+    @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, autotune_in_subproc
+        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -92,12 +104,24 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-            Y = mm(a, b)
+            if use_aoti:
+                Y_compiled = AOTIRunnerUtil.run(
+                    device="cuda",
+                    model=mm,
+                    example_inputs=(a, b),
+                )
+            else:
+
+                @torch.compile(dynamic=False)
+                def compiled_mm(x, w):
+                    return mm(x, w)
+
+                Y_compiled = compiled_mm(a, b)
+
+            Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK",))
     @parametrize("autotune_in_subproc", (True,))
@@ -144,7 +168,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
@@ -179,7 +202,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
@@ -216,7 +238,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
@@ -252,6 +273,96 @@ class TestCKBackend(TestCase):
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
             torch.testing.assert_close(Y_compiled, Y_eager)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("dtype", (torch.bfloat16,))
+    @parametrize("use_fast_accum", (True,))
+    @parametrize("quantize_type", ("tensorwise", "rowwise"))
+    def test_max_autotune_scaled_mm(
+        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type
+    ):
+        tensor_options = {"device": "cuda", "dtype": dtype}
+
+        x = torch.randn(2240, 256, **tensor_options)
+        w = torch.randn(2048, 256, **tensor_options)
+
+        dtype_float8 = torch.float8_e4m3fnuz
+
+        f_quantize = (
+            _quantize_tensorwise if quantize_type == "tensorwise" else _quantize_rowwise
+        )
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = f_quantize(w, dtype_float8)
+        w_t_fp8 = w_fp8.t()
+        w_inverse_scale_t = w_inverse_scale.t()
+
+        # quantize input x
+        x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
+
+        assert "rocm" in dir(config)
+
+        bias = None
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        if quantize_type == "tensorwise":
+            y_eager = linear(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale_t,
+                bias,
+            )
+        else:
+            # FIXME when rowwise quantize is supported by pt eager on ROCm
+            w_fp8_tw, w_inverse_scale_tw = _quantize_tensorwise(w, dtype_float8)
+            w_fp8_tw_t = w_fp8_tw.t()
+            w_inverse_scale_tw_t = w_inverse_scale_tw.t()
+            x_fp8_tw, x_inverse_scale_tw = _quantize_tensorwise(x, dtype_float8)
+            y_eager = linear(
+                x_fp8_tw,
+                x_inverse_scale_tw,
+                w_fp8_tw_t,
+                w_inverse_scale_tw_t,
+                bias,
+            )
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 24,
+                "rocm.n_max_profiling_configs": 24,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+            linear_compiled = torch.compile(
+                linear, backend="inductor", mode="max-autotune"
+            )
+            y_compiled = linear_compiled(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale_t,
+                bias,
+            )
+            self.assertEqual(y_eager.dtype, dtype)
+            self.assertEqual(y_compiled.dtype, dtype)
+
+            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
 
 if __name__ == "__main__":
