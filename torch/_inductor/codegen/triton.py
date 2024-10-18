@@ -2984,7 +2984,6 @@ class TritonKernel(SIMDKernel):
                 code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -3017,7 +3016,7 @@ class TritonKernel(SIMDKernel):
         # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
         # zeros, then, although we still mutate the data, we don't care about those
         # mutations because we don't make any assumptions about the contents of the
-        # workspace buffer.  Similarly, ZERO_PER_GRAPH requires the kenrel to return
+        # workspace buffer.  Similarly, ZERO_PER_GRAPH requires the kernel to return
         # the buffer back to its original state.
         for argname, arg in zip(argdefs, signature):
             if (
