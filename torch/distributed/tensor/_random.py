@@ -111,13 +111,13 @@ class _RNGStateTracker:
     def __init__(self, device_type: str = "cuda"):
         self._device_type = device_type
         self._device_handle = _get_device_handle(device_type)
-        if not (self._device_handle and self._device_handle.is_available()):
+        if not (self._device_handle and torch.acc.is_available()):
             raise RuntimeError(
                 f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
             )
 
         self._states: Dict[str, Tensor] = {}
-        self._devices = [self._device_handle.current_device()]
+        self._devices = [torch.acc.current_device()]
         self._use_distribute_region = True
 
     @property

@@ -2063,9 +2063,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
             def wait(self):
                 if self._flat_param_handle is not None:
-                    current_stream = (
-                        self._flat_param_handle._device_handle.current_stream()
-                    )
+                    current_stream = torch.acc.current_stream()
                     current_stream.wait_event(self._unshard_event)
                     self._flat_param_handle = None
 
@@ -2086,7 +2084,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def _wait_unshard_streams_on_current_stream(self):
         _wait_for_computation_stream(
-            self._device_handle.current_stream(),
+            torch.acc.current_stream(),
             self._unshard_stream,
             self._pre_unshard_stream,
         )
