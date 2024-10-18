@@ -20,8 +20,10 @@ enum class C10_API_ENUM ActivityType {
 };
 
 inline std::string actToString(ActivityType t) {
-  const std::string ActivityTypeNames[] = {
-      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  const std::array<
+      std::string,
+      static_cast<size_t>(ActivityType::NUM_KINETO_ACTIVITIES)>
+      ActivityTypeNames = {"CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
   return ActivityTypeNames[static_cast<int>(t)];
 }
 
@@ -94,7 +96,7 @@ struct TORCH_API ExperimentalConfig {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
