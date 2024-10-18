@@ -323,6 +323,53 @@ def forward(self, x):
             self.assertEqual(node.inputs[0].name, "self")
             self.assertEqual(node.inputs[1].name, "dim")
 
+    def test_serialize_sym_float(self) -> None:
+        class DynamicFloatSimpleModel(torch.nn.Module):
+            def __init__(self, multiplier: torch.SymFloat):
+                super().__init__()
+                self.multiplier = multiplier
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                e = d * self.multiplier
+                e_s0 = e.shape[0]
+                e_s1 = e.shape[1]
+                e_s3 = e_s0 * e_s1
+                f = e.view(e_s3)
+                return torch.cat([f, f])
+
+        multiplier_sym = torch.SymFloat("multiplier_sym")
+        model = DynamicFloatSimpleModel(multiplier_sym)
+        inputs = (
+            torch.randn(2, 4),
+            torch.randn(4, 7),
+            torch.randn(2, 7),
+        )
+        dim0_ac = Dim("dim0_ac")
+        dim1_bc = Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }        
+        exported_module = export(
+            model,
+            inputs,
+            dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serializer = ExportedProgramSerializer()
+        serialized = serializer.serialize(exported_module)
+
+        sym_float_nodes = [
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == "torch.ops.aten.sym_float.float"
+        ]
+
+        for node in sym_float_nodes:
+            self.assertEqual(node.inputs[0].name, "self")
+            self.assertEqual(node.inputs[1].name, "multiplier_sym")
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
