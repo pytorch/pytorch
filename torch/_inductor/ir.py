@@ -233,6 +233,12 @@ def fuse_reindexing(
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
+def get_fill_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+    """
+    Convert strides to fill order (argsort)
+    """
+    sorted_idx: List[int] = argsort(seq)
+    return sorted_idx
 
 def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
@@ -250,7 +256,7 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     """
     Convert strides to stride order
     """
-    sorted_idx: List[int] = argsort(seq)
+    sorted_idx: List[int] = get_fill_order(seq)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
