@@ -301,6 +301,29 @@ class TestSerialize(TestCase):
             self.assertEqual(node.inputs[0].name, "self")
             self.assertEqual(node.inputs[1].name, "dim")
 
+    def test_serialize_sym_bool(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x[:,-y.shape[0]:,:]
+                return z
+
+        inputs = (torch.ones(4, 5 ,10), torch.ones(3))
+        # Compile with dynamic_shapes set to get operator.neg involved
+        exported_module = export(
+            MyModule(), inputs, dynamic_shapes={"x": {}, "y": {0: Dim("seqlen", max=4)}}
+
+        )
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        sym_nodes = [
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == '_operator.neg'
+        ]
+        self.assertNotEqual(len(sym_nodes), 0)
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
