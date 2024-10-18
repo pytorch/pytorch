@@ -1448,14 +1448,30 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
-      self.is_floating_point() || self.is_complex(),
-      "nanmean(): expected input to have floating point or complex dtype but got ",
-      self.scalar_type());
-  const auto factor =
-      at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
+  // Allow all types, but handle them differently
+  if (self.is_floating_point() || self.is_complex()) {
+    // Existing logic for floating point and complex types
+    const auto factor =
+        at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
+    return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
+  } else if (self.is_integral() || self.scalar_type() == ScalarType::Bool) {
+    // New logic for integer and boolean types
+    if (self.numel() == 0) {
+      // Handle empty tensor case
+      return self.to(opt_dtype.value_or(ScalarType::Double)).fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      // For non-empty tensors, cast to float, compute mean, then cast back if necessary
+      auto result = self.to(ScalarType::Double).mean(dim, keepdim);
+      if (opt_dtype.has_value()) {
+        result = result.to(opt_dtype.value());
+      }
+      return result;
+    }
+  } else {
+    TORCH_CHECK(false, "nanmean(): unsupported dtype ", self.scalar_type());
+  }
 }
+
 
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
