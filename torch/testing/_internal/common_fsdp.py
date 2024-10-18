@@ -1498,14 +1498,16 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                     continue
                 # barrier to ensure thread reading the same value
                 original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
-                original_compile_threads = torch._inductor.config.compile_threads
+                original_do_not_use_compile_threads = (
+                    torch._inductor.config.do_not_use_compile_threads
+                )
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
                     torch._dynamo.config.skip_fsdp_hooks = True
-                    torch._inductor.config.compile_threads = 1
+                    torch._inductor.config.do_not_use_compile_threads = True
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
                     raise NotImplementedError(
@@ -1520,7 +1522,9 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
                 torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
-                torch._inductor.config.compile_threads = original_compile_threads
+                torch._inductor.config.do_not_use_compile_threads = (
+                    original_do_not_use_compile_threads
+                )
 
         return wrapper
 

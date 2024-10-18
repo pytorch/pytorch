@@ -94,7 +94,7 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": autotune_in_subproc,
@@ -143,7 +143,7 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": autotune_in_subproc,
@@ -187,7 +187,7 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
@@ -218,7 +218,7 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
@@ -254,7 +254,7 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
@@ -340,7 +340,7 @@ class TestCKBackend(TestCase):
                 bias,
             )
 
-        with config.patch(
+        with config.patch_non_frozen(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,

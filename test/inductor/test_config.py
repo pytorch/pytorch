@@ -21,11 +21,19 @@ class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls._saved_frozen = object.__getattribute__(config, "_frozen_keys")
         cls._saved_config = config.save_config()
+        object.__setattr__(config, "_frozen_keys", set())
 
     def tearDown(self):
         super().tearDown()
+        object.__setattr__(config, "_frozen_keys", set())
         config.load_config(self._saved_config)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        object.__setattr__(config, "_frozen_keys", cls._saved_frozen)
 
     def test_set(self):
         config.max_fusion_size = 13337
@@ -57,6 +65,46 @@ class TestInductorConfig(TestCase):
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
 
+    def test_freeze(self):
+        config.compile_threads = 1
+        config.compile_threads = 2
+        config.freeze_key("compile_threads")
+
+        # Freezing again should do nothing.
+        config.freeze_key("compile_threads")
+
+        # Test "changing" it to the same value
+        config.compile_threads = 2
+
+        def change_compile_threads():
+            config.compile_threads = 3
+
+        self.assertRaises(AttributeError, change_compile_threads)
+
+        def test_non_existant():
+            config.freeze_key("does_not_exist")
+
+        self.assertRaises(AttributeError, test_non_existant)
+
+    def test_load_save_freeze_same(self):
+        # Loading the same value is always fine
+        config.compile_threads = 1
+        saved = config.save_config()
+        config.freeze_key("compile_threads")
+        config.load_config(saved)
+
+    def test_load_save_freeze_different(self):
+        # Loading a different value to frozen key should raise an error
+        config.compile_threads = 1
+        saved = config.save_config()
+        config.compile_threads = 2
+        config.freeze_key("compile_threads")
+
+        def load_config():
+            config.load_config(saved)
+
+        self.assertRaises(AttributeError, load_config)
+
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
         self.assertFalse(hasattr(config, "missing_name"))
@@ -85,6 +133,33 @@ class TestInductorConfig(TestCase):
             self.assertEqual(config.cpp.threads, 9000)
             self.assertEqual(config.max_fusion_size, 9001)
             with config.patch("cpp.threads", 8999):
+                self.assertEqual(config.cpp.threads, 8999)
+            self.assertEqual(config.cpp.threads, 9000)
+
+    def test_patch_non_frozen(self):
+        with config.patch_non_frozen(max_fusion_size=456):
+            self.assertEqual(config.max_fusion_size, 456)
+            with config.patch_non_frozen(max_fusion_size=789):
+                self.assertEqual(config.max_fusion_size, 789)
+            self.assertEqual(config.max_fusion_size, 456)
+
+        with config.patch_non_frozen({"cpp.threads": 9000, "max_fusion_size": 9001}):
+            self.assertEqual(config.cpp.threads, 9000)
+            self.assertEqual(config.max_fusion_size, 9001)
+            with config.patch_non_frozen("cpp.threads", 8999):
+                self.assertEqual(config.cpp.threads, 8999)
+            self.assertEqual(config.cpp.threads, 9000)
+
+        config.compile_threads = 1
+        config.freeze_key("compile_threads")
+
+        with config.patch_non_frozen(compile_threads=2):
+            self.assertEqual(config.compile_threads, 1)
+
+        with config.patch_non_frozen({"cpp.threads": 9000, "compile_threads": 2}):
+            self.assertEqual(config.cpp.threads, 9000)
+            self.assertEqual(config.compile_threads, 1)
+            with config.patch_non_frozen("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
 

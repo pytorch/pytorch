@@ -601,6 +601,11 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Used to run compile tasks synchronously for testing. When set to true, this
+# has the effect of setting compile_threads to 1, without permanently affecting
+# the thread or process pools.
+do_not_use_compile_threads: bool = False
+
 # gemm autotuning global cache dir
 if is_fbcode():
     try:

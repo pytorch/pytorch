@@ -95,7 +95,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(torch._inductor.config, "reorder_for_locality", False)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     @patch.object(
@@ -134,7 +134,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(torch._inductor.config, "reorder_for_locality", False)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     @patch.object(
@@ -181,7 +181,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     @patch.object(
         torch._inductor.config,
@@ -234,7 +234,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     @patch.object(
         torch._inductor.config,
@@ -286,7 +286,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     @patch.object(
         torch._inductor.config,
@@ -342,7 +342,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "do_not_use_compile_threads", True)
     @patch.object(
         torch._inductor.config,
         "_pre_fusion_custom_pass",

@@ -68,6 +68,7 @@ def install_config_module(module: ModuleType) -> None:
     module._config = config  # type: ignore[attr-defined]
     module._default = default  # type: ignore[attr-defined]
     module._allowed_keys = set(config.keys())  # type: ignore[attr-defined]
+    module._frozen_keys = set()  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -129,6 +130,7 @@ class ConfigModule(ModuleType):
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
+    _frozen_keys: Set[str]
     _is_dirty: bool
     _hash_digest: Optional[bytes]
 
@@ -142,6 +144,17 @@ class ConfigModule(ModuleType):
             super().__setattr__(name, value)
         elif name not in self._allowed_keys:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
+        elif name in self._frozen_keys:
+            if value == self._config[name]:
+                # Setting to the same value is fine
+                return
+
+            raise AttributeError(
+                f"{self.__name__}.{name} is frozen so you cannot "
+                "change its value. Consider setting the value "
+                "before using any functionality which freezes "
+                "the relevant config value"
+            )
         else:
             self._config[name] = value
 
@@ -176,6 +189,16 @@ class ConfigModule(ModuleType):
                 continue
             config[key] = self._config[key]
         return config
+
+    def freeze_key(self, name: str) -> None:
+        """Freeze a key to prevent the value from being changed by the user.
+        Use this if a component has already read the value in the config such
+        that changing the value will have no effect."""
+
+        # Try and "get" the key to raise an exception if it does not exist.
+        self.__getattr__(name)
+
+        self._frozen_keys.add(name)
 
     def codegen_config(self) -> str:
         """Convert config to Python statements that replicate current config.
@@ -223,6 +246,19 @@ class ConfigModule(ModuleType):
             config = pickle.loads(maybe_pickled_config)
         else:
             config = maybe_pickled_config
+
+        if isinstance(config, dict):
+            for k in config.keys():
+                if k not in self._frozen_keys:
+                    continue
+                if config[k] != self._config[k]:
+                    raise AttributeError(
+                        f"{self.__name__}.{k} is frozen so you cannot "
+                        "change its value. Consider loading the config "
+                        "before using any functionality which freezes "
+                        "the relevant config value"
+                    )
+
         self._config.update(config)
 
     def get_config_copy(self) -> Dict[str, Any]:
@@ -250,21 +286,7 @@ class ConfigModule(ModuleType):
             with config.patch("name", val):
                 ...
         """
-        changes: Dict[str, Any]
-        if arg1 is not None:
-            if arg2 is not None:
-                assert isinstance(arg1, str)
-                # patch("key", True) syntax
-                changes = {arg1: arg2}
-            else:
-                assert isinstance(arg1, dict)
-                # patch({"key": True}) syntax
-                changes = arg1
-            assert not kwargs
-        else:
-            # patch(key=True) syntax
-            changes = kwargs
-            assert arg2 is None
+        changes = self._get_patch_changes(arg1, arg2, **kwargs)
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior: Dict[str, Any] = {}
         config = self
@@ -288,6 +310,54 @@ class ConfigModule(ModuleType):
                 prior.clear()
 
         return ConfigPatch()
+
+    def patch_non_frozen(
+        self,
+        arg1: Optional[Union[str, Dict[str, Any]]] = None,
+        arg2: Any = None,
+        **kwargs: Dict[str, Any],
+    ) -> "ContextDecorator":
+        """
+        Decorator and/or context manager to make temporary changes to a config.
+        Like 'patch', but does will not change or error when called with a
+        frozen value.`
+        As a decorator:
+
+            @config.patch_non_frozen(name1=val1, name2=val2)
+            def foo(...):
+                ...
+
+        As a context manager:
+
+            with config.patch_non_frozen(name1=val1, name2=val2):
+                ...
+        """
+        changes = self._get_patch_changes(arg1, arg2, **kwargs)
+        changes = {k: v for (k, v) in changes.items() if k not in self._frozen_keys}
+        return self.patch(changes)
+
+    def _get_patch_changes(
+        self,
+        arg1: Optional[Union[str, Dict[str, Any]]] = None,
+        arg2: Any = None,
+        **kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        changes: Dict[str, Any]
+        if arg1 is not None:
+            if arg2 is not None:
+                assert isinstance(arg1, str)
+                # patch("key", True) syntax
+                changes = {arg1: arg2}
+            else:
+                assert isinstance(arg1, dict)
+                # patch({"key": True}) syntax
+                changes = arg1
+            assert not kwargs
+        else:
+            # patch(key=True) syntax
+            changes = kwargs
+            assert arg2 is None
+        return changes
 
     def _make_closure_patcher(self, **changes: Dict[str, Any]) -> Any:
         """

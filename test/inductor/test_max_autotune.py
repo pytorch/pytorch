@@ -286,7 +286,6 @@ class TestMaxAutotune(TestCase):
                     with config.patch(
                         {
                             "autotune_in_subproc": False,
-                            "compile_threads": len(fake_choices),
                         }
                     ):
                         asc("test_call", fake_choices, [], Mock())
