@@ -1234,6 +1234,36 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @inductor_config.patch(
+        {
+            "triton.unique_kernel_names": "original_aten",
+            "fx_graph_remote_cache": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_original_aten_preserved_split_addmm(self):
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        def fn(x, y, z):
+            return torch.addmm(z, x, y).sin()
+
+        args = [
+            torch.randn(16, 24, device=GPU_TYPE),
+            torch.randn(24, 32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
+        ]
+
+        counters.clear()
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+        ret, code = run_and_get_code(opt_fn, *args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
+        # Its name should contain `addmm` because `addmm` was the original aten op where the mm came from.
+        FileCheck().check_not("extern_kernels.addmm(").check(
+            "def triton_tem_fused_addmm"
+        ).run(code[0])
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
