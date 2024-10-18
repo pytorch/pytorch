@@ -1295,6 +1295,12 @@ def load(
         weights_only = True
     elif force_no_weights_only_load:
         if weights_only is None:
+            warnings.warn(
+                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
+                "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
+                UserWarning,
+                stacklevel=2,
+            )
             weights_only = False
 
     if weights_only is None:
