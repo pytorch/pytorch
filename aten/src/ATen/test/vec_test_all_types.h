@@ -1119,14 +1119,14 @@ struct PreventFma
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_log2(T x) {
-    return std::log2(x);
+    return ::log2(x);
 }
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_log2(Complex<T> x) {
-    T ret = std::log(x);
-    T real = ret.real() / std::log(static_cast<T>(2));
-    T imag = ret.imag() / std::log(static_cast<T>(2));
+    T ret = ::log(x);
+    T real = ret.real() / ::log(static_cast<T>(2));
+    T imag = ret.imag() / ::log(static_cast<T>(2));
     return Complex<T>(real, imag);
 }
 
