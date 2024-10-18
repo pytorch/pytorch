@@ -992,7 +992,6 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
