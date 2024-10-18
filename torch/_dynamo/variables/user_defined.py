@@ -14,6 +14,16 @@ import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
 
+
+try:
+    # Not present in all python versions
+    from typing import is_typeddict
+except ImportError:
+
+    def is_typeddict(t):
+        return False
+
+
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
@@ -369,6 +379,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 mutable_local=MutableLocal(),
             )
+        elif is_typeddict(self.value):
+            if self.value.__optional_keys__:
+                unimplemented("typeddict with optional keys not supported")
+            if len(args):
+                unimplemented("TypedDict only supports kwargs")
+            dict_items = {
+                variables.ConstantVariable.create(key): value
+                for key, value in kwargs.items()
+            }
+            return variables.ConstDictVariable(dict_items, mutable_local=MutableLocal())
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
