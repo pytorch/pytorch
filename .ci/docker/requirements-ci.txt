@@ -206,6 +206,11 @@ xdoctest==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
+pydot==3.0.1
+#Description: Needed for testing FxGraphDrawer
+#Pinned versions:
+#test that import:
+
 pygments==2.15.0
 #Description: support doctest highlighting
 #Pinned versions: 2.12.0
