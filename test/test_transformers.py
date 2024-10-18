@@ -2588,15 +2588,13 @@ class TestSDPACudaOnly(NNTestCase):
                 self.test = test
 
             def forward(self, x):
-                B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+                B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
                 q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-                k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-                q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-                v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+                k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+                q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+                v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
 
                 y = F.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
-
-                # y = y.transpose(1, 2).contiguous().view(B, T, C)
                 self.test.assertTrue(y.transpose(1, 2).is_contiguous())
                 y = y.transpose(1, 2).view(B, T, C)
                 y = self.c_proj(y)
@@ -2605,9 +2603,9 @@ class TestSDPACudaOnly(NNTestCase):
         def test_attention(backend: SDPBackend):
             config = Config()
             Attention = CausalSelfAttention(config, self).to("cuda", dtype=torch.float16)
-            sample_input = torch.randn(1, 2048, config.n_embd, device="cuda", dtype = torch.float16)
+            sample_input = torch.randn(1, 2048, config.n_embd, device="cuda", dtype=torch.float16)
             with sdpa_kernel(backend):
-              out = Attention(sample_input)
+                out = Attention(sample_input)
 
         width = 100
         test_attention(SDPBackend.CUDNN_ATTENTION)

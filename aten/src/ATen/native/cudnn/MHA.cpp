@@ -297,7 +297,7 @@ void alloc_with_matching_layout(const Tensor& q, Tensor& output, const std::vect
   TORCH_CHECK(shape.size() == q.sizes().size(), "cuDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
   // get the "fill order," which is just an argsort on the strides
   std::vector<int> fill_order(shape.size());
-  std::iota(fill_order.begin(), fill_order.end(), 0);   
+  std::iota(fill_order.begin(), fill_order.end(), 0);
   std::stable_sort(fill_order.begin(), fill_order.end(), [&q](int idx1, int idx2) {return q.strides()[idx1] < q.strides()[idx2];});
   std::vector<int64_t> ordered_strides(shape.size());
   int64_t current_stride = 1;
