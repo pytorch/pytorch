@@ -1328,7 +1328,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args.insert(
             0, f"convert_arrayref_tensor_to_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
-
         self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
