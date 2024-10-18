@@ -21,7 +21,6 @@ from typing import (
 )
 
 import torch
-from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -538,6 +537,7 @@ def apply_runtime_assertion_pass(gm, graph_signature):
         _node_metadata_hook,
         _set_node_metadata_hook,
     )
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (

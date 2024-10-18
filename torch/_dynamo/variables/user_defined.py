@@ -158,6 +158,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         from . import ConstantVariable, EnumVariable
+        from .builder import SourcelessBuilder, VariableBuilder
 
         source = AttrSource(self.source, name) if self.source is not None else None
 
@@ -186,7 +187,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = None
 
         if isinstance(obj, staticmethod):
-            return VariableTracker.build(tx, obj.__get__(self.value), source)
+            func = obj.__get__(self.value)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
                 return variables.UserFunctionVariable(obj.__func__.fget).call_function(
@@ -197,13 +202,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
             #       inspect.getattr_static(itertools.chain, "from_iterable")
             func = obj.__get__(None, self.value)
-            return VariableTracker.build(tx, func, source)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif source:
             # __mro__ is a member in < 3.12, an attribute in >= 3.12
             if inspect.ismemberdescriptor(obj) or (
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
-                return VariableTracker.build(tx, obj.__get__(self.value), source)
+                return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -214,15 +222,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             or self.value.__module__ == "torch"
         ):
             if source:
-                return VariableTracker.build(tx, obj, source)
+                return VariableBuilder(tx, source)(obj)
 
         if (
             source
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
         ):
-            return VariableTracker.build(tx, obj, source)
-
+            return VariableBuilder(tx, source)(obj)
         return super().var_getattr(tx, name)
 
     def _call_cross_entropy_loss(self, tx: "InstructionTranslator", args, kwargs):
@@ -334,7 +341,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
@@ -445,7 +452,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             field_var = kwargs[field_name]
                         else:
                             assert field_name in field_defaults
-                            field_var = VariableTracker.build(
+                            field_var = SourcelessBuilder.create(
                                 tx, field_defaults[field_name]
                             )
                         var_tracker_kwargs[field_name] = field_var
@@ -458,6 +465,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.NamedTupleVariable(items, self.value)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
+            from .builder import SourcelessBuilder
+
             fields = dataclasses.fields(self.value)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -472,9 +481,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             continue
 
                         if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(tx, field.default)
+                            var_tracker = SourcelessBuilder.create(tx, field.default)
                         elif field.default_factory is not dataclasses.MISSING:
-                            factory_fn = VariableTracker.build(
+                            factory_fn = SourcelessBuilder.create(
                                 tx, field.default_factory
                             )
                             var_tracker = factory_fn.call_function(tx, [], {})
@@ -564,7 +573,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             return tx.inline_user_function_return(
-                VariableTracker.build(
+                SourcelessBuilder.create(
                     tx, polyfills.instantiate_user_defined_class_object
                 ),
                 [self, *args],
@@ -848,6 +857,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .. import trace_rules
+        from .builder import VariableBuilder
 
         if (
             self.is_supported_random()
@@ -884,9 +894,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     "Sourceless UserDefinedObjectVariable method not supported"
                 )
             func_src = AttrSource(self.source, "__func__")
-            func_var = VariableTracker.build(tx, func, func_src)
+            func_var = VariableBuilder(tx, func_src)(func)
             obj_src = AttrSource(self.source, "__self__")
-            obj_var = VariableTracker.build(tx, obj, obj_src)
+            obj_var = VariableBuilder(tx, obj_src)(obj)
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
@@ -988,6 +998,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
         from . import ConstantVariable
+        from .builder import SourcelessBuilder, VariableBuilder
 
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
@@ -1079,7 +1090,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(subobj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
-            return VariableTracker.build(tx, func, source)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
             subobj.__get__
         ):
@@ -1174,7 +1188,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             subobj_from_class, src_from_class
                         )
 
-                return VariableTracker.build(tx, subobj)
+                return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx)
@@ -1198,6 +1212,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
+        from .builder import VariableBuilder
         from .dicts import is_hashable
 
         # TODO this should probably be merged with the dict handling
@@ -1208,11 +1223,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else key.as_python_constant()
         )
 
-        return VariableTracker.build(
+        return VariableBuilder(
             tx,
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant()),
-            self.source and ODictGetItemSource(self.source, index),
-        )
+            ODictGetItemSource(self.source, index),
+        )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
@@ -1222,14 +1236,14 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         assert is_frozen_dataclass(value)
 
+        from .builder import VariableBuilder
+
         field_map = {}
         for field in fields(value):
             if hasattr(value, field.name):
-                field_map[field.name] = VariableTracker.build(
-                    tx,
-                    getattr(value, field.name),
-                    source and AttrSource(source, field.name),
-                )
+                field_map[field.name] = VariableBuilder(
+                    tx, AttrSource(source, field.name)
+                )(getattr(value, field.name))
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
@@ -1301,8 +1315,16 @@ class WeakRefVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         call_source = None
         referent = self.value()
-        source = self.source and WeakRefCallSource(self.source)
-        return VariableTracker.build(tx, referent, source)
+
+        if self.source:
+            from .builder import VariableBuilder
+
+            call_source = WeakRefCallSource(self.source)
+            return VariableBuilder(tx, call_source)(referent)
+        else:
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create(tx, referent)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

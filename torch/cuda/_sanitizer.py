@@ -602,20 +602,9 @@ class CUDASanitizer:
         self.dispatch.__enter__()
         self.enabled = True
 
-    def disable(self):
-        self.dispatch.__exit__(None, None, None)
-        self.enabled = False
-
     def __del__(self):
-        # Since this object lifetime is linked to the `torch.cuda._sanitizer` python
-        # module, it often gets deleted as part of the overall `torch` module cleanup
-        # At that time, depending on CPython version, the torch.* module might be in
-        # different states of being already cleaned up.
-        # Similarly other imports might already have been cleaned up so `sys` might
-        # be already gone as well.
-        # Skip exiting the mode if it outlived the runtime.
-        if (sys is not None) and (not sys.is_finalizing()) and self.enabled:
-            self.disable()
+        if self.enabled:
+            self.dispatch.__exit__(None, None, None)
 
 
 def enable_cuda_sanitizer():

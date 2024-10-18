@@ -1,4 +1,3 @@
-#include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
@@ -17,10 +16,7 @@
 #endif
 
 #if SUPPORTS_BACKTRACE
-C10_CLANG_DIAGNOSTIC_PUSH()
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-dynamic-exception-spec")
 #include <cxxabi.h>
-C10_CLANG_DIAGNOSTIC_POP()
 #ifdef C10_ANDROID
 #include <dlfcn.h>
 #include <unwind.h>
