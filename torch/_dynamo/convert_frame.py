@@ -38,6 +38,7 @@ from torch._utils_internal import (
     justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
+    torch_scope,
 )
 from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.experimental.symbolic_shapes import (
@@ -845,7 +846,10 @@ def _compile(
 
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
-    ):
+    ), torch_scope("compile") as tracker:
+        tracker.set_metadata("compile_id", str(compile_id))
+        tracker.set_metadata("co_name", code.co_name)
+        tracker.set_metadata("co_filename", code.co_filename)
         restart_reasons: set[str] = set()
         # This is shared across restarts
         mutated_closure_cell_contents: Set[str] = set()
@@ -1123,6 +1127,7 @@ def _compile(
                 json.dumps(config_dict),
             )
             record_compilation_metrics(metrics)
+            tracker.set_metadata("metrics", str(vars(metrics)))
             torch._dynamo.callback_handler.run_end_callbacks()
 
 
