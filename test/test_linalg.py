@@ -3714,23 +3714,34 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float)
-    def test_linalg_qr_autograd_errors(self, device, dtype):
-        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
-        # without 'q' you cannot compute the backward pass. Check that
-        # linalg_qr_backward complains cleanly in that case.
-        inp = torch.randn((5, 7), device=device, dtype=dtype, requires_grad=True)
-        q, r = torch.linalg.qr(inp, mode='r')
-        self.assertEqual(q.shape, (0,))  # empty tensor
-        b = torch.sum(r)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "The derivative of linalg.qr depends on Q"):
-            b.backward()
-        inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
-        q, r = torch.linalg.qr(inp, mode='complete')
-        b = torch.sum(r)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "The QR decomposition is not differentiable when mode='complete' and nrows > ncols"):
-            b.backward()
+    def test_linalg_qr_autograd(self, device, dtype):
+        # Check differentiability for modes as specified in the docs.
+        # Differentiability in all cases is only guaranteed if first k = min(m, n) columns are linearly independent.
+        # Mode 'reduced' is always differentiable.
+        # Mode 'r' is never differentiable.
+        # Mode 'complete' is differentiable for m <= n.
+        for mode in 'complete', 'reduced', 'r':
+            for m, n in [(5, 7), (7, 5)]:
+                # Random matrix inputs will effectively satisfy rank requirement of k = min(m, n) columns linearly
+                # independent.
+                inp = torch.randn((m, n), device=device, dtype=dtype, requires_grad=True)
+                q, r = torch.linalg.qr(inp, mode=mode)
+                b = torch.sum(r)
+                if mode == 'complete' and m > n:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "The QR decomposition is not differentiable when mode='complete' and"
+                                                "nrows > ncols"):
+                        b.backward()
+                elif mode == 'r':
+                    # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
+                    # without 'q' you cannot compute the backward pass. Check that
+                    # linalg_qr_backward complains cleanly in that case.
+                    self.assertEqual(q.shape, (0,))  # empty tensor
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "The derivative of linalg.qr depends on Q"):
+                        b.backward()
+                else:
+                    b.backward()
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
