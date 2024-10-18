@@ -248,12 +248,14 @@ def _transform_to_simplex(constraint):
     return transforms.SoftmaxTransform()
 
 
-# TODO define a bijection for LowerCholeskyTransform
+@biject_to.register(constraints.lower_cholesky)
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
 
 
+@biject_to.register(constraints.positive_definite)
+@biject_to.register(constraints.positive_semidefinite)
 @transform_to.register(constraints.positive_definite)
 @transform_to.register(constraints.positive_semidefinite)
 def _transform_to_positive_definite(constraint):
