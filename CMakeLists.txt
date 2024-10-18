@@ -342,19 +342,6 @@ cmake_dependent_option(USE_SYSTEM_UCC "Use system-wide UCC" OFF "USE_UCC" OFF)
 cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
-  USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-  "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-  USE_GLOO_WITH_OPENSSL
-  "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(USE_C10D_GLOO "USE C10D GLOO" ON
-                       "USE_DISTRIBUTED;USE_GLOO" OFF)
-cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
-                       "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
-                       OFF)
-cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
