@@ -9388,6 +9388,7 @@ class TestLinalgMPS(TestCaseMPS):
     def test__int4_mm(self, m, n, q_group, num_groups):
         k = q_group * num_groups
         inner_k_tiles = 2
+        bias = torch.empty((0))
 
         torch.manual_seed(1)
         a_f32 = torch.rand((m, k), device="mps")
@@ -9400,14 +9401,14 @@ class TestLinalgMPS(TestCaseMPS):
             b_int32 = b_int32.to("mps")
             b_scales_and_zeros = b_scales_and_zeros.to("mps")
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32, inner_k_tiles
+                b_int32, inner_k_tiles, q_group, b.shape[-1], b_scales_and_zeros, bias
             )
 
             return b_int4pack, b_scales_and_zeros
 
-        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros, N):
             return torch._weight_int4pack_mm(
-                a, b_int4pack, q_group, b_scales_and_zeros
+                a, b_int4pack, q_group, b_scales_and_zeros, N
             )
 
         b_int4pack, b_scales_and_zeros_f32 = convert_weight_to_int4pack(b_f32)
@@ -9417,7 +9418,7 @@ class TestLinalgMPS(TestCaseMPS):
             b = b_f32.to(dtype=dtype)
             b_scales_and_zeros = b_scales_and_zeros_f32.to(dtype=dtype)
             ref = torch.mm(a, b)
-            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros, b.shape[-1])
 
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertLess(mean_err, 0.05)
