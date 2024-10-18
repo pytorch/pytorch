@@ -16,7 +16,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
 
 
 # Make the helper files in test/ importable
@@ -747,6 +747,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.assertEqual(foo(mod, x), mod_eager)
 
     @skipIfXpu
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
