@@ -138,7 +138,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getStream(c10::Device d) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("getStream")(d.index()).cast<c10::Stream>();
+    auto stream_id = get_method("getStream")(d.index()).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -164,7 +165,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("getNewStream")(d.index(), priority).cast<c10::Stream>();
+    auto stream_id = get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -174,7 +176,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("exchangeStream")(s).cast<c10::Stream>();
+    auto stream_id = get_method("exchangeStream")(s).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, s.device(), stream_id);
   }
 
   /**
