@@ -13,16 +13,7 @@ import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
-
-
-try:
-    # Not present in all python versions
-    from typing import is_typeddict
-except ImportError:
-
-    def is_typeddict(t):
-        return False
-
+from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
