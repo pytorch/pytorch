@@ -1651,7 +1651,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         pass
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
+        assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
+
+        for (inner_input, inner_input_val), outer_input in zip(
+            subgraph.graph.graph_inputs.items(), outer_inputs
+        ):
+            if not isinstance(inner_input_val, ir.TensorBox):
+                continue
+
             # in ABI-compatible mode, we copy the underlying at::Tensor of the conditional
             # input (outer_input) into another at::Tensor to be used as a subgraph input
             # (inner_input) in the nested scope. we can't std::move here, as the codegened
