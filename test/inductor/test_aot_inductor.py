@@ -142,7 +142,6 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         {
             "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -3687,9 +3686,6 @@ def fail_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(is_skip=True),
-    "test_cond_with_parameters": fail_minimal_arrayref_interface(is_skip=True),
-    "test_cond_simple": fail_minimal_arrayref_interface(is_skip=True),
     "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
