@@ -19,11 +19,11 @@ def current_accelerator() -> torch.device:
 
     Example::
 
-        >>> if torch.accelerator.current_accelerator() == 'cuda':
-        >>>     cc = torch.cuda.get_device_capability()
-        >>>     if cc.
-        >>> else:
-        >>>     stream = torch.Stream()
+        >>> # xdoctest: +SKIP
+        >>> if torch.accelerator.current_accelerator().type == 'cuda':
+        >>>     is_half_supported = torch.cuda.has_half()
+        >>> elif torch.accelerator.current_accelerator().type == 'xpu':
+        >>>     is_half_supported = torch.xpu.get_device_properties().has_fp16
     """
     return torch._C._accelerator_getAccelerator()
 
