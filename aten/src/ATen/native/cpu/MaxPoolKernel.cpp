@@ -64,7 +64,7 @@ vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
 
 template <typename scalar_t, typename opmath_t>
 inline
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 compute_internal(
   const scalar_t* input_data,
   scalar_t* out_data,
@@ -139,7 +139,7 @@ compute_internal(
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
 inline
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 compute_internal(
   const scalar_t* input_data,
   scalar_t* out_data,
