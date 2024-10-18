@@ -33,7 +33,7 @@ void initModule(PyObject* module) {
     impl.setDevice({device_type, device_index});
   });
 
-  m.def("_accelerator_getDevice", []() {
+  m.def("_accelerator_getDeviceIndex", []() {
     const auto device_type = at::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
     c10::impl::VirtualGuardImpl impl(device_type);

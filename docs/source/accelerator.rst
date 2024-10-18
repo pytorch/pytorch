@@ -10,7 +10,7 @@ torch.accelerator
     DeviceGuard
     StreamGuard
     current_accelerator
-    current_device
+    current_device_idx
     current_stream
     device_count
     is_available
