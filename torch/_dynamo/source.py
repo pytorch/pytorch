@@ -306,15 +306,17 @@ class TensorPropertySource(ChainedSource):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        def gen_fn():
-            self.base.reconstruct(codegen)
-            codegen.append_output(codegen.create_load_attr(self.prop.method_name()))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, f"call_{self.prop.method_name()}"
+            )
+        )
+        self.base.reconstruct(codegen)
 
-        codegen.add_push_null(gen_fn)
         if self.idx is not None:
             codegen.append_output(codegen.create_load_const(self.idx))
         codegen.extend_output(
-            create_call_function(1 if self.idx is not None else 0, False)
+            create_call_function(2 if self.idx is not None else 1, False)
         )
 
     def guard_source(self):

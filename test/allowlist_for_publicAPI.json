@@ -1095,6 +1095,7 @@
     "ComplexFloatStorage",
     "DisableTorchFunction",
     "DisableTorchFunctionSubclass",
+    "EnableTorchFunction",
     "Generator",
     "HalfStorage",
     "HalfTensor",
