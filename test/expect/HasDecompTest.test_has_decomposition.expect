@@ -228,6 +228,8 @@ aten::_foreach_floor_
 aten::_foreach_frac
 aten::_foreach_frac.out
 aten::_foreach_frac_
+aten::_foreach_global_norm.Scalar
+aten::_foreach_global_norm.Scalar_out
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar

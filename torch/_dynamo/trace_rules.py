@@ -1419,6 +1419,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_floor",
         "torch._foreach_frac_",
         "torch._foreach_frac",
+        "torch._foreach_global_norm",
         "torch._foreach_lerp_",
         "torch._foreach_lerp",
         "torch._foreach_lgamma_",
