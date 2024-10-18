@@ -16,6 +16,7 @@ from torch._dynamo.utils import lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torchgen.utils import dataclass_repr
 
 from .. import config
 from .functional_utils import (
@@ -192,8 +193,27 @@ def aot_dispatch_base_graph(
                 colored=True,
             ),
         )
+
         trace_structured(
-            "aot_forward_graph",
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_forward_graph_fw_metadata",
+                "encoding": "string",
+            },
+            payload_fn=lambda: dataclass_repr(fw_metadata),
+        )
+        if maybe_subclass_meta is not None:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_forward_graph_fw_subclass_metadata",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+            )
+
+        trace_structured(
+            "aot_inference_graph",
             payload_fn=lambda: fw_module.print_readable(
                 print_output=False, include_stride=True, include_device=True
             ),

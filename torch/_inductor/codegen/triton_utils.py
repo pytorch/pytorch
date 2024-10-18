@@ -6,10 +6,10 @@ import sympy
 import torch
 
 from .. import config
-from ..runtime.hints import instance_descriptor
+from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
+from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -71,6 +71,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
         return "*i8"
+    if isinstance(arg, TMADescriptorArg):
+        return "nvTmaDesc"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
@@ -148,7 +150,10 @@ def config_of(
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
-            return V.graph.sizevars.statically_known_multiple_of(x.nbytes, alignment)  # type: ignore[arg-type]
+            # We allocate the workspace ourselves, so it is always aligned
+            return True
+        if isinstance(x, TMADescriptorArg):
+            return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
@@ -159,11 +164,6 @@ def config_of(
         )
     else:
         divisible_by_16 = ()
-    divisible_by_8 = tuple(
-        i
-        for i, arg in zip(indices, args)
-        if is_aligned(arg, alignment=8, include_tensor=False)
-    )
 
     equal_to_1 = tuple(
         i
@@ -172,10 +172,5 @@ def config_of(
         and isinstance(arg.expr, (int, sympy.Integer))
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
-    # ids_of_folded_args is set from equal_to_1
-    # and None args by the Triton compiler
-    ids_of_folded_args = tuple(equal_to_1)
 
-    return instance_descriptor(
-        divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8
-    )
+    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)
