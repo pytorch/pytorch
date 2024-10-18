@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Union
+from typing import Any, List, Union
 
 import torch
 import torch.fx as fx
@@ -207,7 +207,7 @@ def tensorify_python_scalars(
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args: List[Union[MetaProxy, int, float]] = []
+                args: List[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -250,10 +250,9 @@ def tensorify_python_scalars(
 
                     graph.erase_node(node)
 
-    # TODO: Add a new pass here that goes through and finds all item calls
-    # and converts them into constants by looking at the hint. You can do
-    # do this with SymFloats by simply calling calling float() on it and
-    # creating a constant instead.
+    # Now do one more pass that specializes all symfloats we didn't manage
+    # to tensorify away.
+    nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
@@ -272,8 +271,19 @@ def tensorify_python_scalars(
                     args.append(a)
 
             if transform:
-                replacement_proxy = node.target(*args, **node.kwargs)
-                node.replace_all_uses_with(replacement_proxy.node)
+                # I originally tried using MetaProxy here but it gets pretty gnarly
+                # when you try transforming a function that only takes in a non
+                # MetaProxy argument like a bare float. eg. If you have a scalar_tensor_default
+                # call. If you do something like res = node.target(*args, **node.kwargs) where
+                # node.target = <OpOverload(op='aten.scalar_tensor', overload='default')> and
+                # args = [0.01], res will actually be a FakeTensor and not a node or proxy as
+                # you would expect.
+                replacement_node = graph.call_function(
+                    node.target, tuple(args), node.kwargs
+                )
+                with fake_mode:
+                    replacement_node.meta["val"] = node.target(*args, **node.kwargs)
+                node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
 
     # DCE symbols (which are guaranteed to be pure) only
