@@ -32,12 +32,6 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   ~MTIAHooksInterface() override = default;
 
   void init() const override {
-    TORCH_WARN_DEPRECATION(
-        "initMTIA() is deprecated. Please implement init() directly instead.")
-    initMTIA();
-  }
-
-  virtual void initMTIA() const {
     // Avoid logging here, since MTIA needs init devices first then it will know
     // how many devices are available. Make it as no-op if mtia extension is not
     // dynamically loaded.
