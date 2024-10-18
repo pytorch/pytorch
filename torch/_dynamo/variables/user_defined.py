@@ -374,8 +374,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unimplemented("typeddict with optional keys not supported")
             if len(args):
                 unimplemented("TypedDict only supports kwargs")
-            keys_vt = [variables.ConstantVariable.create(key) for key in kwargs]
-            dict_items = dict(zip(keys_vt, kwargs.values()))
+            dict_items = {variables.ConstantVariable.create(key):v for key, v in kwargs.items()}
             return variables.ConstDictVariable(dict_items, mutable_local=MutableLocal())
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
