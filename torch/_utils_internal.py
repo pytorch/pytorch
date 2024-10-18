@@ -182,15 +182,17 @@ class JustKnobsConfig:
     foo.bar.set(True)
 
     Note that this does allow for no JK name (so that you can use this to replace old configurations).
+
+    This config will "reset" iself when the config is saved, unless it's been manually overriden, in which case it'll retain the overriden value.
     """
 
     def __init__(
-        self, *, name: Optional[str] = None, env_name=None, default: bool = True
+        self, *, name: Optional[str] = None, env_name=None, default: bool = True, override: Optional[bool] = None
     ):
         self.name = name
         self.env_name = env_name
         self.default = default
-        self.value: Optional[bool] = None
+        self.value = override
         self.executed_value = None
 
     def set(self, value: bool):
@@ -208,10 +210,44 @@ class JustKnobsConfig:
 
     def __str__(self):
         v = bool(self)
-        return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
+        return f"JustKnobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
+
+    def __repr__(self):
+        # Note that this is used for hashing in install_config_module
+        v = bool(self)
+        return repr(bool(self))
+
+    def __getstate__(self):
+        # Explicitly not including resolutions
+        return {
+            "name": self.name,
+            "env_name": self.env_name,
+            "default": self.default,
+            "value": self.value,
+        }
+    def __setstate__(self, state):
+        self.name = state["name"]
+        self.env_name = state["env_name"]
+        self.default = state["default"]
+        self.value= state["value"]
+        self.executed_value = None
 
     def __bool__(self):
         return self.get()
+
+    def __eq__(self, other):
+        if not isinstance(other, JustKnobsConfig):
+            return False
+        # Note - we skip executed_value here because a config that's been called should equal a config which has not been called.
+        return (
+            self.name == other.name
+            and self.env_name == other.env_name
+            and self.default == other.default
+            and self.value == other.value
+        )
+
+    def _override_set(self):
+        return self.value is not None
 
 
 def justknobs_feature(
