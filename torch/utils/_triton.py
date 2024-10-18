@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
-from typing import Union
 
 
 @functools.lru_cache(None)
@@ -111,18 +110,3 @@ def patch_triton_dtype_repr():
     # exist
     # REMOVE when https://github.com/openai/triton/pull/3342 lands
     triton.language.dtype.__repr__ = lambda self: dtype_to_string(self)
-
-
-if has_triton():
-    from triton.runtime.autotuner import Autotuner
-    from triton.runtime.jit import JITFunction
-else:
-
-    class Autotuner:  # type: ignore[no-redef]
-        pass
-
-    class JITFunction:  # type: ignore[no-redef]
-        pass
-
-
-TritonKernelType = Union[Autotuner, JITFunction]

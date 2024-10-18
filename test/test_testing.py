@@ -19,7 +19,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf, skipIfRocm)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -30,7 +30,6 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and, floa
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 import operator
-import string
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -2222,9 +2221,6 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    # The test is flaky on ROCm and has been open and close multiple times
-    # https://github.com/pytorch/pytorch/issues/110040
-    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2300,7 +2296,7 @@ class TestImports(TestCase):
         # Calling logging.basicConfig, among other things, modifies the global
         # logging state. It is not OK to modify the global logging state on
         # `import torch` (or other submodules we own) because users do not expect it.
-        expected = string.ascii_lowercase
+        expected = 'abcdefghijklmnopqrstuvwxyz'
         commands = [
             'import logging',
             f'import {path}',
