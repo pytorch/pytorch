@@ -191,6 +191,9 @@ def get_history_recording() -> ContextManager[None]:
     return enable_history_recording()
 
 
+graph_capture_lock = threading.Lock()
+
+
 class TreeManagerContainer:
     """
     Manages the lifetime of the tree manager. Like `PrivatePool` in cuda caching allocator,
@@ -285,11 +288,25 @@ class TreeManagerContainer:
             return self.tree_manager
 
 
-local = threading.local()
+def set_tls(local):
+    # one tree manager per device
+    local.tree_manager_containers = {}
+    local.tree_manager_locks = defaultdict(threading.Lock)
 
-# one tree manager per device
-local.tree_manager_containers = {}
-local.tree_manager_locks = defaultdict(threading.Lock)
+    # We need to register this as an object that will be copied over as TLS when new
+    # threads are created in autograd
+    torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+    torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+
+
+local = threading.local()
+set_tls(local)
+
+# # one tree manager per device
+# local.tree_manager_containers = {}
+# local.tree_manager_locks = defaultdict(threading.Lock)
+
+# breakpoint()
 
 
 # only incremented by user call of mark_step_begin
@@ -297,10 +314,10 @@ class MarkStepBox:
     mark_step_counter = 0
 
 
-# We need to register this as an object that will be copied over as TLS when new
-# threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+# # We need to register this as an object that will be copied over as TLS when new
+# # threads are created in autograd
+# torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+# torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin() -> None:
@@ -338,6 +355,11 @@ def get_obj(local: Any, attr_name: str) -> Any:
 
 
 def get_container(device_index: int) -> TreeManagerContainer:
+    if not hasattr(local, "tree_manager_containers") and not torch._C._is_key_in_tls(
+        "tree_manager_containers"
+    ):
+        set_tls(local)
+
     container_dict = get_obj(local, "tree_manager_containers")
     lock = get_obj(local, "tree_manager_locks")[device_index]
 
@@ -876,9 +898,11 @@ class CUDAGraphNode:
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
-            get_expanded_dims(x)
-            if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
-            else []
+            (
+                get_expanded_dims(x)
+                if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
+                else []
+            )
             for idx, x in enumerate(inputs)
         ]
 
@@ -922,9 +946,11 @@ class CUDAGraphNode:
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
         self.reconstructed_inputs: List[InputType] = [
-            self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
-            if isinstance(x, torch.Tensor)
-            else x
+            (
+                self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
+                if isinstance(x, torch.Tensor)
+                else x
+            )
             for x in recording_inputs
         ]
 
@@ -1151,7 +1177,8 @@ class CUDAGraphNode:
 
     def run_graph(self) -> None:
         assert self.graph is not None
-        self.graph.replay()
+        with graph_capture_lock:
+            self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
         "All outputs of the path from this node to its root are dead"
@@ -1841,7 +1868,8 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with torch.cuda.device(device_index):
+        # TODO: the order matters. graph_capture_lock must be acquired before torch.cuda.synchronize()
+        with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
@@ -2030,7 +2058,10 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with graph_capture_lock:
+                out = self.run_eager(new_inputs, function_id)
+
+            return out
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2095,8 +2126,11 @@ class CUDAGraphTreeManager:
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-        # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        # TODO: make lock area smaller.
+        with graph_capture_lock:
+            out = self.record_function(new_inputs, function_id)
+
+        return out
 
     def shutdown(self) -> None:
         """
@@ -2204,7 +2238,10 @@ class CUDAGraphTreeManager:
         constants: Tuple[torch.Tensor, ...],
         placeholders: Tuple[PlaceholderInfo, ...],
         mutated_input_idxs: Tuple[int, ...],
-    ) -> Tuple[ModelType, OutputType,]:
+    ) -> Tuple[
+        ModelType,
+        OutputType,
+    ]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
