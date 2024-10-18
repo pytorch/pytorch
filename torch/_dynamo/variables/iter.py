@@ -172,10 +172,8 @@ class ItertoolsVariable(VariableTracker):
                     *args, mutable_local=MutableLocal()
                 )
 
-            from .builder import SourcelessBuilder
-
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
+                VariableTracker.build(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())

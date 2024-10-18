@@ -33,7 +33,7 @@ runner_types:
     disk_size: 200
     instance_type: c5.12xlarge
     is_ephemeral: false
-    max_available: 1000
+    max_available: 2000
     os: linux
     ami: al2023-ami-2023.5.202*-kernel-6.1-x86_64
   lf.linux.10xlarge.avx2:
@@ -241,7 +241,7 @@ runner_types:
     disk_size: 256
     instance_type: p3.2xlarge
     is_ephemeral: false
-    max_available: 150
+    max_available: 300
     os: windows
   lf.windows.g5.4xlarge.nvidia.gpu:
     disk_size: 256
