@@ -2,7 +2,7 @@
 import copy
 import warnings
 from itertools import chain
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -43,7 +43,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
 
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
-    lifted_inputs: List[Optional[str]],
+    lifted_inputs: Sequence[Optional[str]],
 ) -> Tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
@@ -72,7 +72,7 @@ def _unlift_inputs_as_getattr(
 
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
-    mutated_outputs: List[Optional[str]],
+    mutated_outputs: Sequence[Optional[str]],
     unlifted_name_to_node: Dict[str, torch.fx.Node],
     input_name_to_node: Dict[str, torch.fx.Node],
 ) -> None:
@@ -158,8 +158,8 @@ def _get_codegen(
 
 def _unlift(
     gm: torch.fx.GraphModule,
-    lifted_inputs: List[Optional[str]],
-    mutated_outputs: List[Optional[str]],
+    lifted_inputs: Sequence[Optional[str]],
+    mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
