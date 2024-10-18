@@ -500,25 +500,29 @@ def _get_module_hierarchy(mod: torch.nn.Module) -> Dict[str, str]:
 
 
 def _make_module_call_graph(
-    module_hierarchy: Dict[str, str],
     in_spec: TreeSpec,
     out_spec: TreeSpec,
     module_call_signatures: Dict[str, ModuleCallSignature],
     forward_arg_names: Optional[List[str]] = None,
 ) -> List[ModuleCallEntry]:
-    ret = [
+    original = [
         ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
-        for fqn in module_hierarchy
+        for fqn in _EXPORT_MODULE_HIERARCHY  # type: ignore[union-attr]
     ]
-    assert ret[0].fqn == ""
-    ret[0].signature = ModuleCallSignature(
+    assert original[0].fqn == ""
+    original[0].signature = ModuleCallSignature(
         inputs=[],
         outputs=[],
         in_spec=in_spec,
         out_spec=out_spec,
         forward_arg_names=forward_arg_names,
     )
-    return ret
+    additional = [
+        ModuleCallEntry(fqn=fqn, signature=signature)
+        for fqn, signature in module_call_signatures.items()
+        if fqn not in _EXPORT_MODULE_HIERARCHY  # type: ignore[operator]
+    ]
+    return [*original, *additional]
 
 
 def _export_to_torch_ir(
@@ -1079,7 +1083,6 @@ def _get_module_call_graph(
 
     assert _EXPORT_MODULE_HIERARCHY is not None
     module_call_graph = _make_module_call_graph(
-        _EXPORT_MODULE_HIERARCHY,
         original_in_spec,
         out_spec,
         module_call_signatures,
