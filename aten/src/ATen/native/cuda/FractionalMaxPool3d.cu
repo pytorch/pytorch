@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -121,7 +122,8 @@ template <typename scalar_t>
 __global__ void fractional_max_pool3d_backward_out_frame(
   PackedTensorAccessor64<scalar_t, 5> gradInput,
   PackedTensorAccessor64<const scalar_t, 5> gradOutput,
-  PackedTensorAccessor64<const int64_t, 5> indices) {
+  PackedTensorAccessor64<const int64_t, 5> indices,
+  TORCH_DSA_KERNEL_ARGS) {
   // Output (h, w) point that this thread is responsible for
   int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int64_t plane = blockIdx.y;
@@ -137,13 +139,13 @@ __global__ void fractional_max_pool3d_backward_out_frame(
                       gradOutput.size(4));
 
     int64_t index = indices[batch][plane][outputT][outputH][outputW];
-    CUDA_KERNEL_ASSERT(index >= 0);
+    CUDA_KERNEL_ASSERT2(index >= 0);
     int64_t inputW = index % gradInput.size(4);
     int64_t inputH = (index / gradInput.size(4)) %
       gradInput.size(3);
     int64_t inputT = index / (gradInput.size(3) *
       gradInput.size(4));
-    CUDA_KERNEL_ASSERT(inputT < gradInput.size(2));
+    CUDA_KERNEL_ASSERT2(inputT < gradInput.size(2));
 
     gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputT][inputH][inputW],
@@ -232,8 +234,9 @@ void fractional_max_pool3d_backward_out_cuda_template(
       gradOutput.scalar_type(),
       "fractional_max_pool3d_backward_out_frame",
       [&] {
-        fractional_max_pool3d_backward_out_frame<scalar_t>
-        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+          fractional_max_pool3d_backward_out_frame<scalar_t>,
+          grid, block, 0, at::cuda::getCurrentCUDAStream(),
           gradInput_.packed_accessor64<scalar_t, 5>(),
           gradOutput_.packed_accessor64<const scalar_t, 5>(),
           indices_.packed_accessor64<const int64_t, 5>()
