@@ -32,8 +32,8 @@ A ``UserRRef`` will be created when it is used as an argument or return value in
 :meth:`~torch.distributed.rpc.rpc_async` or
 :meth:`~torch.distributed.rpc.remote` invocation, and the owner will be notified
 according to update the reference count. An ``OwnerRRef`` and its data will be
-deleted when there is no ``UserRRef`` instances globally and there are no
-reference to the ``OwnerRRef`` on the owner as well.
+deleted when there is no ``UserRRef`` instances globally and there is no
+reference to the ``OwnerRRef``.
 
 
 Assumptions
