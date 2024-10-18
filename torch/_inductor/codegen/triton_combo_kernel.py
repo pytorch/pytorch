@@ -919,10 +919,9 @@ class ComboKernel(Kernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.scheduler.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
-                    # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
+                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
                     result.writeline(
-                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
+                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
                     )
                 else:
                     raise KeyError(
