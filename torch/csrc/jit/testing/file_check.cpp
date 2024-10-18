@@ -228,6 +228,7 @@ struct FileCheckImpl {
         groups.push_back({check});
       }
     }
+    checks.push_back(check);
     has_run = false;
   }
 

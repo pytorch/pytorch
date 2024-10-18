@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import asyncio
 import ctypes
 import multiprocessing
 import os
@@ -361,6 +362,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assertIsNotNone(pc.wait(period=0.1))
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
+
+        def test_pcontext_wait_on_a_child_thread(self):
+            asyncio.run(asyncio.to_thread(self.test_pcontext_wait))
 
         def test_multiprocess_context_close(self):
             pc = start_processes(

@@ -309,7 +309,7 @@ class MultiKernelCall:
             return inner
 
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40, fast_flush=True)
+            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40)
             for kernel in self.kernels
         ]
 

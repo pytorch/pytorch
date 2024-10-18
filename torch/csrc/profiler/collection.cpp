@@ -33,14 +33,13 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
     : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
-      size_dim_{static_cast<uint32_t>(t.sizes().size())},
-      stride_dim_{static_cast<uint32_t>(t.strides().size())} {
+      size_dim_{static_cast<uint32_t>(t.sizes().size())} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      t.sizes().size() != t.strides().size(),
+      t.sizes().size() == t.strides().size(),
       "Tensor has mismatching sizes and strides. Sizes: ",
       t.sizes().size(),
       " Strides: ",
@@ -205,7 +204,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.stride_dim_)) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
           if (tensor_size_strides_it.exhausted()) {
             LOG(WARNING)
                 << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -520,6 +519,7 @@ void materialize_vulkan(
             static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
             /*in_tree_building_=*/false}));
   }
+  raw_events.clear();
 }
 
 namespace {
@@ -1448,6 +1448,7 @@ RecordQueue::getRecords(
           /*kineto_info_=*/queue.kineto_info(),
           /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
     }
+    queue.allocations_.clear();
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
@@ -1474,20 +1475,25 @@ RecordQueue::getRecords(
     ProfilerStepInfo step =
         step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
-      // If event has start time after step end time we can continue to the next
-      // step
-      while (i->start_time_ns_ > step.end_time_ns) {
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-      }
-      // If Step annotation starts before event and ends before event ends with
-      // intersection then we move the lefthand side of the step annotation to
-      // the event start time
-      if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-        auto currStepRes = out[step.out_idx];
-        currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      // Only adjust timestamps if experimental config is enabled
+      if (config_.experimental_config.adjust_profiler_step) {
+        // If event has start time after step end time we can continue to the
+        // next step
+        while (i->start_time_ns_ > step.end_time_ns) {
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
+        // If Step annotation starts before event and ends before event ends
+        // with intersection then we move the lefthand side of the step
+        // annotation to the event start time
+        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+          auto currStepRes = out[step.out_idx];
+          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
       }
       out.push_back(i);
     }

@@ -20,15 +20,16 @@ from tools.flight_recorder.components.types import (
     Traceback,
 )
 from tools.flight_recorder.components.utils import (
+    align_trace_from_beginning,
     check_no_missing_dump_files,
     check_size_alltoall,
     check_version,
     find_coalesced_group,
     format_frames,
+    get_version_detail,
     just_print_entries,
     match_coalesced_groups,
     match_one_event,
-    sort_trace_from_beginning,
 )
 
 
@@ -111,8 +112,8 @@ def build_groups_memberships(
                 assert (
                     _groups[pg_guid].desc == desc
                 ), f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
-                assert _memberships[pg_guid] == set(
-                    ranks
+                assert (
+                    _memberships[pg_guid] == set(ranks)
                 ), f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
     return groups, _groups, memberships, _memberships, _pg_guids
 
@@ -140,6 +141,7 @@ def build_collectives(
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
     _pg_guids: Dict[Tuple[str, int], str],
+    version: str,
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -169,6 +171,7 @@ def build_collectives(
         ]
     }
     """
+    major_v, minor_v = get_version_detail(version)
     tracebacks: List[Traceback] = []
 
     collectives: List[Collective] = []
@@ -200,14 +203,12 @@ def build_collectives(
         entries = all_entries[first_rank]
         pg_name, desc = entries[0]["process_group"]
         profiling_name = entries[0]["profiling_name"]
-        pg_name = _pg_guids[(pg_name, first_rank)]
-        collective_seq_id = entries[0]["collective_seq_id"]
-        print(
-            "collective_seq_id ",
-            collective_seq_id,
-            " p2p_seq_id ",
-            entries[0]["p2p_seq_id"],
+        original_pg_name = pg_name  # For db build and logs printing, we want to use the original pg_name, not the hash one.
+        pg_desc = (
+            f"{original_pg_name}:{desc}" if desc != "undefined" else original_pg_name
         )
+        pg_name = _pg_guids[(original_pg_name, first_rank)]
+        collective_seq_id = entries[0]["collective_seq_id"]
         record_id = entries[0]["record_id"]
         input_sizes = entries[0]["input_sizes"]
         output_sizes = entries[0]["output_sizes"]
@@ -265,7 +266,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id if match else None,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )
@@ -311,11 +312,16 @@ def build_collectives(
             if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
                 print(
-                    f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"Not all ranks joining collective {collective_seq_id} at entry {record_id}",
+                    f" for group {pg_desc} collective {profiling_name} ",
                     f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                     f"\nCollective stack traces: \n{collective_frames}",
                 )
+                candidate_ranks.update(found_ranks)
+                candidate_idx.update(found_idx)
+                found_idx.clear()
+                found_ranks.clear()
             elif len(candidate_ranks) == 1:
                 # case two: alltoall or alltoall_base case.
                 if has_undecided_case:
@@ -325,14 +331,16 @@ def build_collectives(
                     fail_check, input_numel, output_numel = check_size_alltoall(
                         alltoall_cases
                     )
-                    # We don't log the input/output sizes for alltoall so we don't consider the size mismatch as an error for now.
-                    fail_check = False
+                    if major_v <= 2 and minor_v <= 3:
+                        # We don't log the input/output sizes for alltoall before v2.4,
+                        # so we don't consider the size mismatch as an error for now.
+                        fail_check = False
                     if fail_check:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
                         print(
-                            f"Input/output mismatch in the collective {record_id} ",
-                            f"for group {pg_name}:{desc} collective {profiling_name} ",
+                            f"Input/output mismatch in the collective {collective_seq_id} ",
+                            f"at entry {record_id} for group {pg_desc} collective {profiling_name} ",
                             f"input_numel {input_numel} output_numel {output_numel} ",
                             f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                             f"\nCollective stack traces: \n{collective_frames}",
@@ -356,12 +364,13 @@ def build_collectives(
             elif len(errors) > 0:
                 mismatch[pg_name] += 1
                 error_msg = ", ".join(
-                    f"Error rank {error[0]}, {str(error[1])}" for error in errors
+                    f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
                 )
                 print(
-                    f"Collective {record_id} errors for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"Collective {collective_seq_id} at entry {record_id} errors",
+                    f" for group {pg_desc} collective {profiling_name} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nFound errors: {error_msg}\n",
+                    f"\nFound errors: {error_msg}.\n",
                     f"\nCollective stack traces: \n{collective_frames} ",
                 )
                 candidate_ranks.update(found_ranks)
@@ -373,7 +382,9 @@ def build_collectives(
             # 1. we found a match on all the ranks that are members of the group
             #  -> we create a Collective and remove the individual entries from their original lists
             if found_ranks == expected_ranks and mismatch[pg_name] == 0:
-                collectives.append(Collective(id=len(collectives), group_id=pg_name))
+                collectives.append(
+                    Collective(id=len(collectives), group_id=original_pg_name)
+                )
                 for r in found_ranks:
                     i = found_idx[r] if r != first_rank else 0
                     nccl_calls.append(
@@ -381,7 +392,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )
@@ -401,7 +412,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=None,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )
@@ -413,19 +424,22 @@ def build_collectives(
     return tracebacks, collectives, nccl_calls
 
 
-def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Database:
+def build_db(
+    details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
+) -> Database:
     # temporary state used for building database
     entries = {}
     pg_config = {}
-    version = {}
+    version_by_ranks = {}
     for dump in details.values():
         rank = dump["rank"]
         entries[rank] = dump["entries"]
-        version[rank] = dump["version"]
+        version_by_ranks[rank] = dump["version"]
         pg_config[rank] = dump["pg_config"]
 
-    check_version(version)
-    entries = sort_trace_from_beginning(entries)
+    # Ensure version is consistent across all ranks.
+    check_version(version_by_ranks, version)
+    entries = align_trace_from_beginning(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
@@ -436,11 +450,11 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
     check_no_missing_dump_files(entries, memberships)
 
     if args.just_print_entries:
-        just_print_entries(entries, _groups, _memberships, _pg_guids)
+        just_print_entries(entries, _groups, _memberships, _pg_guids, args)
         sys.exit(0)
 
     tracebacks, collectives, nccl_calls = build_collectives(
-        entries, _groups, _memberships, _pg_guids
+        entries, _groups, _memberships, _pg_guids, version
     )
     print("built collectives, nccl_calls")
     if args.verbose:

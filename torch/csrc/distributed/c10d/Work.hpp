@@ -34,6 +34,14 @@ enum class OpType : std::uint8_t {
   UNKNOWN = 100,
 };
 
+// TODO: support different types of failures/errors
+enum class WorkResult : std::uint8_t {
+  SUCCESS = 0,
+  TIMEOUT = 1,
+  COMM_ERROR = 2,
+  UNKNOWN = 100,
+};
+
 // Converts OpType to human readable string.
 TORCH_API std::string opTypeToString(OpType opType);
 
@@ -107,6 +115,11 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Returns a Future object that will be associated with the completion of
   // work. Only NCCL backend is currently supported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
+
+  // Get a Future object that would be marked as either success or failure
+  // This API can be used by the user to track the completion of the work
+  // and hanlde the exception if any.
+  virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
 
   virtual float getDuration() const;
 

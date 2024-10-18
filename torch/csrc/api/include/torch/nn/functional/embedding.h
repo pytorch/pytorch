@@ -133,8 +133,7 @@ inline Tensor embedding_bag(
         input_.dim());
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int mode_enum;
+  int mode_enum = 0;
   if (std::holds_alternative<enumtype::kSum>(mode)) {
     mode_enum = 0;
   } else if (std::holds_alternative<enumtype::kMean>(mode)) {

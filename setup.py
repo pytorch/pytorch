@@ -119,6 +119,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   TORCH_XPU_ARCH_LIST
+#     specify which XPU architectures to build for.
+#     ie `TORCH_XPU_ARCH_LIST="ats-m150,lnl-m"`
+#
 #   PYTORCH_ROCM_ARCH
 #     specify which AMD GPU targets to build for.
 #     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
@@ -1143,7 +1147,6 @@ def main():
         "filelock",
         "typing-extensions>=4.8.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.12.1 ; python_version == "3.8"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
@@ -1203,7 +1206,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.12.0"],
+        "optree": ["optree>=0.13.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1240,6 +1243,7 @@ def main():
         "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
+        "include/ATen/cpu/vec/sve/*.h",
         "include/ATen/core/*.h",
         "include/ATen/cuda/*.cuh",
         "include/ATen/cuda/*.h",
@@ -1324,6 +1328,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",

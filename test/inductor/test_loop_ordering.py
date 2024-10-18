@@ -17,14 +17,15 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import expectedFailureXPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
 
 
-if HAS_CUDA:
-    torch.set_default_device("cuda")
+if HAS_GPU:
+    torch.set_default_device(GPU_TYPE)
 
 
 class MockScheduler:
@@ -76,7 +77,13 @@ class ImplDetailTest(TestCase):
 
         box_a = ir.TensorBox.create(
             ir.Buffer(
-                "a", ir.FixedLayout(torch.device("cuda"), torch.float32, sizes, strides)
+                name="a",
+                layout=ir.FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
             )
         )
         box_a_loader = box_a.make_loader()
@@ -139,7 +146,7 @@ class ImplDetailTest(TestCase):
                 )
 
             buf = ir.Pointwise.create(
-                device=torch.device("cuda"),
+                device=torch.device(GPU_TYPE),
                 dtype=torch.float32,
                 inner_fn=inner_fn,
                 ranges=[128, 4, 49, 49],
@@ -174,6 +181,8 @@ class ImplDetailTest(TestCase):
     }
 )
 class LoopOrderingTest(TestCase):
+    device = GPU_TYPE
+
     def do_acc_test(self, f, *args, cast_fp8=True):
         expect = f(*args)
         actual = torch.compile(f)(*args)
@@ -217,7 +226,7 @@ class LoopOrderingTest(TestCase):
         A, B = 20, 30
         # Make the first 2 dimension not able to merge on purpose so that
         # ComputedBuffer.iter_reoredering_reindex will be updated.
-        x = rand_strided([A, A, B], [B, B * A + 300, 1], device="cuda")
+        x = rand_strided([A, A, B], [B, B * A + 300, 1], device=GPU_TYPE)
         y = torch.randn(A, A)
 
         self.do_acc_test(f, x, y)
@@ -228,6 +237,8 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_apbt_realize(self):
         M = 1024
         N = 2048
@@ -247,6 +258,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_sum_and_t(self):
         N = 1024
 
@@ -257,6 +270,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_pw_outer_red(self):
         def f(x):
             x = realize(x + 1)
@@ -267,6 +282,8 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_pw_outer_red_2(self):
         """
         The pointwise kernel is a fused kernel
@@ -340,6 +357,8 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
+    # xpu generate 2 kernels
+    @expectedFailureXPU
     def test_different_broadcast_shapes(self):
         def f(x, y, c):
             return x + c, y + c
@@ -371,7 +390,7 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @unittest.skipIf(not SM90OrLater, "FP8 requires H100+")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
         This test repros the not able to fuses issue in
@@ -387,7 +406,7 @@ class LoopOrderingTest(TestCase):
             return x, x_t
 
         x = torch.randn(4096, 4096, dtype=torch.bfloat16)
-        scale = torch.Tensor([10.0]).cuda()
+        scale = torch.Tensor([10.0]).to(GPU_TYPE)
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
 
         self.do_acc_test(f, x, scale)
@@ -395,5 +414,5 @@ class LoopOrderingTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()
