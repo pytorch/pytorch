@@ -414,7 +414,7 @@ void gemm_transa_(
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
   if (n == 1 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, 0.0, c, 1);
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
     return;
   }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
