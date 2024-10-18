@@ -12,7 +12,7 @@ from ..utils import istype
 
 
 if TYPE_CHECKING:
-    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class MutableLocalSource(Enum):
@@ -121,8 +121,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     VariableTracker instances are immutable and should be copied in
     order to change them.
-
-    Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -246,7 +244,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
-        source = self.source and AttrSource(self.source, name)
+        source = None
+        if self.source:
+            source = AttrSource(self.source, name)
         return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
@@ -362,20 +362,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
-
-    @staticmethod
-    def build(
-        tx: "InstructionTranslatorBase",
-        value: Any,
-        source: Optional[Source] = None,
-    ) -> Any:
-        """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
-        if source is None:
-            return builder.SourcelessBuilder.create(tx, value)
-        else:
-            return builder.VariableBuilder(tx, source)(value)
 
     def __init__(
         self,

@@ -106,7 +106,7 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -184,9 +184,10 @@ void fbgemm_spmdm_report_error_(
 } // namespace
 
 template <typename data_t, typename index_t>
-std::enable_if_t<
-    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
-    void>
+typename std::enable_if<
+    std::is_same<data_t, at::Half>::value ||
+        std::is_same<data_t, at::BFloat16>::value,
+    void>::type
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -365,7 +366,7 @@ index_select_add(
   }
 }
 template<typename data_t, typename index_t>
-std::enable_if_t<std::is_same_v<data_t, float>, void>
+typename std::enable_if<std::is_same<data_t, float>::value, void>::type
 index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
@@ -492,7 +493,7 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -547,9 +548,10 @@ index_select_scale_add(
 }
 
 template <typename data_t, typename index_t>
-std::enable_if_t<
-    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
-    void>
+typename std::enable_if<
+    std::is_same<data_t, at::Half>::value ||
+        std::is_same<data_t, at::BFloat16>::value,
+    void>::type
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -739,7 +741,7 @@ index_select_scale_add(
   }
 }
 template<typename data_t, typename index_t>
-std::enable_if_t<std::is_same_v<data_t, float>, void>
+typename std::enable_if<std::is_same<data_t, float>::value, void>::type
 index_select_scale_add(const Tensor &select_indices,
                                           const Tensor &add_indices,
                                           const Tensor &scale,
