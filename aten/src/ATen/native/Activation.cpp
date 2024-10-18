@@ -614,7 +614,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     Tensor& output) {
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
     return output;
