@@ -22,6 +22,13 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::Int1:
+    case ScalarType::Int2:
+    case ScalarType::Int3:
+    case ScalarType::Int4:
+    case ScalarType::Int5:
+    case ScalarType::Int6:
+    case ScalarType::Int7:
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
@@ -49,11 +56,7 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLBool;
       break;
     case ScalarType::ComplexHalf:
-      dtype.code = DLDataTypeCode::kDLComplex;
-      break;
     case ScalarType::ComplexFloat:
-      dtype.code = DLDataTypeCode::kDLComplex;
-      break;
     case ScalarType::ComplexDouble:
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
@@ -90,7 +93,7 @@ DLDataType getDLDataType(const Tensor& t) {
 
 static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
   DLDevice ctx;
-  ctx.device_id = static_cast<int32_t>(device_id);
+  ctx.device_id = static_cast<int32_t>(static_cast<unsigned char>(device_id));
   switch (tensor.device().type()) {
     case DeviceType::CPU:
       ctx.device_type = DLDeviceType::kDLCPU;
@@ -253,10 +256,12 @@ ScalarType toScalarType(const DLDataType& dtype) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+namespace {
 struct ATenDLMTensor {
   Tensor handle;
-  DLManagedTensor tensor;
+  DLManagedTensor tensor{};
 };
+} // namespace
 
 static void deleter(DLManagedTensor* arg) {
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
