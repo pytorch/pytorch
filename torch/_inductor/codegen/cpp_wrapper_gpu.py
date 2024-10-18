@@ -366,7 +366,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
         stream = (
             "stream"
