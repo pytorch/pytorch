@@ -55,10 +55,22 @@ namespace {
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
-bool check_prefer_cudnn_attention() {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+bool check_prefer_cudnn_attention(sdp_params const& params) {
+  // TODO(eqy): Re-enable by default after upgrading to a release later than 9.5.0
+  // see context: https://github.com/pytorch/pytorch/issues/138340
+  // return false;
+#if defined(CUDNN_VERSION)
+
+#if CUDNN_VERSION > 90500
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
+#elif CUDNN_VERSION >= 90000
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  return params.query.is_contiguous() && dprops->major >= 9;
+#else
+  return false;
+#endif
+
 #else
   return false;
 #endif
@@ -76,7 +88,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
+  static const bool prefer_cudnn = check_prefer_cudnn_attention(params);
   return prefer_cudnn ? cudnn_order : default_order;
 }
 
