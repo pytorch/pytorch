@@ -2774,7 +2774,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
             work.wait()
             result = work.get_future_result().wait()
-            self.assertEqual(WorkResult(result), WorkResult.FAILURE)
+            self.assertEqual(WorkResult(result), WorkResult.COMM_ERROR)
 
         if prev_nccl_async_error_handling is not None:
             os.environ[
