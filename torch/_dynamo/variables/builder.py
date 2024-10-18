@@ -966,7 +966,7 @@ class VariableBuilder:
             )
             # We bind the new_symint to graph input.
             set_example_value(sym_node_proxy.node, new_symint)
-            self.tx.output.bound_symbols[new_symint.node.expr] = sym_node_proxy
+            self.tx.output.root_tracer.bound_symbols[new_symint.node.expr] = sym_node_proxy
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -1859,7 +1859,7 @@ class VariableBuilder:
             source=self.get_source(),
         )
 
-        self.tx.output.bound_symbols[wrapped_value.node.expr] = proxy
+        self.tx.output.root_tracer.bound_symbols[wrapped_value.node.expr] = proxy
         set_example_value(proxy.node, wrapped_value)
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
