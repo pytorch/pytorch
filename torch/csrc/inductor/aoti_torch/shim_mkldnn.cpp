@@ -269,4 +269,26 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
   });
 }
 
+#if AT_MKL_ENABLED()
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
+    AtenTensorHandle X,
+    AtenTensorHandle W,
+    AtenTensorHandle origin_W,
+    AtenTensorHandle* B,
+    int64_t prepack_batch_size,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = at::native::mkl_linear(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(W),
+        *tensor_handle_to_tensor_pointer(origin_W),
+        pointer_to_optional<at::Tensor>(B),
+        prepack_batch_size);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+#endif // AT_MKL_ENABLED
+
 #endif // AT_MKLDNN_ENABLED()
