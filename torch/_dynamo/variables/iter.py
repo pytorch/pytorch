@@ -485,7 +485,7 @@ class MapVariable(ZipVariable):
         )
 
 
-class FilterVariable(MapVariable):
+class FilterVariable(ZipVariable):
     """
     Represents filter(fn, iterable)
     """
@@ -497,7 +497,6 @@ class FilterVariable(MapVariable):
         **kwargs,
     ) -> None:
         super().__init__(
-            fn,
             [
                 iterable,
             ],
@@ -507,6 +506,18 @@ class FilterVariable(MapVariable):
 
     def python_type(self):
         return filter
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return False
+
+    def next_variable(self, tx):
+        # A do-while loop to find elements that make fn return true
+        while True:
+            args = super().next_variable(tx)
+            assert len(args.items) == 1
+            res = self.fn.call_function(tx, args.items, {})
+            if res.is_python_constant() and res.as_python_constant():
+                return args.items[0]
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
