@@ -764,7 +764,6 @@ def proxy_args_kwargs(args, kwargs):
 
 @dataclasses.dataclass
 class CompilationMetrics:
-    is_forward: bool = dataclasses.field(default=True, init=False)
     compile_id: str
     frame_key: str
     co_name: str
@@ -805,7 +804,6 @@ class CompilationMetrics:
 
 @dataclasses.dataclass
 class BwdCompilationMetrics:
-    is_forward: bool = dataclasses.field(default=False, init=False)
     compile_id: str
     inductor_compile_time_s: Optional[float]
     code_gen_time_s: Optional[float]
