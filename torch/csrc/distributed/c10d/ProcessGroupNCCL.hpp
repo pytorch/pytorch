@@ -491,7 +491,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
     // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
     // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
-    // accepts int. Otherwise, an imlicit conversion may happen at the API call
+    // accepts int. Otherwise, an implicit conversion may happen at the API call
     // and the value may become negative.
     // [Note 2]: this member is pybinded to Python, the value passed from Python
     // must be within the numerical range of C++ int. Otherwise, Python will
