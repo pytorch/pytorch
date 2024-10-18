@@ -67,7 +67,6 @@ from .common import (
     SizeArg,
     TensorArg,
     WorkspaceArg,
-    WorkspaceZeroMode,
 )
 from .simd import (
     constant_repr,
@@ -2548,9 +2547,9 @@ class TritonKernel(SIMDKernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.scheduler.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
                     result.writeline(
-                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
+                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
                     )
                 else:
                     raise KeyError(
@@ -2721,7 +2720,6 @@ class TritonKernel(SIMDKernel):
                 code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-
         # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
             if isinstance(arg, SizeArg):
@@ -2754,13 +2752,9 @@ class TritonKernel(SIMDKernel):
         # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
         # zeros, then, although we still mutate the data, we don't care about those
         # mutations because we don't make any assumptions about the contents of the
-        # workspace buffer.  Similarly, ZERO_PER_GRAPH requires the kenrel to return
-        # the buffer back to its original state.
+        # workspace buffer.
         for argname, arg in zip(argdefs, signature):
-            if (
-                isinstance(arg, WorkspaceArg)
-                and arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL
-            ):
+            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
                 mutated_args.add(argname)
 
         mutated_args = sorted(mutated_args)
@@ -2950,8 +2944,11 @@ class TritonKernel(SIMDKernel):
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
         current_device = V.graph.scheduler.get_current_device_or_throw()
 
-        for ws in self.args.workspace_args:
-            wrapper.generate_workspace_allocation(ws)
+        if self.args.workspace_arg is not None:
+            ws = self.args.workspace_arg
+            wrapper.generate_workspace_allocation(
+                ws.nbytes, current_device, ws.zero_fill
+            )
 
         grid = wrapper.generate_default_grid(
             name, grid, grid_callable=self._get_grid_fn()
@@ -2968,8 +2965,8 @@ class TritonKernel(SIMDKernel):
             triton_meta=self.triton_meta,
         )
 
-        for ws in reversed(self.args.workspace_args):
-            wrapper.generate_workspace_deallocation(ws)
+        if self.args.workspace_arg is not None:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
