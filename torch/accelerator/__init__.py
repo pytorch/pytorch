@@ -14,8 +14,8 @@ def current_accelerator() -> torch.device:
     r"""Return the device type of the current :ref:`accelerator<accelerators>`.
 
     Returns:
-        str: the device type of the current accelerator. If no available accelerators,
-            return cpu device type.
+        torch.device: return the current accelerator as :class:`torch.device`.
+            If no available accelerators, return cpu device.
 
     Example::
 
