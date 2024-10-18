@@ -40,8 +40,7 @@ class C10_CUDA_API CUDAError : public c10::Error {
   do {                                                         \
     const cudaError_t __err = EXPR;                            \
     if (C10_UNLIKELY(__err != cudaSuccess)) {                  \
-      auto error_unused C10_UNUSED = cudaGetLastError();       \
-      (void)error_unused;                                      \
+      C10_UNUSED auto error_unused = cudaGetLastError();       \
       TORCH_WARN("CUDA warning: ", cudaGetErrorString(__err)); \
     }                                                          \
   } while (0)
@@ -54,16 +53,14 @@ class C10_CUDA_API CUDAError : public c10::Error {
   do {                                                          \
     const cudaError_t __err = EXPR;                             \
     if (C10_UNLIKELY(__err != cudaSuccess)) {                   \
-      cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
-      (void)error_unused;                                       \
+      C10_UNUSED cudaError_t error_unused = cudaGetLastError(); \
     }                                                           \
   } while (0)
 
 // Clear the last CUDA error
 #define C10_CUDA_CLEAR_ERROR()                                \
   do {                                                        \
-    cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
-    (void)error_unused;                                       \
+    C10_UNUSED cudaError_t error_unused = cudaGetLastError(); \
   } while (0)
 
 // This should be used directly after every kernel launch to ensure

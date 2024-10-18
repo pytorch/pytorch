@@ -22,7 +22,7 @@ int device_count_impl(bool fail_if_no_driver) {
   // Clear out the error state, so we don't spuriously trigger someone else.
   // (This shouldn't really matter, since we won't be running very much CUDA
   // code in this regime.)
-  cudaError_t last_err C10_UNUSED = cudaGetLastError();
+  C10_UNUSED cudaError_t last_err = cudaGetLastError();
   switch (err) {
     case cudaErrorNoDevice:
       // Zero devices is ok here

@@ -40,7 +40,7 @@ int register_linear_params() {
 }
 
 namespace {
-static C10_UNUSED auto linear_params = register_linear_params();
+C10_UNUSED static auto linear_params = register_linear_params();
 }  // namespace
 
 }}  // namespace ao::sparse
