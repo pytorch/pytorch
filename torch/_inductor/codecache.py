@@ -475,18 +475,14 @@ def write_atomic(
     try:
         tmp_path.rename(target=path)
     except FileExistsError as e_file_exist:
-        if _IS_WINDOWS:
-            # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
-            # Below two lines code is equal to `tmp_path.rename(path)` on non-Windows OS.
-            # 1. Copy tmp_file to Target(Dst) file.
-            shutil.copy2(src=tmp_path, dst=path)
-            # 2. Delete tmp_file.
-            os.remove(tmp_path)
-        else:
-            # It is expect not run here on non-Windows OS. If run into here, raise error.
-            raise e_file_exist
-    except BaseException as e:
-        raise e
+        if not _IS_WINDOWS:
+            raise
+        # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
+        # Below two lines code is equal to `tmp_path.rename(path)` on non-Windows OS.
+        # 1. Copy tmp_file to Target(Dst) file.
+        shutil.copy2(src=tmp_path, dst=path)
+        # 2. Delete tmp_file.
+        os.remove(tmp_path)
 
 
 @dataclasses.dataclass
