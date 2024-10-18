@@ -133,6 +133,12 @@ def _get_user_allowed_globals():
         rc[f"{module}.{name}"] = f
     return rc
 
+def _is_user_allowed_or_subclass(inst):
+    for user_allowed in _get_user_allowed_globals().values():
+        if (inst is user_allowed
+            or (isinstance(user_allowed, type) and issubclass(type(inst), user_allowed))):
+            return True
+    return False
 
 def _tensor_rebuild_functions():
     return {
@@ -260,7 +266,7 @@ class Unpickler:
                 cls = self.stack.pop()
                 if cls is torch.nn.Parameter:
                     self.append(torch.nn.Parameter(*args))
-                elif cls in _get_user_allowed_globals().values():
+                elif _is_user_allowed_or_subclass(cls):
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
@@ -288,7 +294,7 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
+                elif _is_user_allowed_or_subclass(inst):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:
