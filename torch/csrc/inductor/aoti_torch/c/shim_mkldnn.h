@@ -129,6 +129,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     const char* attr,
     AtenTensorHandle* ret0);
 
+#if AT_MKL_ENABLED()
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
+    AtenTensorHandle X,
+    AtenTensorHandle W,
+    AtenTensorHandle origin_W,
+    AtenTensorHandle* B,
+    int64_t prepack_batch_size,
+    AtenTensorHandle* ret0);
+
+#endif // AT_MKL_ENABLED
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
