@@ -1290,8 +1290,39 @@ class TestMemoryLeak(TestCaseMPS):
         step(a)
         torch.mps.empty_cache()
         driver_after = torch.mps.driver_allocated_memory()
-        self.assertEqual(driver_before, driver_after, f"Detected {driver_after-driver_before} bytes leak of GPU memory")
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after - driver_before} bytes leak of GPU memory")
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/125217
+    # TODO(hvaara): When this is fixed in macOS:
+    #   * This test will start failing consistently.
+    #   * Update `0` in the predicate below to the macOS version that fixes the issue.
+    #   * Remove this TODO.
+    #   * Worry about flakes.
+    @xfailIf(product_version > 0)
+    def test_maxpool2d_no_leak(self):
+        N, C, H, W = 64, 32, 256, 256
+        iters = 5
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(32, 32, 3),
+            nn.MaxPool2d((2, 2)),
+        ).to('mps')
+        input = torch.rand(N, C, H, W, device='mps')
+
+        # Warm up
+        model(input)
+        torch.mps.empty_cache()
+
+        # Begin test
+        driver_before = torch.mps.driver_allocated_memory()
+        model(input)
+        for _ in range(iters):
+            output = model(input)
+            loss = output.sum()
+            loss.backward()
+        torch.mps.empty_cache()
+        driver_after = torch.mps.driver_allocated_memory()
+        self.assertEqual(driver_before, driver_after, f"Detected {driver_after - driver_before} bytes leak of GPU memory")
 
 class TestPixelShuffle(TestCaseMPS):
     def test_pixel_shuffle_unshuffle(self):
@@ -8055,7 +8086,7 @@ class TestMPS(TestCaseMPS):
 
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
-        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
