@@ -1921,7 +1921,7 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float32])
-    @parametrize("batch_size", [64])
+    @parametrize("batch_size", [120])
     @parametrize("q_seq_len", [384])
     @parametrize("kv_seq_len", [384])
     @parametrize("n_head", [16])
@@ -1971,7 +1971,7 @@ class TestSDPA(NNTestCase):
         q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
         kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
         
-        mask_dtypes = [None] #[None, torch.bfloat16, torch.float]
+        mask_dtypes = [torch.bfloat16] #[None, torch.bfloat16, torch.float]
         for mask_dtype in mask_dtypes:
             q = make_tensor(q_shape) * 100
             k = make_tensor(kv_shape) * 100
@@ -2081,7 +2081,7 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.bfloat16])
-    @parametrize("batch_size", [64])
+    @parametrize("batch_size", [120])
     @parametrize("q_seq_len", [384])
     @parametrize("kv_seq_len", [384])
     @parametrize("n_head", [16])

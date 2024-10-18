@@ -616,7 +616,7 @@ def _sfdp_replacement_20(
     dropout,
 ):
     counters["inductor"]["fuse_attention"] += 1
-    print("hit sdpa pattern 20")
+    # print("hit sdpa pattern 20")
     res = _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),
@@ -706,7 +706,7 @@ def _sfdp_replacement_21(
     dropout,
 ):
     counters["inductor"]["fuse_attention"] += 1
-    print("hit sdpa pattern 21")
+    # print("hit sdpa pattern 21")
     res = _scaled_dot_product_attention(
         query.transpose(1, 2),
         key.transpose(1, 2),

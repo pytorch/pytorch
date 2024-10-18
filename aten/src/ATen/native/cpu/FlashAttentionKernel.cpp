@@ -697,6 +697,88 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
   }
 }
 
+template <typename scalar_t>
+inline void _sub_exp_sum_div_quant_fusion_kernel(
+    const float* in,
+    const int64_t& M,
+    const int64_t& N,
+    const int64_t& N_step,
+    const int& ldn,
+    const int& kvSize,
+    const int& rndkvSplitSize,
+    const int& rndkvTail,
+    const int& av_gemm_K,
+    const int& av_gemm_K_tail,
+    const int32_t& beta1, // zp_a
+    const float& alpha, // scale_a
+    float* local,
+    scalar_t* out,
+    float* sfm_max_ptr,
+    float* sfm_sum_ptr) {
+  const int32_t vec_size = at::vec::Vectorized<float>::size();
+  float min_val = 0;
+  float max_val = 255;
+  auto vec_min_val = at::vec::Vectorized<float>(min_val);
+  auto vec_max_val = at::vec::Vectorized<float>(max_val);
+  float beta1_float = (float) beta1;
+  auto vec_beta1 = at::vec::Vectorized<float>(beta1_float);
+  for (int64_t row = 0; row < M; ++row) {
+    auto sfm_max = sfm_max_ptr[row];
+    auto vec_max = at::vec::Vectorized<float>(sfm_max);
+    // sub max, exp, sum reduce
+    for (int64_t n = 0; n < N; n += N_step) {
+      int64_t kvBlockSize = std::min(N_step, kvSize - n);
+      const float* qk_block_data = in + n * ldn + row * kvBlockSize;
+      float tmp_sum = 0;
+      auto vec_tmp_sum = at::vec::Vectorized<float>(tmp_sum);
+      float* tmp_out = local + n;
+      for (long col = 0; col < vec_size * (kvBlockSize / vec_size); col += vec_size) {
+        auto tmp0 = at::vec::Vectorized<float>::loadu(qk_block_data + col);
+        auto tmp1 = tmp0 - vec_max;
+        auto tmp2 = tmp1.exp_u20();
+        vec_tmp_sum += tmp2;
+        _store(tmp_out + col, tmp2);
+      }
+      tmp_sum += vec_tmp_sum.reduce_add();
+      for (long col = vec_size * (kvBlockSize / vec_size); col < kvBlockSize; col++) {
+        auto tmp0 = qk_block_data[col];
+        auto tmp1 = tmp0 - sfm_max;
+        auto tmp2 = exp(tmp1);
+        tmp_sum += tmp2;
+        tmp_out[col] = tmp2;
+      }
+      sfm_sum_ptr[row] += tmp_sum;
+    }
+    // div sum, sum for attention
+    auto sum_scale = 1 / sfm_sum_ptr[row] / alpha;
+    auto vec_sum_scale = vec::Vectorized<float>(sum_scale);
+    for (int64_t n = 0; n < N; n += N_step) {
+      int64_t rndkvBlockSize = (kvSize - n) == N_step ? rndkvSplitSize : rndkvTail;
+      scalar_t* qk_reduced_block_data = out + n * ldn;
+      float* tmp_in = local + n;
+      scalar_t* tmp_out = qk_reduced_block_data + row * (n + N_step >= kvSize ? av_gemm_K_tail : av_gemm_K);
+      for (long col = 0; col < vec_size * (rndkvBlockSize / vec_size); col += vec_size) {
+        auto tmp0 = vec::Vectorized<float>::loadu(tmp_in + col);
+        auto tmp1 = tmp0 * vec_sum_scale;
+        auto tmp2 = tmp1.round();
+        auto tmp3 = tmp2 + vec_beta1;
+        auto tmp4 = at::vec::maximum(tmp3, vec_min_val);
+        auto tmp5 = at::vec::minimum(tmp4, vec_max_val);
+        _store(tmp_out + col, tmp5);
+      }
+      for (long col = vec_size * (rndkvBlockSize / vec_size); col < rndkvBlockSize; col++) {
+        auto tmp0 = tmp_in[col];
+        auto tmp1 = tmp0 * sum_scale;
+        auto tmp2 = std::nearbyint(tmp1);
+        auto tmp3 = tmp2 + beta1_float;
+        auto tmp4 = std::max(tmp3, min_val);
+        auto tmp5 = std::min(tmp4, max_val);
+        tmp_out[col] = tmp5;
+      }
+    }
+  }
+}
+
 /*
 1. dequant
 2. quant
@@ -1640,57 +1722,6 @@ cpu_flash_attention_u8(
   int av_gemm_K_tail_padding = av_gemm_K_tail_mul4 ? 0 : 4 - kvTail % 4;
   int av_gemm_K_tail = kvTail + av_gemm_K_tail_padding;
 
-  at::Tensor k_sum_buf = at::empty(
-      {batchSize, num_head, kvSize},
-      query.options().dtype(at::kInt));
-
-  at::Tensor v_sum_buf = at::empty(
-      {batchSize, num_head, headSize},
-      query.options().dtype(at::kInt));
-
-  // allocate per thread temp buf (accumulate type)
-  // int64_t size_per_thread =
-  //     /* qk       */ kvSlice * qSplitSize * kvSplitSize + // qSplitSize * kvSize +
-  //     /* dst      */ qSplitSize * headSize;
-  // int64_t size_per_thread =
-  //     /* qk       */ kvSlice * qSplitSize * rndkvSplitSize + // qSplitSize * kvSize +
-  //     /* dst      */ qSplitSize * rndHeadSize +
-  //     /* qk_local */ kvSlice * av_gemm_K;
-
-  // int64_t size_s32_per_thread =
-  //     /* qk_s32   */ qSplitSize * rndkvSplitSize +
-  //     /* dst_s32  */ qSplitSize * rndHeadSize;
-
-  // at::Tensor buf = at::empty(
-  //     {num_thread, size_per_thread}, query.options().dtype(accumulate_dtype));
-  // at::Tensor buf_reduced = at::empty(
-  //     {num_thread,
-  //      kvSlice * qSplitSize,
-  //      av_gemm_K},
-  //     query.options());
-  // at::Tensor buf_s32 = at::empty(
-  //     {num_thread, size_s32_per_thread}, query.options().dtype(at::kInt));
-
-  // allocate per thread temp buf (accumulate type)
-  // int64_t sum_size_per_thread =
-  //     // /* query_sum     */ qSplitSize +
-  //     // /* key_sum       */ kvSplitSize +
-  //     // /* attention_sum */ qSplitSize +
-  //     // /* value_sum     */ headSize +
-  //     /* softmax_sum   */ qSplitSize;
-
-  // at::Tensor sum_buf = at::empty(
-  //     {num_thread, sum_size_per_thread},
-  //     query.options().dtype(accumulate_dtype));
-
-  // int64_t qa_sum_size_per_thread =
-  //     /* query_sum     */ qSplitSize +
-  //     /* attention_sum */ qSplitSize;
-
-  // at::Tensor qa_sum_buf = at::empty(
-  //     {num_thread, qa_sum_size_per_thread},
-  //     query.options().dtype(at::kInt));
-
   // at::Tensor k_sum_buf = at::empty(
   //     {batchSize, num_head, kvSize},
   //     query.options().dtype(at::kInt));
@@ -1698,16 +1729,6 @@ cpu_flash_attention_u8(
   // at::Tensor v_sum_buf = at::empty(
   //     {batchSize, num_head, headSize},
   //     query.options().dtype(at::kInt));
-
-  // int64_t max_size_per_thread = /* softmax max */ qSplitSize;
-
-  // at::Tensor max_buf = at::empty(
-  //     {num_thread, max_size_per_thread},
-  //     query.options().dtype(accumulate_dtype));
-
-  // size_t wsp_size_per_thread = 4 * 1024;
-  // std::vector<size_t> wsp;
-  // wsp.resize(num_thread * wsp_size_per_thread);
 
   dt u8_dt = dt::u8;
   dt s8_dt = dt::s8;
@@ -1722,16 +1743,8 @@ cpu_flash_attention_u8(
       ? attention_mask.value().data_ptr<mask_t>()
       : nullptr;
   scalar_t* out_data = output.data_ptr<scalar_t>();
-  // accum_t* lse_data = logsumexp.data_ptr<accum_t>();
-  // accum_t* buf_data = buf.data_ptr<accum_t>();
-  // scalar_t* buf_reduced_data = buf_reduced.data_ptr<scalar_t>();
-  // int32_t* buf_s32_data = buf_s32.data_ptr<int32_t>();
-  // accum_t* sum_data = sum_buf.data_ptr<accum_t>();
-  // int32_t* qa_sum_data = qa_sum_buf.data_ptr<int32_t>();
-  // int32_t* k_sum_data = kv_sum_buf.data_ptr<int32_t>();
-  // int32_t* v_sum_data = k_sum_data + kvSize;
-  int32_t* k_sum_data = k_sum_buf.data_ptr<int32_t>();
-  int32_t* v_sum_data = v_sum_buf.data_ptr<int32_t>();
+  // int32_t* k_sum_data = k_sum_buf.data_ptr<int32_t>();
+  // int32_t* v_sum_data = v_sum_buf.data_ptr<int32_t>();
 
   // accum_t* max_data = max_buf.data_ptr<accum_t>();
 
@@ -1852,29 +1865,6 @@ cpu_flash_attention_u8(
   (*av_gemm_batch).generate();
   size_t scratchpad_size = std::max(qk_scratchpad_size, av_scratchpad_size);
 
-  // Buffer to store Key and Value after transforms
-  at::Tensor key_t_reorder = at::empty(
-      {batchSize,
-       num_head,
-       qk_gemm_K,
-       rndkvSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-  // Buffer to store padding query
-  // std::unique_ptr<unsigned short[]> query_padding_data = std::make_unique<unsigned short[]>(
-  //       num_thread * qSplitSize * qk_gemm_K);
-  // scalar_t* query_padding_ptr = reinterpret_cast<scalar_t*>(query_padding_data.get());
-  auto key_reorder_ptr = key_t_reorder.data_ptr<scalar_t>();
-  int kv_padding_size = (kvSize - 1) / kvSplitSize * av_gemm_K + av_gemm_K_tail;
-
-  at::Tensor value_t_reorder = at::empty(
-      {batchSize,
-      num_head,
-      kvSlice * av_gemm_K, //kv_padding_size,
-      rndHeadSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-  auto value_reorder_ptr = value_t_reorder.data_ptr<scalar_t>();
-
-
   int64_t total_size_uint8_per_thread =
     /* qk */ kvSlice * qSplitSize * rndkvSplitSize * 4 +
     /* qk_local  */ kvSlice * av_gemm_K * 4 +
@@ -1884,8 +1874,12 @@ cpu_flash_attention_u8(
     /* softmax_sum   */ qSplitSize * 4 +
     /* query_sum     */ qSplitSize * 4 +
     /* attention_sum */ qSplitSize * 4 +
+    /* key_sum */ kvSize * 4 +
+    /* value_sum */ headSize * 4 +
     /* softmax max */ qSplitSize * 4 +
     /* query_padding_data */ qSplitSize * qk_gemm_K +
+    /* key_t_reorder */ qk_gemm_K * rndkvSize +
+    /* value_t_reorder */ kvSlice * av_gemm_K * rndHeadSize +
     /* scratchpad_gemm */ scratchpad_size;
 
     at::Tensor total_buf = at::empty(
@@ -1955,167 +1949,6 @@ cpu_flash_attention_u8(
         int64_t i = 0, j = 0;
         at::native::data_index_init(
             begin, i, batchSize, j, num_head);
-        for (const auto z : c10::irange(begin, end)) {
-          (void)z; // Suppress unused variable
-          _int_sum_b_contiguous_kernel(k_data + i * kStrideB + j * kStrideH,
-            k_sum_data + i * num_head * kvSize + j * kvSize,
-            kvSize, headSize, kStrideN, q_zp, /* accum */ false);
-          _int_sum_a_contiguous_kernel(v_data + i * vStrideB + j * vStrideH,
-            v_sum_data + i * num_head * headSize + j * headSize,
-            headSize, kvSize, vStrideN, a_zp);
-        // Move to the next query
-        at::native::data_index_step(i, batchSize, j, num_head);
-      }
-  });
-
-  at::parallel_for(
-      0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
-        int64_t i = 0, j = 0, l = 0, n = 0;
-        at::native::data_index_init(
-            begin, i, batchSize, j, num_head, l, kvSlice);
-        uint8_t* B_blocked_xform_u8 = new uint8_t[std::max(qk_gemm_K, av_gemm_K) * block_64];
-        // int8_t* B_blocked_xform_s8 = reinterpret_cast<signed char*>(B_blocked_xform_u8);
-        for (const auto z : c10::irange(begin, end)) {
-          (void)z; // Suppress unused variable
-          n = l * kvSplitSize;
-          // long ss, ee;
-          if (n + kvSplitSize < kvSize) {
-            for (int64_t b = 0; b < rndkvSplitSize; b += block_64) {
-              bool tail = kvSplitSize - b < block_64;
-              do_transpose(
-              // do_copy(
-                  k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
-                  B_blocked_xform_u8,
-                  tail ? kvSplitSize - b : block_64,
-                  headSize,
-                  kStrideN,
-                  block_64);
-              if (!headSize_mul4) {
-                pad_remain_row_col(
-                    B_blocked_xform_u8,
-                    headSize,
-                    block_64,
-                    qk_gemm_K,
-                    block_64,
-                    block_64
-                  );
-              }
-              // Pack
-              (*brgemm_k_xform).execute(
-                // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
-                B_blocked_xform_u8,
-                key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                      j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                      b * qk_gemm_K
-              );
-            }
-            // split headSize to block_64, block_64, block_64 ...
-            // [kvSplitSize, headSize] -> [av_gemm_K,  block_64 ...]
-            for (int64_t b = 0; b < rndHeadSize; b += block_64) {
-              // copy_value_with_pad(
-              //   v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-              //   B_blocked_xform_u8,
-              //   kvSplitSize,
-              //   headSize - b < block_64 ? headSize - b : block_64,
-              //   av_gemm_K,
-              //   block_64,
-              //   vStrideN);
-              (*brgemm_v_xform).execute(
-                v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-                // B_blocked_xform_u8,
-                value_reorder_ptr +
-                    i * num_head * kvSlice * av_gemm_K * rndHeadSize +
-                    j * kvSlice * av_gemm_K * rndHeadSize + n * rndHeadSize +
-                    av_gemm_K * b);
-            }
-          } else {
-            // tail
-            auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
-            int64_t b = 0;
-            while (b < rndkvTail) {
-              bool tail = kvTail - b < block_size;
-              do_transpose(
-                  k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
-                  B_blocked_xform_u8,
-                  tail ? kvTail - b : block_size,
-                  headSize,
-                  kStrideN,
-                  block_size);
-              if (!headSize_mul4) {
-                pad_remain_row_col(
-                    B_blocked_xform_u8,
-                    headSize,
-                    block_size,
-                    qk_gemm_K,
-                    block_size,
-                    block_size
-                  );
-              }
-              // Pack
-              if (block_size == block_64) {
-                (*brgemm_k_xform_tail).execute(
-                  // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
-                  B_blocked_xform_u8,
-                  key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                        j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                        b * qk_gemm_K
-                );
-              } else {
-                (*brgemm_k_xform_tail_tail).execute(
-                  // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
-                  B_blocked_xform_u8,
-                  key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                        j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                        b * qk_gemm_K
-                );
-              }
-              b += block_size;
-              block_size = (kvTail - b) >= block_64 ? block_64 : kv_tail_tail_block_size;
-            }
-            // split headSize to block_64, block_64, block_64 ...
-            // [kvTail, headSize] -> [av_gemm_K_tail,  block_64 ...]
-            for (int64_t b = 0; b < headSize; b += block_64) {
-              // copy_value_with_pad(
-              //   v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-              //   B_blocked_xform_u8,
-              //   kvTail,
-              //   headSize - b < block_64 ? headSize - b : block_64,
-              //   av_gemm_K_tail,
-              //   block_64,
-              //   vStrideN);
-              // (*brgemm_v_xform_tail).execute(
-              //   v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-              //   // B_blocked_xform_u8,
-              //   value_reorder_ptr +
-              //       i * num_head * kv_padding_size * rndHeadSize +
-              //       j * kv_padding_size * rndHeadSize + n * rndHeadSize +
-              //       av_gemm_K_tail * b);
-              (*brgemm_v_xform).execute(
-                v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-                // B_blocked_xform_u8,
-                value_reorder_ptr +
-                    i * num_head * kvSlice * av_gemm_K * rndHeadSize +
-                    j * kvSlice * av_gemm_K * rndHeadSize + n * rndHeadSize +
-                    av_gemm_K * b);
-            }
-          }
-          // Move to the next query
-          at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
-        }
-      });
-
-  // global params for quant
-  // float min_val = 0;
-  // float max_val = 255;
-  // const auto vec_min_val = at::vec::Vectorized<float>(min_val);
-  // const auto vec_max_val = at::vec::Vectorized<float>(max_val);
-  const int32_t vec_size = at::vec::Vectorized<float>::size();
-
-  at::parallel_for(
-      0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
-        int64_t i = 0, j = 0, k = 0;
-        at::native::data_index_init(
-            begin, i, batchSize, j, num_head, k, qSlice);
         int ompIdx = at::get_thread_num();
         scalar_t* total_buf_ptr = total_buf_data + ompIdx * total_size_uint8_per_thread;
         int32_t offset = 0;
@@ -2135,231 +1968,370 @@ cpu_flash_attention_u8(
         offset += qSplitSize * 4;
         int32_t* a_sum_ptr = reinterpret_cast<int32_t*>(total_buf_ptr + offset);
         offset += qSplitSize * 4;
+        int32_t* k_sum_ptr = reinterpret_cast<int32_t*>(total_buf_ptr + offset);
+        offset += kvSize * 4;
+        int32_t* v_sum_ptr = reinterpret_cast<int32_t*>(total_buf_ptr + offset);
+        offset += headSize * 4;
         accum_t* sfm_max_ptr = reinterpret_cast<accum_t*>(total_buf_ptr + offset);
         offset += qSplitSize * 4;
         scalar_t* query_t_padding_ptr = reinterpret_cast<scalar_t*>(total_buf_ptr + offset);
         offset += qSplitSize * qk_gemm_K;
+        scalar_t* key_reorder_ptr = reinterpret_cast<scalar_t*>(total_buf_ptr + offset);
+        offset += qk_gemm_K * rndkvSize;
+        scalar_t* value_reorder_ptr = reinterpret_cast<scalar_t*>(total_buf_ptr + offset);
+        offset += kvSlice * av_gemm_K * rndHeadSize;
         scalar_t* scratchpad_gemm = reinterpret_cast<scalar_t*>(total_buf_ptr + offset);
+        uint8_t* B_blocked_xform_u8 = new uint8_t[std::max(qk_gemm_K, av_gemm_K) * block_64];
 
         for (const auto z : c10::irange(begin, end)) {
           (void)z; // Suppress unused variable
-          int32_t* k_sum_ptr = k_sum_data + i * num_head * kvSize + j * kvSize;
-          int32_t* v_sum_ptr = v_sum_data + i * num_head * headSize + j * headSize;
-          int64_t m = k * qSplitSize;
-          int64_t qBlockSize = std::min(qSplitSize, qSize - m);
-          // Initialize sum and max
-          fill_stub(
-              sfm_sum_ptr, static_cast<accum_t>(0), qSplitSize);
-          fill_stub(
-              q_sum_ptr, static_cast<int32_t>(0), qSplitSize);
-          fill_stub(
-              a_sum_ptr, static_cast<int32_t>(0), qSplitSize);
-          fill_stub(
-              sfm_max_ptr, static_cast<accum_t>(-std::numeric_limits<accum_t>::infinity()), qSplitSize);
-          int64_t num_keys =
-              is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
-          copy_value_with_pad(
-              q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-              query_t_padding_ptr,
-              qBlockSize,
-              headSize,
-              qBlockSize,
-              qk_gemm_K,
-              qStrideM);
+          // sum k and v
+          if (q_zp == 0) {
+            fill_stub(k_sum_ptr, static_cast<int32_t>(0), kvSize);
+          } else {
+            _int_sum_b_contiguous_kernel(k_data + i * kStrideB + j * kStrideH,
+              k_sum_ptr,
+              kvSize, headSize, kStrideN, q_zp, /* accum */ false);
+          }
+          if (a_zp == 0) {
+            fill_stub(v_sum_ptr, static_cast<int32_t>(0), headSize);
+          } else {
+            _int_sum_a_contiguous_kernel(v_data + i * vStrideB + j * vStrideH,
+              v_sum_ptr,
+              headSize, kvSize, vStrideN, a_zp);
+          }
 
-          _int_sum_b_contiguous_kernel(q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-                q_sum_ptr, qBlockSize, headSize, qStrideM, k_zp, /* accum */ false);
-          for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
-            int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-            // Calculate sums for dequant compensation item
-            if (qBlockSize == qSplitSize) {
-              // q main
-              if (n + kvSplitSize < kvSize) {
-                // k main
-                for (int64_t b = 0; b < kvSplitSize; b += block_64) {
-                  dnnl::ukernel::brgemm::release_hw_context();
-                  (*qk_gemm).set_hw_context();
-                  (*qk_gemm).execute(
-                    query_t_padding_ptr,
-                    key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                        j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                        b * qk_gemm_K,
-                    A_B_offsets,
-                    qk_s32_data + b,
-                    scratchpad_gemm);
+          // pack
+          for (int64_t n = 0; n < kvSize; n += kvSplitSize) {
+            // long ss, ee;
+            if (n + kvSplitSize < kvSize) {
+              for (int64_t b = 0; b < rndkvSplitSize; b += block_64) {
+                bool tail = kvSplitSize - b < block_64;
+                do_transpose(
+                // do_copy(
+                    k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
+                    B_blocked_xform_u8,
+                    tail ? kvSplitSize - b : block_64,
+                    headSize,
+                    kStrideN,
+                    block_64);
+                if (!headSize_mul4) {
+                  pad_remain_row_col(
+                      B_blocked_xform_u8,
+                      headSize,
+                      block_64,
+                      qk_gemm_K,
+                      block_64,
+                      block_64
+                    );
                 }
-              } else {
-                auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
-                int64_t b = 0;
-                while (b < kvTail) {
-                  if (block_size == block_64) {
-                    dnnl::ukernel::brgemm::release_hw_context();
-                    (*qk_gemm_ktail).set_hw_context();
-                    (*qk_gemm_ktail).execute(
-                        query_t_padding_ptr,
-                        key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                            j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                            b * qk_gemm_K,
-                        A_B_offsets,
-                        qk_s32_data + b,
-                        scratchpad_gemm);
-                  } else {
-                    dnnl::ukernel::brgemm::release_hw_context();
-                    (*qk_gemm_ktail_tail).set_hw_context();
-                    (*qk_gemm_ktail_tail).execute(
-                        query_t_padding_ptr,
-                        key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                            j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                            b * qk_gemm_K,
-                        A_B_offsets,
-                        qk_s32_data + b,
-                        scratchpad_gemm);
-                  }
-                  b += block_size;
-                  block_size = (kvTail - b) >= block_64 ? block_64 : kv_tail_tail_block_size;
-                }
+                // Pack
+                (*brgemm_k_xform).execute(
+                  // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
+                  B_blocked_xform_u8,
+                  key_reorder_ptr + n * qk_gemm_K +
+                        b * qk_gemm_K
+                );
+              }
+              // split headSize to block_64, block_64, block_64 ...
+              // [kvSplitSize, headSize] -> [av_gemm_K,  block_64 ...]
+              for (int64_t b = 0; b < rndHeadSize; b += block_64) {
+                (*brgemm_v_xform).execute(
+                  v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
+                  // B_blocked_xform_u8,
+                  value_reorder_ptr + n * rndHeadSize +
+                      av_gemm_K * b);
               }
             } else {
-              if (n + kvSplitSize < kvSize) {
-                for (int64_t b = 0; b < kvSplitSize; b += block_64) {
-                  dnnl::ukernel::brgemm::release_hw_context();
-                  (*qk_gemm_qtail).set_hw_context();
-                  (*qk_gemm_qtail).execute(
-                    query_t_padding_ptr,
-                    key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                        j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                        b * qk_gemm_K,
-                    A_B_offsets,
-                    qk_s32_data + b,
-                    scratchpad_gemm);
+              // tail
+              auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
+              int64_t b = 0;
+              while (b < rndkvTail) {
+                bool tail = kvTail - b < block_size;
+                do_transpose(
+                    k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
+                    B_blocked_xform_u8,
+                    tail ? kvTail - b : block_size,
+                    headSize,
+                    kStrideN,
+                    block_size);
+                if (!headSize_mul4) {
+                  pad_remain_row_col(
+                      B_blocked_xform_u8,
+                      headSize,
+                      block_size,
+                      qk_gemm_K,
+                      block_size,
+                      block_size
+                    );
                 }
-              } else {
-                // k tail
-                auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
-                int64_t b = 0;
-                while (b < kvTail) {
-                  if (block_size == block_64) {
-                    dnnl::ukernel::brgemm::release_hw_context();
-                    (*qk_gemm_qktail).set_hw_context();
-                    (*qk_gemm_qktail).execute(
-                        query_t_padding_ptr,
-                        key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                            j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                            b * qk_gemm_K,
-                        A_B_offsets,
-                        qk_s32_data + b,
-                        scratchpad_gemm);
-                  } else {
-                    dnnl::ukernel::brgemm::release_hw_context();
-                    (*qk_gemm_qktail_tail).set_hw_context();
-                    (*qk_gemm_qktail_tail).execute(
-                        query_t_padding_ptr,
-                        key_reorder_ptr + i * num_head * qk_gemm_K * rndkvSize +
-                            j * qk_gemm_K * rndkvSize + n * qk_gemm_K +
-                            b * qk_gemm_K,
-                        A_B_offsets,
-                        qk_s32_data + b,
-                        scratchpad_gemm);
-                  }
+                // Pack
+                if (block_size == block_64) {
+                  (*brgemm_k_xform_tail).execute(
+                    // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
+                    B_blocked_xform_u8,
+                    key_reorder_ptr + n * qk_gemm_K +
+                          b * qk_gemm_K
+                  );
+                } else {
+                  (*brgemm_k_xform_tail_tail).execute(
+                    // k_data + i * kStrideB + j * kStrideH + n * kStrideN + b * kStrideN,
+                    B_blocked_xform_u8,
+                    key_reorder_ptr + n * qk_gemm_K +
+                          b * qk_gemm_K
+                  );
+                }
                 b += block_size;
                 block_size = (kvTail - b) >= block_64 ? block_64 : kv_tail_tail_block_size;
+              }
+              // split headSize to block_64, block_64, block_64 ...
+              // [kvTail, headSize] -> [av_gemm_K_tail,  block_64 ...]
+              for (int64_t b = 0; b < headSize; b += block_64) {
+                (*brgemm_v_xform).execute(
+                  v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
+                  // B_blocked_xform_u8,
+                  value_reorder_ptr + n * rndHeadSize +
+                      av_gemm_K * b);
+              }
+            }
+          }
+
+          // sdpa core
+          // int32_t* k_sum_ptr = k_sum_data + i * num_head * kvSize + j * kvSize;
+          // int32_t* v_sum_ptr = v_sum_data + i * num_head * headSize + j * headSize;
+          for (int64_t k = 0; k < qSlice; k++) {
+            int64_t m = k * qSplitSize;
+            int64_t qBlockSize = std::min(qSplitSize, qSize - m);
+            // Initialize sum and max
+            fill_stub(
+                sfm_sum_ptr, static_cast<accum_t>(0), qSplitSize);
+            fill_stub(
+                a_sum_ptr, static_cast<int32_t>(0), qSplitSize);
+            fill_stub(
+                sfm_max_ptr, static_cast<accum_t>(-std::numeric_limits<accum_t>::infinity()), qSplitSize);
+            int64_t num_keys =
+                is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
+            copy_value_with_pad(
+                q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                query_t_padding_ptr,
+                qBlockSize,
+                headSize,
+                qBlockSize,
+                qk_gemm_K,
+                qStrideM);
+
+            if (k_zp == 0) {
+              _int_sum_b_contiguous_kernel(q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                    q_sum_ptr, qBlockSize, headSize, qStrideM, k_zp, /* accum */ false);
+            } else {
+              fill_stub(
+                q_sum_ptr, static_cast<int32_t>(0), qSplitSize);
+            }
+            for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
+              int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+              // Calculate sums for dequant compensation item
+              if (qBlockSize == qSplitSize) {
+                // q main
+                if (n + kvSplitSize < kvSize) {
+                  // k main
+                  for (int64_t b = 0; b < kvSplitSize; b += block_64) {
+                    dnnl::ukernel::brgemm::release_hw_context();
+                    (*qk_gemm).set_hw_context();
+                    (*qk_gemm).execute(
+                      query_t_padding_ptr,
+                      key_reorder_ptr + n * qk_gemm_K +
+                          b * qk_gemm_K,
+                      A_B_offsets,
+                      qk_s32_data + b,
+                      scratchpad_gemm);
+                  }
+                } else {
+                  auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
+                  int64_t b = 0;
+                  while (b < kvTail) {
+                    if (block_size == block_64) {
+                      dnnl::ukernel::brgemm::release_hw_context();
+                      (*qk_gemm_ktail).set_hw_context();
+                      (*qk_gemm_ktail).execute(
+                          query_t_padding_ptr,
+                          key_reorder_ptr + n * qk_gemm_K +
+                              b * qk_gemm_K,
+                          A_B_offsets,
+                          qk_s32_data + b,
+                          scratchpad_gemm);
+                    } else {
+                      dnnl::ukernel::brgemm::release_hw_context();
+                      (*qk_gemm_ktail_tail).set_hw_context();
+                      (*qk_gemm_ktail_tail).execute(
+                          query_t_padding_ptr,
+                          key_reorder_ptr + n * qk_gemm_K +
+                              b * qk_gemm_K,
+                          A_B_offsets,
+                          qk_s32_data + b,
+                          scratchpad_gemm);
+                    }
+                    b += block_size;
+                    block_size = (kvTail - b) >= block_64 ? block_64 : kv_tail_tail_block_size;
+                  }
                 }
+              } else {
+                if (n + kvSplitSize < kvSize) {
+                  for (int64_t b = 0; b < kvSplitSize; b += block_64) {
+                    dnnl::ukernel::brgemm::release_hw_context();
+                    (*qk_gemm_qtail).set_hw_context();
+                    (*qk_gemm_qtail).execute(
+                      query_t_padding_ptr,
+                      key_reorder_ptr + n * qk_gemm_K +
+                          b * qk_gemm_K,
+                      A_B_offsets,
+                      qk_s32_data + b,
+                      scratchpad_gemm);
+                  }
+                } else {
+                  // k tail
+                  auto block_size = kvTail >= block_64 ? block_64 : kv_tail_tail_block_size;
+                  int64_t b = 0;
+                  while (b < kvTail) {
+                    if (block_size == block_64) {
+                      dnnl::ukernel::brgemm::release_hw_context();
+                      (*qk_gemm_qktail).set_hw_context();
+                      (*qk_gemm_qktail).execute(
+                          query_t_padding_ptr,
+                          key_reorder_ptr + n * qk_gemm_K +
+                              b * qk_gemm_K,
+                          A_B_offsets,
+                          qk_s32_data + b,
+                          scratchpad_gemm);
+                    } else {
+                      dnnl::ukernel::brgemm::release_hw_context();
+                      (*qk_gemm_qktail_tail).set_hw_context();
+                      (*qk_gemm_qktail_tail).execute(
+                          query_t_padding_ptr,
+                          key_reorder_ptr + n * qk_gemm_K +
+                              b * qk_gemm_K,
+                          A_B_offsets,
+                          qk_s32_data + b,
+                          scratchpad_gemm);
+                    }
+                  b += block_size;
+                  block_size = (kvTail - b) >= block_64 ? block_64 : kv_tail_tail_block_size;
+                  }
+                }
+              }
+
+              // do dequant compensation, add mask, max reduce for softmax, and convert qk from s32 to fp32
+              int64_t rndkvBlockSize = kvBlockSize == kvSplitSize ? rndkvSplitSize : rndkvTail;
+              accum_t* qk_block_data = qk_data + n * qSplitSize;
+              if (has_attn_mask) {
+                mask_t* mask_data_offset = mask_data + i * mStrideB + j * mStrideH + m * mStrideM + (mStrideN == 0 ? 0 : n);
+                _dequant_mask_max_fusion_kernel(
+                  qk_s32_data, //in
+                  mask_data_offset, //mask_ptr
+                  q_sum_ptr, //sum_a_ptr
+                  k_sum_ptr + n, //sum_b_ptr
+                  qBlockSize, //M
+                  rndkvBlockSize, //N
+                  rndkvBlockSize, //ldi
+                  mStrideM, //ldm
+                  kvBlockSize, //ldo
+                  q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
+                  q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
+                  qk_block_data, //out
+                  sfm_max_ptr // sfm_max_ptr
+                );
+              } else {
+                _dequant_max_fusion_kernel(
+                  qk_s32_data, //in
+                  q_sum_ptr, //sum_a_ptr
+                  k_sum_ptr + n, //sum_b_ptr
+                  qBlockSize, //M
+                  rndkvBlockSize, //N
+                  rndkvBlockSize, //ldi
+                  mStrideM, //ldm
+                  kvBlockSize, //ldo
+                  q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
+                  q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
+                  qk_block_data, //out
+                  sfm_max_ptr // sfm_max_ptr
+                );  
               }
             }
 
-            // do dequant compensation, add mask, max reduce for softmax, and convert qk from s32 to fp32
-            int64_t rndkvBlockSize = kvBlockSize == kvSplitSize ? rndkvSplitSize : rndkvTail;
-            accum_t* qk_block_data = qk_data + n * qSplitSize;
-            if (has_attn_mask) {
-              mask_t* mask_data_offset = mask_data + i * mStrideB + j * mStrideH + m * mStrideM + (mStrideN == 0 ? 0 : n);
-              _dequant_mask_max_fusion_kernel(
-                qk_s32_data, //in
-                mask_data_offset, //mask_ptr
-                q_sum_ptr, //sum_a_ptr
-                k_sum_ptr + n, //sum_b_ptr
+            // sub max, exp, sum reduce, div sum for softmax
+            // and quant
+            // and sum for attention
+            if (v_zp == 0) {
+              _sub_exp_sum_div_quant_fusion_kernel(
+                qk_data, //in
                 qBlockSize, //M
-                rndkvBlockSize, //N
-                rndkvBlockSize, //ldi
-                mStrideM, //ldm
-                kvBlockSize, //ldo
-                q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
-                q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
-                qk_block_data, //out
-                sfm_max_ptr // sfm_max_ptr
+                num_keys, //N
+                kvSplitSize, //N_step
+                qSplitSize, //ldn
+                kvSize, //kvSize
+                rndkvSplitSize, //rndkvSplitSize
+                rndkvTail, //rndkvTail
+                av_gemm_K, //av_gemm_K
+                av_gemm_K_tail, //av_gemm_K_tail
+                a_zp, // zp_a=beta1
+                a_scale, // scale_a=alpha
+                qk_local_data, //local
+                qk_reduced_data, //out
+                sfm_max_ptr, //sfm_max_ptr
+                sfm_sum_ptr //sfm_sum_ptr
               );
             } else {
-              _dequant_max_fusion_kernel(
-                qk_s32_data, //in
-                q_sum_ptr, //sum_a_ptr
-                k_sum_ptr + n, //sum_b_ptr
+              _sub_exp_sum_div_quant_sum_fusion_kernel(
+                qk_data, //in
                 qBlockSize, //M
-                rndkvBlockSize, //N
-                rndkvBlockSize, //ldi
-                mStrideM, //ldm
-                kvBlockSize, //ldo
-                q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
-                q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
-                qk_block_data, //out
-                sfm_max_ptr // sfm_max_ptr
-              );  
+                num_keys, //N
+                kvSplitSize, //N_step
+                qSplitSize, //ldn
+                kvSize, //kvSize
+                rndkvSplitSize, //rndkvSplitSize
+                rndkvTail, //rndkvTail
+                av_gemm_K, //av_gemm_K
+                av_gemm_K_tail, //av_gemm_K_tail
+                a_zp, // zp_a=beta1
+                v_zp, // zp_b=beta2
+                a_scale, // scale_a=alpha
+                qk_local_data, //local
+                qk_reduced_data, //out
+                sfm_max_ptr, //sfm_max_ptr
+                sfm_sum_ptr, //sfm_sum_ptr
+                a_sum_ptr //a_sum_ptr
+              );
             }
+
+            // Calculate Softmax(q @ k.T) @ v
+            for (int64_t b = 0; b < headSize; b += block_64) {
+              dnnl::ukernel::brgemm::release_hw_context();
+              (*av_gemm_batch).set_hw_context();
+              (*av_gemm_batch).execute(
+                qk_reduced_data,
+                value_reorder_ptr + b * av_gemm_K,
+                A_B_offsets_batch,
+                dst_s32_data + b,
+                scratchpad_gemm);
+            }
+
+            // After the last gemm,
+            // do dequant compensation, quant and convert from s32 to int8
+            _dequant_quant_fusion_kernel(
+              dst_s32_data, //in
+              a_sum_ptr, //sum_a_ptr
+              v_sum_ptr, //sum_b_ptr
+              qBlockSize, //M
+              rndHeadSize, //N
+              rndHeadSize, //ldi
+              oStrideM, //ldo
+              a_zp * v_zp * kvSize, //zp_a*zp_b*k=beta1
+              o_zp, //zp_c=beta2
+              a_scale * v_scale / o_scale, //scale_a*scale_b/scale_c=alpha
+              out_data + i * oStrideB + j * oStrideH + m * oStrideM //out
+            );
           }
-
-          // sub max, exp, sum reduce, div sum for softmax
-          // and quant
-          // and sum for attention
-          _sub_exp_sum_div_quant_sum_fusion_kernel(
-            qk_data, //in
-            qBlockSize, //M
-            num_keys, //N
-            kvSplitSize, //N_step
-            qSplitSize, //ldn
-            kvSize, //kvSize
-            rndkvSplitSize, //rndkvSplitSize
-            rndkvTail, //rndkvTail
-            av_gemm_K, //av_gemm_K
-            av_gemm_K_tail, //av_gemm_K_tail
-            a_zp, // zp_a=beta1
-            v_zp, // zp_b=beta2
-            a_scale, // scale_a=alpha
-            qk_local_data, //local
-            qk_reduced_data, //out
-            sfm_max_ptr, //sfm_max_ptr
-            sfm_sum_ptr, //sfm_sum_ptr
-            a_sum_ptr //a_sum_ptr
-          );
-
-          // Calculate Softmax(q @ k.T) @ v
-          for (int64_t b = 0; b < headSize; b += block_64) {
-            dnnl::ukernel::brgemm::release_hw_context();
-            (*av_gemm_batch).set_hw_context();
-            (*av_gemm_batch).execute(
-              qk_reduced_data,
-              value_reorder_ptr +
-                  i * num_head * kvSlice * av_gemm_K * rndHeadSize +
-                  j * kvSlice * av_gemm_K * rndHeadSize + b * av_gemm_K,
-              A_B_offsets_batch,
-              dst_s32_data + b,
-              scratchpad_gemm);
-          }
-
-          // After the last gemm,
-          // do dequant compensation, quant and convert from s32 to int8
-          _dequant_quant_fusion_kernel(
-            dst_s32_data, //in
-            a_sum_ptr, //sum_a_ptr
-            v_sum_ptr, //sum_b_ptr
-            qBlockSize, //M
-            rndHeadSize, //N
-            rndHeadSize, //ldi
-            oStrideM, //ldo
-            a_zp * v_zp * kvSize, //zp_a*zp_b*k=beta1
-            o_zp, //zp_c=beta2
-            a_scale * v_scale / o_scale, //scale_a*scale_b/scale_c=alpha
-            out_data + i * oStrideB + j * oStrideH + m * oStrideM //out
-          );
           // Move to the next query
-          at::native::data_index_step(i, batchSize, j, num_head, k, qSlice);
+          at::native::data_index_step(i, batchSize, j, num_head);
         }
       });
   // Once all computations are done, need to release HW context.
