@@ -716,50 +716,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     def build_extensions(self):
         self.create_compile_commands()
-        # The caffe2 extensions are created in
-        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
-        # and need to be copied to build/lib.linux.... , which will be a
-        # platform dependent build folder created by the "build" command of
-        # setuptools. Only the contents of this folder are installed in the
-        # "install" command by default.
-        # We only make this copy for Caffe2's pybind extensions
-        caffe2_pybind_exts = [
-            "caffe2.python.caffe2_pybind11_state",
-            "caffe2.python.caffe2_pybind11_state_gpu",
-            "caffe2.python.caffe2_pybind11_state_hip",
-        ]
-        if BUILD_LIBTORCH_WHL:
-            caffe2_pybind_exts = []
-        i = 0
-        while i < len(self.extensions):
-            ext = self.extensions[i]
-            if ext.name not in caffe2_pybind_exts:
-                i += 1
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = self.get_ext_filename(fullname)
-            report(f"\nCopying extension {ext.name}")
-
-            relative_site_packages = (
-                sysconfig.get_path("purelib")
-                .replace(sysconfig.get_path("data"), "")
-                .lstrip(os.path.sep)
-            )
-            src = os.path.join("torch", relative_site_packages, filename)
-            if not os.path.exists(src):
-                report(f"{src} does not exist")
-                del self.extensions[i]
-            else:
-                dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst_dir = os.path.dirname(dst)
-                if not os.path.exists(dst_dir):
-                    os.makedirs(dst_dir)
-                self.copy_file(src, dst)
-                i += 1
 
         # Copy functorch extension
-        for i, ext in enumerate(self.extensions):
+        for ext in self.extensions:
             if ext.name != "functorch._C":
                 continue
             fullname = self.get_ext_fullname(ext.name)
@@ -1068,18 +1027,6 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_CAFFE2"]:
-        extensions.append(
-            Extension(name="caffe2.python.caffe2_pybind11_state", sources=[]),
-        )
-        if cmake_cache_vars["USE_CUDA"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_gpu", sources=[]),
-            )
-        if cmake_cache_vars["USE_ROCM"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_hip", sources=[]),
-            )
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
