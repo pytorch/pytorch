@@ -53,7 +53,6 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
@@ -181,13 +180,16 @@ def user_defined_kernel_grid_fn_code(
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
-                tuple(
-                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+            (
+                wrapper.codegen_shape_tuple(
+                    tuple(
+                        wrapper.generate_example_arg_value(g, type(g))
+                        for g in sympy_grid
+                    )
                 )
-            )
-            if config.triton.autotune_at_compile_time
-            else None,
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
 
     def writeline(line: str, example_grid: Optional[str] = None):
@@ -300,17 +302,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
                 if self.last_seen_device_guard_index is None:
-                    if config.abi_compatible:
-                        code.writeline(
-                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                        )
-                    else:
-                        code.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
-                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
-                            )
-                        )
+                    code.writeline(
+                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                    )
                 else:
                     assert (
                         self.last_seen_device_guard_index == self.device_idx
@@ -319,10 +313,6 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
                         f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                        if config.abi_compatible
-                        else maybe_hipify_code_wrapper(
-                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
-                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -841,6 +831,18 @@ class PythonWrapperCodegen(CodeGen):
             kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
 
+    def generate_tma_descriptor(self, desc):
+        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
+        prefix = "triton.tools.experimental_descriptor"
+        fn_name = f"create_{desc.rank}d_tma_descriptor"
+        call = f"{prefix}.{fn_name}"
+        args = f"{ptr}, {dims}, {block_dims}, {element_size}"
+        line = f"{desc.name} = {call}({args})"
+        self.writeline(line)
+
     def generate_scatter_fallback(
         self,
         output,
@@ -1290,7 +1292,7 @@ class PythonWrapperCodegen(CodeGen):
 
         original_name = kernel.__name__
 
-        from .common import KernelArgType, SizeArg, TensorArg
+        from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
 
         signature: List[KernelArgType] = []
         constants: Dict[str, Any] = {}
@@ -1304,7 +1306,13 @@ class PythonWrapperCodegen(CodeGen):
                 constants[key] = arg
             else:
                 non_constant_indices.append(idx)
-                if isinstance(arg, ir.Buffer):
+                if isinstance(arg, ir.TMADescriptor):
+                    signature.append(
+                        TMADescriptorArg(
+                            name=key,
+                        )
+                    )
+                elif isinstance(arg, ir.Buffer):
                     signature.append(
                         TensorArg(
                             name=key,

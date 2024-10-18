@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -243,6 +244,37 @@ class EagerAndRecordGraphs:
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
+
+
+class AotEagerAndRecordGraphs:
+    def __init__(self) -> None:
+        self.graphs: List[torch.fx.GraphModule] = []
+        self.fw_graphs: List[torch.fx.GraphModule] = []
+        self.bw_graphs: List[torch.fx.GraphModule] = []
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
+        self.graphs.append(gm)
+
+        def fw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.fw_graphs.append(gm)
+            return gm.forward
+
+        def bw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.bw_graphs.append(gm)
+            return gm.forward
+
+        return aot_eager(
+            gm,
+            example_inputs,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+        )
 
 
 def strip_comment(code: str) -> str:
