@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Union
+from typing import Any, Dict, List, Union
 
 import torch
 import torch.fx as fx
@@ -258,6 +258,7 @@ def tensorify_python_scalars(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             args = []
+            kwargs: Dict[str, Any] = {}
             transform = False
             for a in node.args:
                 if (
@@ -270,6 +271,17 @@ def tensorify_python_scalars(
                 else:
                     args.append(a)
 
+            for k, v in node.kwargs.items():
+                if (
+                    isinstance(v, fx.Node)
+                    and "val" in v.meta
+                    and isinstance(zf := v.meta["val"], torch.SymFloat)
+                ):
+                    transform = True
+                    kwargs[k] = float(zf)
+                else:
+                    kwargs[k] = v
+
             if transform:
                 # I originally tried using MetaProxy here but it gets pretty gnarly
                 # when you try transforming a function that only takes in a non
@@ -278,13 +290,14 @@ def tensorify_python_scalars(
                 # node.target = <OpOverload(op='aten.scalar_tensor', overload='default')> and
                 # args = [0.01], res will actually be a FakeTensor and not a node or proxy as
                 # you would expect.
-                replacement_node = graph.call_function(
-                    node.target, tuple(args), node.kwargs
-                )
+                replacement_node = graph.call_function(node.target, tuple(args), kwargs)
                 with fake_mode:
                     replacement_node.meta["val"] = node.target(
                         *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
-                        **node.kwargs,
+                        **{
+                            k: v.meta["val"] if isinstance(v, fx.Node) else v
+                            for k, v in kwargs.items()
+                        },
                     )
 
                 node.replace_all_uses_with(replacement_node)
