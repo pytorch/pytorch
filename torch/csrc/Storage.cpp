@@ -195,7 +195,9 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   TORCH_INTERNAL_ASSERT(!storage_impl->pyobj_slot()->owns_pyobj());
 
   storage_impl->pyobj_slot()->set_owns_pyobj(true);
-  Py_INCREF(self);
+  // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
+  // ensure the PyObject is in a valid state
+  _Py_NewReference((PyObject*)self);
 
   self->cdata = c10::MaybeOwned<c10::Storage>::borrowed(storage);
   return true;

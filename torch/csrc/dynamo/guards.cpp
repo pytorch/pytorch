@@ -3586,6 +3586,10 @@ PyObject* torch_c_dynamo_guards_init() {
   if (m == nullptr)
     return nullptr;
 
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
+
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);

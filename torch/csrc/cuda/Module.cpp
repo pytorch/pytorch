@@ -390,9 +390,11 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   PyObject* key = nullptr;
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(kwargs_o);
   while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
     extra_args.emplace_back(as_scalar(value));
   }
+  Py_END_CRITICAL_SECTION();
 
   c10::SmallVector<at::Tensor> outputs = at::cuda::CompileAndLaunchKernel(
       code_string,
