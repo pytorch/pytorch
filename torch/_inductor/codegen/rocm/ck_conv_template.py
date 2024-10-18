@@ -12,6 +12,7 @@ except ImportError:
 
 if ck4inductor is not None:
     from ck4inductor.grouped_conv_fwd.gen_instances import gen_conv_ops_library  # type: ignore[import-untyped]
+    from ck4inductor.grouped_conv_fwd.op import CKGroupedConvFwdOp  # type: ignore[import-untyped] # noqa: TCH002
 else:
     def gen_conv_ops_library():
         return []
@@ -455,7 +456,6 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
         )
-        # import pdb; pdb.set_trace()
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
