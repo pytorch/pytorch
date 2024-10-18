@@ -373,9 +373,11 @@ class CtxSubclassTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         out = pytree.tree_map(
-            lambda x: CtxSubclassTensor(x, biggest_constant)
-            if isinstance(x, torch.Tensor)
-            else x,
+            lambda x: (
+                CtxSubclassTensor(x, biggest_constant)
+                if isinstance(x, torch.Tensor)
+                else x
+            ),
             out_a,
         )
 
@@ -558,6 +560,36 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
 
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_function_disabled_eager_backend(self):
+        @compile_full_eager
+        def fn(x):
+            return torch.add(x, 1.0)
+
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func == torch.add:
+                    return super().__torch_function__(
+                        lambda x, y: torch.add(x, y) + 2, types, args, kwargs
+                    )
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        x = torch.ones(2, 2)
+        x = x.as_subclass(TestSubclass)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {TestSubclass}):
+            result = fn(x)
+
+        print(result)
+        self.assertEqual(result, torch.ones(2, 2) + 3)
+
+        # create a subclass which rewrites a source op
+        # to the same source op w/ a different operand
 
     def test_return_subclass(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -1522,11 +1554,11 @@ s1 > 3""",
                 )
                 out_a = func(*args_a, **kwargs_a)
                 out = pytree.tree_map(
-                    lambda x: SubclassTensor(
-                        x, SubclassTensorArgs2(x.shape, x.device, None)
-                    )
-                    if isinstance(x, torch.Tensor)
-                    else x,
+                    lambda x: (
+                        SubclassTensor(x, SubclassTensorArgs2(x.shape, x.device, None))
+                        if isinstance(x, torch.Tensor)
+                        else x
+                    ),
                     out_a,
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
