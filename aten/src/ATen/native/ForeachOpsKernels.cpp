@@ -44,6 +44,7 @@
 #include <ATen/ops/_foreach_pow_native.h>
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
+#include <ATen/ops/_foreach_rsqrt_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
 #include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
@@ -393,6 +394,7 @@ FOREACH_UNARY_OP(tanh);
 FOREACH_UNARY_OP(sin);
 FOREACH_UNARY_OP(sinh);
 FOREACH_UNARY_OP(round);
+FOREACH_UNARY_OP(rsqrt);
 FOREACH_UNARY_OP(lgamma);
 FOREACH_UNARY_OP(frac);
 FOREACH_UNARY_OP(trunc);
