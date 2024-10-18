@@ -1444,7 +1444,7 @@ class HalideKernel(SIMDKernel):
                 )
             )
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
             schduler = config.halide.scheduler_cpu
@@ -1621,7 +1621,7 @@ class HalideKernel(SIMDKernel):
         if (
             len(dims) == 1
             and config.halide.scheduler_cuda == "Anderson2021"
-            and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
+            and V.graph.get_current_device_or_throw().type == "cuda"
         ):
             # workaround https://github.com/halide/Halide/issues/8246
             n = max(2, n)
@@ -1631,7 +1631,7 @@ class HalideKernel(SIMDKernel):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cuda":
             stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
             call_args.append(stream_name)

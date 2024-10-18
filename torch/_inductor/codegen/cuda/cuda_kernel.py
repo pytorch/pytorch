@@ -205,7 +205,7 @@ class CUDATemplateKernel(CUDAKernel):
         if node.get_workspace_size() > 0:
             ws = WorkspaceArg(
                 count=node.get_workspace_size(),
-                device=V.graph.scheduler.get_current_device_or_throw(),
+                device=V.graph.get_current_device_or_throw(),
                 zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                 outer_name=WorkspaceArg.unique_name(),
             )
