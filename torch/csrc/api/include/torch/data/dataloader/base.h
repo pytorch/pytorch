@@ -21,8 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 template <typename Dataset, typename Batch, typename BatchRequest>
 class DataLoaderBase {
  public:
@@ -35,7 +34,7 @@ class DataLoaderBase {
   DataLoaderBase(
       DataLoaderOptions options,
       std::unique_ptr<Dataset> main_thread_dataset = nullptr)
-      : options_(std::move(options)),
+      : options_(options),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
@@ -249,5 +248,4 @@ class DataLoaderBase {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool joined_ = false;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

@@ -93,13 +93,13 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
 void InputArchive::load_from(
     const std::string& filename,
     std::optional<torch::Device> device /*= std::nullopt*/) {
-  module_ = torch::jit::load(filename, std::move(device));
+  module_ = torch::jit::load(filename, device);
 }
 
 void InputArchive::load_from(
     std::istream& stream,
     std::optional<torch::Device> device /*= std::nullopt*/) {
-  module_ = torch::jit::load(stream, std::move(device));
+  module_ = torch::jit::load(stream, device);
 }
 
 void InputArchive::load_from(

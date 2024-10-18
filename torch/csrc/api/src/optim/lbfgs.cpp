@@ -13,8 +13,7 @@
 #include <functional>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 LBFGSOptions::LBFGSOptions(double lr) : lr_(lr) {}
 
@@ -196,14 +195,8 @@ static double _cubic_interpolate(
     std::optional<std::tuple<double, double>> bounds = std::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double xmin_bound, xmax_bound;
-  if (bounds != std::nullopt) {
-    std::tie(xmin_bound, xmax_bound) = *bounds;
-  } else {
-    std::tie(xmin_bound, xmax_bound) =
-        (x1 <= x2) ? std::make_tuple(x1, x2) : std::make_tuple(x2, x1);
-  }
+  auto [xmin_bound, xmax_bound] =
+      (bounds != std::nullopt) ? (*bounds) : std::minmax({x1, x2});
   // Code for most common case: cubic interpolation of 2 points
   //   w/ function and derivative values for both
   // Solution in this case (where x2 is the farthest point):
@@ -649,5 +642,4 @@ void LBFGS::load(serialize::InputArchive& archive) {
         std::move(state);
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

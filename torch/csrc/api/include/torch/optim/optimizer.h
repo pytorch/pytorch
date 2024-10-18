@@ -29,8 +29,7 @@ class InputArchive;
 } // namespace torch
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API OptimizerParamState {
  public:
@@ -115,7 +114,7 @@ class TORCH_API Optimizer {
   Optimizer(Optimizer&& optimizer) = default;
 
   explicit Optimizer(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       std::unique_ptr<OptimizerOptions> defaults)
       : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
@@ -215,5 +214,4 @@ TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     Optimizer& optimizer);
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim
