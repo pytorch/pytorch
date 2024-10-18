@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -16,7 +15,7 @@ __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[InputType],
+    example_inputs: List["InputType"],
     options: Optional[Dict[str, Any]] = None,
 ):
     """

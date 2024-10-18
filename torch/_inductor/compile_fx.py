@@ -75,6 +75,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
+from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -1588,6 +1589,7 @@ def compile_fx(
                 gm, joint_inputs, **kwargs, compiler="inductor"
             )
 
+        @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:

@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 
-from __future__ import annotations
-
 import argparse
 import copy
 import functools
@@ -67,9 +65,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: _CompileFxCallableEx,
+    unconfigured_compiler_fn: "_CompileFxCallableEx",
     compiler_name: str,
-) -> _CompileFxCallableEx:
+) -> "_CompileFxCallableEx":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -81,9 +79,9 @@ def wrap_compiler_debug(
     @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        **kwargs: Unpack[_CompileFxKwargsEx],
-    ) -> Union[CompiledFxGraph, str]:
+        example_inputs: Sequence["InputType"],
+        **kwargs: Unpack["_CompileFxKwargsEx"],
+    ) -> Union["CompiledFxGraph", str]:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -122,7 +120,7 @@ def wrap_compiler_debug(
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
         def deferred_for_real_inputs(
-            real_inputs: Sequence[InputType], **_kwargs: object
+            real_inputs: Sequence["InputType"], **_kwargs: object
         ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
@@ -755,14 +753,16 @@ def repro_run(options, mod, load_args):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False
+
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(list(args))
+
+        compiled(list(args))
+
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
-    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
