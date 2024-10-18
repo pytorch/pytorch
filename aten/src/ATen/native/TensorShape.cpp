@@ -217,15 +217,6 @@
 #include <vector>
 
 namespace at::meta {
-inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
-  size_t i = 0;
-  for (const Tensor& t : tensors) {
-    TORCH_CHECK(
-        t.dim() > 0,
-        "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
-    i++;
-  }
-}
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
@@ -249,7 +240,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // size (i.e. other empty sizes are not skipped).
   auto materialized = tensors.materialize();
 
-  cat_check_no_zero_dim(materialized);
+  native::check_cat_no_zero_dim(materialized);
   dim = at::legacy_cat_wrap_dim(dim, materialized);
 
   // Checking names before the actual dimensions.
