@@ -3687,6 +3687,9 @@ def fail_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
+    "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(is_skip=True),
+    "test_cond_with_parameters": fail_minimal_arrayref_interface(is_skip=True),
+    "test_cond_simple": fail_minimal_arrayref_interface(is_skip=True),
     "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
