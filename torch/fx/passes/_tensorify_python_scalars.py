@@ -267,8 +267,6 @@ def tensorify_python_scalars(
                 ):
                     transform = True
                     args.append(float(zf))
-                elif isinstance(a, fx.Node):
-                    args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
                 else:
                     args.append(a)
 
@@ -284,7 +282,11 @@ def tensorify_python_scalars(
                     node.target, tuple(args), node.kwargs
                 )
                 with fake_mode:
-                    replacement_node.meta["val"] = node.target(*args, **node.kwargs)
+                    replacement_node.meta["val"] = node.target(
+                        *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
+                        **node.kwargs,
+                    )
+
                 node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
 
