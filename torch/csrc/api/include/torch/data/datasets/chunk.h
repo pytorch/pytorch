@@ -212,7 +212,6 @@ class BatchDataBuffer {
     explicit UnwrappedBatchData(UnwrappedBatchType data)
         : batch_data(std::move(data)) {}
 
-    // NOLINTNEXTLINE(modernize-pass-by-value)
     explicit UnwrappedBatchData(std::exception_ptr e)
         : exception(std::move(e)) {}
 
@@ -233,6 +232,7 @@ class BatchDataBuffer {
   std::condition_variable cv_read_;
   std::condition_variable cv_write_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   ExampleSampler& example_sampler_;
 
   // configurable maximun number of elements the queue can hold at one time.
@@ -495,6 +495,7 @@ class ChunkDataset final
   std::vector<std::thread> preload_threads_;
 
   /// The options the Dataset was configured with.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ChunkDatasetOptions options_;
 
   // function pointer wrapper to apply custom processing over chunk data. This
