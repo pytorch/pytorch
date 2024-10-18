@@ -15,7 +15,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer, Kernel
@@ -365,17 +365,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
                 gen_check("input_handles", idx, name, tensor)
         self.prefix.writeline("}")
-
-    def codegen_input_numel_asserts(self):
-        for name, buf in V.graph.graph_inputs.items():
-            if isinstance(buf, sympy.Expr):
-                continue
-
-            # comparing strides for 0 size tensor is tricky. Ignore them for now.
-            if sympy_product(buf.get_size()) == 0:
-                continue
-            numel = buf.get_numel()
-            self.prefix.writeline(f"assert_numel({name}, {numel});")
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())

@@ -32,18 +32,6 @@ BufferName = str
 MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 
 
-def get_input_cpp_type(input):
-    assert config.use_minimal_arrayref_interface
-
-    if isinstance(input, sympy.Expr):
-        from ..graph import may_get_constant_buffer_dtype
-
-        dtype = may_get_constant_buffer_dtype(input)
-        assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
-        return DTYPE_TO_CPP[dtype]
-    return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
-
-
 class CppWrapperCpuArrayRef(CppWrapperCpu):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
@@ -96,6 +84,18 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpuArrayRef()
 
+    @staticmethod
+    def get_input_cpp_type(input):
+        assert config.use_minimal_arrayref_interface
+
+        if isinstance(input, sympy.Expr):
+            from ..graph import may_get_constant_buffer_dtype
+
+            dtype = may_get_constant_buffer_dtype(input)
+            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            return DTYPE_TO_CPP[dtype]
+        return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
+
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
@@ -112,7 +112,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         if V.graph.aot_mode:
             if config.use_minimal_arrayref_interface and not V.graph.is_const_graph:
                 input_cpp_types = ", ".join(
-                    f"{get_input_cpp_type(x)}" for x in V.graph.graph_inputs.values()
+                    f"{CppWrapperCpuArrayRef.get_input_cpp_type(x)}"
+                    for x in V.graph.graph_inputs.values()
                 )
                 output_arrayref_types = ", ".join(
                     f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
@@ -684,6 +685,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         args.insert(
             0, f"convert_arrayref_tensor_to_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
