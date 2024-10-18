@@ -15,7 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Set, Tuple
+from typing import Any, Container, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import torch
 
@@ -172,6 +172,10 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
         f.write(f"{kernel_name} | {args_str}\n")
 
 
+def reduce_prod(x: Iterable[int]) -> int:
+    return functools.reduce(lambda x, y: x * y, x)
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -298,23 +302,28 @@ class CachingAutotuner(KernelInterface):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
                 ):
-                    assert len(self.size_hints) == 2
+                    assert len(self.size_hints) >= 2
                     xblock = triton_config.kwargs.get("XBLOCK", 1)
-                    rblock = triton_config.kwargs["RBLOCK"]
+                    reduction_kwargs = [
+                        kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
+                    ]
+                    rblocks = [
+                        triton_config.kwargs[kwarg] for kwarg in reduction_kwargs
+                    ]
                     total_block = (self.size_hints[0] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
                     if nreg is None:
                         continue
 
-                    # make sure rblock is not too small
-                    if rblock <= 64:
+                    # make sure rblocks are not too small
+                    if any(block <= 64 for block in rblocks):
                         continue
 
                     # each SM of A100 has 65536 32-bit registers. To maximize
                     # the theoretical occupancy, we need run 2048 threads on each
                     # SM. So each thread should use no more than 65536 / 2048
                     # = 32 registers. In cases where occupancy matters, and each
-                    # thread uses too many registers, reduce RBLOCK to reduce
+                    # thread uses too many registers, reduce R0_BLOCK to reduce
                     # the register usage.
                     # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
                     # from PLBartForCausalLM, latency improve from
@@ -350,12 +359,13 @@ class CachingAutotuner(KernelInterface):
                         # no need to improve occupancy
                         continue
                     new_config = copy.deepcopy(triton_config)
-                    new_config.kwargs["RBLOCK"] = rblock // 2
+                    for kwarg in reduction_kwargs:
+                        new_config.kwargs[kwarg] //= 2
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
                     log.debug(
-                        "Dynamically scale down RBLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        "Dynamically scale down R0_BLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
                         triton_config,
                         new_config,
                     )
@@ -896,8 +906,8 @@ class CachingAutotuner(KernelInterface):
 
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
-            and "RBLOCK" in launcher.config.kwargs
-        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have RBLOCK"
+            and "R0_BLOCK" in launcher.config.kwargs
+        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -1209,6 +1219,20 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
+def check_max_block(cfg: Dict[str, int]):
+    """
+    Check that block sizes are within the maximum allowed.
+    """
+    for var, val in cfg.items():
+        block_suffix = "BLOCK"
+        if block_suffix in var:
+            prefix = var.removesuffix(block_suffix)
+            max_block = TRITON_MAX_BLOCK[prefix]
+            assert (
+                val <= max_block
+            ), f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+
+
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
     # therefore using half the number of warps here correspondingly.
@@ -1333,13 +1357,18 @@ def triton_config(
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
+    check_max_block(cfg)
     check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
 def triton_config_reduction(
-    size_hints, x, r, num_stages=1, num_warps=None, register_intensive=False
+    size_hints,
+    x: int,
+    rnumels: Sequence[int],
+    num_stages=1,
+    num_warps=None,
+    register_intensive=False,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -1347,68 +1376,93 @@ def triton_config_reduction(
     dimension and will be rounded up to the nearest power of 2.
     """
 
-    target = conditional_product(x, r)
+    # shrink sizes to size hints
+    x = min(x, size_hints[0])
+    rnumels = [min(r, size_hints[axis + 1]) for axis, r in enumerate(rnumels)]
+    num_axes = len(rnumels)
+
+    def total_numel() -> int:
+        return conditional_product(x, *rnumels)
+
+    target = total_numel()
     if conditional_product(*size_hints) < target:
         target //= 8
 
-    # shrink sizes to size hints
-    x = min(x, size_hints[0])
-    r = min(r, size_hints[1])
-
     # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, r) < target:
+    while x < size_hints[0] and total_numel() < target:
         x *= 2
-    while r < size_hints[1] and conditional_product(x, r) < target:
-        r *= 2
+    for axis in range(num_axes):
+        while rnumels[axis] < size_hints[axis + 1] and total_numel() < target:
+            rnumels[axis] *= 2
 
     if num_warps is None:
-        num_warps = conditional_product(x, r) // 128
+        num_warps = total_numel() // 128
     num_warps = _num_warps(
         num_warps, max_num_warps=16, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
 
-    while conditional_product(x, r) > target:
-        if r == 1:
-            break
-        r = r // 2
+    for axis in range(num_axes):
+        while total_numel() > target:
+            if rnumels[axis] == 1:
+                break
+            rnumels[axis] = rnumels[axis] // 2
 
-    cfg = {"XBLOCK": x, "RBLOCK": r}
+    cfg = get_config([x], rnumels)
     check_config(cfg, xnumel=size_hints[0])
-    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
-    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    check_max_block(cfg)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
+def get_config(xnumels: Sequence[int], rnumels: Sequence[int]) -> Dict[str, int]:
+    """
+    Return the config for spatial (X, Y, Z) and reduction (R0, R1) variables.
+    """
+
+    def make_cfg(vars_: Iterable[str], numels: Iterable[int]):
+        return {var + "BLOCK": val for var, val in zip(vars_, numels)}
+
+    xvars = ["X", "Y", "Z"][: len(xnumels)]
+    rvars = [f"R{axis}_" for axis in range(len(rnumels))]
+    return {
+        **make_cfg(xvars, xnumels),
+        **make_cfg(rvars, rnumels),
+    }
+
+
+def triton_config_tiled_reduction(size_hints, x, y, rnumels, num_stages=1):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
     each tile dimension and will be rounded up to the nearest power of 2.
     """
 
-    target = conditional_product(x, y, r)
-    if conditional_product(*size_hints) < target:
-        target //= 8
-
     # shrink sizes to size hints
     x = min(x, size_hints[0])
     y = min(y, size_hints[1])
-    r = min(r, size_hints[2])
+    rnumels = [min(r, size_hints[2:]) for r in rnumels]
+
+    def total_numel() -> int:
+        return conditional_product(x, y, *rnumels)
+
+    target = total_numel()
+    if conditional_product(*size_hints) < target:
+        target //= 8
 
     # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, y, r) < target:
+    while x < size_hints[0] and total_numel() < target:
         x *= 2
-    while r < size_hints[2] and conditional_product(x, y, r) < target:
-        r *= 2
-    while y < size_hints[1] and conditional_product(x, y, r) < target:
+    for axis in range(len(rnumels)):
+        while rnumels[axis] < size_hints[2 + axis] and total_numel() < target:
+            rnumels[axis] *= 2
+    while y < size_hints[1] and total_numel() < target:
         y *= 2
 
-    cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
-    num_warps = _num_warps(conditional_product(x, y, r) // 256, min_num_warps=1)
+    cfg = get_config((x, y), rnumels)
+    num_warps = _num_warps(total_numel() // 256, min_num_warps=1)
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
-    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    check_max_block(cfg)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1504,44 +1558,49 @@ def _reduction_configs(
     *, size_hints: List[int], inductor_meta: Dict[str, Any]
 ) -> List[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
-    assert len(size_hints) == 2
-    rnumel = size_hints[-1]
+    rnumels = size_hints[1:]
 
     register_intensive = False
-    MAX_RBLOCK = 2048
+    MAX_Rn_BLOCK = 2048
     if (
         size_hints[0] >= 1024
         and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
         >= 10
     ):
-        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
+        # A heuristics to reduce Rn_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
         #
         # The magic numbers are a bit arbitrary.
         #
-        # We cannot rely on dynamically scaling down RBLOCK later, since sometimes
+        # We cannot rely on dynamically scaling down Rn_BLOCK later, since sometimes
         # triton makes it to use less registers with worse perf. Check:
         # https://github.com/pytorch/pytorch/issues/126463
         #
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
-        MAX_RBLOCK = 1024
+        MAX_Rn_BLOCK = 1024
         register_intensive = True
+
+    total_rnumel = reduce_prod(rnumels)
+    num_axes = len(rnumels)
 
     contiguous_config = triton_config_reduction(
         size_hints,
         1,
-        (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK),
+        tuple(
+            rnumel if 256 <= rnumel < MAX_Rn_BLOCK else MAX_Rn_BLOCK
+            for rnumel in rnumels
+        ),
         register_intensive=register_intensive,
     )
     outer_config = triton_config_reduction(
-        size_hints, 64, 8, register_intensive=register_intensive
+        size_hints, 64, (8,) * num_axes, register_intensive=register_intensive
     )
     tiny_config = triton_config_reduction(
         size_hints,
-        2 * (256 // rnumel) if rnumel <= 256 else 1,
-        min(rnumel, MAX_RBLOCK),
+        2 * (256 // total_rnumel) if total_rnumel <= 256 else 1,
+        tuple(min(rnumel, MAX_Rn_BLOCK) for rnumel in rnumels),
         register_intensive=register_intensive,
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
@@ -1553,17 +1612,17 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
     if disable_pointwise_autotuning(inductor_meta):
-        return [triton_config_reduction(size_hints, 32, 128)]
+        return [triton_config_reduction(size_hints, 32, (128,) * num_axes)]
     return [
         contiguous_config,
         outer_config,
         tiny_config,
-        triton_config_reduction(size_hints, 64, 64),
-        triton_config_reduction(size_hints, 8, 512),
-        # halve the XBLOCK/RBLOCK compared to outer_config
+        triton_config_reduction(size_hints, 64, (64,) * num_axes),
+        triton_config_reduction(size_hints, 8, (512,) * num_axes),
+        # halve the XBLOCK/Rn_BLOCK compared to outer_config
         # TODO: this may only be beneficial when each iteration of the reduction
         # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-        triton_config_reduction(size_hints, 64, 4, num_warps=8),
+        triton_config_reduction(size_hints, 64, (4,) * num_axes, num_warps=8),
     ]
 
 
@@ -1581,8 +1640,6 @@ def reduction(
         size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
-    if len(size_hints) != 2:
-        raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
     return cached_autotune(
@@ -1607,28 +1664,33 @@ def persistent_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
 
-    xnumel, rnumel = size_hints
+    xnumel = size_hints[0]
+    rnumels = size_hints[1:]
+    total_rnumel = reduce_prod(rnumels)
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+        triton_config_reduction(size_hints, xblock, rnumels, register_intensive=True)
         for xblock in (1, 8, 32, 128)
-        if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
+        if xblock == 1 or (total_rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
 
     # TODO(jansel): we should be able to improve these heuristics
-    if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+    if reduction_hint == ReductionHint.INNER and total_rnumel >= 256:
         configs = configs[:1]
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
             triton_config_reduction(
-                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+                size_hints,
+                2 * (256 // total_rnumel) if total_rnumel <= 256 else 1,
+                rnumels,
             )
         ]
     for c in configs:
-        # we don't need RBLOCK for persistent reduction
-        c.kwargs.pop("RBLOCK")
+        # we don't need Rn_BLOCK for persistent reduction
+        for axis in range(len(rnumels)):
+            c.kwargs.pop(f"R{axis}_BLOCK")
 
     if disable_pointwise_autotuning(inductor_meta):
         configs = configs[:1]
@@ -1662,11 +1724,12 @@ def split_scan(
 
     configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
 
-    # Fixup configs to enforce the minimum RBLOCK size
+    # Fixup configs to enforce the minimum Rn_BLOCK size
     min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
     for cfg in configs:
-        if cfg.kwargs["RBLOCK"] < min_rblock:
-            cfg.kwargs["RBLOCK"] = min_rblock
+        for var in list(cfg.kwargs.keys()):
+            if var.startswith("R") and cfg.kwargs[var] < min_rblock:
+                cfg.kwargs[var] = min_rblock
 
     return cached_autotune(
         size_hints,
@@ -1791,7 +1854,7 @@ def grid(*numels):
 def split_scan_grid(xnumel, rnumel):
     def grid_fn(meta):
         assert meta.get("XBLOCK", 1) == 1
-        return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
+        return (ceildiv(rnumel, meta.get("R0_BLOCK", 1)), xnumel, 1)
 
     grid_fn_str = f"split_scan_grid({xnumel}, {rnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
