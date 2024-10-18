@@ -106,7 +106,7 @@ def allow_in_graph(fn):
         torch.compiler.allow_in_graph(my_custom_function)
 
         @torch.compile(...)
-        def fn(a):
+        def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
