@@ -753,11 +753,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 namespace {
 #ifdef _MSC_VER
 template<typename T>
-inline typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline std::enable_if_t<std::is_integral_v<T>, bool> isnan_(T x) {
   return false;
 }
 template<typename T>
-inline typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline std::enable_if_t<!std::is_integral_v<T>, bool> isnan_(T x) {
   return std::isnan(x);
 }
 #else
@@ -2291,7 +2291,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
         other_data += strides[1];
       }
     });
-  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return result.load();
 }
 

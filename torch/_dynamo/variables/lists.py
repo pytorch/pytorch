@@ -33,6 +33,7 @@ from .iter import IteratorVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -134,10 +135,8 @@ class BaseListVariable(VariableTracker):
             assert not kwargs
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
-            from .builder import SourcelessBuilder
-
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.index),
+                VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -296,7 +295,7 @@ class RangeVariable(BaseListVariable):
     def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "range" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(range))
@@ -402,7 +401,7 @@ class ListVariable(CommonListMethodsVariable):
     def debug_repr(self):
         return self.debug_repr_helper("[", "]")
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
@@ -459,7 +458,7 @@ class DequeVariable(CommonListMethodsVariable):
     def debug_repr(self):
         return self.debug_repr_helper("deque([", "])")
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "deque" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(
@@ -534,7 +533,7 @@ class TupleVariable(BaseListVariable):
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
 
@@ -633,7 +632,7 @@ class SizeVariable(TupleVariable):
         )
         return proxy
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
@@ -717,21 +716,45 @@ class NamedTupleVariable(TupleVariable):
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
 
+    def is_namedtuple(self):
+        return hasattr(self.tuple_cls, "_fields") and callable(
+            getattr(self.tuple_cls, "_make", None)
+        )
+
+    def is_structseq(self):
+        return not self.is_namedtuple()
+
     def debug_repr(self):
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return repr(self.tuple_cls([Lit(x.debug_repr()) for x in self.items]))
+        # NamedTupleType(*iterable)
         return repr(self.tuple_cls(*(Lit(x.debug_repr()) for x in self.items)))
 
     def python_type(self):
         return self.tuple_cls
 
     def as_python_constant(self):
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return self.python_type()([x.as_python_constant() for x in self.items])
+        # NamedTupleType(*iterable)
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return self.python_type()(self._as_proxy())
+        # NamedTupleType(*iterable)
         return self.python_type()(*self._as_proxy())
 
-    def reconstruct(self, codegen):
-        create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Constructors:
+        #   StructSequenceType(iterable)
+        #   NamedTupleType(*iterable)
+        #   NamedTupleType._make(iterable)
+        create_fn = self.tuple_cls if self.is_structseq() else self.tuple_cls._make
         codegen.add_push_null(
             lambda: codegen.append_output(codegen._create_load_const(create_fn))
         )
@@ -804,7 +827,7 @@ class SliceVariable(BaseListVariable):
     def as_python_constant(self):
         return slice(*[guard_if_dyn(x) for x in self.items])
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
@@ -872,7 +895,7 @@ class ListIteratorVariable(IteratorVariable):
     def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         codegen.extend_output(
@@ -977,7 +1000,7 @@ class RestrictedListSubclassVariable(ListVariable):
             **kwargs,
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.user_cls_source))
         super().reconstruct(codegen)
         codegen.extend_output(create_call_function(1, False))
