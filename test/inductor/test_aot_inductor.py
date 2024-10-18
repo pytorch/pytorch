@@ -142,6 +142,7 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         {
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -3688,6 +3689,19 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
     "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(),
+    "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(),
+    "test_cond_nested": fail_minimal_arrayref_interface(),
+    "test_cond_simple": fail_minimal_arrayref_interface(),
+    "test_cond_use_buffers_from_outer_scope": fail_minimal_arrayref_interface(),
+    "test_cond_with_multiple_outputs": fail_minimal_arrayref_interface(),
+    "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
+    "test_cond_with_parameters": fail_minimal_arrayref_interface(),
+    "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
+    "test_foreach_multiple_dynamic": fail_minimal_arrayref_interface(),
+    "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
+    "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
