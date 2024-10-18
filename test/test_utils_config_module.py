@@ -155,9 +155,6 @@ class TestConfigModule(TestCase):
 
         # BUG
         config.e_bool = False
-        # self.assertEqual(config.get_hash(), b'\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6')
-        # Hack around bug
-        config._is_dirty = True
         self.assertNotEqual(
             config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
         )
@@ -165,7 +162,6 @@ class TestConfigModule(TestCase):
 
         # Test ignored values
         config.e_compile_ignored = False
-        config._is_dirty = True
         self.assertEqual(
             config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
         )
