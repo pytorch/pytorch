@@ -198,6 +198,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["control_flow"]
 
     @property
+    def skip_models_due_to_export_unsupported(self):
+        return self._skip["export_unsupported"]
+
+    @property
     def guard_on_nn_module_models(self):
         return {
             "vision_maskrcnn",
