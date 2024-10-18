@@ -155,6 +155,8 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
             r = handler(*args)
             log.debug("%s(%s) -> %s", handler_name, args, r)
             return r
+    except NotImplementedError:
+        raise
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise
