@@ -70,7 +70,7 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
+from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -3371,12 +3371,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # their contents, in `self.symbolic_locals`. See
             # `UserFunctionVariable::bind_args`.
             return self.symbolic_locals[name]
-
-    def check_replace_is_safe(self, oldvar):
-        if not is_side_effect_safe(oldvar.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
-            )
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

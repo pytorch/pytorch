@@ -2000,6 +2000,7 @@ class GraphLowering(torch.fx.Interpreter):
         return (
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
+            and len(self.graph_inputs[name].get_size()) == 0
             and self.graph_inputs[name].get_device().type == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
