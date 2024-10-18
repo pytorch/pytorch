@@ -5,9 +5,9 @@
 #endif
 
 #include <ATen/ATen.h>
-
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-
+#endif
 namespace c10d::symmetric_memory {
 
 template <typename T>
