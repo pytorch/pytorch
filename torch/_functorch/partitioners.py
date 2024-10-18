@@ -30,6 +30,7 @@ from torch.utils.checkpoint import CheckpointPolicy
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import is_with_effects
+from .backward_pass_aware import get_saved_recomp_nodes_from_BWPA
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -1502,21 +1503,50 @@ def dp_knapsack(
     # The maximum runtime that can be achieved within the max_memory constraint
     max_runtime = dp[n][quantized_max_memory].item()
 
+    print("SAVED VALUES:")
+    print(saved_items)
+    print("RECOMP VALUES:")
+    print(recomputable_items)
     return max_runtime, saved_items, recomputable_items
 
 
 def _optimize_runtime_with_given_memory(
+    joint_graph: fx.Graph,
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
+    node_info: NodeInfo,
+    all_recomputable_banned_nodes: List[fx.Node],
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
+        memory = list(memory.values())
         return greedy_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "ilp":
+        memory = list(memory.values())
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
+        memory = list(memory.values())
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "backward_pass_aware":
+        try:
+            print("----- solving ILP based approach ----")
+            saved_node_idx, recomp_node_idx = get_saved_recomp_nodes_from_BWPA(
+                memory,
+                joint_graph,
+                max_memory,
+                node_info,
+                all_recomputable_banned_nodes,
+            )
+            return [0.0, saved_node_idx, recomp_node_idx]
+        except Exception as e:
+            print(f"ILP based approach failed with error: {e}")
+            print("----- solving DP based approach ----")
+            memory = list(memory.values())
+            return dp_knapsack(memory, runtimes, max_memory)
+        finally:
+            print("----- done ----")
+
     else:
         raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
@@ -1680,18 +1710,32 @@ def choose_saved_values_set(
     ]
     from torch.utils._mode_utils import no_dispatch
 
-    def get_saved_values_knapsack(memory_budget):
+    def get_saved_values_knapsack(memory_budget, node_info, joint_graph):
         with no_dispatch():
             (
                 expected_runtime,
                 saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
-                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
+                (
+                    joint_graph,
+                    memories_banned_nodes,
+                    runtimes_banned_nodes,
+                    max(
+                        min(
+                            config.activation_memory_budget,
+                            config.activation_memory_bw_budget,
+                        ),
+                        0,
+                    ),
+                    node_info,
+                    all_recomputable_banned_nodes,
+                )
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
-            dont_ban.add(all_recomputable_banned_nodes[idx])
+            if idx in all_recomputable_banned_nodes:
+                dont_ban.add(all_recomputable_banned_nodes[idx])
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
