@@ -289,7 +289,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
 
   if (input.ndimension() == 4) /* non-batch mode */
   {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
@@ -312,7 +312,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
@@ -465,7 +465,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
   {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -489,7 +489,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
