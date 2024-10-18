@@ -1169,6 +1169,8 @@ if(USE_CPP_CODE_COVERAGE)
     string(APPEND CMAKE_C_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
     string(APPEND CMAKE_CXX_FLAGS
            " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS
+          " -fuse-ld=lld")
   else()
     message(
       ERROR
