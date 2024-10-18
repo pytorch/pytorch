@@ -31,8 +31,15 @@ typedef NS_ENUM(NSInteger, MTLMathMode)
     MTLMathModeFast = 2,
 };
 
+typedef NS_ENUM(NSInteger, MTLMathFloatingPointFunctions)
+{
+    MTLMathFloatingPointFunctionsFast = 0,
+    MTLMathFloatingPointFunctionsPrecise = 1,
+};
+
 @interface MTLCompileOptions()
 @property (readwrite, nonatomic) MTLMathMode mathMode;
+@property (readwrite, nonatomic) MTLMathFloatingPointFunctions mathFloatingPointFunctions;
 @end
 
 #endif

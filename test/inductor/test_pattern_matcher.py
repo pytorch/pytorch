@@ -1264,6 +1264,7 @@ class TestPatternMatcher(TestCase):
             "def triton_tem_fused_addmm"
         ).run(code[0])
 
+    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",
@@ -1273,7 +1274,6 @@ class TestPatternMatcher(TestCase):
         }
     )
     def test_original_aten_preserved_pad_mm(self):
-        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y):
             return x @ y
 
