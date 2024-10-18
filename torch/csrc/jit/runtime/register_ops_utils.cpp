@@ -311,7 +311,7 @@ void listMulIntLeftInPlace(Stack& stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (C10_UNUSED const auto i : c10::irange(1, n)) {
+    for ([[maybe_unused]] const auto i : c10::irange(1, n)) {
       for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
@@ -329,7 +329,7 @@ void listMulIntLeft(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -346,7 +346,7 @@ void listMulIntRight(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -379,7 +379,7 @@ void listSlice(Stack& stack) {
   sliced_list.reserve(num_values);
 
   int i = start;
-  for (C10_UNUSED const auto j : c10::irange(num_values)) {
+  for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
     sliced_list.push_back(list.get(i));
     i += step;
   }

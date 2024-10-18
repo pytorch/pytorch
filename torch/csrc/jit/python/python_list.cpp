@@ -134,7 +134,7 @@ void initScriptListBindings(PyObject* module) {
 
             auto seq = std::make_shared<ScriptList>(self->type());
 
-            for (C10_UNUSED const auto i [[maybe_unused]] :
+            for ([[maybe_unused]] const auto i [[maybe_unused]] :
                  c10::irange(slicelength)) {
               seq->append(self->getItem(static_cast<ptrdiff_t>(start)));
               start += step;

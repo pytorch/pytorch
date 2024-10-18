@@ -153,7 +153,7 @@ static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor&
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for (C10_UNUSED const auto i : c10::irange(indent)) {
+  for ([[maybe_unused]] const auto i : c10::irange(indent)) {
     stream << " ";
   }
 }

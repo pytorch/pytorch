@@ -554,9 +554,9 @@ int register_embedding_params() {
 
 namespace {
 
-C10_UNUSED static auto conv2d_params = register_conv_params<2>();
-C10_UNUSED static auto conv3d_params = register_conv_params<3>();
-C10_UNUSED static auto linear_params = register_linear_params();
-C10_UNUSED static auto embedding_params = register_embedding_params();
+[[maybe_unused]] static auto conv2d_params = register_conv_params<2>();
+[[maybe_unused]] static auto conv3d_params = register_conv_params<3>();
+[[maybe_unused]] static auto linear_params = register_linear_params();
+[[maybe_unused]] static auto embedding_params = register_embedding_params();
 
 } // namespace

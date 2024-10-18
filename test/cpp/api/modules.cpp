@@ -3511,7 +3511,7 @@ void _multihead_attn_test_helper(
   std::uniform_int_distribution<int> d_2_10(2, 10);
   std::uniform_int_distribution<int> d_3_10(3, 10);
   bool registration_checked = false;
-  for (C10_UNUSED const auto i : c10::irange(100)) {
+  for ([[maybe_unused]] const auto i : c10::irange(100)) {
     const auto batch_sz = d_2_10(generator);
     const auto seq_len = d_2_10(generator);
     const auto d_head = d_3_10(generator);

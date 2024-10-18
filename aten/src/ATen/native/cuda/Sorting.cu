@@ -177,7 +177,7 @@ struct KthValueLauncher {
       cuda::detail::TensorInfo<scalar_t, index_t> values_info,
       int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
-      C10_UNUSED int collapse_indices_dim,
+      [[maybe_unused]] int collapse_indices_dim,
       cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,
@@ -212,9 +212,9 @@ struct MedianLauncher {
   template <typename scalar_t, typename index_t, int all_dims>
   inline void launch(
       cuda::detail::TensorInfo<scalar_t, index_t> values_info,
-      C10_UNUSED int collapse_values_dim,
+      [[maybe_unused]] int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
-      C10_UNUSED int collapse_indices_dim,
+      [[maybe_unused]] int collapse_indices_dim,
       cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,

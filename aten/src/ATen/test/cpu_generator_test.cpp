@@ -161,7 +161,7 @@ TEST(CPUGeneratorImpl, TestPhiloxEngineOffset1) {
   // So if you want to skip 8 values, offset would
   // be 2, since 2*4=8.
   at::Philox4_32 engine2(123, 1, 2);
-  for (C10_UNUSED const auto i : c10::irange(8)) {
+  for ([[maybe_unused]] const auto i : c10::irange(8)) {
     // Note: instead of using the engine() call 8 times
     // we could have achieved the same functionality by
     // calling the incr() function twice.
@@ -222,14 +222,14 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   // test with zero seed
   at::mt19937 engine1(0);
   std::mt19937 engine2(0);
-  for (C10_UNUSED const auto i : c10::irange(10000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(10000)) {
     ASSERT_EQ(engine1(), engine2());
   }
 
   // test with large seed
   engine1 = at::mt19937(2147483647);
   engine2 = std::mt19937(2147483647);
-  for (C10_UNUSED const auto i : c10::irange(10000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(10000)) {
     ASSERT_EQ(engine1(), engine2());
   }
 
@@ -238,10 +238,9 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
   auto seed = rd();
   engine1 = at::mt19937(seed);
   engine2 = std::mt19937(seed);
-  for (C10_UNUSED const auto i : c10::irange(10000)) {
+  for ([[maybe_unused]] const auto i : c10::irange(10000)) {
     ASSERT_EQ(engine1(), engine2());
   }
-
 }
 
 TEST(CPUGeneratorImpl, TestPhiloxEngineReproducibilityRandN) {

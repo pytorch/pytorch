@@ -101,7 +101,7 @@ static void RunDecompositions(Block* block) {
 
 void RunDecompositions(std::shared_ptr<Graph> g) {
   RunDecompositions(g->block());
-  for (C10_UNUSED const auto _ : c10::irange(2)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(2)) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }

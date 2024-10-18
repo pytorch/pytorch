@@ -62,11 +62,11 @@ void stressTestStore(std::string prefix = "") {
   auto hashStore = c10::make_intrusive<c10d::HashStore>();
   c10d::PrefixStore store(std::move(prefix), hashStore);
 
-  for (C10_UNUSED const auto i : c10::irange(numThreads)) {
+  for ([[maybe_unused]] const auto i : c10::irange(numThreads)) {
     threads.emplace_back([&] {
       sem1.post();
       sem2.wait();
-      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
+      for ([[maybe_unused]] const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
     });

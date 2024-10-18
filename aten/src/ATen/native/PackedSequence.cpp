@@ -188,7 +188,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     }
     int64_t dec = prev_batch_size - batch_size;
     if (dec > 0) {
-      for (C10_UNUSED const auto j : c10::irange(dec)) {
+      for ([[maybe_unused]] const auto j : c10::irange(dec)) {
         (*lengths--) = i;
       }
     }
