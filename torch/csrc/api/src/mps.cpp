@@ -10,7 +10,7 @@ bool is_available() {
 /// Sets the seed for the MPS's default generator.
 void manual_seed(uint64_t seed) {
   if (is_available()) {
-    auto gen = at::detail::getMPSHooks().getDefaultMPSGenerator();
+    auto gen = at::detail::getMPSHooks().getDefaultGenerator();
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());
