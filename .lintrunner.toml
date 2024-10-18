@@ -218,6 +218,8 @@ include_patterns = [
     'torch/csrc/distributed/autograd/**/*.h',
     'torch/csrc/distributed/rpc/**/*.cpp',
     'torch/csrc/distributed/rpc/**/*.h',
+    'torch/csrc/distributed/c10d/**/*.cpp',
+    'torch/csrc/distributed/c10d/**/*.h',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
 ]
@@ -243,7 +245,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
