@@ -2856,6 +2856,11 @@ class BenchmarkRunner:
         if self.args.backend == "torchao":
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
+        # avoid reorder_for_locality for xpu device when checking accuracy currently.
+        # This is because reordering the order of random kernels will lead to different results on xpu device.
+        if current_device == "xpu":
+            inductor_config.reorder_for_locality = False
+
         with self.pick_grad(name, self.args.training):
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
