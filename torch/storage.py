@@ -8,12 +8,25 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
-from typing_extensions import Self
+from typing import (
+    Any,
+    cast,
+    Dict as _Dict,
+    Optional as _Optional,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+from typing_extensions import Self
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
 
 
 __all__ = ["TypedStorage", "UntypedStorage"]
@@ -273,8 +286,8 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, *, device: Union[str, torch.device], non_blocking: _bool = False):
-        if isinstance(device, str):
+    def to(self, *, device: DeviceLikeType, non_blocking: _bool = False):
+        if not isinstance(device, torch.device):
             device = torch.device(device)
         return _to(self, device, non_blocking)
 
@@ -1061,7 +1074,7 @@ class TypedStorage:
         hpu_storage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> Self:
+    def to(self, *, device: DeviceLikeType, non_blocking: bool = False) -> Self:
         _warn_typed_storage_removal()
         if self.dtype in [
             torch.quint8,
