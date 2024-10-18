@@ -396,7 +396,9 @@ def local_scalar_dense(fake_mode, func, arg):
     return r
 
 
-@register_op_impl(torch.ops.aten.nonzero.default)
+@register_op_impl(
+    [torch.ops.aten.nonzero.default, torch.ops.aten.nonzero_numpy.default]
+)
 def nonzero(fake_mode, func, arg):
     if (
         fake_mode.shape_env is None
@@ -411,6 +413,8 @@ def nonzero(fake_mode, func, arg):
             _constrain_range_for_size,
             has_free_symbols,
         )
+        from torch.utils._sympy.numbers import IntInfinity
+        from torch.utils._sympy.value_ranges import bound_sympy
 
         if not has_free_symbols(arg.numel()) and arg.numel() == 0:
             # If numel is zero, then the output size must be zero.
@@ -429,6 +433,15 @@ def nonzero(fake_mode, func, arg):
 
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
+            else:
+                prod_node = math.prod(arg.shape).node
+                prod_range = bound_sympy(
+                    prod_node.expr, prod_node.shape_env.var_to_range
+                )
+                if isinstance(prod_range.upper, IntInfinity):
+                    maxval = sys.maxsize - 1
+                else:
+                    maxval = prod_range.upper
 
             _constrain_range_for_size(nnz, max=maxval)
 
