@@ -11688,6 +11688,14 @@ fn
         fn(ones)
         nonlocal_fn()
 
+    def test_compare_tensor_with_none(self):
+        @torch.compile()
+        def f(x):
+            return torch.tensor(x == None)
+
+        res = f(torch.tensor(1))
+        self.assertEqual(torch.tensor(False), res)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
