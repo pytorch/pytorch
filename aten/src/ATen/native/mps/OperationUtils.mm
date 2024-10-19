@@ -541,9 +541,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsShape = getMPSShape(_tensor);
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
 
-    auto flattenedShaped = [srcBuf length] / src.element_size();
-    MPSShape* mpsBaseShape = @[ @(flattenedShaped) ];
-    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsBaseShape];
+    auto storage_numel = src.storage().nbytes() / src.element_size();
+    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
+                                                                                 shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
     MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
                                                           offset:src.storage_offset() * src.element_size()
