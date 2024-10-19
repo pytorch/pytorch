@@ -55,7 +55,7 @@ void LBFGSOptions::set_lr(const double lr) {
 }
 
 template <typename T>
-bool if_container_equal(T lhs, T rhs) {
+static bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size()))
     return false;
   for (const auto i : c10::irange(lhs.size())) {
@@ -131,7 +131,7 @@ Tensor LBFGS::_gather_flat_grad() {
 
 int64_t LBFGS::_numel() {
   if (_numel_cache == std::nullopt) {
-    auto res = 0;
+    int64_t res = 0;
     for (const auto& p : param_groups_.at(0).params()) {
       res += p.numel();
     }
@@ -141,7 +141,7 @@ int64_t LBFGS::_numel() {
 }
 
 void LBFGS::_add_grad(const double step_size, const Tensor& update) {
-  auto offset = 0;
+  int64_t offset = 0;
   for (auto& p : param_groups_.at(0).params()) {
     auto numel = p.numel();
     // view as to avoid deprecated pointwise semantics
@@ -192,7 +192,7 @@ static double _cubic_interpolate(
     double x2,
     double f2,
     double g2,
-    std::optional<std::tuple<double, double>> bounds = std::nullopt) {
+    std::optional<std::pair<double, double>> bounds = std::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   auto [xmin_bound, xmax_bound] =
@@ -293,7 +293,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
         t,
         f_new,
         val(gtd_new),
-        std::make_tuple(min_step, max_step));
+        std::make_pair(min_step, max_step));
     // next step
     t_prev = tmp;
     f_prev = f_new;
