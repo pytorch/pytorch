@@ -13,11 +13,20 @@ from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
-if not torch._running_with_deploy():
-    import torch._dynamo.compiled_autograd as ca
+if torch._running_with_deploy():
+
+    def compiled_autograd_enabled():
+        return False
+
 else:
-    ca = object()  # type: ignore[assignment]
-    ca.compiled_autograd_enabled = False
+
+    def compiled_autograd_enabled():
+        if torch.compiler.is_compiling():
+            import torch._dynamo.compiled_autograd as ca
+
+            return ca.compiled_autograd_enabled or ca.in_compiled_autograd_region
+        else:
+            return False
 
 
 @dataclass
@@ -124,7 +133,7 @@ def _from_local_no_grad(
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
 
-    if not ca.compiled_autograd_enabled:
+    if not compiled_autograd_enabled():
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
