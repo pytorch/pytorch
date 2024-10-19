@@ -1,9 +1,7 @@
 #pragma once
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
 #include <functional>
