@@ -292,13 +292,10 @@ def tensorify_python_scalars(
                 # you would expect.
                 replacement_node = graph.call_function(node.target, tuple(args), kwargs)
                 with fake_mode:
-                    replacement_node.meta["val"] = node.target(
-                        *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
-                        **{
-                            k: v.meta["val"] if isinstance(v, fx.Node) else v
-                            for k, v in kwargs.items()
-                        },
-                    )
+                    # Just copy over node.meta["val"] since recalculating val can result in a
+                    # float. eg. if you have a mul of two symfloats that were specialized, now
+                    # val would be set to a real float!
+                    replacement_node.meta["val"] = node.meta["val"]
 
                 node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
