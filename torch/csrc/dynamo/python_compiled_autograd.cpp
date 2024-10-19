@@ -92,23 +92,47 @@ static void check(bool result) {
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
 
-PythonLogger::PythonLogger(PyObject* logger) : logger_(logger) {
-  TORCH_INTERNAL_ASSERT(logger_ != nullptr);
-}
+struct PythonLogger {
+  PythonLogger() = delete;
+  explicit PythonLogger(PyObject* logger) : logger_(logger) {
+    TORCH_INTERNAL_ASSERT(logger_ != nullptr);
+  }
 
-// must be called while GIL is held
-void PythonLogger::log(PythonLogger::Level level, std::string_view msg) const {
-  THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
-  TORCH_INTERNAL_ASSERT(pymethod != nullptr);
-  THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
-  if (pyfunc == nullptr) {
-    throw_python_error();
+  enum Level : unsigned int {
+    DEBUG = 0,
+    INFO = 1,
+    WARNING = 2,
+    ERROR = 3,
+    CRITICAL = 4,
+    COUNT // Keep this as the last enum
+  };
+
+  // must be called while GIL is held
+  void log(Level level, std::string_view msg) const {
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
+    TORCH_INTERNAL_ASSERT(pymethod != nullptr);
+    THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
+    if (pyfunc == nullptr) {
+      throw_python_error();
+    }
+    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
+    if (result == nullptr) {
+      throw_python_error();
+    }
   }
-  PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
-  if (result == nullptr) {
-    throw_python_error();
-  }
-}
+
+ private:
+  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
+      "debug", // Level::DEBUG
+      "info", // Level::INFO
+      "warning", // Level::WARNING
+      "error", // Level::ERROR
+      "critical" // Level::CRITICAL
+  };
+
+  // Note: logger_ must stay valid for the lifetime of this object
+  PyObject* logger_;
+};
 
 struct VerboseLogger : public PythonLogger {
   static std::optional<VerboseLogger> maybe_create() {
