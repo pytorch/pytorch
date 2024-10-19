@@ -118,9 +118,6 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
-// suppress an unused variable.
-#define C10_UNUSED [[maybe_unused]]
-
 #if !defined(__has_attribute)
 #define __has_attribute(x) 0
 #endif
