@@ -397,7 +397,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 namespace {
 template <typename T>
 struct StealOrDefault {
-  StealOrDefault(T& container)
+  explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
   ~StealOrDefault() {
@@ -1060,7 +1060,7 @@ class TransferEvents {
       std::shared_ptr<Result>& r,
       std::shared_ptr<Result> parent) {
     r->visit(c10::overloaded(
-        [&](ExtraFields<EventType::Kineto>& i) {
+        [&]([[maybe_unused]] ExtraFields<EventType::Kineto>& i) {
           TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
           r->start_tid_ = parent ? parent->start_tid_
                                  : at::RecordFunction::currentThreadId();
@@ -1297,7 +1297,7 @@ int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
           [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
             i.duration_ns_ = children_total_duration;
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- Allocation events can't have children
           },
           [&](auto&) {
@@ -1333,10 +1333,10 @@ int64_t adjust_timestamps_dfs(
             i.end_time_ns_ =
                 new_start_time + (i.end_time_ns_ - r->start_time_ns_);
           },
-          [](ExtraFields<EventType::Vulkan>& i) {
+          []([[maybe_unused]] ExtraFields<EventType::Vulkan>& i) {
             // Pass- We don't need to manually adjust end time for Vulkan events
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- No duration or end time to adjust
           },
           [&](auto&) {
@@ -1488,6 +1488,7 @@ RecordQueue::getRecords(
         // with intersection then we move the lefthand side of the step
         // annotation to the event start time
         if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
           auto currStepRes = out[step.out_idx];
           currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
           step_idx++;
