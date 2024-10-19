@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import copy
 import dataclasses
@@ -5,20 +6,7 @@ import inspect
 import logging
 import threading
 from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
-from typing_extensions import Never
-
-import sympy
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
@@ -33,25 +21,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
-
-
-if TYPE_CHECKING:
-    from triton._C.libtriton.ir import (
-        module as TritonIRModule,
-        operation as TritonIROperation,
-    )
-
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch._dynamo.variables.constant import ConstantVariable
-    from torch._dynamo.variables.functions import TritonKernelVariable
-    from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
-    from torch.fx.proxy import Proxy
-    from torch.utils._triton import TritonKernelType
-
-    TritonMetaParamsType = Dict[str, int]
-    TritonGridTupleType = Tuple[Union[int, sympy.Expr, SymInt], ...]
-    TritonGridCallableType = Callable[[TritonMetaParamsType], Tuple[int, ...]]
-    TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
 
 log = logging.getLogger("torch._dynamo")
@@ -81,13 +50,13 @@ TMADescriptorMetadata = Dict[
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable:
-    id_to_kernel: Dict[int, "TritonKernelType"] = {}
-    kernel_to_id: Dict["TritonKernelType", int] = {}
-    constant_args: Dict[int, Dict[str, Any]] = {}
+    id_to_kernel: Dict[int, Any] = {}
+    kernel_to_id: Dict[Any, int] = {}
+    constant_args: Dict[int, Any] = {}
     lock = threading.Lock()
 
     # Returns index on the table
-    def add_kernel(self, kernel: "TritonKernelType") -> int:
+    def add_kernel(self, kernel) -> int:
         with self.lock:
             if kernel in self.kernel_to_id:
                 return self.kernel_to_id[kernel]
@@ -98,21 +67,21 @@ class KernelSideTable:
             return idx
 
     # Returns the triton kernel at the given index
-    def get_kernel(self, idx: int) -> "TritonKernelType":
+    def get_kernel(self, idx: int):
         # No need to lock here as fetching from dict is atomic
         assert idx in self.id_to_kernel
         return self.id_to_kernel[idx]
 
     # Not every constant arg can be added to the graph. Use this side table
     # for constant args.
-    def add_constant_args(self, args: Dict[str, Any]) -> int:
+    def add_constant_args(self, args) -> int:
         with self.lock:
             idx = len(self.constant_args)
             self.constant_args[idx] = args
             return idx
 
     # Returns the constant args
-    def get_constant_args(self, idx: int) -> Dict[str, Any]:
+    def get_constant_args(self, idx: int):
         # No need to lock here as fetching from dict is atomic
         assert idx in self.constant_args
         return self.constant_args[idx]
@@ -141,7 +110,7 @@ class Param:
 class Intermediate:
     idx: int
 
-    def fake(self) -> bool:
+    def fake(self):
         return self.idx < 0
 
 
@@ -152,16 +121,14 @@ class Op:
     args: List[Union[Param, Intermediate]]
     ret: Intermediate = dataclasses.field(repr=False)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         if self.name == "tt.call":
             assert self.fn_call_name is not None
         else:
             assert self.fn_call_name is None
 
 
-def generate_ttir(
-    kernel: "TritonKernelType", kwargs: Dict[str, Any]
-) -> Tuple["TritonIRModule", List[str]]:
+def generate_ttir(kernel, kwargs):
     """
     Uses Triton's internal code generation to create TTIR
     """
@@ -242,9 +209,7 @@ def generate_ttir(
     return ttir_module, ordered_tensor_names
 
 
-def ttir_to_functions(
-    ttir_module: "TritonIRModule",
-) -> Dict[str, Dict[Intermediate, List[Op]]]:
+def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
     """
     Walk the `ttir_module` bottom up to mine the `functions` from
     the structured MLIR entities representing the Triton kernel
@@ -262,12 +227,12 @@ def ttir_to_functions(
     reindex_map: Dict[int, int] = {}
     next_fake_intermediate = 0
 
-    def reindex(idx: int) -> int:
+    def reindex(idx):
         if idx not in reindex_map:
             reindex_map[idx] = len(reindex_map)
         return reindex_map[idx]
 
-    def mlir_to_functions(op: "TritonIROperation") -> None:
+    def mlir_to_functions(op) -> None:
         name: str = op.get_name()
         if name == "builtin.module":
             # this wraps all tt.func ops
@@ -443,19 +408,11 @@ def ttir_to_functions(
 
 
 class MemoizeWithCycleCheck:
-    fn: Callable[..., Any]
-    cache: Dict[Tuple[str, int], Any]
-
-    def __init__(self, fn: Callable[..., Any]) -> None:
+    def __init__(self, fn):
         self.fn = fn
         self.reset()
 
-    def __call__(
-        self,
-        functions: Dict[str, Dict[Intermediate, List[Op]]],
-        fn_name: str,
-        num_args: int,
-    ) -> List[bool]:
+    def __call__(self, functions, fn_name, num_args):
         key = (fn_name, num_args)
         if key not in self.cache:
             self.cache[key] = None
@@ -464,14 +421,12 @@ class MemoizeWithCycleCheck:
             raise RuntimeError("Recursion is not supported")
         return self.cache[key]
 
-    def reset(self) -> None:
+    def reset(self):
         self.cache = {}
 
 
 @MemoizeWithCycleCheck
-def analyze_kernel_mutations(
-    functions: Dict[str, Dict[Intermediate, List[Op]]], fn_name: str, num_args: int
-) -> List[bool]:
+def analyze_kernel_mutations(functions, fn_name, num_args):
     """
     Analyzes the graph to detect all sinks from a predefined list of sinks
     by using triton's MemWrite trait list. NOTE: What if triton exposed this?
@@ -533,9 +488,7 @@ def analyze_kernel_mutations(
     return mutated
 
 
-def identify_mutated_tensors(
-    kernel: "TritonKernelType", kwargs: Dict[str, Any]
-) -> List[str]:
+def identify_mutated_tensors(kernel, kwargs):
     """
     Given a triton kernel and the arguments for this kernel, this function
     1) Retrieves the TTIR converted version of the kernel from Triton's API.
@@ -593,12 +546,12 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
 
     def __call__(
         self,
-        kernel_idx: int,
-        constant_args_idx: int,
-        grid: List["TritonGridType"],
+        kernel_idx,
+        constant_args_idx,
+        grid,
         tma_descriptor_metadata: TMADescriptorMetadata,
-        kwargs: Dict[str, Any],
-    ) -> Any:
+        kwargs,
+    ):
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -618,13 +571,13 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 
     def __call__(
         self,
-        kernel_idx: int,
-        constant_args_idx: int,
-        grid: List["TritonGridType"],
+        kernel_idx,
+        constant_args_idx,
+        grid,
         tma_descriptor_metadata: TMADescriptorMetadata,
-        kwargs: Dict[str, Any],
-        tensors_to_clone: List[str],
-    ) -> Dict[str, Any]:
+        kwargs,
+        tensors_to_clone,
+    ):
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -641,12 +594,12 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-) -> None:
+    kwargs,
+):
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
     kernel = kernel_side_table.get_kernel(kernel_idx)
@@ -691,14 +644,14 @@ def triton_kernel_wrapper_mutation_dense(
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_mutation_fake_tensor_mode(
-    mode: FakeTensorMode,
+    mode,
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-) -> None:
+    kwargs,
+):
     with mode:
         return None
 
@@ -706,26 +659,20 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
 def _(
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-) -> None:
+    kwargs,
+):
     return None
 
 
-def trace_triton_kernel_wrapper(
-    proxy_mode: ProxyTorchDispatchMode,
-    func_overload: Callable[..., Any],
-    node_args: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
 
-    proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy, node_args  # type: ignore[union-attr]
-    )
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
         func_overload,
@@ -739,14 +686,14 @@ def trace_triton_kernel_wrapper(
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
-    mode: ProxyTorchDispatchMode,
+    mode,
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-) -> None:
+    kwargs,
+):
     trace_triton_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
@@ -762,9 +709,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     return None
 
 
-def get_mutated_tensors(
-    kernel_idx: int, constant_args_idx: int, kwargs: Dict[str, Any]
-) -> List[str]:
+def get_mutated_tensors(kernel_idx, constant_args_idx, kwargs):
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     return identify_mutated_tensors(kernel, {**kwargs, **constant_args})
@@ -772,14 +717,14 @@ def get_mutated_tensors(
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
-    ctx: "BaseFunctionalizeAPI",
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    ctx,
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-) -> None:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    kwargs,
+):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
@@ -815,13 +760,13 @@ def triton_kernel_wrapper_mutation_functionalize(
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_functional_dense(
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-    tensors_to_clone: List[str],
-) -> Dict[str, Any]:
+    kwargs,
+    tensors_to_clone,
+):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
@@ -842,15 +787,15 @@ def triton_kernel_wrapper_functional_dense(
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode: FakeTensorMode,
+    mode,
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-    tensors_to_clone: List[str],
-) -> Dict[str, Any]:
+    kwargs,
+    tensors_to_clone,
+):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
@@ -865,16 +810,16 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
-    mode: ProxyTorchDispatchMode,
+    mode,
     *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-    tensors_to_clone: List[str],
-) -> Dict[str, Any]:
-    ret = trace_triton_kernel_wrapper(
+    kwargs,
+    tensors_to_clone,
+):
+    return trace_triton_kernel_wrapper(
         mode,
         triton_kernel_wrapper_functional,
         {
@@ -886,21 +831,19 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
             "tensors_to_clone": tensors_to_clone,
         },
     )
-    assert ret is not None
-    return ret
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
 def triton_kernel_wrapper_functional_functionalize(
-    ctx: "BaseFunctionalizeAPI",
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: List["TritonGridType"],
+    ctx,
+    kernel_idx,
+    constant_args_idx,
+    grid,
     tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: Dict[str, Any],
-    tensors_to_clone: List[str],
-) -> Dict[str, Any]:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    kwargs,
+    tensors_to_clone,
+):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
         outputs = triton_kernel_wrapper_functional(
             kernel_idx=kernel_idx,
@@ -910,7 +853,7 @@ def triton_kernel_wrapper_functional_functionalize(
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
         )
-        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+        return ctx.wrap_tensors(outputs)
 
 
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
@@ -958,44 +901,25 @@ class TritonHOPifier:
     TritonHOPifier is an abstract class that can be overriden by its subclasses.
     """
 
-    def raise_unsupported(self, msg: str) -> Never:
+    def raise_unsupported(self, msg):
         raise NotImplementedError("abstract method")
 
-    def is_callable(self, maybe_callable: Any) -> bool:
+    def is_callable(self, maybe_callable):
         raise NotImplementedError("abstract method")
 
-    def get_value(self, val: Any) -> Any:
+    def get_value(self, val):
         raise NotImplementedError("abstract method")
 
-    def call_grid(  # type: ignore[no-untyped-def]
-        self,
-        grid,
-        meta,
-        tx,
-    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
+    def call_grid(self, grid, meta, tx):
         raise NotImplementedError("abstract method")
 
-    def call_HOP(  # type: ignore[no-untyped-def]
-        self,
-        variable,
-        grids,
-        combined_args: Dict[str, Any],
-        tx,
-    ) -> Optional["ConstantVariable"]:
+    def call_HOP(self, variable, grids, combined_args, tx):
         raise NotImplementedError("abstract method")
 
-    def check_grid(  # type: ignore[no-untyped-def]
-        self, grid
-    ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
+    def check_grid(self, grid):
         raise NotImplementedError("abstract method")
 
-    def init_variable(
-        self,
-        variable: Union["TraceableTritonKernelWrapper", "TritonKernelVariable"],
-        kernel: "TritonKernelType",
-        kernel_idx: Optional[int],
-        grid: Optional["TritonGridType"],
-    ) -> None:
+    def init_variable(self, variable, kernel, kernel_idx, grid):
         from triton.runtime.autotuner import Autotuner
 
         assert kernel is not None
@@ -1050,11 +974,7 @@ class TritonHOPifier:
                     "Only configs and keys are supported for triton.autotune"
                 )
 
-    def call_getitem(
-        self,
-        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
-        args: Sequence[Any],
-    ) -> Union["TritonKernelVariable", "TraceableTritonKernelWrapper"]:
+    def call_getitem(self, variable, args):
         # __getitem__ should only be called if we don't already have a grid
         # Only grid needs to be passed
         if variable.grid is not None or len(args) != 1:
@@ -1068,13 +988,7 @@ class TritonHOPifier:
             grid=args[0],
         )
 
-    def call_run(
-        self,
-        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
-        args: Sequence[Any],
-        kwargs: Dict[str, Any],
-        tx: Optional["InstructionTranslator"],
-    ) -> Optional["ConstantVariable"]:
+    def call_run(self, variable, args, kwargs, tx):
         if "grid" not in kwargs:
             self.raise_unsupported("Triton kernel requires to be called with a grid")
         grid = kwargs.pop("grid")
@@ -1089,13 +1003,7 @@ class TritonHOPifier:
             tx,
         )
 
-    def call_triton_kernel(
-        self,
-        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
-        args: Sequence[Any],
-        kwargs: Dict[str, Any],
-        tx: Optional["InstructionTranslator"],
-    ) -> Optional["ConstantVariable"]:
+    def call_triton_kernel(self, variable, args, kwargs, tx):
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
@@ -1182,11 +1090,10 @@ class TritonHOPifier:
             # If the grid is a function, then lets execute it and convert it to
             # a list
             grid = variable.grid
-            assert grid is not None
             if self.is_callable(grid):
                 # Populate the special "meta" argument to call the grid function
                 meta = {**combined_args_raw, **config_args}
-                grid = self.call_grid(grid, meta, tx)  # type: ignore[arg-type]
+                grid = self.call_grid(grid, meta, tx)
             grids.append(self.check_grid(grid))
 
         for i in range(len(grids)):
@@ -1234,30 +1141,20 @@ class TritonHOPifier:
 
 
 class TracingTritonHOPifier(TritonHOPifier):
-    def raise_unsupported(self, msg: str) -> Never:
+    def raise_unsupported(self, msg):
         raise RuntimeError(msg)
 
-    def is_callable(self, maybe_callable: Any) -> bool:
+    def is_callable(self, maybe_callable):
         return callable(maybe_callable)
 
-    def get_value(self, val: Any) -> Any:
+    def get_value(self, val):
         return val
 
-    def call_grid(
-        self,
-        grid: "TritonGridCallableType",
-        meta: "TritonMetaParamsType",
-        tx: None,
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+    def call_grid(self, grid, meta, tx):
         assert tx is None
-        assert isinstance(meta, dict)
-        assert callable(grid)
         return grid(meta)
 
-    def check_grid(
-        self,
-        grid: "TritonGridType",
-    ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
+    def check_grid(self, grid):
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
                 "capture_triton can only handle grids that resolve to Sequence[int]."
@@ -1265,17 +1162,10 @@ class TracingTritonHOPifier(TritonHOPifier):
         # normalize to tuple
         return tuple(grid)
 
-    def call_HOP(
-        self,
-        variable: "TraceableTritonKernelWrapper",
-        grids: List["TritonGridTupleType"],
-        combined_args: Dict[str, Any],
-        tx: None,
-    ) -> None:
+    def call_HOP(self, variable, grids, combined_args, tx):
         assert tx is None
-        assert isinstance(variable, TraceableTritonKernelWrapper)
 
-        def is_graphable(val: Any) -> bool:
+        def is_graphable(val):
             return isinstance(val, fx.node.base_types)
 
         non_graphable_args = {
@@ -1284,11 +1174,10 @@ class TracingTritonHOPifier(TritonHOPifier):
         graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
 
         constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
-        assert isinstance(variable.kernel_idx, int)
         return triton_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
-            grid=grids,  # type: ignore[arg-type]
+            grid=grids,
             # TMA descriptor capturing not yet
             # supported in non-dynamo tracing
             tma_descriptor_metadata={},
@@ -1300,25 +1189,16 @@ tracing_triton_hopifier_singleton = TracingTritonHOPifier()
 
 
 class TraceableTritonKernelWrapper:
-    kernel: "TritonKernelType"
-    kernel_idx: Optional[int]
-    grid: Optional["TritonGridType"]
-
-    def __init__(
-        self,
-        kernel: "TritonKernelType",
-        kernel_idx: Optional[int],
-        grid: Optional["TritonGridType"],
-    ) -> None:
+    def __init__(self, kernel, kernel_idx, grid):
         self.kernel = None
         self.grid = None
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
         assert self.kernel is not None
 
-    def __getitem__(self, *args: Sequence[Any]) -> "TraceableTritonKernelWrapper":
-        return tracing_triton_hopifier_singleton.call_getitem(self, args)  # type: ignore[return-value]
+    def __getitem__(self, *args):
+        return tracing_triton_hopifier_singleton.call_getitem(self, args)
 
-    def run(self, *args: Sequence[Any], **kwargs: Dict[str, Any]) -> Any:
+    def run(self, *args, **kwargs):
         from torch._library.triton import is_capture_triton_enabled
 
         if is_capture_triton_enabled():
@@ -1327,7 +1207,7 @@ class TraceableTritonKernelWrapper:
             assert self.kernel is not None
             return self.kernel.run(*args, **kwargs)
 
-    def __call__(self, *args: Sequence[Any], **kwargs: Dict[str, Any]) -> Any:
+    def __call__(self, *args, **kwargs):
         from torch._library.triton import is_capture_triton_enabled
 
         if is_capture_triton_enabled():
@@ -1338,7 +1218,7 @@ class TraceableTritonKernelWrapper:
             assert self.kernel is not None
             return self.kernel[self.grid](*args, **kwargs)
 
-    def specialize_symbolic(self, arg: Sequence[Any]) -> Any:
+    def specialize_symbolic(self, arg: Any) -> Any:
         import torch
 
         # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
