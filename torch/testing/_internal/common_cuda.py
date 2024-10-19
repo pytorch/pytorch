@@ -253,6 +253,8 @@ def _check_cusparse_generic_available():
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:
         return False
+    if not torch.version.hip:
+        return False
 
     rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-")[0]    # ignore git sha

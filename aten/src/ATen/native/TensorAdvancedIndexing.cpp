@@ -875,12 +875,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     // See Note [Enabling Deterministic Operations]
     if (result.is_cuda() && globalContext().deterministicAlgorithms()){
         torch::List<std::optional<Tensor>> indices;
-        indices.reserve(dim + 1);
-        for (const auto i: c10::irange(dim)) {
-          (void)i;
-          indices.emplace_back();
-        }
-        indices.emplace_back(index);
+        indices.resize(dim + 1);
+        indices.set(dim, index);
         result.index_put_(indices, source, false);
         return;
     }
