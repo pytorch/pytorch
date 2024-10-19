@@ -546,8 +546,8 @@ def tuned_cslt_sparse_mm(
     input_nodes: Tuple[Any, ...] = (mat1_compressed, mat2)
     k, n = mat2.get_size()
 
-    is_int8_input_type = mat1_compressed.dtype == torch.int8
-    compression_factor = 10 if is_int8_input_type else 9
+    is_8bit_input_type = mat1_compressed.dtype in [torch.int8, torch.float8_e4m3fn]
+    compression_factor = 10 if is_8bit_input_type else 9
     m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
 
     from torch._inductor.ir import FixedLayout

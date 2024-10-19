@@ -43,6 +43,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
         case at::ScalarType::Float8_e4m3fn:
             type = CUDA_R_8F_E4M3;
+            compression_factor = 10;
             break;
 #endif
         default:
@@ -158,6 +159,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
         output_type = CUDA_R_8F_E4M3;
         C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
+        compression_factor = 10;
         break;
 #endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
