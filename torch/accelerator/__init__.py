@@ -11,7 +11,9 @@ from ._utils import _device_t, _get_device_index
 
 
 def current_accelerator() -> torch.device:
-    r"""Return the device type of the current :ref:`accelerator<accelerators>`.
+    r"""Return the device of the current :ref:`accelerator<accelerators>`.
+    Note that the index of the returned :class:`torch.device` will be ``None``, use
+    use :func:`torch.accelerator.current_device_idx` to know the current index being used.
 
     Returns:
         torch.device: return the current accelerator as :class:`torch.device`.
@@ -60,18 +62,18 @@ def current_device_idx() -> int:
     return torch._C._accelerator_getDeviceIndex()
 
 
-def set_device(device: _device_t) -> None:
-    r"""Set the current device to a given device.
+def set_device_idx(device: _device_t, /) -> None:
+    r"""Set the current device index to a given device.
 
     Args:
         device (:class:`torch.device`, str, int): a given device that must match the current
-            :ref:`accelerator<accelerators>` device type. This function is a no-op if this argument is negative.
+            :ref:`accelerator<accelerators>` device type. This function is a no-op if this device index is negative.
     """
     device_index = _get_device_index(device)
-    torch._C._accelerator_setDevice(device_index)
+    torch._C._accelerator_setDeviceIndex(device_index)
 
 
-def current_stream(device: _device_t = None) -> torch.Stream:
+def current_stream(device: _device_t = None, /) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
@@ -95,7 +97,7 @@ def set_stream(stream: torch.Stream) -> None:
     torch._C._accelerator_setStream(stream)
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: _device_t = None, /) -> None:
     r"""Wait for all kernels in all streams on the given device to complete.
 
     Args:
@@ -126,7 +128,7 @@ __all__ = [
     "current_stream",
     "device_count",
     "is_available",
-    "set_device",
+    "set_device_idx",
     "set_stream",
     "synchronize",
 ]
