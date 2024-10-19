@@ -7,6 +7,7 @@ from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from . import config
+from sympy import Symbol
 import torch.fx.traceback as fx_traceback
 import torch
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -274,11 +275,11 @@ class Interpreter:
         if not torch._dynamo.config.specialize_float:
             # Force the specialization of backed symfloats
             args = tuple(
-                float(a) if isinstance(a, torch.SymFloat) and a.node.hint is not None else a
+                float(a) if isinstance(a, torch.SymFloat) and isinstance(a, Symbol) and a.node.hint is not None else a
                 for a in args
             )
             kwargs = {
-                k: (float(v) if isinstance(v, torch.SymFloat) and v.node.hint is not None else v)
+                k: (float(v) if isinstance(v, torch.SymFloat) and isinstance(v, Symbol) and v.node.hint is not None else v)
                 for k, v in kwargs.items()
             }
 
