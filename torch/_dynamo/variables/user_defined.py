@@ -372,7 +372,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
-                unimplemented("typeddict with optional keys not supported")
+                unimplemented("TypedDict with optional keys not supported")
             if len(args):
                 unimplemented("TypedDict only supports kwargs")
             dict_items = {
