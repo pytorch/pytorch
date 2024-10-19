@@ -2043,8 +2043,7 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            with graph_capture_lock:
-                out = self.run_eager(new_inputs, function_id)
+            out = self.run_eager(new_inputs, function_id)
 
             return out
 

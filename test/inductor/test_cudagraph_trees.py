@@ -2488,26 +2488,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_multithreading(self):
             import threading
 
-            def wrapper(x, y):
-                def foo(x, y):
-                    a = x * y
-                    b = x + y
-                    return a + b
+            def foo(x, y):
+                a = x * y
+                b = x + y
+                return a + b
 
+            repeat = 32
+            compiled_fns = []
+            for i in range(repeat):
+                x = torch.rand(512, 512).to("cuda")
+                y = torch.rand(512, 512).to("cuda")
                 opt_foo = torch.compile(foo, mode="reduce-overhead")
+                opt_foo(x, y)
+                compiled_fns.append(opt_foo)
 
+            def wrapper(x, y, opt_foo):
                 for i in range(10):
                     z = opt_foo(x, y)
+                return z
 
             threads = []
 
-            for i in range(32):
+            for i in range(repeat):
                 threads.append(
                     threading.Thread(
                         target=wrapper,
                         args=(
-                            torch.rand(256, 256).to("cuda"),
-                            torch.rand(256, 256).to("cuda"),
+                            torch.rand(512, 512).to("cuda"),
+                            torch.rand(512, 512).to("cuda"),
+                            compiled_fns[i],
                         ),
                     )
                 )
