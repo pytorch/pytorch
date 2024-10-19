@@ -3697,7 +3697,8 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
             self.assertEqual(cnts.frame_count, 1)
-            self.assertEqual(cnts.op_count, 6)
+            self.assertEqual(cnts.op_count, 5)
+            cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):
         def fn():
