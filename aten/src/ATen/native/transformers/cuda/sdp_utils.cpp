@@ -61,12 +61,9 @@ bool check_prefer_cudnn_attention(sdp_params const& params) {
   // return false;
 #if defined(CUDNN_VERSION)
 
-#if CUDNN_VERSION > 90500
+#if CUDNN_VERSION > 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
-#elif CUDNN_VERSION >= 90000
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  return params.query.is_contiguous() && dprops->major >= 9;
 #else
   return false;
 #endif
