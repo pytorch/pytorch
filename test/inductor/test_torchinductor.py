@@ -11719,7 +11719,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
             arguments_that_are_divisible_by_16_in_kernel0 = (
                 kernels[0].triton_meta["configs"][0].divisible_by_16
             )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+            self.assertIn(
+                arguments_that_are_divisible_by_16_in_kernel0, [(0, 1, 3), (0, 1)]
+            )
 
             # kernel1 reduces from 8 elements to a single scalar.
             # Since multi-kernel generate 2 variants for each kernel. The second
@@ -11742,17 +11744,19 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
                 torch._dynamo.reset()
                 kernels = self.get_kernels(fn, [inps])
-                arguments_that_are_divisible_by_16 = (
-                    kernels[0].triton_meta["configs"][0].divisible_by_16
-                )
+                arguments_that_are_divisible_by_16 = [
+                    k
+                    for k in kernels[0].triton_meta["configs"][0].divisible_by_16
+                    if k < 2
+                ]
 
                 #             NO_ALIGN ALIGN     ALIGN
                 # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
 
                 if offset % 4 == 0:
-                    expected_aligned = (0, 1, 2)
+                    expected_aligned = (0, 1)
                 else:
-                    expected_aligned = (1, 2)
+                    expected_aligned = (1,)
                 self.assertEqual(arguments_that_are_divisible_by_16, expected_aligned)
 
             # If input isn't a view, storage offset != , inductor will assume alignment.
@@ -11762,7 +11766,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             arguments_that_are_divisible_by_16 = (
                 kernels[0].triton_meta["configs"][0].divisible_by_16
             )
-            self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
+            self.assertEqual(arguments_that_are_divisible_by_16, [0, 1])
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

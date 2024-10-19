@@ -294,7 +294,7 @@ class ComboKernelBenchmarkTests(TestCase):
             ),
         )
 
-        self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
+        self.assertIn(torch._inductor.metrics.generated_kernel_count, (7, 8))
 
     @requires_cuda
     def test_persistent_reduction_no_x_dim(self):
