@@ -27,7 +27,6 @@ from typing import Any, Dict, Iterator, List, Literal, Tuple, TypedDict
 from unittest import mock
 
 import numpy as np
-from omegaconf import OmegaConf
 
 import torch
 import torch._dynamo.test_case
@@ -68,6 +67,11 @@ _GLOBAL_CPU_TENSOR = torch.randn(3)
 HAS_MSGSPEC = importlib.util.find_spec("msgspec")
 if HAS_MSGSPEC:
     import msgspec
+
+
+HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
+if HAS_OMEGACONG:
+    from omegaconf import OmegaConf
 
 
 def exists(val):
@@ -6053,6 +6057,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not HAS_OMEGACONG, "missing omegaconf package")
     def test_omegaconf_dictconfig(self):
         def fn(cfg, x):
             a = cfg["foo"].a * x
