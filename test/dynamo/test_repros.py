@@ -6140,7 +6140,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         def fn(x, y):
             obj = LlavaImagePixelInputs(type=int, data=y)
-            return x * obj["data"]
+            out = x * obj["data"]
+            obj["data"] = 3
+            return out * obj["data"]
 
         x, y = torch.randn(4), torch.randn(4)
         ref = fn(x, y)
