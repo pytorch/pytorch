@@ -118,7 +118,7 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
         else:
             # Polyfill for python=3.9. kw_only simply introduces an extra check
             # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls)
+            return dataclasses.dataclass(cls, frozen=frozen)
 
     if cls is None:
         return wrap
