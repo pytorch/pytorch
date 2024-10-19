@@ -6,7 +6,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import sys
 import textwrap
 import traceback
 from contextlib import nullcontext
@@ -84,6 +83,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    ir_dataclass,
     is_dynamic,
     is_gpu,
     sympy_dot,
@@ -107,23 +107,6 @@ _IntLike: TypeAlias = Union[int, Expr]
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-from typing_extensions import dataclass_transform
-
-
-@dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls)
-
-    if cls is None:
-        return wrap
-    return wrap(cls)
-
 
 """ [Note: Inductor IR]
 
@@ -1762,7 +1745,7 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        i_loaders = [i.make_loader() for i in intermediates]  # noqa: F841
+        i_loaders = [i.make_loader() for i in intermediates]
 
         def intermediate_loader_fn(index, reduction_index, loader):
             return loader([*index, *reduction_index])
@@ -2129,7 +2112,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        _buffer, layout = as_storage_and_layout(x, freeze=False)
+        buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2198,7 +2181,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        _buffer, layout = as_storage_and_layout(x, freeze=False)
+        buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -2825,6 +2808,7 @@ class SliceView(View):
         except TypeError:
             pass
 
+        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -3836,7 +3820,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4511,7 +4495,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper):
-        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
+        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -5125,7 +5109,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -5951,6 +5935,7 @@ class FallbackKernel(ExternKernelAlloc):
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
 
+        schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg):
@@ -6933,7 +6918,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                _example_output,
+                example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7060,7 +7045,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:
         with V.graph.fake_mode:
             (
-                _example_output,
+                example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,

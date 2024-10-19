@@ -13,7 +13,6 @@ import torch.fx
 import torch.nn
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
-from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -31,6 +30,7 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
+from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
@@ -792,7 +792,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_graph,
             false_graph,
             true_shared,
-            _false_shared,
+            false_shared,
             unique_true,
             unique_false,
         ) = _merge_graph_inputs(
@@ -927,7 +927,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs = args[3].unpack_var_sequence(tx)
 
         (
-            (cond_r, _cond_treespec),
+            (cond_r, cond_treespec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -973,7 +973,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             body_graph,
             cond_shared,
-            _body_shared,
+            body_shared,
             cond_unique,
             body_unique,
         ) = _merge_graph_inputs(
@@ -1040,7 +1040,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1062,7 +1062,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    SourcelessBuilder.create(
+                    VariableTracker.build(
                         tx,
                         leaf.size
                         if leaf.size is not None
@@ -1072,14 +1072,14 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
-                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                    "dtype": VariableTracker.build(tx, leaf.dtype),
+                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(xs.items, xs.items)
         ]
         (
-            (combine_result, _combine_treespec),
+            (combine_result, combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1211,7 +1211,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ]
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
-            (combine_result, _combine_treespec),
+            (combine_result, combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1532,14 +1532,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        (
-            p_args,
-            p_kwargs,
-            _example_value,
-            body_r,
-            treespec,
-            _,
-        ) = self.create_wrapped_node(tx, args, kwargs, "wrap")
+        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
+            tx, args, kwargs, "wrap"
+        )
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -1829,6 +1824,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        callable = args[0]
+
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
@@ -1918,7 +1915,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
-            _body_r,
+            body_r,
             treespec,
             checkpointed_gmod,
         ) = self.create_wrapped_node(
@@ -2060,7 +2057,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
-        from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
 
@@ -2068,9 +2064,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return query.call_method(
                 tx,
                 "new_empty",
-                (SourcelessBuilder.create(tx, []),),
+                (VariableTracker.build(tx, []),),
                 {
-                    "dtype": SourcelessBuilder.create(tx, torch.int32),
+                    "dtype": VariableTracker.build(tx, torch.int32),
                 },
             )
 
@@ -2080,8 +2076,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             score = query.call_method(
                 tx,
                 "new_empty",
-                (SourcelessBuilder.create(tx, []),),
-                {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
+                (VariableTracker.build(tx, []),),
+                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
             )
             new_args = [score, *bhmn]
         else:
@@ -2090,7 +2086,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (_body_output, _body_treespec),
+                (body_output, body_treespec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
@@ -2282,10 +2278,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tracer=fwd_tracer,
         )
 
-        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+        if ctx in tx.output.side_effects.store_attr_mutations:
             if (
                 "_materialize_non_diff_grads"
-                in tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+                in tx.output.side_effects.store_attr_mutations[ctx]
             ):
                 unimplemented("NYI")
 
@@ -2499,7 +2495,7 @@ def maybe_positional_arg_names(func):
     except (Unsupported, NotImplementedError):
         return None
     try:
-        sig = inspect.signature(fn)
+        sig = inspect.signature(func.get_function())
     except ValueError:
         return None
     for name, param in sig.parameters.items():

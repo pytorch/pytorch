@@ -12,6 +12,7 @@ from .ir import (
     FixedLayout,
     FlexibleLayout,
     ir_node_to_tensor,
+    IRNode,
     is_contiguous_storage_and_layout,
     Layout,
     may_convert_to_optional,
@@ -1009,7 +1010,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            _kernel_layout,
+            kernel_layout,
             req_stride_order,
         ) = _prepare_convolution_fusion_create(
             cls,
@@ -1094,16 +1095,8 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            self.codegen_args(),
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            op_overload=self.op_overload,
-            raw_args=[*self.inputs, *self.constant_args],
-        )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(cls, x, packed_w, orig_w, B, batch_size):
@@ -1163,9 +1156,10 @@ class LinearUnary(ExternKernelAlloc):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ic = x.get_size()
-        oc, _ic = w.get_size()
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
         output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -1225,9 +1219,10 @@ class LinearBinary(ExternKernelAlloc):
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ic = x.get_size()
-        oc, _ic = w.get_size()
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
         output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:
@@ -1809,6 +1804,8 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         hy_shape = hx.get_size()
         cy_shape = cx.get_size()
+
+        res: List[IRNode] = []
 
         inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [

@@ -67,6 +67,7 @@ from .common import (
     SizeArg,
     TensorArg,
     WorkspaceArg,
+    WorkspaceZeroMode,
 )
 from .simd import (
     constant_repr,
@@ -563,6 +564,7 @@ class TritonPrinter(PythonPrinter):
         Helper for max/min code genereration.
         cmp: > or <
         """
+        nargs = len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
@@ -1604,6 +1606,9 @@ class TritonKernel(SIMDKernel):
                 ):
                     return None
 
+                def identity(expr: sympy.Expr) -> sympy.Expr:
+                    return expr
+
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
@@ -1792,6 +1797,9 @@ class TritonKernel(SIMDKernel):
             index_str, "0" if lower else None, size_str, mask_str
         )
 
+        indirect = self.is_indirect_indexing(expr) or any(
+            isinstance(m, TritonCSEVariable) for m in indexing.mask_vars
+        )
         buffer = self.get_load_buffer(indexing)
         self.cse.generate(buffer, line, assignment=False)
 
@@ -2312,6 +2320,7 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
+        reduction_range_prefix = self.range_trees[-1].prefix
 
         broadcasted_values = []
         accumulators = []
@@ -2322,6 +2331,7 @@ class TritonKernel(SIMDKernel):
 
         for value, dtype in zip(values, dtypes):
             acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
             value_dtype = self.cse.generate(
                 self.compute,
@@ -2334,6 +2344,7 @@ class TritonKernel(SIMDKernel):
             broadcasted_values.append(value)
 
             acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
             if not self.persistent_reduction:
                 accumulator = self.cse.newvar()
@@ -2416,6 +2427,7 @@ class TritonKernel(SIMDKernel):
         assert (
             self.persistent_reduction
         ), "ops.sort is only supported in persistent reductions"
+        reduction_range_prefix = self.range_trees[-1].prefix
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - 1
@@ -2506,7 +2518,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        _argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -2535,10 +2547,10 @@ class TritonKernel(SIMDKernel):
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
-                    device = V.graph.scheduler.get_current_device_or_throw()
-                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    device = V.graph.get_current_device_or_throw()
+                    count = V.graph.sizevars.size_hint(arg_sig.count)
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
@@ -2564,7 +2576,7 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -2699,7 +2711,7 @@ class TritonKernel(SIMDKernel):
 
         if name is None:
             code.splice(gen_common_triton_imports())
-            device_type = V.graph.scheduler.get_current_device_or_throw().type
+            device_type = V.graph.get_current_device_or_throw().type
             if device_type == "cpu":
                 code.splice("triton_helpers.set_driver_to_cpu()")
             else:
@@ -2741,9 +2753,13 @@ class TritonKernel(SIMDKernel):
         # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
         # zeros, then, although we still mutate the data, we don't care about those
         # mutations because we don't make any assumptions about the contents of the
-        # workspace buffer.
+        # workspace buffer.  Similarly, ZERO_PER_GRAPH requires the kernel to return
+        # the buffer back to its original state.
         for argname, arg in zip(argdefs, signature):
-            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+            if (
+                isinstance(arg, WorkspaceArg)
+                and arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL
+            ):
                 mutated_args.add(argname)
 
         mutated_args = sorted(mutated_args)
@@ -2753,9 +2769,7 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
 
@@ -2931,13 +2945,10 @@ class TritonKernel(SIMDKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
 
-        if self.args.workspace_arg is not None:
-            ws = self.args.workspace_arg
-            wrapper.generate_workspace_allocation(
-                ws.nbytes, current_device, ws.zero_fill
-            )
+        for ws in self.args.workspace_args:
+            wrapper.generate_workspace_allocation(ws)
 
         grid = wrapper.generate_default_grid(
             name, grid, grid_callable=self._get_grid_fn()
@@ -2954,8 +2965,8 @@ class TritonKernel(SIMDKernel):
             triton_meta=self.triton_meta,
         )
 
-        if self.args.workspace_arg is not None:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        for ws in reversed(self.args.workspace_args):
+            wrapper.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -3108,7 +3119,7 @@ class TritonScheduling(SIMDScheduling):
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
-        origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+        origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
             wrapper.writeline(origins)
 
@@ -3160,12 +3171,12 @@ class TritonScheduling(SIMDScheduling):
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
+            basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
@@ -3185,7 +3196,7 @@ class TritonScheduling(SIMDScheduling):
 
     def benchmark_fused_nodes(self, nodes):
         with preserve_rng_state(), torch.cuda.device(
-            self.scheduler.get_current_device_or_throw()
+            V.graph.get_current_device_or_throw()
         ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
@@ -3368,14 +3379,16 @@ def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
         assert isinstance(
             backend, (SIMDScheduling, CUDACombinedScheduling)
         ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        V.graph.scheduler.current_device = device
 
-        # Don't increment kernel count when generating debug string.
-        # This will confuse some unit tests that check the number of
-        # generated kernels.
-        old_generated_kernel_count = metrics.generated_kernel_count
-        triton_code = backend.generate_kernel_code_from_nodes(node.get_nodes()).strip()
-        metrics.generated_kernel_count = old_generated_kernel_count
+        with V.graph.set_current_device(device):
+            # Don't increment kernel count when generating debug string.
+            # This will confuse some unit tests that check the number of
+            # generated kernels.
+            old_generated_kernel_count = metrics.generated_kernel_count
+            triton_code = backend.generate_kernel_code_from_nodes(
+                node.get_nodes()
+            ).strip()
+            metrics.generated_kernel_count = old_generated_kernel_count
 
         lines.append(f"{node.get_name()} Triton code:")
         lines.append(textwrap.indent(triton_code, "    "))
