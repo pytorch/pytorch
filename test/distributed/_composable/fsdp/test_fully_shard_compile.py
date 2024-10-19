@@ -624,8 +624,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
-        # TODO: fix fwd_fullgraph=False case
-        for fwd_fullgraph in [True]:
+        for fwd_fullgraph in [True, False]:
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(
                     fwd_fullgraph=fwd_fullgraph
@@ -637,8 +636,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
-        # TODO: fix fwd_fullgraph=False case
-        for fwd_fullgraph in [True]:
+        for fwd_fullgraph in [True, False]:
             self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(
                     fwd_fullgraph=fwd_fullgraph
@@ -743,7 +741,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 file_check.run(bwd_code)
 
-    @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
@@ -824,9 +821,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        # TODO: fix fwd_fullgraph=False case
         for fwd_fullgraph, all_requires_grad in itertools.product(
-            [True], [True, False]
+            [True, False], [True, False]
         ):
             with self._maybe_add_graph_break_to_sdpa(
                 fwd_fullgraph
@@ -844,9 +840,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        # TODO: fix fwd_fullgraph=False case
         for fwd_fullgraph, all_requires_grad in itertools.product(
-            [True], [True, False]
+            [True, False], [True, False]
         ):
             with self._maybe_add_graph_break_to_sdpa(fwd_fullgraph):
                 self._test_traceable_fsdp(
@@ -962,7 +957,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         )
                 file_check.run(bwd_code)
 
-    @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
