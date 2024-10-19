@@ -557,9 +557,7 @@ constexpr auto count_max =
 // https://github.com/NVIDIA/nccl/issues/696. The issue of skipping send/recv
 // is that it can cause deadlock when a rank send and recv 0 bytes so it's
 // completely skipping the collective, causing mismatch across ranks
-// Note: on AMD GPU, we're running into hang w/ 0 byte send/recv, so we're
-// skipping this for ROCm for now
-#if !defined(USE_ROCM) && defined(NCCL_MAJOR) && \
+#if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR > 13)))
 template <typename T>
 constexpr bool _nccl_should_send_recv(C10_UNUSED T _unused_) {
