@@ -114,6 +114,13 @@ def tensorify_python_scalars(
 
     Analysis = TensorReferenceAnalysis
 
+    def remove_node_and_expr_mapping(node: fx.Node) -> None:
+        graph.erase_node(node)
+        for expr, proxy in list(expr_to_sym_proxy.items()):
+            if proxy.node == node:
+                del expr_to_sym_proxy[expr]
+                break
+
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
@@ -248,7 +255,7 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(replacement_proxy.node)
 
-                    graph.erase_node(node)
+                    remove_node_and_expr_mapping(node)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -298,7 +305,7 @@ def tensorify_python_scalars(
                     replacement_node.meta["val"] = node.meta["val"]
 
                 node.replace_all_uses_with(replacement_node)
-                graph.erase_node(node)
+                remove_node_and_expr_mapping(node)
 
     # DCE symbols (which are guaranteed to be pure) only
     for proxy in reversed(expr_to_sym_proxy.values()):
