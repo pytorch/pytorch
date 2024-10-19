@@ -1,19 +1,6 @@
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
-#include <ATen/cuda/CUDAConfig.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/Half.h>
-#include <cusparse.h>
-#include <cstdint>
+#include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 
 #if AT_CUSPARSELT_ENABLED()
-
-#include <cusparseLt.h>
 
 namespace at::native {
 
@@ -56,6 +43,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
         case at::ScalarType::Float8_e4m3fn:
             type = CUDA_R_8F_E4M3;
+            compression_factor = 10;
             break;
 #endif
         default:
@@ -103,7 +91,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
+std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -111,6 +99,8 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
+    int split_k,
+    bool split_k_one_kernel,
     bool search_alg_id
 )
 {
@@ -169,6 +159,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         output_type = CUDA_R_8F_E4M3;
         C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
+        compression_factor = 10;
         break;
 #endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
@@ -335,9 +326,20 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
       &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
 
-  // set alg_id
+  // set matmul search params
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
       &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
+
+  cusparseLtSplitKMode_t splitKMode;
+  int max_alg_id;
+  if (split_k != 1) {
+     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K, &split_k, sizeof(split_k)));
+
+    splitKMode = split_k_one_kernel ? CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL : CUSPARSELT_SPLIT_K_MODE_TWO_KERNELS;
+     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K_MODE, &splitKMode, sizeof(splitKMode)));
+  }
 
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
@@ -381,9 +383,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         &stream,
         1));
 
-    // get alg_id used
+    // get matmul params used
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_SPLIT_K,
+                                       &split_k, sizeof(split_k)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_SPLIT_K_MODE,
+                                       &splitKMode, sizeof(splitKMode)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+                                       &max_alg_id, sizeof(max_alg_id)));
+
+
   }
   else {
     // do normal matmul
@@ -411,7 +427,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
-  return {alg_id, res};
+  return {res, alg_id, split_k, splitKMode == CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL, max_alg_id};
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -421,7 +437,9 @@ at::Tensor _cslt_sparse_mm(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
-    int64_t alg_id
+    int64_t alg_id,
+    int64_t split_k,
+    bool split_k_one_kernel
 )
 {
     auto result = _cslt_sparse_mm_impl(
@@ -432,8 +450,10 @@ at::Tensor _cslt_sparse_mm(
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
+        (int) split_k,
+        split_k_one_kernel,
         false);
-    return std::get<1>(result);
+    return std::get<0>(result);
 }
 
 int64_t _cslt_sparse_mm_search(
@@ -445,7 +465,10 @@ int64_t _cslt_sparse_mm_search(
     bool transpose_result
 )
 {
+    TORCH_WARN_ONCE("torch._cslt_sparse_mm_search is deprecated and will be removed in a future PyTorch release. Please use torch._C._cusparselt.mm_search instead.");
     int alg_id_int = 0;
+    int split_k = 1;
+    bool split_k_one_kernel= true;
     auto result = _cslt_sparse_mm_impl(
         compressed_A,
         dense_B,
@@ -454,10 +477,11 @@ int64_t _cslt_sparse_mm_search(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
+        split_k,
+        split_k_one_kernel,
         true);
-    return (int64_t) std::get<0>(result);
+    return (int64_t) std::get<1>(result);
 }
-
 
 } // namespace at::native
 
@@ -476,7 +500,9 @@ at::Tensor _cslt_sparse_mm(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result,
-    int64_t alg_id)
+    int64_t alg_id,
+    int64_t split_k,
+    bool split_k_one_kernel)
 {
     TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
