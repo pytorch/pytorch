@@ -22,7 +22,7 @@ void initModule(PyObject* module) {
     return static_cast<c10::DeviceIndex>(impl.deviceCount());
   });
 
-  m.def("_accelerator_setDevice", [](c10::DeviceIndex device_index) {
+  m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
     const auto device_type = at::getAccelerator(true).value();
     // If device index is negative, no-op
     if (device_index < 0) {
@@ -66,6 +66,9 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_synchronizeDevice", [](c10::DeviceIndex device_index) {
     const auto device_type = at::getAccelerator(true).value();
+    if (!torch::utils::is_device_initialized(device_type)) {
+      return;
+    }
     torch::utils::maybe_initialize_device(device_type);
     c10::impl::VirtualGuardImpl impl(device_type);
     // impl.synchronizeDevice should can be safely called from any device
