@@ -330,7 +330,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_mul")
+                .check("triton_poi_fused_all_reduce_mul")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_add")
@@ -373,7 +373,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             #    still happens among nodes within a GroupedSchedulerNode.
             # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
             #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
-            FileCheck().check("triton_poi_fused_add_div_0.").check(
+            FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
                 "_c10d_functional.all_reduce_."
             ).check("triton_poi_fused_mul_1.").run(code)
             out = compiled(inputs, **self.get_world_trs())
