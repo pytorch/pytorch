@@ -37,8 +37,7 @@ bool forwardHasOp(
 }
 
 namespace {
-[[maybe_unused]]
-void ConcatAddMulReplaceNaNClip(
+[[maybe_unused]] void ConcatAddMulReplaceNaNClip(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -92,8 +91,7 @@ void ConcatAddMulReplaceNaNClip(
   fuse.runOnGraph(graph);
 }
 
-[[maybe_unused]]
-void CastedBatchOneHotLengths(
+[[maybe_unused]] void CastedBatchOneHotLengths(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -124,8 +122,7 @@ void CastedBatchOneHotLengths(
   fuse.runOnGraph(graph);
 }
 
-[[maybe_unused]]
-void ConcatBatchMatMulBatchGather(
+[[maybe_unused]] void ConcatBatchMatMulBatchGather(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
@@ -286,8 +283,7 @@ void ConcatBatchMatMulBatchGather(
   fuse.runOnGraph(graph);
 }
 
-[[maybe_unused]]
-void ClipRangesGatherSigridHash(
+[[maybe_unused]] void ClipRangesGatherSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
