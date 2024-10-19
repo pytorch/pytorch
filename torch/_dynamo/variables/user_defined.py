@@ -13,6 +13,7 @@ import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
+from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
@@ -369,6 +370,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 mutable_local=MutableLocal(),
             )
+        elif is_typeddict(self.value):
+            if self.value.__optional_keys__:
+                unimplemented("TypedDict with optional keys not supported")
+            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
