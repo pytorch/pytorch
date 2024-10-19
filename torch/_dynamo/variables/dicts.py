@@ -5,7 +5,7 @@ import dataclasses
 import functools
 import inspect
 import sys
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -16,7 +16,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import MutableLocal, VariableTracker, VariableTrackerContainer
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -59,7 +59,7 @@ def is_hashable(x):
         )
 
 
-class ConstDictVariable(VariableTrackerContainer):
+class ConstDictVariable(VariableTracker):
     _nonvar_fields = {
         "user_cls",
         *VariableTracker._nonvar_fields,
@@ -173,8 +173,11 @@ class ConstDictVariable(VariableTrackerContainer):
             + "}"
         )
 
-    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
-        return {k: self._as_constant(v, visited) for k, v in self.items.items()}
+    def as_python_constant(self):
+        return {
+            k.vt.as_python_constant(): v.as_python_constant()
+            for k, v in self.items.items()
+        }
 
     def keys_as_python_constant(self):
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
@@ -480,8 +483,8 @@ class SetVariable(ConstDictVariable):
     def python_type(self):
         return set
 
-    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
-        return {self._as_constant(k.vt, visited) for k in self.set_items}
+    def as_python_constant(self):
+        return {k.vt.as_python_constant() for k in self.set_items}
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
@@ -981,12 +984,10 @@ class HFPretrainedConfigVariable(VariableTracker):
         assert self.is_matching_cls(type(obj))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .builder import VariableBuilder
-
         try:
             attr_value = getattr(self.obj, name)
-            attr_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, attr_source)(attr_value)
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, attr_value, source)
 
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
@@ -1050,15 +1051,11 @@ class PythonSysModulesVariable(VariableTracker):
         key: VariableTracker,
         default: Optional[VariableTracker] = None,
     ):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
 
         if has_key:
-            return VariableBuilder(
-                tx,
-                GetItemSource(self.source, k),
-            )(sys.modules[k])
+            source = self.source and GetItemSource(self.source, k)
+            return VariableTracker.build(tx, sys.modules[k], source)
 
         if default is not None:
             return default
@@ -1066,10 +1063,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
-        return VariableBuilder(
-            tx,
-            GetItemSource(self.source, k),
-        )(sys.modules[k])
+        source = self.source and GetItemSource(self.source, k)
+        return VariableTracker.build(tx, sys.modules[k], source)

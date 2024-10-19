@@ -9,8 +9,7 @@
 #include <functional>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Wraps a function in a `Module`.
 ///
@@ -101,5 +100,4 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
 /// module storage semantics.
 TORCH_MODULE(Functional);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

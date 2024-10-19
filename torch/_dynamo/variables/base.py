@@ -12,7 +12,7 @@ from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class MutableLocalSource(Enum):
@@ -121,6 +121,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     VariableTracker instances are immutable and should be copied in
     order to change them.
+
+    Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -244,18 +246,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-
-        from .builder import SourcelessBuilder, VariableBuilder
         from .misc import GetAttrVariable
 
         source = self.source and AttrSource(self.source, name)
         try:
             value = self.const_getattr(tx, name)
             if not is_function_or_wrapper(value):
-                if source:
-                    return VariableBuilder(tx, source)(value=value)
-                else:
-                    return SourcelessBuilder.create(tx=tx, value=value)
+                return VariableTracker.build(tx, value, source)
         except (NotImplementedError, Unsupported):
             pass
         return GetAttrVariable(self, name, source=source)
@@ -373,6 +370,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
+
+    @staticmethod
+    def build(
+        tx: "InstructionTranslatorBase",
+        value: Any,
+        source: Optional[Source] = None,
+    ) -> Any:
+        """Create a new VariableTracker from a value and optional Source"""
+        from . import builder
+
+        if source is None:
+            return builder.SourcelessBuilder.create(tx, value)
+        else:
+            return builder.VariableBuilder(tx, source)(value)
 
     def __init__(
         self,

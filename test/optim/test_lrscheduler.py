@@ -759,6 +759,32 @@ class TestLRScheduler(TestCase):
         # Ensure that multiple schedulers does not affect the initial learning rate
         self.assertEqual(prev_lr, new_lr)
 
+    def test_sequentiallr5(self):
+        """
+        Test SequentialLR with a ChainedScheduler.
+        """
+        epochs = 10
+        schedulers = []
+        milestones = []
+
+        targets = [
+            [0.0005, 0.0014, 0.0023, 0.0032, 0.0041]
+            + [0.025, 0.025, 0.025, 0.025, 0.025]
+        ]
+
+        const_sched = ConstantLR(optimizer=self.opt, factor=0.1, total_iters=5)
+        lin_sched = LinearLR(optimizer=self.opt, start_factor=0.1, total_iters=5)
+        milestones.append(5)
+
+        chained = ChainedScheduler([lin_sched, const_sched])
+        schedulers.append(chained)
+
+        const_sched2 = ConstantLR(optimizer=self.opt, factor=0.5, total_iters=5)
+        schedulers.append(const_sched2)
+
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
