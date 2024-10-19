@@ -5708,6 +5708,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     @torch._dynamo.config.patch(guard_nn_modules=False)
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_inlining_cornercase(self):
         """
         nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the

@@ -1693,7 +1693,7 @@ Tensor repeat_backward(
   }
   const auto input_dims = input_shape.size();
   auto num_unsqueezed = grad.dim() - input_dims;
-  for (C10_UNUSED const auto i : c10::irange(num_unsqueezed)) {
+  for ([[maybe_unused]] const auto i : c10::irange(num_unsqueezed)) {
     grad = grad.sum(0, false);
   }
 
