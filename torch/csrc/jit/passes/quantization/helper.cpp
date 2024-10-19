@@ -332,8 +332,7 @@ void cloneMethod(
     Module& module,
     const std::string& orig_method_name,
     const std::string& new_method_name) {
-  const auto& orig_method = module.get_method(orig_method_name);
-  const Function& method = orig_method.function();
+  const Function& method = module.get_method(orig_method_name).function();
   auto graph = toGraphFunction(method).graph()->copy();
   const auto& schema = method.getSchema();
   const auto this_method_name =
