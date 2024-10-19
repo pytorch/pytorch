@@ -36,7 +36,6 @@ import torch
 from torch import SymInt
 from torch._dynamo.utils import get_chromium_event_logger
 from torch._guards import GuardSource, TracingContext
-from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -2367,10 +2366,7 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is call_torchbind
-    ):
+    elif isinstance(example_value, (int, float, bool)):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:

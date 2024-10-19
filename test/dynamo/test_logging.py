@@ -642,7 +642,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         record_str = "\n".join(r.getMessage() for r in records)
 
         self.assertIn(
-            """L['zs'][0] == 3.0""",
+            """L['zs'][0] == ___as_tensor(L['zs'][0]).item()""",
             record_str,
         )
         self.assertIn(

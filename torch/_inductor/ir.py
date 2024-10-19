@@ -185,6 +185,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     sympy.logic.boolalg.Boolean,
                     Expr,
                     int,
+                    float,
                     EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
