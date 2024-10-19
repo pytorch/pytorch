@@ -196,6 +196,7 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
@@ -1870,6 +1871,8 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
 
+            example_value = unspec_var.proxy.node.meta["example_value"]
+
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
@@ -2132,6 +2135,8 @@ def wrap_fx_proxy_cls(
 
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
 
+    initial_example_value = example_value
+
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
@@ -2350,12 +2355,16 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
@@ -2473,6 +2482,7 @@ def _automatic_dynamic(
     def update_frame_state(size, stride):
         # Intentionally shadow e from parent scope so it is not accidentally
         # called
+        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
@@ -2746,7 +2756,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, _reason = tensor_always_has_static_shape(
+        static_shapes, reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,

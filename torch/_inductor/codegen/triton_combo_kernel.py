@@ -209,7 +209,7 @@ class ComboKernel(Kernel):
         )
 
         for node in subkernel_nodes:
-            _node_schedule, tiled_groups, _numel, _rnumel = node_info_map[node]
+            node_schedule, tiled_groups, numel, rnumel = node_info_map[node]
             node_info = node
 
             read_writes = node.read_writes
@@ -673,9 +673,7 @@ class ComboKernel(Kernel):
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
             ),
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -744,7 +742,7 @@ class ComboKernel(Kernel):
     def add_blockd_to_args(self, argdefs: List[str]) -> List[str]:
         block_args = {}
         block_names = {}
-        for sub_kernel in self.sub_kernels:
+        for num, sub_kernel in enumerate(self.sub_kernels):
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
                 if tree.prefix == "r" and (
@@ -889,7 +887,7 @@ class ComboKernel(Kernel):
         self, num_gb: float, grid: Optional[List[Any]] = None
     ) -> IndentedBuffer:
         result = IndentedBuffer()
-        _argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -918,10 +916,11 @@ class ComboKernel(Kernel):
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
-                    device = V.graph.scheduler.get_current_device_or_throw()
-                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    device = V.graph.get_current_device_or_throw()
+                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
@@ -960,7 +959,7 @@ class ComboKernel(Kernel):
             grid_arg = f"{extra_args_str}grid=grid_combo_kernels({grid_str})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.get_current_device_or_throw().index
+        index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -1088,7 +1087,7 @@ class ComboKernel(Kernel):
             name,
             call_args,
             grid,
-            V.graph.scheduler.get_current_device_or_throw().index,
+            V.graph.get_current_device_or_throw().index,
             gpu=True,
             triton=True,
             arg_types=arg_types,

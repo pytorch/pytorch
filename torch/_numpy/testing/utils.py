@@ -262,6 +262,9 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             return  # both nan, so equal
 
         # handle signed zero specially for floats
+        array_actual = np.asarray(actual)
+        array_desired = np.asarray(desired)
+
         if desired == 0 and actual == 0:
             if not signbit(desired) == signbit(actual):
                 raise AssertionError(msg)
@@ -1208,7 +1211,7 @@ def _assert_valid_refcount(op):
     gc.disable()
     try:
         rc = sys.getrefcount(i)
-        for _ in range(15):
+        for j in range(15):
             d = op(b, c)
         assert_(sys.getrefcount(i) >= rc)
     finally:
@@ -2144,7 +2147,7 @@ def _assert_no_gc_cycles_context(name=None):
     gc.disable()
     gc_debug = gc.get_debug()
     try:
-        for _ in range(100):
+        for i in range(100):
             if gc.collect() == 0:
                 break
         else:
@@ -2376,7 +2379,7 @@ def _no_tracing(func):
 def _get_glibc_version():
     try:
         ver = os.confstr("CS_GNU_LIBC_VERSION").rsplit(" ")[1]
-    except Exception:
+    except Exception as inst:
         ver = "0.0"
 
     return ver
