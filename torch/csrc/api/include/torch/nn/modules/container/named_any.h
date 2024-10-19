@@ -18,8 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Stores a type erased `Module` with name.
 ///
@@ -57,7 +56,7 @@ class NamedAnyModule {
   NamedAnyModule(std::string name, M&& module)
       : NamedAnyModule(
             std::move(name),
-            std::make_shared<typename std::remove_reference<M>::type>(
+            std::make_shared<std::remove_reference_t<M>>(
                 std::forward<M>(module))) {}
 
   /// Creates a `NamedAnyModule` from a `Module` that is unwrapped from
@@ -90,5 +89,4 @@ class NamedAnyModule {
   AnyModule module_;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
