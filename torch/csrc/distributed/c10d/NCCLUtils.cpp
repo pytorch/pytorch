@@ -30,25 +30,20 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  if (!initialized_) {
-    waitUntilInitialized();
-  }
-
-  return ncclComm_;
-}
-
-void NCCLComm::waitUntilInitialized() {
-  // Wait for initialization to complete if in nonblocking mode.
-  // If timeout is reached, throw an exception.
+  // In non-blocking mode, ensure comm is ready.
   if (nccl_use_nonblocking()) {
+    // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
   }
-  // In blocking mode, this function is nothing but setting initialized_ to
-  // true.
-  initialized_ = true;
-  LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
-            << " is initialized.";
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
+  return ncclComm_;
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -102,8 +97,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     }
   }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
-  // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
-  // its initialization.
+  // initialized. Rely on getNcclComm() to wait for its initialization.
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
