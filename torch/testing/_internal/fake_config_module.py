@@ -1,7 +1,8 @@
 import sys
-
-from torch.utils._config_module import install_config_module
 from typing import Optional
+
+from torch._utils_internal import JustKnobsConfig
+from torch.utils._config_module import install_config_module
 
 
 e_bool = True
@@ -18,6 +19,8 @@ _e_ignored = True
 magic_cache_config_ignored = True
 # [@compile_ignored: debug]
 e_compile_ignored = True
+e_jk = JustKnobsConfig("does_not_exist")
+e_jk_false = JustKnobsConfig("does_not_exist", default=False)
 
 
 class nested:

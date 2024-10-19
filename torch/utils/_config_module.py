@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
+from torch._utils_internal import justknobs_check, JustKnobsConfig
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
@@ -39,12 +41,18 @@ def install_config_module(module: ModuleType) -> None:
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
+                # Handle from torch.utils_internal import JustKnobsConfig
+                or (isinstance(value, type) and issubclass(value, JustKnobsConfig))
             ):
                 continue
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
                 config[name] = _ConfigEntry(default=value)
+                if dest is module:
+                    delattr(module, key)
+            elif isinstance(value, JustKnobsConfig):
+                config[name] = _ConfigEntry(default=value.default, justknob=value.name)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -119,6 +127,10 @@ class _ConfigEntry:
     default: Any
     # The value specified by the user when they overrode the configuration
     user_override: Any = None
+    # The justknob to check for this config
+    justknob: Optional[str] = None
+    # The resolved justknob value
+    justknob_value: Any = None
 
 
 class ConfigModule(ModuleType):
@@ -152,6 +164,15 @@ class ConfigModule(ModuleType):
             config = self._config[name]
             if config.user_override is not None:
                 return copy.deepcopy(config.user_override)
+            if config.justknob_value is not None:
+                # JK only supports bools and ints
+                return config.justknob_value
+            if config.justknob is not None:
+                config.justknob_value = justknobs_check(
+                    name=config.justknob, default=config.default
+                )
+                # JK only supports bools and ints
+                return config.justknob_value
             return copy.deepcopy(config.default)
         except KeyError as e:
             # make hasattr() work properly

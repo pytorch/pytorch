@@ -89,6 +89,8 @@ class TestConfigModule(TestCase):
                 "e_compile_ignored": True,
                 "magic_cache_config_ignored": True,
                 "_save_config_ignore": ["e_ignored"],
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -116,6 +118,8 @@ class TestConfigModule(TestCase):
                 "nested.e_bool": True,
                 "e_ignored": True,
                 "e_compile_ignored": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -139,14 +143,14 @@ class TestConfigModule(TestCase):
 
     def test_get_hash(self):
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"&\xac\xb0\xd7\xa7c\x85\xa5\x9ek\xb0\xcbz\x1c\xe7I"
         )
         # Test cached value
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"&\xac\xb0\xd7\xa7c\x85\xa5\x9ek\xb0\xcbz\x1c\xe7I"
         )
         self.assertEqual(
-            config._hash_digest, b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"&\xac\xb0\xd7\xa7c\x85\xa5\x9ek\xb0\xcbz\x1c\xe7I"
         )
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
@@ -154,14 +158,14 @@ class TestConfigModule(TestCase):
         # BUG
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"&\xac\xb0\xd7\xa7c\x85\xa5\x9ek\xb0\xcbz\x1c\xe7I"
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"&\xac\xb0\xd7\xa7c\x85\xa5\x9ek\xb0\xcbz\x1c\xe7I"
         )
         del config.e_compile_ignored
 
@@ -186,6 +190,8 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p2 = config.to_dict()
@@ -208,6 +214,8 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p3 = config.get_config_copy()
@@ -230,6 +238,8 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
 
