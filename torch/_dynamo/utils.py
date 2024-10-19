@@ -2032,8 +2032,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
 
-    # Force the specialization of backed symfloats
-    args = tuple(float(a) if isinstance(a, torch.SymFloat) and a.node.hint is not None else a for a in args)
+    if not torch._dynamo.config.specialize_float:
+        # Force the specialization of backed symfloats
+        args = tuple(
+            float(a) if isinstance(a, torch.SymFloat) and a.node.hint is not None else a
+            for a in args
+        )
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
