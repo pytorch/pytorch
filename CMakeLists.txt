@@ -342,19 +342,6 @@ cmake_dependent_option(USE_SYSTEM_UCC "Use system-wide UCC" OFF "USE_UCC" OFF)
 cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
-  USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-  "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-  USE_GLOO_WITH_OPENSSL
-  "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(USE_C10D_GLOO "USE C10D GLOO" ON
-                       "USE_DISTRIBUTED;USE_GLOO" OFF)
-cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
-                       "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
-                       OFF)
-cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
@@ -1096,6 +1083,10 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
+  endif()
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
