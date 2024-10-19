@@ -1383,10 +1383,27 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
+        self.generic_dict_vt = variables.ConstDictVariable({})
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        # A common pattern in the init code of MutableMapping objects is to
+        # update the __dict__ attribute. To prevent graph break, we directly
+        # return a ConstDictVariable for the __dict__attr.
+        #
+        # However, users can try to add a new attribute to the class using the
+        # __dict__ attribute. To catch this, we save the ConstDictVariable for
+        # the __dict__ and then lookup into this vt for each attr lookup.
         if name == "get" and type(self.value).get is collections.abc.Mapping.get:
             return variables.UserMethodVariable(polyfills.mapping_get, self)
+        elif name == "__dict__" and self.source:
+            self.generic_dict_vt = variables.LazyVariableTracker.create(
+                self.value.__dict__, AttrSource(self.source, "__dict__")
+            )
+            return self.generic_dict_vt
+        elif out := self.generic_dict_vt.maybe_getitem_const(
+            variables.ConstantVariable(name)
+        ):
+            return out
         else:
             return super().var_getattr(tx, name)
 

@@ -1177,6 +1177,19 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.side_effects.load_attr(self, name)
+
+        value = getattr(self.value, name)
+        if self.source:
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(value)
+        else:
+            return SourcelessBuilder(tx, value)
+
     def as_python_constant(self):
         return self.value
 
