@@ -119,6 +119,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   TORCH_XPU_ARCH_LIST
+#     specify which XPU architectures to build for.
+#     ie `TORCH_XPU_ARCH_LIST="ats-m150,lnl-m"`
+#
 #   PYTORCH_ROCM_ARCH
 #     specify which AMD GPU targets to build for.
 #     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
