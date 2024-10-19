@@ -38,9 +38,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
-from torch.utils._sympy.functions import (
-    OpaqueUnaryFn_sqrt,
-)
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -75,6 +72,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils._sympy.functions import OpaqueUnaryFn_sqrt
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
