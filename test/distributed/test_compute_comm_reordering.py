@@ -159,7 +159,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
-            print(code)
             # Verify that the all_reduce_ has been raised above the 2nd matmul
             # but below the 1st matmul. Note that the all_reduce_ directly
             # writes to the output buffer of the 1st matmul, which is an input
@@ -273,7 +272,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_mul")
+                .check("triton_poi_fused_all_reduce_mul")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_add")
