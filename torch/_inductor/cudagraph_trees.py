@@ -2043,9 +2043,7 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            out = self.run_eager(new_inputs, function_id)
-
-            return out
+            return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
