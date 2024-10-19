@@ -1,22 +1,11 @@
 #pragma once
 
-#include <torch/detail/static.h>
-#include <torch/nn/module.h>
 #include <torch/nn/modules/container/any.h>
-#include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/variadic.h>
-
-#include <ATen/Device.h>
-
-#include <initializer_list>
 #include <memory>
 #include <type_traits>
-#include <typeinfo>
 #include <utility>
-#include <vector>
 
 namespace torch::nn {
 
