@@ -5,6 +5,7 @@ import sympy
 
 import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
@@ -16,7 +17,6 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from torch._inductor.virtualized import V
 from ..utils import use_aten_gemm_kernels, use_ck_gemm_template, use_triton_template
 from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
@@ -295,7 +295,11 @@ def tuned_scaled_mm(
                 **kwargs,
             )
 
-    if is_nonzero and use_ck_gemm_template(layout) and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0:
+    if (
+        is_nonzero
+        and use_ck_gemm_template(layout)
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    ):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
     if (

@@ -1228,6 +1228,7 @@ def use_ck_gemm_template(layout):
 def use_ck_conv_template(layout):
     return use_ck_template(layout) and _use_conv_autotune_backend("CK")
 
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
