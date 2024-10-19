@@ -97,13 +97,7 @@ class DeferredGpuDefaultGrid:
         assert (
             params is not None
         ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        block_cfg = {
-            "XBLOCK": params["x_block"],
-            "YBLOCK": params["y_block"],
-            "ZBLOCK": params["z_block"],
-            "RBLOCK": params["r_block"],
-        }
-        return grid_fn(block_cfg)
+        return grid_fn(params["meta"])
 
 
 class DeferredGpuGridLine(DeferredLineBase):
@@ -256,6 +250,9 @@ class CppWrapperGpu(CppWrapperCpu):
             autotune_configs=configs,
         )
 
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError("Host-side TMA descriptors NYI in C++ wrapper.")
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
@@ -372,7 +369,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
         stream = (
             "stream"
