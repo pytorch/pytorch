@@ -1480,8 +1480,9 @@ calc_i0(T _x) {
   return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
-// Upcast bfloat16 input to float for numerical accuracy purposes
+// Upcast bfloat16/half input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+inline c10::Half calc_i0(c10::Half a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1512,6 +1513,11 @@ calc_i1(T _x) {
   return (_x < T{0.0}) ? -out : out;
 }
 
+// Upcast bfloat16/half input to float for numerical accuracy purposes
+inline c10::BFloat16 calc_i1(c10::BFloat16 a) { return calc_i1(static_cast<float>(a)); }
+inline c10::Half calc_i1(c10::Half a) { return calc_i1(static_cast<float>(a)); }
+
+
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
@@ -1540,6 +1546,11 @@ calc_i1e(T _x) {
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
+
+// Upcast bfloat16/half input to float for numerical accuracy purposes
+inline c10::BFloat16 calc_i1e(c10::BFloat16 a) { return calc_i1e(static_cast<float>(a)); }
+inline c10::Half calc_i1e(c10::Half a) { return calc_i1e(static_cast<float>(a)); }
+
 
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
