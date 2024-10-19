@@ -11004,7 +11004,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         # This used to crash on MacOS Sequoia
         # See https://github.com/pytorch/pytorch/issues/137800
         x = torch.rand(16, 16, device='mps', dtype=torch.float16)
-        y = x[:,0:2].view(torch.float32) + 1
+        y = x[:, 0:2].view(torch.float32) + 1
 
     def test_masked_select(self):
         x = torch.randn(3, 4)
