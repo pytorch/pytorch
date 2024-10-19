@@ -127,3 +127,6 @@
 [submodule "third_party/NVTX"]
 	path = third_party/NVTX
 	url = https://github.com/NVIDIA/NVTX.git
+[submodule "third_party/x86-simd-sort"]
+	path = third_party/x86-simd-sort
+	url = https://github.com/intel/x86-simd-sort.git
