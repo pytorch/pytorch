@@ -2349,6 +2349,9 @@ def wrap_fx_proxy_cls(
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, float):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
         from .sdpa import SDPAParamsVariable
 
