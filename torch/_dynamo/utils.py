@@ -2038,6 +2038,14 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             float(a) if isinstance(a, torch.SymFloat) and a.node.hint is not None else a
             for a in args
         )
+        kwargs = {
+            k: (
+                float(v)
+                if isinstance(v, torch.SymFloat) and v.node.hint is not None
+                else v
+            )
+            for k, v in kwargs.items()
+        }
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
