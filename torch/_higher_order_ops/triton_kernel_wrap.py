@@ -6,11 +6,11 @@ import inspect
 import logging
 import threading
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
@@ -24,6 +24,21 @@ from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 
 log = logging.getLogger("torch._dynamo")
+
+# TMADescriptorMetadata maps kernel parameter names to the metadata that allows
+# reconstructing TMA descriptors from the underlying tensors (passed as kernel
+# arguments in the fx graph, instead of the TMA descriptors). Namely: a tuple
+# conisting of list of dims, list of block dims, and element size. E.g., for this
+# call in host-side Triton TMA API ``create_2d_tma_descriptor(ptr, 50, 60, 32, 15, 4)``,
+# the metadata will look like ``([50, 60], [32, 15], 4)``. All ints can be SymInts.
+TMADescriptorMetadata = Dict[
+    str,  # kernel parameter name
+    Tuple[
+        List[Union[int, SymInt]],  # dims
+        List[Union[int, SymInt]],  # block_dims
+        Union[int, SymInt],  # element_size
+    ],
+]
 
 
 ###############################################################################
@@ -422,7 +437,12 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
     # All the OPs that have MemWrite trait.
     # What if Triton exposed this?
-    MUTATION_OPS = {"tt.store": [0], "tt.atomic_cas": [0], "tt.atomic_rmw": [0]}
+    MUTATION_OPS = {
+        "tt.store": [0],
+        "tt.atomic_cas": [0],
+        "tt.atomic_rmw": [0],
+        "tt.experimental_descriptor_store": [0],
+    }
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
@@ -524,11 +544,19 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=False)
 
-    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
+    def __call__(
+        self,
+        kernel_idx,
+        constant_args_idx,
+        grid,
+        tma_descriptor_metadata: TMADescriptorMetadata,
+        kwargs,
+    ):
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=kwargs,
         )
 
@@ -541,11 +569,20 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=False)
 
-    def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
+    def __call__(
+        self,
+        kernel_idx,
+        constant_args_idx,
+        grid,
+        tma_descriptor_metadata: TMADescriptorMetadata,
+        kwargs,
+        tensors_to_clone,
+    ):
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=kwargs,
             tensors_to_clone=tensors_to_clone,
         )
@@ -556,7 +593,12 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
-    *, kernel_idx, constant_args_idx, grid, kwargs
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
 ):
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
@@ -573,19 +615,56 @@ def triton_kernel_wrapper_mutation_dense(
         exec(code, namespace)
         grid_fn = namespace[fn_name]
 
+    if tma_descriptor_metadata:
+        from triton.tools.experimental_descriptor import (  # noqa: F401
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+        )
+
+        # as we need to launch the kernel here, we "unwrap" the
+        # tma_descriptor_metadata, create the TMA descriptors
+        # from it, and replace the tensors in the kwargs by the
+        # correspoinding TMA descriptors before launching
+        kwargs = kwargs.copy()
+        for k, v in tma_descriptor_metadata.items():
+            tensor = kwargs[k]
+            dims, block_dims, element_size = v
+            create_tma_descriptor = (
+                create_1d_tma_descriptor if len(dims) == 1 else create_2d_tma_descriptor
+            )
+            kwargs[k] = create_tma_descriptor(
+                tensor.data_ptr(),
+                *dims,
+                *block_dims,
+                element_size,
+            )
+
     kernel[grid_fn](**kwargs, **constant_args)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_mutation_fake_tensor_mode(
-    mode, *, kernel_idx, constant_args_idx, grid, kwargs
+    mode,
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
 ):
     with mode:
         return None
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
-def _(*, kernel_idx, constant_args_idx, grid, kwargs):
+def _(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
+):
     return None
 
 
@@ -607,7 +686,13 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
-    mode, *, kernel_idx, constant_args_idx, grid, kwargs
+    mode,
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
 ):
     trace_triton_kernel_wrapper(
         mode,
@@ -616,6 +701,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
             "kernel_idx": kernel_idx,
             "constant_args_idx": constant_args_idx,
             "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
         },
     )
@@ -631,7 +717,12 @@ def get_mutated_tensors(kernel_idx, constant_args_idx, kwargs):
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
-    ctx, kernel_idx, constant_args_idx, grid, kwargs
+    ctx,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
@@ -646,6 +737,7 @@ def triton_kernel_wrapper_mutation_functionalize(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
         )
@@ -667,7 +759,13 @@ def triton_kernel_wrapper_mutation_functionalize(
 
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_functional_dense(
-    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
+    tensors_to_clone,
 ):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -681,6 +779,7 @@ def triton_kernel_wrapper_functional_dense(
         kernel_idx=kernel_idx,
         constant_args_idx=constant_args_idx,
         grid=grid,
+        tma_descriptor_metadata=tma_descriptor_metadata,
         kwargs=kwargs,
     )
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
@@ -688,7 +787,14 @@ def triton_kernel_wrapper_functional_dense(
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+    mode,
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
+    tensors_to_clone,
 ):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -704,7 +810,14 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
-    mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+    mode,
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
+    tensors_to_clone,
 ):
     return trace_triton_kernel_wrapper(
         mode,
@@ -713,6 +826,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
             "kernel_idx": kernel_idx,
             "constant_args_idx": constant_args_idx,
             "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
             "tensors_to_clone": tensors_to_clone,
         },
@@ -721,7 +835,13 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
 def triton_kernel_wrapper_functional_functionalize(
-    ctx, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
+    ctx,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    kwargs,
+    tensors_to_clone,
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
@@ -729,6 +849,7 @@ def triton_kernel_wrapper_functional_functionalize(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grid,
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
         )
@@ -1057,6 +1178,9 @@ class TracingTritonHOPifier(TritonHOPifier):
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grids,
+            # TMA descriptor capturing not yet
+            # supported in non-dynamo tracing
+            tma_descriptor_metadata={},
             kwargs=graphable_args,
         )
 
