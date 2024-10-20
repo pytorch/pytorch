@@ -136,6 +136,11 @@ class OutputAdapter:
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
+# TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
+class _DummyLeaf:  # use a class instead.
+    pass
+
+
 def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
     def replace_list_with_tuple(x: Any) -> Any:
         if type(x) is list:
@@ -146,7 +151,7 @@ def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
             )
         return x
 
-    dummy_leaf = None
+    dummy_leaf = _DummyLeaf
     dummy_tree = pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
     dummy_tree = pytree.tree_map(
         replace_list_with_tuple,
