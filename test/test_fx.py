@@ -25,7 +25,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree
-import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
@@ -527,6 +526,56 @@ class TestFX(JitTestCase):
         gm = GraphModule(m, new_g)
         gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
+
+    def test_proxy_deepcopy_without_tracer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return 2 * x
+
+        module = MyModule()
+        traced = symbolic_trace(module)
+        node = list(traced.graph.nodes)[-2]
+        p = torch.fx.Proxy(node, None)
+        node.proxy = p
+        p2 = copy.deepcopy(p)
+        self.assertTrue(isinstance(p2, torch.fx.Proxy))
+        self.assertEqual(p2.node.name, node.name)
+        self.assertEqual(p2.node.target, node.target)
+        self.assertNotEqual(id(p2.node), id(node))
+
+    def test_proxy_deepcopy_with_tracer(self):
+        class TestTracer(Tracer):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            def is_leaf_module(self, module, name):
+                return True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return 2 * x
+
+        module = MyModule()
+        tracer = TestTracer("mytracer")
+        traced = symbolic_trace(module)
+        node = list(traced.graph.nodes)[-2]
+        p = torch.fx.Proxy(node, tracer)
+        node.proxy = p
+        p2 = copy.deepcopy(p)
+        self.assertTrue(isinstance(p2, torch.fx.Proxy))
+        self.assertTrue(isinstance(p2.tracer, torch.fx._symbolic_trace.Tracer))
+        self.assertEqual(p2.tracer.name, "mytracer")
+        self.assertEqual(p2.node.name, node.name)
+        self.assertEqual(p2.node.target, node.target)
+        self.assertNotEqual(id(p2.node), id(node))
+        self.assertNotEqual(id(p2.tracer), id(tracer))
 
     def test_concrete_arg_none_assert(self):
         class Foo(torch.nn.Module):
@@ -1196,7 +1245,9 @@ class TestFX(JitTestCase):
 
         bio.seek(0)
 
-        loaded = torch.load(bio)
+        # weights_only=False as this loads a GraphModule
+        # GLOBAL torch.fx.graph_module.reduce_graph_module was not an allowed global by default
+        loaded = torch.load(bio, weights_only=False)
 
         torch.testing.assert_close(loaded(x), x[0])
 
@@ -3552,8 +3603,11 @@ class TestFX(JitTestCase):
             Foo,
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),
+            flatten_with_keys_fn=lambda x: (
+                ((pytree.GetAttrKey("a"), x.a), (pytree.GetAttrKey("b"), x.b)),
+                None,
+            ),
         )
-        fx_pytree.register_pytree_flatten_spec(Foo, lambda x, _: [x.a, x.b])
 
         def f_custom(x):
             return x.a + x.b
@@ -4198,7 +4252,9 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         b = io.BytesIO()
         torch.save(gm, b)
         b.seek(0)
-        reload_gm = torch.load(b)
+        # weights_only=False as this loads a GraphModule
+        # GLOBAL torch.fx.graph_module.reduce_graph_module was not an allowed global by default
+        reload_gm = torch.load(b, weights_only=False)
         self.assertTrue(hasattr(reload_gm, "foo"))
         self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))

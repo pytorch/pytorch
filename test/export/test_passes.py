@@ -41,10 +41,12 @@ from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -743,7 +745,7 @@ def forward(self, token, obj_attr, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -762,7 +764,7 @@ def forward(self, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -781,7 +783,7 @@ def forward(self, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -800,7 +802,7 @@ def forward(self, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -820,7 +822,7 @@ def forward(self, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -845,7 +847,7 @@ def forward(self, x):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -880,7 +882,7 @@ def forward(self, x):
             new_gm.code.strip("\n"),
             """\
 def forward(self, x1, x2):
-    x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
+    x1, x2, = fx_pytree.tree_flatten_spec(((x1, x2), {}), self._in_spec)
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
@@ -940,7 +942,7 @@ def forward(self, sin, cos):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -990,7 +992,7 @@ def forward(self, add_1):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1047,7 +1049,7 @@ def forward(self, add_1, add_2):
             mod.code.strip("\n"),
             """\
 def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    x, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1164,20 +1166,55 @@ def forward(self, add_1):
             x = torch.randn([3, 3])
             ep = export(mod, (x,))
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+            graph_text = str(inplace_ep.graph)
+            self.assertExpectedInline(
+                graph_text,
+                """\
+graph():
+    %b_state : [num_users=2] = placeholder[target=b_state]
+    %x : [num_users=1] = placeholder[target=x]
+    %custom_mutator_tuple_default : [num_users=2] = call_function[target=torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple.\
+default](args = (%x, %b_state), kwargs = {})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 0), kwargs = {})
+    %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%custom_mutator_tuple_default, 1), kwargs = {})
+    return (b_state, getitem_3, getitem_4)""",
+            )
 
-            nodes = inplace_ep.graph.nodes
-            getitems = 0
-            for node in nodes:
-                if node.op == "call_function":
-                    self.assertFalse(node.target is auto_functionalized)
-                    if node.target is operator.getitem:
-                        getitems += 1
-            self.assertEqual(getitems, 2)  # tuple return of len 2
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass(self):
+        class Model(torch.nn.Module):
+            def __init__(self, size=4, h_dim=10):
+                super().__init__()
+                self.rnn = torch.nn.GRU(size, h_dim, batch_first=True)
 
-            out_specs = inplace_ep.graph_signature.output_specs
-            self.assertEqual(out_specs[0].arg.name, "b_state")  # state
-            self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
-            self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
+            def forward(self, x):
+                _, states = self.rnn(x)
+                return states
+
+        # move the exported program from cpu to cuda:0
+        mod = Model()
+        example_inputs = (torch.rand(1, 10, 4),)
+        ep = export(mod, example_inputs)
+        location = torch.device("cuda:0")
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        # move it back to cpu
+        location = "cpu"
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cpu"))
+        # move it to cuda:0 again
+        location = {"cpu": "cuda:0"}
+        ep = move_to_device_pass(ep, location=location)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, torch.device("cuda:0"))
 
 
 if __name__ == "__main__":

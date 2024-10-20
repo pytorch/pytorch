@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -19,7 +20,7 @@
 #include <ATen/ops/_foreach_max_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
 
-#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -159,7 +160,13 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::empty({}, options));
+    vec_res.push_back(at::native::empty_cuda(
+        {},
+        optTypeMetaToScalarType(options.dtype_opt()),
+        options.layout_opt(),
+        options.device_opt(),
+        options.pinned_memory_opt(),
+        options.memory_format_opt()));
   }
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
@@ -214,7 +221,13 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       result.emplace_back(vec_res[i]);
       i++;
     } else {
-      result.emplace_back(at::empty({}, options));
+      result.emplace_back(at::native::empty_cuda(
+          {},
+          optTypeMetaToScalarType(options.dtype_opt()),
+          options.layout_opt(),
+          options.device_opt(),
+          options.pinned_memory_opt(),
+          options.memory_format_opt()));
     }
   }
   return result;
@@ -441,7 +454,13 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   vec_res.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
   for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::empty({}, res_option));
+    vec_res.push_back(at::native::empty_cuda(
+        {},
+        optTypeMetaToScalarType(res_option.dtype_opt()),
+        res_option.layout_opt(),
+        res_option.device_opt(),
+        res_option.pinned_memory_opt(),
+        res_option.memory_format_opt()));
   }
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};

@@ -333,9 +333,9 @@ def requires_mpi():
     )
 
 
-def skip_if_rocm(func):
+def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
-    func.skip_if_rocm = True
+    func.skip_if_rocm_multiprocess = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -351,6 +351,22 @@ def skip_if_win32():
         sys.platform == "win32",
         "This unit test case is not supported on Windows platform",
     )
+
+
+def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
+    """
+    Returns True if the device's compute capability is (major, minor) or higher.
+    Error out if the device is not a CUDA device.
+    Returns False if device is a RoCM device.
+    """
+    if device.type != "cuda":
+        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+
+    if torch.version.hip is not None:
+        # ROCm devices may have different compute capability codes
+        return False
+
+    return torch.cuda.get_device_capability(device) >= (major, minor)
 
 
 @retry_on_connect_failures
@@ -554,8 +570,14 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def setUp(self) -> None:
         super().setUp()
@@ -667,7 +689,7 @@ class MultiProcessTestCase(TestCase):
                 "Process %s skipping test %s for following reason: %s", self.rank, test_name, str(se)
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
-        except Exception as e:
+        except Exception:
             logger.error(
                 "Caught exception: \n%s exiting "
                 "process %s with exit code: %s",
@@ -1007,8 +1029,14 @@ class MultiThreadedTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        try:
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
+        except AttributeError as e:
+            if methodName != 'runTest':
+                # we allow instantiation with no explicit method name
+                # but not an *incorrect* or missing method name
+                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()

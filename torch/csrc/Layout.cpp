@@ -27,7 +27,8 @@ PyObject* THPLayout_repr(THPLayout* self) {
 }
 
 PyTypeObject THPLayoutType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.layout", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.layout", /* tp_name */
     sizeof(THPLayout), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

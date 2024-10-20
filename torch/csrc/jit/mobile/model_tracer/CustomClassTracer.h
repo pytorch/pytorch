@@ -6,9 +6,7 @@
 #include <set>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 /* The CustomClassTracer class handles the attachment and removal of a recording
  * callback that traces the invocation of code that handles loading custom
@@ -36,6 +34,4 @@ struct CustomClassTracer final {
   }
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

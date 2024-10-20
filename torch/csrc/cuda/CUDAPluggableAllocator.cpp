@@ -14,7 +14,7 @@ CUDAPluggableAllocatorDeleterContext::CUDAPluggableAllocatorDeleterContext(
     size_t size,
     int device,
     cudaStream_t stream)
-    : free_fn_(free_fn),
+    : free_fn_(std::move(free_fn)),
       data_(data),
       size_(size),
       device_(device),
@@ -210,8 +210,8 @@ void CUDAPluggableAllocator::recordStream(
   }
 }
 
-c10::cuda::CUDACachingAllocator::DeviceStats CUDAPluggableAllocator::
-    getDeviceStats(c10::DeviceIndex device) {
+c10::CachingDeviceAllocator::DeviceStats CUDAPluggableAllocator::getDeviceStats(
+    c10::DeviceIndex device) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getDeviceStats. "

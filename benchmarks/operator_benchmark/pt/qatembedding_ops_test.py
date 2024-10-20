@@ -1,6 +1,7 @@
 import numpy
-import operator_benchmark as op_bench
 from pt import configs
+
+import operator_benchmark as op_bench
 
 import torch
 import torch.ao.nn.qat as nnqat

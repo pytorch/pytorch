@@ -185,7 +185,9 @@ class TestVerificationOnWrongExport(pytorch_test_common.ExportTestCase):
         # {"onnx_backend": verification.OnnxBackend.ONNX},
         {"onnx_backend": verification.OnnxBackend.ONNX_RUNTIME_CPU},
     ],
-    class_name_func=lambda cls, idx, input_dicts: f"{cls.__name__}_{input_dicts['onnx_backend'].name}",
+    class_name_func=lambda cls,
+    idx,
+    input_dicts: f"{cls.__name__}_{input_dicts['onnx_backend'].name}",
 )
 class TestFindMismatch(pytorch_test_common.ExportTestCase):
     onnx_backend: verification.OnnxBackend

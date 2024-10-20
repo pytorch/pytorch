@@ -1280,7 +1280,7 @@ PyObject* THPModule_increment_version(
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
+static PyMethodDef methods[] = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,

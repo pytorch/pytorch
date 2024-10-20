@@ -5,8 +5,6 @@
 class ParseError(Exception):
     """Whenever the simple parser is unable to parse the report, this exception will be raised"""
 
-    pass
-
 
 class Report:
     """A report is a container of errors, and a summary on how many errors are found"""
