@@ -683,36 +683,40 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 @dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
-    context: Context
-    _children_specs: List[Self]
+    _context: Context
+    _children: List[Self]
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        num_nodes = sum((spec.num_nodes for spec in self._children_specs), start=1)
-        num_leaves = sum(spec.num_leaves for spec in self._children_specs)
-        num_children = len(self._children_specs)
+        num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
+        num_leaves = sum(spec.num_leaves for spec in self._children)
+        num_children = len(self._children)
         object.__setattr__(self, "num_nodes", num_nodes)
         object.__setattr__(self, "num_leaves", num_leaves)
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, indent: int = 0) -> str:
-        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
+        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self._context}, ["
         children_specs_str: str = ""
         if self.num_children > 0:
             indent += 2
-            children_specs_str += self._children_specs[0].__repr__(indent)
+            children_specs_str += self._children[0].__repr__(indent)
             children_specs_str += "," if self.num_children > 1 else ""
             children_specs_str += ",".join(
                 [
                     "\n" + " " * indent + child.__repr__(indent)
-                    for child in self._children_specs[1:]
+                    for child in self._children[1:]
                 ]
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
+
+    @property
+    def context(self) -> Context:
+        return self._context
 
     @property
     @deprecated(
@@ -721,16 +725,16 @@ class TreeSpec:
         category=FutureWarning,
     )
     def children_specs(self) -> List[Self]:
-        return self._children_specs
+        return self._children
 
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List[Self]:
-        return self._children_specs.copy()
+        return self._children.copy()
 
     def child(self, index: int) -> Self:
-        return self._children_specs[index]
+        return self._children[index]
 
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
         if self.is_leaf():
@@ -752,7 +756,7 @@ class TreeSpec:
                     f"Node arity mismatch; "
                     f"expected {self.num_children}, but got {len(child_pytrees)}.",
                 )
-            if context != self.context:
+            if context != self._context:
                 raise ValueError(
                     f"Node context mismatch for custom node type {self.type!r}.",
                 )
@@ -775,10 +779,10 @@ class TreeSpec:
 
             if both_standard_dict:  # dictionary types are compatible with each other
                 dict_context = (
-                    self.context
+                    self._context
                     if self.type is not defaultdict
                     # ignore mismatch of `default_factory` for defaultdict
-                    else self.context[1]
+                    else self._context[1]
                 )
                 expected_keys = dict_context
                 got_key_set = set(tree)
@@ -797,15 +801,15 @@ class TreeSpec:
                 flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
                 child_pytrees, context = flatten_fn(tree)
                 if (
-                    context != self.context
+                    context != self._context
                     and self.type is not deque  # ignore mismatch of `maxlen` for deque
                 ):
                     raise ValueError(
                         f"Node context mismatch for node type {self.type!r}; "
-                        f"expected {self.context!r}, but got {context!r}.",  # namedtuple type mismatch
+                        f"expected {self._context!r}, but got {context!r}.",  # namedtuple type mismatch
                     )
 
-        for child_pytree, child_spec in zip(child_pytrees, self._children_specs):
+        for child_pytree, child_spec in zip(child_pytrees, self._children):
             child_spec._flatten_up_to_helper(child_pytree, subtrees)
 
     def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
@@ -831,14 +835,19 @@ class TreeSpec:
         start = 0
         end = 0
         child_pytrees = []
-        for child_spec in self._children_specs:
+        for child_spec in self._children:
             end += child_spec.num_leaves
             child_pytrees.append(child_spec.unflatten(leaves[start:end]))
             start = end
 
-        return unflatten_fn(child_pytrees, self.context)
+        return unflatten_fn(child_pytrees, self._context)
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
@@ -854,7 +863,11 @@ class LeafSpec(TreeSpec):
 
 # All leaves are equivalent, so represent with a single object to save on
 # object construction time
-_LEAF_SPEC = LeafSpec()
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore", category=FutureWarning, module=__name__, append=False
+    )
+    _LEAF_SPEC = LeafSpec()
 
 
 def treespec_leaf() -> LeafSpec:
@@ -1347,15 +1360,15 @@ def _broadcast_to_and_flatten(
         return None
 
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, ctx = flatten_fn(tree)
+    child_pytrees, context = flatten_fn(tree)
 
     # Check if the Node is different from the spec
-    if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
+    if len(child_pytrees) != treespec.num_children or context != treespec._context:
         return None
 
     # Recursively flatten the children
     result: List[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec._children_specs):
+    for child, child_spec in zip(child_pytrees, treespec._children):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
             result += flat
@@ -1409,7 +1422,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec.context)
+            serialized_context = json.dumps(treespec._context)
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
@@ -1417,9 +1430,9 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
                 "custom serializer using _register_pytree_node."
             ) from e
     else:
-        serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
+        serialized_context = serialize_node_def.to_dumpable_context(treespec._context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec._children_specs]
+    child_schemas = [_treespec_to_json(child) for child in treespec._children]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
