@@ -20,14 +20,15 @@ class LazyCache:
     def realize(self) -> None:
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
-        from .builder import SourcelessBuilder, VariableBuilder
 
         tx = InstructionTranslator.current_tx()
-        if isinstance(self.value, LazySymNodeFormatString):
-            self.vt = SourcelessBuilder.create(tx, self.value)
-        else:
-            self.vt = VariableBuilder(tx, self.source)(self.value)
 
+        if isinstance(self.value, LazySymNodeFormatString):
+            source = None
+        else:
+            source = self.source
+
+        self.vt = VariableTracker.build(tx, self.value, source)
         del self.value
         del self.source
 
@@ -37,7 +38,7 @@ class LazyVariableTracker(VariableTracker):
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
 
-    The `realize` function invokes VariableBuilder to produce the real object.
+    The `realize` function invokes VariableTracker.build() to produce the real object.
     Once a LazyVariableTracker has been realized, internal bookkeeping will
     prevent double realization.
 
@@ -79,6 +80,14 @@ class LazyVariableTracker(VariableTracker):
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
+
+    def peek_type(self) -> type[Any]:
+        assert not self.is_realized()
+        return type(self._cache.value)
+
+    def peek_value(self) -> Any:
+        assert not self.is_realized()
+        return self._cache.value
 
     def __str__(self) -> str:
         if self.is_realized():

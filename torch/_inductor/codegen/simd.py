@@ -48,6 +48,7 @@ from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
+    expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
@@ -486,7 +487,7 @@ class SIMDKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -878,7 +879,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, _signature, _ = self.args.python_argdefs()
+        argdefs, call_args, signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
@@ -1144,7 +1145,7 @@ class SIMDScheduling(BaseScheduling):
             )
             return bool(not_ready_yet_nodes)
 
-        for node in nodes:
+        for index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)
@@ -1209,18 +1210,8 @@ class SIMDScheduling(BaseScheduling):
         numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
-        size_hint = V.graph.sizevars.size_hint
-        has_hint = V.graph.sizevars.shape_env.has_hint
 
-        def within_32bit(e):
-            # Allow for unhinted e as long as we can still statically prove
-            # (e.g., via ValueRanges) that it is still in bounds
-            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
-                return True
-            # Otherwise, the hint MUST exist and be in range
-            return has_hint(e) and size_hint(e) <= int_max
-
-        if not within_32bit(numel):
+        if not expr_fits_within_32bit(numel):
             return False
 
         # Any use of a MultiOutputLayout will create a buffer with a
@@ -1231,7 +1222,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]
 
-        if not all(within_32bit(size) for size in buf_sizes):
+        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -1358,19 +1349,9 @@ class SIMDScheduling(BaseScheduling):
             index_dtype=index_dtype,
         )
 
-        def _node_has_sort(node):
-            if node in (EnableReduction, DisableReduction):
-                return False
-
-            sort_nodes = node._body.root_block.graph.find_nodes(
-                op="call_method", target="sort"
-            )
-            return bool(sort_nodes)
-
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        has_sort = any(_node_has_sort(node) for node in node_schedule)
-        if has_sort:
+        if has_sort := schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
@@ -1495,7 +1476,7 @@ class SIMDScheduling(BaseScheduling):
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
-        _, (_numel, rnumel) = template_node.group
+        _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
         with kernel:
@@ -1751,13 +1732,13 @@ class SIMDScheduling(BaseScheduling):
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 a0, a1 = ranked_tilings[0]
-                _b0, b1 = ranked_tilings[i]
+                b0, b1 = ranked_tilings[i]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     continue
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     a0, a1 = ranked_tilings[i]
-                    _b0, b1 = ranked_tilings[0]
+                    b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     tiling = (a0, FloorDiv(a1, b1), b1)
@@ -1814,10 +1795,6 @@ class SIMDScheduling(BaseScheduling):
 
             def __del__(self) -> None:
                 self.n.last_usage = self.last_usage
-
-        last_usage_holders = [  # noqa: F841
-            LastUsageHolder(n, n.last_usage) for n in nodes
-        ]
 
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
@@ -1908,3 +1885,12 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
+
+
+def schedule_contains_op(node_schedule, op_name: str) -> bool:
+    """True if V.ops.{op_name} is used in node_schedule"""
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node._body.has_op(op_name):
+                return True
+    return False

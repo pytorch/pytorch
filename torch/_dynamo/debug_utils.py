@@ -370,7 +370,7 @@ def same_two_models(
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
-    except Exception:
+    except Exception as e:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
@@ -455,7 +455,7 @@ def backend_accuracy_fails(
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
         )
-    except Exception:
+    except Exception as e:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
@@ -678,6 +678,12 @@ class InputWriter:
             "reader.tensor("
             + ", ".join([storage, str(tuple(t.shape)), *args])
             + f")  # {name}"
+        )
+
+    # write out that the arg was filtered out as it is constant
+    def const(self, name) -> None:
+        self._lines.append(
+            f"reader.const({name!r})  # {name}, filtered out during compilation"
         )
 
     # TODO: this doesn't actually symint atm

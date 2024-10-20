@@ -38,8 +38,7 @@ std::string stringSlice(
 
   int64_t i = start_val;
   std::string result = "";
-  for (const auto j : c10::irange(num_vals)) {
-    (void)j; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto j : c10::irange(num_vals)) {
     result += string[i];
     i += step;
   }

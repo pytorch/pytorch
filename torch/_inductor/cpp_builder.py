@@ -126,7 +126,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        (
+        output_msg = (
             subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
             .strip()
             .decode(*SUBPROCESS_DECODE_ARGS)
@@ -144,9 +144,7 @@ def get_cpp_compiler() -> str:
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
-            return (
-                build_paths.cc() if torch.version.hip is None else build_paths.clang()
-            )
+            return build_paths.cc
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
@@ -193,7 +191,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
             .decode(*SUBPROCESS_DECODE_ARGS)
         )
         return "Microsoft" in output_msg.splitlines()[0]
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         return False
 
     return False
@@ -234,7 +232,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                 _check_minimal_version(TorchVersion(icx_ver))
 
         return is_intel_compiler
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         return False
     except subprocess.SubprocessError:
         # --version args not support.
@@ -275,12 +273,12 @@ def get_compiler_version_info(compiler: str) -> str:
         version_string = subprocess.check_output(
             [compiler, "-v"], stderr=subprocess.STDOUT, env=env
         ).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception:
+    except Exception as e:
         try:
             version_string = subprocess.check_output(
                 [compiler, "--version"], stderr=subprocess.STDOUT, env=env
             ).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception:
+        except Exception as e:
             return ""
     # Mutiple lines to one line string.
     version_string = version_string.replace("\r", "_")
@@ -503,7 +501,12 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            cflags.append("Werror=ignored-optimization-argument")
+            ignored_optimization_argument = (
+                "Werror=ignored-optimization-argument"
+                if config.aot_inductor.raise_error_on_ignored_optimization
+                else "Wno-ignored-optimization-argument"
+            )
+            cflags.append(ignored_optimization_argument)
     return cflags
 
 
@@ -663,7 +666,7 @@ def _get_glibcxx_abi_build_flags() -> List[str]:
 
 
 def _get_torch_cpp_wrapper_defination() -> List[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER"]
+    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
 
 
 def _use_custom_generated_macros() -> List[str]:
@@ -705,24 +708,19 @@ def _setup_standard_sys_libs(
         return cflags, include_dirs, passthough_args
 
     if config.is_fbcode():
+        # TODO(T203137008) Can we unify these flags with triton_cc_command?
         cflags.append("nostdinc")
         # Note that the order of include paths do matter, as a result
         # we need to have several branches interleaved here
-        if torch.version.hip is None:
-            include_dirs.append(build_paths.sleef())
-        include_dirs.append(build_paths.openmp())
-        include_dirs.append(build_paths.python())
-        if torch.version.hip is not None:
-            include_dirs.append(build_paths.clang_include())
-            include_dirs.append(build_paths.gcc_include())
-            include_dirs.append(build_paths.gcc_install_tools_include())
-        else:
-            include_dirs.append(build_paths.cc_include())
-            include_dirs.append(build_paths.libgcc())
-            include_dirs.append(build_paths.libgcc_arch())
-        include_dirs.append(build_paths.libgcc_backward())
-        include_dirs.append(build_paths.glibc())
-        include_dirs.append(build_paths.linux_kernel())
+        include_dirs.append(build_paths.sleef_include)
+        include_dirs.append(build_paths.openmp_include)
+        include_dirs.append(build_paths.python_include)
+        include_dirs.append(build_paths.cc_include)
+        include_dirs.append(build_paths.libgcc_include)
+        include_dirs.append(build_paths.libgcc_arch_include)
+        include_dirs.append(build_paths.libgcc_backward_include)
+        include_dirs.append(build_paths.glibc_include)
+        include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
         if aot_mode and not use_absolute_path:
@@ -734,8 +732,8 @@ def _setup_standard_sys_libs(
             passthough_args.append(" --rtlib=compiler-rt")
             passthough_args.append(" -fuse-ld=lld")
             passthough_args.append(f" -Wl,--script={linker_script}")
-            passthough_args.append(" -B" + build_paths.glibc_lib())
-            passthough_args.append(" -L" + build_paths.glibc_lib())
+            passthough_args.append(" -B" + build_paths.glibc_lib)
+            passthough_args.append(" -L" + build_paths.glibc_lib)
 
     return cflags, include_dirs, passthough_args
 
@@ -784,11 +782,6 @@ def _get_torch_related_args(
     if _IS_WINDOWS:
         libraries.append("sleef")
 
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.abi_compatible:
-        libraries.append("c10")
-        libraries_dirs.append(TORCH_LIB_PATH)
-
     return include_dirs, libraries_dirs, libraries
 
 
@@ -820,7 +813,7 @@ def _get_python_related_args() -> Tuple[List[str], List[str]]:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
     if config.is_fbcode():
-        python_include_dirs.append(build_paths.python())
+        python_include_dirs.append(build_paths.python_include)
 
     return python_include_dirs, python_lib_path
 
@@ -864,7 +857,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            cdll.LoadLibrary(omp_path)
+            omp_module = cdll.LoadLibrary(omp_path)
     except subprocess.SubprocessError:
         pass
 
@@ -880,7 +873,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
             omp_path = output.rstrip()
             if os.path.isfile(omp_path):
                 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-                cdll.LoadLibrary(omp_path)
+                omp_module = cdll.LoadLibrary(omp_path)
                 return True
         except subprocess.SubprocessError:
             pass
@@ -986,9 +979,9 @@ def _get_openmp_args(
             cflags.append("openmp:experimental")  # MSVC CL
     else:
         if config.is_fbcode():
-            include_dir_paths.append(build_paths.openmp())
+            include_dir_paths.append(build_paths.openmp_include)
 
-            openmp_lib = build_paths.openmp_lib()
+            openmp_lib = build_paths.openmp_lib_so
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
             passthough_args.append(fb_openmp_extra_flags)
 
@@ -1167,7 +1160,7 @@ def _set_gpu_runtime_env() -> None:
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = build_paths.cuda()
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
 
 def _transform_cuda_paths(lpaths: List[str]) -> None:
@@ -1180,7 +1173,7 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
             and path.startswith(os.environ["CUDA_HOME"])
             and not os.path.exists(f"{path}/libcudart_static.a")
         ):
-            for root, _dirs, files in os.walk(path):
+            for root, dirs, files in os.walk(path):
                 if "libcudart_static.a" in files:
                     lpaths[i] = os.path.join(path, root)
                     lpaths.append(os.path.join(lpaths[i], "stubs"))
@@ -1204,9 +1197,7 @@ def get_cpp_torch_device_options(
         and "CUDA_HOME" not in os.environ
         and "CUDA_PATH" not in os.environ
     ):
-        os.environ["CUDA_HOME"] = (
-            build_paths.rocm() if torch.version.hip else build_paths.cuda()
-        )
+        os.environ["CUDA_HOME"] = build_paths.sdk_home
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1245,10 +1236,7 @@ def get_cpp_torch_device_options(
             _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
-        if torch.version.hip is not None:
-            include_dirs.append(os.path.join(build_paths.rocm(), "include"))
-        else:
-            include_dirs.append(os.path.join(build_paths.cuda(), "include"))
+        include_dirs.append(build_paths.sdk_include)
 
         if aot_mode and device_type == "cuda":
             if torch.version.hip is None:
@@ -1347,7 +1335,7 @@ def get_name_and_dir_from_output_file_path(
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
     name_and_ext = os.path.basename(file_path)
-    name, _ext = os.path.splitext(name_and_ext)
+    name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
     return name, dir
