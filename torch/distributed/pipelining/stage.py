@@ -719,7 +719,7 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                     "full_backward": False,
                 }
-                weight_grads, _ = self.backward_maybe_with_nosync("weight", bwd_kwargs)
+                self.backward_maybe_with_nosync("weight", bwd_kwargs)
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,
@@ -1603,13 +1603,13 @@ def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
         ]
 
         logger.debug(
-            f"Rank: {pg_rank}"  # noqa: G004
-            f"Stage id: {stage_id}"
-            f"Stage num stages: {stage.num_stages}"
-            f"Stage rank: {rank}"
-            f"Stage world size: {world_size}"
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}"  # noqa: G003
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}"  # noqa: G003
+            f"Rank: {pg_rank}",  # noqa: G004
+            f"Stage id: {stage_id}",
+            f"Stage num stages: {stage.num_stages}",
+            f"Stage rank: {rank}",
+            f"Stage world size: {world_size}",
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}",  # noqa: G003
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}",  # noqa: G003
         )
 
         all_inputs.extend(stage_input_shapes)
