@@ -521,9 +521,8 @@ class CppMicroGemmAMX(CppMicroGemm):
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
 
-    const auto last_k_offset = K / {{block_k}} * {{block_k}};
-    const auto tail_k_size = K - last_k_offset;
-    const auto num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
+    // This may not be true for the tail, but wouldn't affect correctness.
+    const auto num_b_rows = 16;
     const auto b_tile_ptr_stride = ldb * {{vnni_size}};
 
     auto load_B_row = [&]({{input2_t}}* {{restrict_keyword}} src, {{input_t}}* {{restrict_keyword}} dst) {
@@ -545,8 +544,14 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
         const int64_t init_idx =  n * buf_size_per_nr_block;
+        // For simplicitym even if the tail would not be a multiple of block_k,
+        // we would incur the cost of reading some data we won't use because
+        // each B tile's dequantized data in the buffer would have 16x32 elements.
+        const auto last_k_offset = K / {{block_k}} * {{block_k}};
+        const auto tail_k_size = K - last_k_offset;
+        const auto max_k_idx = tail_k_size ? last_k_offset + {{block_k}} : last_k_offset;
         {{kernel.unroll_pragma(4)}}
-        for (int k = 0; k < last_k_offset; k += {{block_k}}) {
+        for (int k = 0; k < max_k_idx; k += {{block_k}}) {
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
                 load_B_tile(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
