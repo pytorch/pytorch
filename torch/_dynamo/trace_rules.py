@@ -3159,7 +3159,6 @@ THIRDPARTY_SKIPLIST = (
     "hypothesis",
     "networkx",
     "numpy",
-    "omegaconf",
     "onnx",
     "onnxruntime",
     "onnx_tf",
