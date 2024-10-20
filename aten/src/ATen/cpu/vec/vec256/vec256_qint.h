@@ -75,7 +75,7 @@ inline __m256i pack_saturate_and_clamp<int32_t>(
     int32_t /*min_val*/,
     int32_t /*max_val*/) {
   // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+  TORCH_CHECK(false, "pack_saturate_and_clamp<int32_t> is not supported");
 }
 
 template <>
@@ -843,7 +843,7 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
   return a.maximum(b);
 }
 
-#else
+#elif !defined(CPU_CAPABILITY_SVE256)
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with AVX2. This may not be an issue, because
@@ -1339,7 +1339,7 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
-#if defined(CPU_CAPABILITY_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <typename T>
 typename std::enable_if_t<std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(at::vec::Vectorized<T> src) {

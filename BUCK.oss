@@ -52,7 +52,7 @@ cxx_library(
             "**/*.pb.h",
         ],
     ),
-    compiler_flags = ['-Os', '-fexceptions', '-frtti', '-Wno-shadow', '-Wno-unknown-pragmas', '-Wno-unused-variable', '-Wno-sign-compare', '-Icaffe2', '-Imodules', '-DEIGEN_NO_DEBUG', '-DCAFFE2_USE_GOOGLE_GLOG','-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK=1', '-DCAFFE2_IS_XPLAT_BUILD', '-DSTRIP_ERROR_MESSAGES', '-DUSE_INTERNAL_PTHREADPOOL_IMPL'],
+    compiler_flags = ['-Os', '-fexceptions', '-frtti', '-Wno-shadow', '-Wno-unknown-pragmas', '-Wno-unused-variable', '-Wno-sign-compare', '-Icaffe2', '-Imodules', '-DEIGEN_NO_DEBUG', '-DCAFFE2_USE_LITE_PROTO', '-DCAFFE2_USE_GOOGLE_GLOG', '-DCAFFE2_RNN_NO_TEXT_FORMAT', '-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK=1', '-DCAFFE2_IS_XPLAT_BUILD', '-DSTRIP_ERROR_MESSAGES', '-DUSE_INTERNAL_PTHREADPOOL_IMPL', '-DCAFFE2_USE_HPTT'],
     preferred_linkage = "static",
     platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
     preprocessor_flags = ['-DUSE_INTERNAL_PTHREADPOOL_IMPL'],
