@@ -241,7 +241,7 @@ exclude_patterns = [
     'c10/util/*inl.h',
     'c10/test/**/*.h',
     'third_party/**/*',
-    'torch/csrc/api/**',
+    'torch/csrc/api/include/torch/nn/pimpl-inl.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
