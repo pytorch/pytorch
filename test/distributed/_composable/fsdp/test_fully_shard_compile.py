@@ -104,8 +104,7 @@ class TestFullyShardCompileCompute(FSDPTest):
 class TestFullyShardCompile(FSDPTest):
     fake_pg = not at_least_x_gpu(2)
 
-    # This method is an override of the base class.
-    # Tests in this class requires bf16 support, so SM arch must be 80 or
+    # Inductor tests in this class requires bf16 support, so SM arch must be 80 or
     # higher.
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
@@ -412,8 +411,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
         with torch._dynamo.config.patch(
             skip_fsdp_hooks=False,
@@ -423,13 +420,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
             fully_shard(model)
-            model_compiled = torch.compile(model, backend="inductor")
+            model_compiled = torch.compile(model, backend="aot_eager")
             for i in range(10):
                 torch.compiler.set_stance(
                     "force_eager" if i < 1 else "default"
                 )  # eager warmup for 1 iteration
                 with torch._dynamo.compiled_autograd.enable(
-                    torch.compile(backend="inductor", fullgraph=True)
+                    torch.compile(backend="aot_eager", fullgraph=True)
                 ):
                     out = model_compiled(inputs)
                     out.sum().backward()
@@ -578,6 +575,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
+        self.skipTestForOldSm()
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fwd_fullgraph=True
         )
@@ -672,6 +670,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
@@ -769,6 +768,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
+        self.skipTestForOldSm()
         _, triton_codes = run_and_get_code(
             lambda: self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fwd_fullgraph=False),
@@ -884,6 +884,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_True(self):
+        self.skipTestForOldSm()
         for (
             fwd_fullgraph,
             all_requires_grad,
@@ -990,6 +991,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_False(self):
+        self.skipTestForOldSm()
         fwd_fullgraph = False
         # TODO: fix numerical issue in activation_checkpoint=True case
         for all_requires_grad, activation_checkpoint in itertools.product(
