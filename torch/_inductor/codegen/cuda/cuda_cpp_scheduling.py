@@ -66,7 +66,9 @@ class CUDACPPScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.cuda(r'''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''', 'so')")
+            compile_wrapper.writeline(
+                f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -89,7 +91,7 @@ class CUDACPPScheduling(BaseScheduling):
             template_node
         ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
-        _, (_numel, rnumel) = template_node.group
+        _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
         kernel, render = ctb.make_kernel_render(ctb)

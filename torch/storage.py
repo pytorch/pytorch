@@ -535,6 +535,9 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
     }
 
 

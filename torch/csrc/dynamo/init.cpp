@@ -38,6 +38,9 @@ void initDynamoBindings(PyObject* torch) {
   if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
     throw python_error();
   }
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
+#endif
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||

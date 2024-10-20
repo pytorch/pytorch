@@ -390,6 +390,7 @@ def should_pad_bench(
     )
     m_padded_length = 0
     n_padded_length = 0
+    batchsize = 1
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]
@@ -399,6 +400,7 @@ def should_pad_bench(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
+            batchsize = mat1.shape[0]
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
@@ -704,35 +706,25 @@ def should_pad_mm(match: Match) -> bool:
 
 
 def pad_mat1(mat1, *, m_padded_length, k_padded_length, is_bmm=False):
-    if m_padded_length == 0 and k_padded_length == 0:
-        return mat1
-    elif k_padded_length != 0 and m_padded_length != 0:
+    if k_padded_length != 0 or m_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, k_padded_length, 0, m_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat1, pad_arg)
-    elif m_padded_length != 0:
-        return pad_dim(mat1, m_padded_length, 0 if not is_bmm else 1)
     else:
-        assert k_padded_length != 0
-        return pad_dim(mat1, k_padded_length, 1 if not is_bmm else 2)
+        return mat1
 
 
 def pad_mat2(mat2, *, k_padded_length, n_padded_length, is_bmm=False):
-    if k_padded_length == 0 and n_padded_length == 0:
-        return mat2
-    elif k_padded_length != 0 and n_padded_length != 0:
+    if k_padded_length != 0 or n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat2, pad_arg)
-    elif k_padded_length != 0:
-        return pad_dim(mat2, k_padded_length, 0 if not is_bmm else 1)
     else:
-        assert n_padded_length != 0
-        return pad_dim(mat2, n_padded_length, 1 if not is_bmm else 2)
+        return mat2
 
 
 def pad_mm(

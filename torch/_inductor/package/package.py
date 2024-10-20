@@ -181,7 +181,7 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
                 aoti_output_dir,
                 model_name,
             )
-            for root, _dirs, files in os.walk(aoti_output_dir):
+            for root, dirs, files in os.walk(aoti_output_dir):
                 for file in files:
                     log.debug(
                         "Saving AOTI generated file %s to archive in %s%s/%s",
@@ -210,6 +210,7 @@ class AOTICompiledModel:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
