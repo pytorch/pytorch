@@ -263,7 +263,7 @@ struct NcclCommList {
   ~NcclCommList() {
     if (comms) {
       for (const auto i : c10::irange(ndevices)) {
-        int dummy_var;
+        int dummy_var = 0;
         if (C10_CUDA_ERROR_HANDLED(cudaGetDevice(&dummy_var)) != cudaSuccess) {
           /* there are cases when this destructor is called after the
            CUDA driver is already unloaded from the process.
@@ -366,7 +366,7 @@ void check_inputs(
   auto dtype = inputs[0].scalar_type();
 
   for (const auto i : c10::irange(len)) {
-    auto input = inputs[i];
+    const auto& input = inputs[i];
     auto output = outputs[i];
 
     check_tensor(
@@ -398,7 +398,7 @@ void check_inputs(
   auto dtype = inputs[0].scalar_type();
 
   for (const auto i : c10::irange(len)) {
-    auto input = inputs[i];
+    const auto& input = inputs[i];
 
     check_tensor(
         input,
@@ -421,25 +421,24 @@ void check_inputs(
 
 } // namespace detail
 
-AutoNcclGroup::AutoNcclGroup() {
+AutoNcclGroup::AutoNcclGroup() : comm_(nullptr), comm_nonblocking_(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
-  comm_nonblocking_ = false;
-  comm_ = nullptr;
+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
-AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking) {
+AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking)
+    : comm_(comm), comm_nonblocking_(comm_nonblocking) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
-  comm_ = comm;
-  comm_nonblocking_ = comm_nonblocking;
+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
@@ -510,7 +509,7 @@ void get_unique_id(ncclUniqueId& id) {
 ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  ncclComm_t comm;
+  ncclComm_t comm = nullptr;
   ncclUniqueId id = comm_id;
   NCCL_CHECK(ncclCommInitRank(
       to_nccl_comm(&comm), nranks, *(to_nccl_unique_id(&id)), rank));
@@ -548,7 +547,7 @@ struct GetSecondArgType;
 
 template <typename R, typename Arg0, typename Arg1, typename... Args>
 struct GetSecondArgType<R(Arg0, Arg1, Args...)> {
-  typedef typename std::decay<Arg1>::type type;
+  typedef std::decay_t<Arg1> type;
 };
 
 constexpr auto count_max =
@@ -825,7 +824,7 @@ void all2all_single_equal_split(
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
-  int numranks;
+  int numranks = 0;
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
   size_t rankdiff = input.nbytes() / size;
@@ -895,7 +894,7 @@ void all2all_single_unequal_split(
       comm,
       stream.stream()));
 #else
-  int numranks;
+  int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
@@ -1107,7 +1106,7 @@ void gather(
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
-  int numranks, cur_rank;
+  int numranks = 0, cur_rank = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
 
@@ -1156,7 +1155,7 @@ void scatter(
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
-  int numranks, cur_rank;
+  int numranks = 0, cur_rank = 0;
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));

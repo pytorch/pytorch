@@ -39,7 +39,8 @@ PyObject* THPQScheme_repr(THPQScheme* self) {
 }
 
 PyTypeObject THPQSchemeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.qscheme", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.qscheme", /* tp_name */
     sizeof(THPQScheme), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

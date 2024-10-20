@@ -519,6 +519,7 @@ void materialize_vulkan(
             static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
             /*in_tree_building_=*/false}));
   }
+  raw_events.clear();
 }
 
 namespace {
@@ -1447,6 +1448,7 @@ RecordQueue::getRecords(
           /*kineto_info_=*/queue.kineto_info(),
           /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
     }
+    queue.allocations_.clear();
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
@@ -1473,20 +1475,25 @@ RecordQueue::getRecords(
     ProfilerStepInfo step =
         step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
-      // If event has start time after step end time we can continue to the next
-      // step
-      while (i->start_time_ns_ > step.end_time_ns) {
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-      }
-      // If Step annotation starts before event and ends before event ends with
-      // intersection then we move the lefthand side of the step annotation to
-      // the event start time
-      if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-        auto currStepRes = out[step.out_idx];
-        currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      // Only adjust timestamps if experimental config is enabled
+      if (config_.experimental_config.adjust_profiler_step) {
+        // If event has start time after step end time we can continue to the
+        // next step
+        while (i->start_time_ns_ > step.end_time_ns) {
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
+        // If Step annotation starts before event and ends before event ends
+        // with intersection then we move the lefthand side of the step
+        // annotation to the event start time
+        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+          auto currStepRes = out[step.out_idx];
+          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
       }
       out.push_back(i);
     }

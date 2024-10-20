@@ -21,7 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -38,9 +38,9 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 
-import pytest
+from torch.testing._internal.inductor_utils import HAS_GPU
 
-from torch.utils._triton import has_triton
+import pytest
 
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 
@@ -981,7 +981,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             torch.backends.cuda.matmul.allow_tf32 = orig
 
 
-    @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions(self, device, dtype):
 
@@ -1009,7 +1009,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         for r, c in shapes:
             run_test(r, c, device, dtype)
 
-    @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions_all_patterns(self, device, dtype):
         r, c = 32, 128
@@ -1022,10 +1022,19 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         torch.testing.assert_close(dense, dense_val, rtol=0, atol=0)
 
 
-
-CUSPARSELT_NUM_ALG_IDS = 4
 CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
 
+def to_float8(x, dtype=torch.float8_e4m3fn):
+    finfo = torch.finfo(dtype)
+    # Calculate the scale as dtype max divided by absmax
+    scale = finfo.max / x.abs().max().clamp(min=1e-12)
+    # scale and clamp the tensor to bring it to
+    # the representative range of float8 data type
+    # (as default cast is unsaturated)
+    x_scl_sat = (x * scale).clamp(min=finfo.min, max=finfo.max)
+    # Return both float8 data and the inverse scale (as float),
+    # as both required as inputs to torch._scaled_mm
+    return x_scl_sat.to(dtype), scale.float().reciprocal()
 
 class TestSparseSemiStructuredCUSPARSELT(TestCase):
     """
@@ -1034,10 +1043,68 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch._cslt_sparse_mm
     """
     def setUp(self):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
-    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @parametrize("dense_input_shape", [(256, 128)])
+    def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
+        if torch.backends.cusparselt.version() < 602:
+            self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
+
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
+
+        A_fp8, A_scale = to_float8(A)
+        B_fp8, B_scale = to_float8(B)
+        A_fp8_sparse = to_sparse_semi_structured(A_fp8)
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"`SparseSemiStructuredTensor.*_scaled_mm",
+        ):
+            dense_result = torch.mm(A_fp8_sparse, B_fp8)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
+        (k, l, m) = (32, 64, 32)
+        x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
+        y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn)
+
+        x_sparse = to_sparse_semi_structured(x)
+        out_fp8_sparse = torch._scaled_mm(x_sparse, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn)
+        # this fails on ROCm currently because hipblaslt doesn't have amax op
+        out_fp32 = out_fp8.to(torch.float32)
+        out_fp32_sparse = out_fp8_sparse.to(torch.float32)
+        torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("dense_input_shape", [(256, 128)])
+    def test_sparse_semi_structured_scaled_mm(
+        self, dense_input_shape, device, out_dtype
+    ):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
+
+        A_fp8, A_scale = to_float8(A)
+        B_fp8, B_scale = to_float8(B)
+
+        A_fp8_sparse = to_sparse_semi_structured(A_fp8)
+
+        dense_result = torch._scaled_mm(
+            A_fp8, B_fp8, scale_a=A_scale, scale_b=B_scale, out_dtype=out_dtype
+        )
+        sparse_result = torch._scaled_mm(
+            A_fp8_sparse, B_fp8, scale_a=A_scale, scale_b=B_scale, out_dtype=out_dtype
+        )
+        torch.testing.assert_close(dense_result, sparse_result, rtol=7e-2, atol=7e-2)
+
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_mixed_dtype(self, dense_input_shape, out_dtype, device):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
@@ -1066,7 +1133,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):
         A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
         B = torch.ones((128, 256), device=device).to(torch.int8).t()
@@ -1082,17 +1149,14 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
     @inference_dtypes
-    def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
-        # alg_id=3 not supported for float32 dtype
-        if dtype == torch.float32 and alg_id == 3:
-            return
+    def test_cslt_sparse_mm_alg_id(self, device, dtype):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
+        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
 
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
@@ -1102,17 +1166,13 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
     @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
-        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
         alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
-        # when setting using the last one (4)
-        # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
-        # TODO Move this into the cuSPARSELt backendk
-        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
+        assert alg_id in range(torch.backends.cusparselt.get_max_alg_id())
 
     def test_cusparselt_backend(self):
         version = _get_torch_cuda_version()

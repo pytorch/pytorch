@@ -270,7 +270,7 @@ class AutoChunkerTransform:
     def _chunk_source_node(self, source_node):
         bs = _get_fake_tensor_from_node(source_node).shape[0]
         print(f"{bs=}")
-        self.num_chunk = 4 # TODO don't hardcode
+        self.num_chunk = 2 # TODO don't hardcode
         self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
         out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
         chunks = []

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 import torch
-from torch.onnx._internal.exporter import testing as onnx_testing
+from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
 

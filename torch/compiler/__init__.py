@@ -48,7 +48,8 @@ def allow_in_graph(fn):
     If you are using :func:`torch.compile` (with backend="inductor" (the default)), or
     :func:`torch.export.export`, and trying to black-box a Python function throughout
     all tracing, do not use this API.
-    Instead, please create a custom operator (see :ref:`custom-ops-landing-page`)
+    Instead, please create a custom operator (see `PyTorch Custom Operators Landing Page
+    <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_)
 
     .. warning::
 
