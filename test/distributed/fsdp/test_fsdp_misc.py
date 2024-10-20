@@ -278,9 +278,9 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
         x = torch.randn(10, 10, device="cuda")
         y = torch.randn(10, 10, device="cuda")
-        for _ in range(4):
+        for i in range(4):
             if use_second_layer:
-                a, _ = fsdp(x, y)
+                a, b = fsdp(x, y)
             else:
                 a = fsdp(x, y)
             loss = a.sum()
@@ -509,7 +509,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     def test_fsdp_cpu_training(self):
         """Tests FSDP training on CPU."""
         gloo_pg = dist.new_group(backend="gloo")
-        for ss in [  # noqa: F841
+        for ss in [
             ShardingStrategy.NO_SHARD,
             ShardingStrategy.FULL_SHARD,
             ShardingStrategy.SHARD_GRAD_OP,
@@ -857,13 +857,13 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.cuda.set_device(self.rank)
         # Test CPU
         no_params = nn.ReLU()
-        module = FSDP(no_params)  # noqa: F841
+        module = FSDP(no_params)
         # Test CUDA
         no_params = nn.ReLU().cuda()
         module = FSDP(no_params)
         # Test CPU + device_id
         no_params = nn.ReLU()
-        module = FSDP(no_params, device_id=torch.cuda.current_device())  # noqa: F841
+        module = FSDP(no_params, device_id=torch.cuda.current_device())
         # For modules with no params, wrong device_id will raise error about
         # inconsistency between compute_device and device_id, since compute_device
         # is computed as torch.cuda.current_device when there are no params.

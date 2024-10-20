@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: jit"]
-# ruff: noqa: F841
+
 import contextlib
 import copy
 import itertools
@@ -820,6 +820,15 @@ def forward(self, x_1):
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )
+            )
+        )
+
+    def test_sym_max_multi_max_simplify(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        self.assertTrue(
+            statically_known_true(
+                torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
             )
         )
 

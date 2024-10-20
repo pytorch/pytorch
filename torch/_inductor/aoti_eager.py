@@ -275,7 +275,7 @@ def aoti_compile_with_persistent_cache(
                 with open(op_conf, mode) as op_conf_file:
                     try:
                         json_data = json.load(op_conf_file)
-                    except Exception:
+                    except Exception as e:
                         json_data = []
 
                     assert isinstance(json_data, list)

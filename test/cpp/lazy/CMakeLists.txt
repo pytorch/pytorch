@@ -36,8 +36,8 @@ if(USE_CUDA)
   target_compile_definitions(test_lazy PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_lazy PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_lazy PRIVATE USE_ROCM)

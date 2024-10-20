@@ -247,18 +247,24 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext):
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
 
         def task():
+            if aot_compile:
+                # We rely on JITInductor to compile the CUDA code,
+                # so that we can load it into AOTInductor.
+                CUDACodeCache.compile(source_code, "o")
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
-    def rocm(self, source_code, dst_file_ext):
+    def rocm(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
         def task():
+            if aot_compile:
+                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)

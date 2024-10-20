@@ -1,5 +1,4 @@
 # Owner(s): ["module: fx.passes"]
-# ruff: noqa: F841
 
 from dataclasses import dataclass
 import operator

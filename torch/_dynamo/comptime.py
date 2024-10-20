@@ -388,7 +388,7 @@ class _Comptime:
         """
 
         def inner(inner_ctx):
-            ctx = inner_ctx.parent()  # noqa: F841
+            ctx = inner_ctx.parent()
             builtins.breakpoint()
 
         comptime(inner)

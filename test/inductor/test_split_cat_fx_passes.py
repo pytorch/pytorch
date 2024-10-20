@@ -113,8 +113,6 @@ class TestSplitCatFxPasses(TestCase):
                 expected_split_norm_count,
                 msg=f"for {fn}",
             )
-            if expected_split_norm_count > 0:
-                self.assertIn("normalization_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
@@ -770,7 +768,7 @@ class TestSplitCatFxPasses(TestCase):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)
 
-        def unbind_cat(x):  # noqa: F841
+        def unbind_cat(x):
             return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):

@@ -57,7 +57,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         Ensure broadcast has no dependency on torch.distributed when run in single process.
         """
         func = mock.MagicMock()
-        broadcast(data_or_fn=func, rank=0)
+        res = broadcast(data_or_fn=func, rank=0)
         func.assert_called_once()
 
     def test_broadcast_result_raises_exceptions_from_func(
@@ -98,7 +98,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         Ensure all_gather has no dependency on torch.distributed when run in single process.
         """
         func = mock.MagicMock()
-        all_gather(data_or_fn=func)
+        res = all_gather(data_or_fn=func)
         func.assert_called_once()
 
     def test_all_gather_result_raises_exceptions_from_func(

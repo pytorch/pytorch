@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     EqualityConstraint,
     GuardOnDataDependentSymNode,
+    RelaxedUnspecConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
     ValueRanges,
@@ -93,15 +94,22 @@ def fakify(
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
-    dynamic_sizes = [
-        DimDynamic.DYNAMIC
-        if i in getattr(t, "_dynamo_weak_dynamic_indices", {})
-        else DimDynamic.STATIC
-        for i in range(n_dims)
-    ]
+    dynamic_sizes = []
+    constraint_sizes = [None] * n_dims
+    for i in range(n_dims):
+        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+        elif i in getattr(t, "_dynamo_dynamic_indices", {}):
+            # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
+            # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
+            # are raised when specializing.
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+        else:
+            dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=dynamic_sizes,
-        constraint_sizes=[None] * n_dims,
+        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
     )
     t_id = id(t)
     assert mode.shape_env is not None
@@ -242,6 +250,18 @@ def _flatten_dynamic_shapes(
     return flat_shapes
 
 
+def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
+    for attr in [
+        "_dynamo_weak_dynamic_indices",
+        "_dynamo_dynamic_indices",
+        "_dynamo_dynamic_range",
+        "_dynamo_static_indices",
+        "_dynamo_unbacked_indices",
+    ]:
+        if hasattr(tensor, attr):
+            delattr(tensor, attr)
+
+
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
@@ -292,9 +312,9 @@ def produce_guards_and_solve_constraints(
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
             original_signature,
-            dynamic_shapes,
+            dynamic_shapes,  # type: ignore[arg-type]
             constraint_violation_error,
-            forced_specializations,
+            forced_specializations,  # type: ignore[arg-type]
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
@@ -331,6 +351,11 @@ def make_constraints(
     }
     if not dynamic_shapes:
         return range_constraints
+
+    # clean up dynamic markers from tensors
+    for arg in pytree.tree_flatten(combined_args)[0]:
+        if isinstance(arg, torch.Tensor):
+            _clean_dynamic_markers(arg)
 
     # get individual dynamic shapes spec for each input
     if not isinstance(dynamic_shapes, dict):

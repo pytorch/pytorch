@@ -119,6 +119,7 @@ class TestCheckpoint(TestCase):
         # no checkpoint
         with MemoryDelta(x.device) as mem1:
             loss1 = net1(x1).sum()
+        graph_size1 = self._get_graph_size(loss1)
         loss1.backward()
 
         # with checkpoint

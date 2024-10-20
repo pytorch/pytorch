@@ -30,10 +30,11 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_is_or_higher_than,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
@@ -79,6 +80,8 @@ class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
 
 
 class ReplicateTest(MultiProcessInductorTestCase):
+    # TODO: consider using all devices? The min(2, ...) here would limit the
+    # test to always run on 2 GPUs only.
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -216,24 +219,29 @@ class ReplicateTest(MultiProcessInductorTestCase):
         ]
         self._test_compile(use_gpu=False, no_sync=True)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu_ac(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
+        # Check device capability wrt bf16
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        if not sm_is_or_higher_than(device, 8, 0):
+            self.skipTest("bf16 requires sm >= 8.0")
+
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
@@ -244,7 +252,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
         self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
@@ -261,7 +269,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
             use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
@@ -311,11 +319,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for _ in range(3):
+        for i in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for _ in range(3):
+        for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -324,11 +332,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for _ in range(3):
+        for i in range(3):
             fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
-        for _ in range(3):
+        for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
 
         fc.run(code)
@@ -347,11 +355,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for _ in range(3):
+        for i in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for _ in range(3):
+        for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
@@ -359,17 +367,18 @@ class ReplicateTest(MultiProcessInductorTestCase):
         code = self._test_bucketing(init_process_group=False, loop=2)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
-        for _ in range(3):
+        for i in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
-        for _ in range(3):
+        for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
 
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
+        # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
         torch.cuda.set_device("cuda:0")
@@ -385,7 +394,7 @@ class DDP_TP_Test(InductorTestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
     def test_ddp_tp(self):
         ref_model = Net()
