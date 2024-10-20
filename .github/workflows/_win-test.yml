@@ -49,7 +49,7 @@ jobs:
       - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
-          git config --system core.longpaths true
+          git config --global core.longpaths true
           git config --global core.symlinks true
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
