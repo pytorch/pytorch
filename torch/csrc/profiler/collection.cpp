@@ -195,7 +195,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         return {RawTensorMetadata(), sizes, strides};
       }
       const auto& raw_metadata = *tensor_metadata_it++;
-      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+      for ([[maybe_unused]] const auto _ :
+           c10::irange(raw_metadata.size_dim_)) {
         if (tensor_size_strides_it.exhausted()) {
           LOG(WARNING)
               << "Expected Tensor Size mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -204,7 +205,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+        for ([[maybe_unused]] const auto _ :
+             c10::irange(raw_metadata.size_dim_)) {
           if (tensor_size_strides_it.exhausted()) {
             LOG(WARNING)
                 << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -429,7 +431,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
-  for (C10_UNUSED const auto _ :
+  for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
     auto& first = it->basic_fields_;
     auto& second = (++it)->basic_fields_;
