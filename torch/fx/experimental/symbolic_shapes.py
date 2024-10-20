@@ -3879,8 +3879,6 @@ class ShapeEnv:
         guess
 
         """
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -3919,8 +3917,6 @@ class ShapeEnv:
         source: Optional[Source] = None,
     ) -> Union[float, SymFloat]:
         """Create a SymFloat value from a symbolic expression"""
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -4808,7 +4804,7 @@ class ShapeEnv:
                 res = f"{source_ref(source)} == {sexpr}"
                 exprs.append(res)
                 if (s0 := self.source_to_var.get(srcname)) is not None:
-                    if source != (canonical_source := self.var_to_sources[s0][0]):
+                    if source != self.var_to_sources[s0][0]:
                         verbose_exprs.append(
                             f"{res}  # duck sizing added this equality because these "
                             f"variables had the same size {self.var_to_val[s0]} "
@@ -6140,7 +6136,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:
