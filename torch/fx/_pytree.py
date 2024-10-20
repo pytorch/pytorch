@@ -34,8 +34,7 @@ def register_pytree_flatten_spec(
 
 
 # TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
-#                  Use a class instead.
-class _DummyLeaf:
+class _DummyLeaf:  # use a class instead.
     pass
 
 
@@ -54,7 +53,8 @@ def tree_flatten_spec(
         assert isinstance(spec, PyTreeSpec), "Expected a PyTreeSpec"
         return [accessor(pytree) for accessor in spec.accessors()]
 
-    dummy_tree = python_pytree.tree_unflatten([_DummyLeaf] * spec.num_leaves, spec)
+    dummy_leaf = _DummyLeaf
+    dummy_tree = python_pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
     return [
         python_pytree.key_get(pytree, key_path)
         for key_path, _ in python_pytree.tree_leaves_with_path(dummy_tree)
