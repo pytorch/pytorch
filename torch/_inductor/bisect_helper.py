@@ -468,7 +468,7 @@ class BisectionManager:
                     cls.bisection_enabled = bisection_enabled_orig
                     cls.delete_bisect_status()
 
-            DisableBisect()
+            cleanup = DisableBisect()
 
         curr_backend = cls.get_backend()
         curr_subsystem_name = cls.get_subsystem()
