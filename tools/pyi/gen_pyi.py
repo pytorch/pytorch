@@ -254,7 +254,7 @@ def sig_for_ops(opname: str) -> list[str]:
         ]
     elif name in asymmetric_comparison_ops:
         return [
-            "def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
         ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
