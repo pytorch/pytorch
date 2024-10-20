@@ -1216,7 +1216,7 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, l_y_ : torch._subclasses.fake_tensor.FakeTensor):
+def forward(self, child : torch.Tensor, l_y_ : torch.Tensor):
     child_1 = child[0];  child_1 = None
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
@@ -1248,7 +1248,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch._subclasses.fake_tensor.FakeTensor):
+def forward(self, child : torch.Tensor):
     child_1 = child.sin()
     child_2 = child.sin();  child = None
     return (child_1, child_2)""",
@@ -1289,7 +1289,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch._subclasses.fake_tensor.FakeTensor):
+def forward(self, child : torch.Tensor):
     return (child, child, child, child, child, child, child)""",
             )
 
@@ -1332,7 +1332,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, const_unused : int):
+def forward(self, child : torch.Tensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1366,7 +1366,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, const_unused : int):
+def forward(self, child : torch.Tensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
