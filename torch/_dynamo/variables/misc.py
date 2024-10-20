@@ -976,7 +976,7 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -1325,7 +1325,7 @@ class NullVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):

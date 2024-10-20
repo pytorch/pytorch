@@ -116,7 +116,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
