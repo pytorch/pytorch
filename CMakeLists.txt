@@ -242,6 +242,7 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_XPU "Use XPU" ON)
+option(NO_DEPRECATED "Don't compile deprecated code" OFF)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
@@ -881,6 +882,10 @@ if(USE_ROCM)
   if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
   endif()
+endif()
+
+if(NO_DEPRECATED)
+  add_compile_definitions(C10_NO_DEPRECATED)
 endif()
 
 if(DEBUG_CUDA)
