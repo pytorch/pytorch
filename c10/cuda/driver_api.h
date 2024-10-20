@@ -8,7 +8,7 @@
     CUresult __err = EXPR;                                                 \
     if (__err != CUDA_SUCCESS) {                                           \
       const char* err_str;                                                 \
-      CUresult get_error_str_err C10_UNUSED =                              \
+      CUresult get_error_str_err [[maybe_unused]] =                        \
           c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                             \
         AT_ERROR("CUDA driver error: unknown error");                      \
