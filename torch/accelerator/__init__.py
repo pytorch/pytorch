@@ -11,9 +11,12 @@ from ._utils import _device_t, _get_device_index
 
 
 def current_accelerator() -> torch.device:
-    r"""Return the device of the current :ref:`accelerator<accelerators>`.
+    r"""Return the device of the current :ref:`accelerator<accelerators>`. And use
+    :func:`torch.accelerator.is_available` to check if it is available.
     Note that the index of the returned :class:`torch.device` will be ``None``, use
-    use :func:`torch.accelerator.current_device_idx` to know the current index being used.
+    :func:`torch.accelerator.current_device_idx` to know the current index being used.
+    This function doesn't gaurantee that the current accelerator is available, use
+    :func:`torch.accelerator.is_available` to check its availability.
 
     Returns:
         torch.device: return the current accelerator as :class:`torch.device`.
@@ -22,6 +25,8 @@ def current_accelerator() -> torch.device:
     Example::
 
         >>> # xdoctest: +SKIP
+        >>> if torch.accelerator.is_available():
+        >>>     return
         >>> if torch.accelerator.current_accelerator().type == 'cuda':
         >>>     is_half_supported = torch.cuda.has_half()
         >>> elif torch.accelerator.current_accelerator().type == 'xpu':
@@ -98,7 +103,8 @@ def set_stream(stream: torch.Stream) -> None:
 
 
 def synchronize(device: _device_t = None, /) -> None:
-    r"""Wait for all kernels in all streams on the given device to complete.
+    r"""Wait for all kernels in all streams on the given device to complete. This function is a no-op
+    if the current :ref:`accelerator<accelerators>` is not initialized.
 
     Args:
         device (:class:`torch.device`, str, int, optional): device for which to synchronize. It must match
