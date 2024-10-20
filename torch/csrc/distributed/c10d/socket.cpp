@@ -921,6 +921,11 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
           err);
 
       return ConnectResult::Retry;
+    } else if (err == std::errc::timed_out) {
+      C10D_WARNING(
+          "The server socket on {} has timed out, will retry.", addr, err);
+
+      return ConnectResult::Retry;
     } else {
       recordError(
           "The client socket has failed to connect to {} {}.", addr, err);
