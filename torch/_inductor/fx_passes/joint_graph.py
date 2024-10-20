@@ -469,6 +469,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             config.joint_custom_post_pass(graph.graph)
             count += 1
 
+    graph.print_readable()
+    if config.AutoChunker.enable:
+        from .auto_chunker import AutoChunker
+
+        AutoChunker(graph).chunk_batch_dimension()
+
     if count:
         stable_topological_sort(graph.graph)
         graph.graph.lint()

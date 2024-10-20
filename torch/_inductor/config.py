@@ -764,6 +764,17 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
 
+class AutoChunker:
+    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+
+    # If an op has too small input tensors, we skip chunking it.
+    input_threshold = 1024
+
+    # Apply auto chunker if an op amplifies input by more than amplify_threshold
+    # times.
+    amplify_threshold = 16
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
