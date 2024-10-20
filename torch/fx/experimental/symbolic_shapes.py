@@ -4687,7 +4687,6 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
-        print("haha", placeholders, sources)
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource

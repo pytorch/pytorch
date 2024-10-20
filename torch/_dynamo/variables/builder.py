@@ -2161,8 +2161,13 @@ def wrap_fx_proxy_cls(
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
-    # We allow placeholders to carry example_value in the beginning
-    if not proxy.node.op == "placeholder":
+    # Placeholders always carry example_value in node.meta.
+    # non-placeholders always have no example_value in node.meta
+    if proxy.node.op == "placeholder":
+        assert (
+            "example_value" in proxy.node.meta
+        ), f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+    else:
         assert (
             "example_value" not in proxy.node.meta
         ), f"{proxy.node.meta['example_value']}"
