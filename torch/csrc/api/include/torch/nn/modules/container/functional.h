@@ -64,16 +64,9 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) > 0)>>
   explicit FunctionalImpl(SomeFunction original_function, Args&&... args)
-      // NOLINTNEXTLINE(modernize-avoid-bind)
-      : function_(std::bind(
-            original_function,
-            /*input=*/std::placeholders::_1,
-            std::forward<Args>(args)...)) {
-    // std::bind is normally evil, but (1) gcc is broken w.r.t. handling
-    // parameter pack expansion in lambdas and (2) moving parameter packs into
-    // a lambda only works with C++14, so std::bind is the more move-aware
-    // solution here.
-  }
+      : function_([=](auto&& input) {
+          return original_function(input, std::forward<Args>(args)...);
+        }) {}
 
   void reset() override;
 
