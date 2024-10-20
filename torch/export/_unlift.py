@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
-from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
+from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -21,6 +21,9 @@ from .exported_program import (
 
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    if not self.validate_inputs:
+        return
+
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
 
     if received_spec != self._in_spec:
@@ -31,7 +34,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
             f"{received_spec}"
         )
 
-    return _check_input_constraints_for_graph(
+    _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
         flat_args_with_path,
         self.range_constraints,
@@ -216,6 +219,9 @@ def _register_attrs_to_new_gm(
             attr_kind=_AttrKind.PARAMETER,
         )
 
+    # Technically this doesn't account for the aliased multiple constants but
+    # it is ok because we have a seperate pass later in the stack that populates
+    # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
     ):
@@ -251,6 +257,7 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
         super().__init__(root, graph)
         # Need to fix up non-persistent buffers.
         self.range_constraints = range_constraints or []
+        self.validate_inputs = True
 
 
 def _create_stateful_graph_module(
@@ -258,7 +265,7 @@ def _create_stateful_graph_module(
     range_constraints,
     # TODO(suo) this should not be optional, but is since we still ahve
     # capture_pre_autograd_graph grr
-    graph_signature: Optional[ExportGraphSignature] = None,
+    ep: Optional[ExportedProgram] = None,
 ):
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
@@ -270,15 +277,22 @@ def _create_stateful_graph_module(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
-    if graph_signature is None:
+    if ep is None:
         return stateful_gm
+
+    # When we have a constant that has requires_grad=True, we need to detach it
+    # when we unlift as the tensors that require gradients should be registered
+    # via parameters. But this is problematic when we have aliasing two constants
+    # because when we call detach, they will become different tensors. This dict
+    # keeps track of this logic.
+    original_tensor_to_detached_tensor = {}
 
     # Fix up lifted tensor constants.
     # fx.GraphModule() constructor silently turns a constant attribute of plain_graph_module
     # into a buffer in stateful_gm and creates an inconsistency with graph_signature.
     # We fix this by de-registering these buffers in lifted_tensor_constants
     # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
-    for constant_fqn in graph_signature.lifted_tensor_constants:
+    for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
         # We call detach on the constant_val since they're tensor contants and we don't need to
@@ -292,16 +306,42 @@ def _create_stateful_graph_module(
                 f"torch.export will detach it and treat it as a constant tensor "
                 f"but please register it as parameter instead."
             )
-            buffer = buffer.detach()
+            detached_buffer = buffer.detach()
+            original_tensor_to_detached_tensor[buffer] = detached_buffer
+            buffer = detached_buffer
         *prefix, field = constant_fqn.rsplit(".")
-        submod = _recursive_getattr(stateful_gm, prefix)
+        submod = torch.fx.graph_module._get_attr_via_attr_list(stateful_gm, prefix)
         delattr(submod, field)
         _assign_attr(buffer, stateful_gm, constant_fqn, attr_kind=_AttrKind.CONSTANT)
+
+    # Constants are not preserved well when we create a new GraphModule unlike param/buffers
+    for const_name, value in ep.constants.items():
+        if not torch.fx.graph_module._has_attr(stateful_gm, const_name):
+            if isinstance(value, torch.Tensor):
+                if value.requires_grad:
+                    warnings.warn(
+                        f"A model attribute `{const_name}` requires gradient "
+                        f"but it's not properly registered as a parameter. "
+                        f"torch.export will detach it and treat it as a constant tensor "
+                        f"but please register it as parameter instead."
+                    )
+                    if value in original_tensor_to_detached_tensor:
+                        value = original_tensor_to_detached_tensor[value]
+                    else:
+                        detached_value = value.detach()
+                        original_tensor_to_detached_tensor[value] = detached_value
+                        value = detached_value
+                _assign_attr(
+                    value,
+                    stateful_gm,
+                    const_name,
+                    attr_kind=_AttrKind.CONSTANT,
+                )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
     # here.
-    for buffer in graph_signature.non_persistent_buffers:
+    for buffer in ep.graph_signature.non_persistent_buffers:
         _assign_attr(
             plain_graph_module.get_buffer(buffer),
             stateful_gm,
@@ -317,8 +357,9 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
-    forward_arg_names = ep.graph_module.meta.get("forward_arg_names")
-
+    forward_arg_names = (
+        sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
+    )
     lifted_inputs: List[Optional[str]] = [
         (
             in_spec.target
@@ -354,8 +395,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.constants,
         forward_arg_names=forward_arg_names,
     )
-    unlift_gm = _create_stateful_graph_module(
-        new_gm, ep.range_constraints, ep.graph_signature
-    )
+    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm

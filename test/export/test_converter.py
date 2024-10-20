@@ -25,7 +25,7 @@ class TestConverter(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:  # noqa: F841
+        class FakeTensorQueue:
             def __init__(self, queue):
                 self.queue = queue
 
@@ -838,6 +838,32 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    def test_convert_if_duplicate_attr_names(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = 1
+                self.h = 2
+
+            def forward(self, x: torch.Tensor, y: int):
+                self.w = self.w * 10
+                self.h = self.h * 20
+
+                if y > 10:
+                    res = self.w + x
+                else:
+                    res = self.h + x
+
+                if y < 10:
+                    res = self.w + res
+                else:
+                    res = self.h + res
+
+                return res
+
+        inp = (torch.ones(3), 5)
+        self._check_equal_ts_ep_converter(M(), inp, option=["script"])
+
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -991,7 +1017,7 @@ class TestConverter(TestCase):
             torch.randn([2, 3, 4]).to(torch.float32),
             torch.randn([2, 3, 4]).to(torch.float64),
         )
-        self._check_equal_ts_ep_converter(func6, inp)
+        ep_list = self._check_equal_ts_ep_converter(func6, inp)
 
         # TODO: Additional check once dynamic shape is supported.
         # for ep in ep_list:
@@ -1327,7 +1353,7 @@ class TestConverter(TestCase):
     def test_ts2ep_with_loop(self):
         def func1(x, x_list: List[torch.Tensor]):
             a, b, c = x, x, x
-            for _ in range(1, 5, 2):
+            for i in range(1, 5, 2):
                 for k in range(5):
                     a = a + a + k
                     b = b + b - k
@@ -1338,12 +1364,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # noqa: F841
+        def func2(x):
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # noqa: F841
+        def func3(x):
             while x.sum() < 10:
                 x += x.sin()
             return x

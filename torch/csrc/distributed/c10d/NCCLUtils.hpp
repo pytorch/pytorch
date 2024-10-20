@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,6 +16,8 @@
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
+
+constexpr int64_t kCommInitBusyWaitMillis = 2;
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
@@ -101,8 +104,22 @@
     }                                                                         \
   } while (0)
 
+// Error out if (current time - startTime) is greater than timeout (sec).
+#define C10D_CHECK_TIMEOUT(startTime, timeout)                              \
+  do {                                                                      \
+    auto currentTime = std::chrono::steady_clock::now();                    \
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(    \
+                           currentTime - startTime)                         \
+                           .count();                                        \
+    if (timeElapsed > timeout) {                                            \
+      std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" + \
+          std::to_string(__LINE__);                                         \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                       \
+    }                                                                       \
+  } while (0)
+
 // Macro to throw on a non-successful NCCL return value, non-blocking.
-#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason)                     \
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
   ncclResult_t result = cmd;                                                  \
   auto startTimepoint = std::chrono::steady_clock::now();                     \
   while (result == ncclInProgress) {                                          \
@@ -119,6 +136,7 @@
         TORCH_CHECK_WITH(DistBackendError, false, err);                       \
       }                                                                       \
     }                                                                         \
+    yield_fn;                                                                 \
     ncclCommGetAsyncError(comm, &result);                                     \
   }                                                                           \
   if (result != ncclSuccess) {                                                \
@@ -127,6 +145,24 @@
         "\n" + getNcclErrorDetailStr(result, failureReason);                  \
     TORCH_CHECK_WITH(DistBackendError, false, err);                           \
   }
+
+#define C10D_SCHED_SLEEP()     \
+  std::this_thread::sleep_for( \
+      std::chrono::milliseconds(kCommInitBusyWaitMillis))
+
+// Macro to throw exception on a non-successful NCCL return value or timeout.
+// This macro uses sched_yield() to yield the CPU.
+// Thus suitable for NCCL calls that would quickly turn ncclSuccess, e.g.
+// collectives.
+#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, sched_yield())
+
+// Macro to throw exception on a non-successful NCCL return value or timeout.
+// This macro uses sleep to yield the CPU.
+// Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
+// ncclCommInitRankConfig, ncclCommFinalize, etc.
+#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, comm, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
   ncclResult_t state = cmd;                                                  \
@@ -146,6 +182,7 @@
           TORCH_CHECK_WITH(DistBackendError, false, err);                    \
         }                                                                    \
       }                                                                      \
+      sched_yield();                                                         \
       ncclCommGetAsyncError(comm->getNcclComm(), &state);                    \
     } while (state == ncclInProgress);                                       \
   }                                                                          \
@@ -259,11 +296,11 @@ class TORCH_API DebugInfoWriter {
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm),
-        aborted_(false),
+      : aborted_(false),
         ncclAsyncErr_(ncclSuccess),
         commFailureReason_(std::nullopt),
-        initialized_(false) {}
+        initialized_(false),
+        ncclComm_(ncclComm) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -464,15 +501,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle;
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        ncclCommRegister(comm, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -491,15 +530,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(ncclComm_, handle),
+        ncclCommDeregister(comm, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -507,12 +548,13 @@ class NCCLComm {
 #endif
   }
 
+  std::string repr() const {
+    return c10::str((void*)ncclComm_);
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
-  // a helper function to wait until the communicator is initialized;
-  void waitUntilInitialized(int timeoutSecs);
-  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
@@ -529,6 +571,11 @@ class NCCLComm {
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
+
+ private:
+  ncclComm_t ncclComm_{nullptr};
+  // a helper function to wait until the communicator is initialized;
+  void waitUntilInitialized();
 };
 
 // Helper that automatically cleans up premul sums.
@@ -626,9 +673,9 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int64_t, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?

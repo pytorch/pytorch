@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 if not dist.is_available():
@@ -218,7 +218,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_compile(self):
         self.run_subtests(
@@ -260,7 +260,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
         model = torch.compile(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for _ in range(10):
+        for i in range(10):
             losses = []
             inp = ref_model.get_input(torch.device("cuda"))
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):

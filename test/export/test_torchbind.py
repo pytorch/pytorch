@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: export"]
-# ruff: noqa: F841
 
 
 import unittest
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -721,6 +721,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
         safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
@@ -1094,12 +1095,12 @@ class TestCompileTorchbind(TestCase):
                 0,
             ).fill_(-1)
         )
-        tq3 = torch.classes._TorchScriptTesting._TensorQueue(  # noqa: F841
+        tq3 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)
         )
-        tq4 = torch.classes._TorchScriptTesting._TensorQueue(  # noqa: F841
+        tq4 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)

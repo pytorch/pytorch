@@ -237,6 +237,9 @@ print(torch.xpu.device_count())
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(xpu_stream, torch.Stream)
+        self.assertTrue(issubclass(type(xpu_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(xpu_stream).mro())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
@@ -262,6 +265,10 @@ print(torch.xpu.device_count())
             NotImplementedError, "elapsedTime is not supported by XPU backend."
         ):
             event1.elapsed_time(event2)
+        xpu_event = torch.xpu.Event()
+        self.assertIsInstance(xpu_event, torch.Event)
+        self.assertTrue(issubclass(type(xpu_event), torch.Event))
+        self.assertTrue(torch.Event in type(xpu_event).mro())
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -367,7 +374,7 @@ print(torch.xpu.device_count())
             self.assertEqual(copy.get_device(), original.get_device())
 
     def test_out_of_memory(self):
-        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
+        tensor = torch.zeros(1024, device="xpu")
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
@@ -404,7 +411,7 @@ print(torch.xpu.device_count())
     def test_device_memory_allocated(self):
         device_count = torch.xpu.device_count()
         current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
-        torch.ones(10, device="xpu:0")
+        x = torch.ones(10, device="xpu:0")
         self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(
@@ -412,6 +419,14 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+
+    def test_get_arch_list(self):
+        arch_list = torch.xpu.get_arch_list()
+        if not arch_list:
+            return
+        flags = torch.xpu.get_gencode_flags()
+        for arch in arch_list:
+            self.assertTrue(arch in flags)
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)

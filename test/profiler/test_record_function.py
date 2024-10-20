@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: profiler"]
-# ruff: noqa: F841
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events

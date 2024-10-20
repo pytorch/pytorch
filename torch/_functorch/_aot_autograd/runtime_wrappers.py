@@ -274,6 +274,7 @@ def _create_runtime_wrapper(
     if config.unlift_effect_tokens:
         assert len(runtime_metadata.tokens) == 0
 
+    replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
             make_output_handler(info, runtime_metadata, trace_joint)
@@ -1061,6 +1062,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+
+        num_aliased_args_with_metadata_mutations = len(
+            aliased_arg_idx_with_metadata_mutations
+        )
+
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
@@ -1848,13 +1854,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                     "The grad inputs should be same tensor subclass type as forward output"
                                 )
 
-                    # Get the number of tangents after unwrapping
-                    len_tangents = len(  # noqa: F841
-                        unwrap_tensor_subclasses(
-                            tangents,
-                            is_joint_structure=False,
-                        )
-                    )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
@@ -1915,7 +1914,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if lazy_backward_info is None:
                             raise RuntimeError(
                                 """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
                             )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph

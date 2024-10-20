@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 import math
@@ -33,6 +32,8 @@ skip = functools.partial(skipif, True)
 HAS_REFCOUNT = True
 IS_WASM = False
 IS_PYPY = False
+
+import string
 
 # FIXME: make from torch._numpy
 # These are commented, as if they are imported, some of the tests pass for the wrong reasons
@@ -1529,7 +1530,7 @@ class TestVectorize(TestCase):
     def test_string_ticket_1892(self):
         # Test vectorization over strings: issue 1892.
         f = np.vectorize(lambda x: x)
-        s = "0123456789" * 10
+        s = string.digits * 10
         assert_equal(s, f(s))
 
     def test_cache(self):

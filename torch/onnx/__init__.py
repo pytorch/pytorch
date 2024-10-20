@@ -154,6 +154,7 @@ def export(
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     report: bool = False,
+    optimize: bool = False,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -285,6 +286,7 @@ def export(
             Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
             at the same time.
         report: Whether to generate a markdown report for the export process.
+        optimize: Whether to optimize the exported model.
         verify: Whether to verify the exported model using ONNX Runtime.
         profile: Whether to profile the export process.
         dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
@@ -295,7 +297,7 @@ def export(
 
         training: Deprecated option. Instead, set the training mode of the model before exporting.
         operator_export_type: Deprecated option. Only ONNX is supported.
-        do_constant_folding: Deprecated option. The exported graph is always optimized.
+        do_constant_folding: Deprecated option.
         custom_opsets: Deprecated.
             A dictionary:
 
@@ -354,6 +356,7 @@ def export(
             external_data=external_data,
             dynamic_shapes=dynamic_shapes,
             report=report,
+            optimize=optimize,
             verify=verify,
             profile=profile,
             dump_exported_program=dump_exported_program,
