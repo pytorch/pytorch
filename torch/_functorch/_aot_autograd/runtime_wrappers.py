@@ -274,7 +274,6 @@ def _create_runtime_wrapper(
     if config.unlift_effect_tokens:
         assert len(runtime_metadata.tokens) == 0
 
-    replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
             make_output_handler(info, runtime_metadata, trace_joint)
@@ -1062,11 +1061,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
-
-        num_aliased_args_with_metadata_mutations = len(
-            aliased_arg_idx_with_metadata_mutations
-        )
-
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:

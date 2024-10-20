@@ -621,7 +621,7 @@ def create_functionalized_fn(
                 flat_outs = [from_fun(o) for o in flat_outs]
                 num_outs = len(meta.output_info)
 
-                for i, outp in enumerate(flat_outs[:num_outs]):
+                for i in range(num_outs):
                     info = meta.output_info[i]
                     if info.output_type != OutputType.is_input:
                         continue

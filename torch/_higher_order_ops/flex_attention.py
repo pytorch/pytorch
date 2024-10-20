@@ -424,7 +424,7 @@ def flex_attention_functionalize(
         + [torch.zeros((), dtype=torch.int) for _ in range(4)]
         + list(score_mod_other_buffers_unwrapped)
     )
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
@@ -465,7 +465,7 @@ def flex_attention_fake_tensor_mode(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
         v_head_dim = value.size(-1)
-        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
+        batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
@@ -1066,7 +1066,7 @@ def flex_attention_backward_functionalize(
         for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
     )
 
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
 

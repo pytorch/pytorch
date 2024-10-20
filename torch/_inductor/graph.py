@@ -1992,7 +1992,7 @@ class GraphLowering(torch.fx.Interpreter):
             from .codecache import AotCodeCompiler
 
             assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
-            code, linemap = self.codegen_with_cpp_wrapper()
+            code, _linemap = self.codegen_with_cpp_wrapper()
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
