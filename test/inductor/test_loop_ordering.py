@@ -140,7 +140,7 @@ class ImplDetailTest(TestCase):
 
         def _create_computed_buffer():
             def inner_fn(index):
-                i0, i1, i2, i3 = index
+                i0, _, i2, i3 = index
                 return ops.load(
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )

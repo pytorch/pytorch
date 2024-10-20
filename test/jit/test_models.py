@@ -376,7 +376,7 @@ class TestModels(JitTestCase):
                 batch_size = inputs.size()[1]
                 state_shape = self.config.n_cells, batch_size, self.config.d_hidden
                 h0 = c0 = inputs.new_zeros(state_shape)
-                outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
+                _, (ht, _) = self.rnn(inputs, (h0, c0))
                 return (
                     ht[-1]
                     if not self.config.birnn
@@ -593,7 +593,6 @@ class TestModels(JitTestCase):
     @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
-        x = torch.ones(1, 3, 224, 224)
         m_orig = torch.jit.trace(
             torchvision.models.resnet18(), torch.ones(1, 3, 224, 224)
         )

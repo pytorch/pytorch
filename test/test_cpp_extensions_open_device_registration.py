@@ -275,7 +275,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertTrue(z.is_foo)
 
     def test_open_device_packed_sequence(self):
-        device = self.module.custom_device()
+        device = self.module.custom_device()  # noqa: F841
         a = torch.rand(5, 3)
         b = torch.tensor([1, 1, 1, 1, 1])
         input = torch.nn.utils.rnn.PackedSequence(a, b)
@@ -447,7 +447,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         with torch._subclasses.fake_tensor.FakeTensorMode.push():
             a = torch.empty(1, device="foo")
             b = torch.empty(1, device="foo:0")
-            result = a + b
+            result = a + b  # noqa: F841
 
     def test_open_device_named_tensor(self):
         torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])

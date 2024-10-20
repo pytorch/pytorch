@@ -321,7 +321,6 @@ def implements_tensor_like(torch_function):
     return decorator
 
 def generate_tensor_like_torch_implementations():
-    torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
     # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
@@ -1537,8 +1536,6 @@ class TestTorchFunctionMode(TestCase):
         self.assertFalse(called)
 
     def test_disable_enable_subclass(self):
-        called = False
-
         class A(torch.Tensor):
             pass
 
@@ -1640,7 +1637,6 @@ class TestTorchFunctionMode(TestCase):
             base_mode = BaseTorchFunctionMode()
             with base_mode:
                 torch.set_default_device("cpu")
-                x = torch.ones(2, 2)
                 stack = get_stack()
                 self.assertIsInstance(stack[0], DeviceContext)
                 self.assertEqual(stack[0].device, torch.device("cpu"))

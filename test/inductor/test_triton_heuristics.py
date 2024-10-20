@@ -145,7 +145,7 @@ class TestTritonHeuristics(TestCase):
             cfg.pre_hook = pre_hook
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
-            autotuner = CachingAutotuner(**args)
+            CachingAutotuner(**args)
 
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))

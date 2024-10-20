@@ -55,7 +55,7 @@ class SmokeTest(TestCase):
 
     def test_compile_invalid_options(self):
         with self.assertRaises(RuntimeError):
-            opt_f = torch.compile(_test_f, mode="ha")
+            torch.compile(_test_f, mode="ha")
 
 
 if __name__ == "__main__":

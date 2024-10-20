@@ -696,9 +696,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return tensor_x
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, _ = make_aot_ort(dynamic=True)
         else:
-            local_aot_ort, local_ort = "onnxrt", None
+            local_aot_ort, _ = "onnxrt", None
 
         prefix = f"test_dump_model_{'local' if test_local_backend else 'onnxrt'}_"
         expected = f"{prefix}0.onnx"
@@ -722,12 +722,12 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         with onnxrt_dump_path(prefix):
             example_args = example_args_collection[0]
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertTrue(os.path.exists(expected_graph))
             self.assertFalse(os.path.exists(not_expected))
 
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
 

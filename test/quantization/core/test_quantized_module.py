@@ -203,7 +203,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.scale, loaded_from_package.scale)
         self.assertEqual(qlinear.zero_point, loaded_from_package.zero_point)
 
-        for name, module in loaded_from_package.named_modules():
+        for name, _ in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
             assert(name is not None)  # noqa: E275
 
@@ -1157,7 +1157,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         x_zero_point = 0
         y_scale = 5.0 / 256
         y_zero_point = 127
-        alpha = 1.5
 
         dims = (1, 4, 8)
 
