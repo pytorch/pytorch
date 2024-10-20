@@ -5,7 +5,6 @@
 #include <cstdlib>
 
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 
 #if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
@@ -85,12 +84,14 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey = c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
-  const auto cert = c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
+  const auto pkey =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
+  const auto cert =
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
   const auto caFile =
-      c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE");
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
   const auto caPath =
-      c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH");
+      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
   return ::gloo::transport::tcp::tls::CreateDevice(
       attr, pkey, cert, caFile, caPath);
 }
