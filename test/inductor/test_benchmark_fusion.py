@@ -279,7 +279,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
                     "empty_strided_cuda", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_0.run").check_count(
+                ).check("triton_tem_fused_relu_0.run").check_count(
                     "del", 3, exactly=True
                 ).check(
                     "return"
