@@ -25,6 +25,10 @@
 #include <c10/util/irange.h>
 #include <variant>
 
+#if AT_KLEIDIAI_ENABLED()
+#include <ATen/native/kleidiai/kai_kernels.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -3431,78 +3435,138 @@ DEFINE_DISPATCH(int8pack_mm_stub);
 
 Tensor _convert_weight_to_int4pack_cpu(
     const Tensor& in,
-    int64_t innerKTiles) {
-
-  TORCH_CHECK(in.dim() == 2,
-      __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kByte,
-      __func__, " : expect weight to be kByte.");
-  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
-      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
-
+    int64_t innerKTiles,
+    const int64_t qGroupSize,
+    int64_t N,
+    const Tensor& qScaleAndZeros,
+    const Tensor& bias) {
+  TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
+  TORCH_CHECK(
+      in.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
   auto weight = in.contiguous();
-  auto N = weight.size(0);
-  auto K = weight.size(1) * 2;
+
+  int64_t K = weight.size(1) * 2;
+  std::vector<int64_t> weight_packed_dims;
+  at::TensorOptions weight_packed_options = at::TensorOptions().dtype(at::kInt);
+
+#if AT_KLEIDIAI_ENABLED()
+  TORCH_CHECK(
+      qGroupSize == 0 || qGroupSize == 32,
+      __func__,
+      ": Group size should be 32 or 0. Provided ",
+      qGroupSize);
+
+  if (qGroupSize == 0) {
+    TORCH_CHECK(
+        qScaleAndZeros.numel() != 0,
+        __func__,
+        ": Scales can't be null for channelwise weight packing");
+  } else {
+    TORCH_CHECK(
+        bias.numel() == 0,
+        __func__,
+        ": Bias not supported in groupwise kernel");
+    K = (weight.size(0) / N) * qGroupSize;
+  }
+
+  const int64_t rhs_packed_size =
+      kleidiai::kai_pack_rhs_int4_size(N, K, qGroupSize);
+  weight_packed_dims = {rhs_packed_size};
+  weight_packed_options = weight_packed_options.dtype(at::kByte);
+#else
+  TORCH_CHECK(
+      innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
+      __func__,
+      " : innerKTiles need to be 2, 4, or 8, got ",
+      innerKTiles);
+  N = weight.size(0);
 
   // Create fake shapes for cpu. The meta registration in dynamo requires
   // operator has the same output shape for each device. So creating a fake
   // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
   constexpr int64_t kNTileSize = 8;
   constexpr int64_t kKTileSize = 16;
-  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
-
-  TORCH_CHECK(N % 16 == 0,
-      __func__, " : expect N to be dividable by 16");
   const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
-  TORCH_CHECK( K % kSuperKTileSize == 0,
-      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
+  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
+  TORCH_CHECK(N % 16 == 0, __func__, " : expect N to be divisible by 16");
+  TORCH_CHECK(
+      K % kSuperKTileSize == 0,
+      __func__,
+      " : expect K to be divisible by ",
+      kSuperKTileSize);
+
   auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+  weight_packed_dims = {nTiles, kSuperTiles, 32, innerKTiles / 2};
+#endif
 
-  auto weight_packed = at::empty(
-      {nTiles, kSuperTiles, 32, innerKTiles / 2},
-      at::TensorOptions().dtype(at::kInt));
+  auto weight_packed = at::empty(weight_packed_dims, weight_packed_options);
 
+#if AT_KLEIDIAI_ENABLED()
+  kleidiai::kai_pack_int4_rhs(
+      weight_packed, weight, qScaleAndZeros, bias, N, K, qGroupSize);
+#else
   weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+#endif
+
   return weight_packed;
 }
 
 Tensor _weight_int4pack_mm_cpu(
     const Tensor& A,
     const Tensor& B,
-    int64_t qGroupSize,
-    const Tensor& qScaleAndZeros) {
-
-  constexpr int64_t kNTileSize = 8;
-
+    const int64_t qGroupSize,
+    const Tensor& qScaleAndZeros,
+    int64_t N) {
   auto M = A.size(0);
-  auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
-      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
-  TORCH_CHECK(A.dim() == 2,
-      __func__, " : expect A to be 2D tensor.");
+#if AT_KLEIDIAI_ENABLED()
+  TORCH_CHECK(
+      A.dtype() == kFloat,
+      __func__,
+      " : expect A to be either 32-bit float tensor.");
+  TORCH_CHECK(
+      qGroupSize == 0 || qGroupSize == 32,
+      __func__,
+      ": Group size should be 32 or 0");
+#else
+  constexpr int64_t kNTileSize = 8;
+  N = B.size(0) * kNTileSize;
 
-  TORCH_CHECK(B.dtype() == kInt,
-      __func__, " : expect B to be int32 tensor.");
-  TORCH_CHECK(B.is_contiguous(),
-      __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.dim() == 4,
-      __func__, " : expect B to 4d tensor.");
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__,
+      " : expect A to be either 32-bit or 16-bit float tensor.");
+  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
-  TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
-      || qGroupSize == 256,
-      __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.is_contiguous(), __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.dim() == 4, __func__, " : expect B to 4d tensor.");
 
-  TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
-      && qScaleAndZeros.size(2) == 2,
-      __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
+  TORCH_CHECK(
+      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
+          qGroupSize == 256,
+      __func__,
+      ": expect qGroupSize to be 32, 64, 128 or 256, got ",
+      qGroupSize);
+
+  TORCH_CHECK(
+      qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N &&
+          qScaleAndZeros.size(2) == 2,
+      __func__,
+      ": expect qScaleAndZeros to be 3d tensor with sizes [:, ",
+      N,
+      ", 2]");
+#endif
 
   auto C = at::empty({M, N}, A.options());
-  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
 
+#if AT_KLEIDIAI_ENABLED()
+  kleidiai::kai_quant_pack_lhs_int4_mm(C, A, B, M, N, K, qGroupSize);
+#else
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
+#endif
   return C;
 }
 

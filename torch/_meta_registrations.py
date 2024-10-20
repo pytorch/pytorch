@@ -3239,39 +3239,164 @@ def meta__int_mm(a, b):
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
+def kai_roundup(a: int, b: int) -> int:
+    return ((a + b - 1) // b) * b
+
+
+def get_kai_packed_weight_size(n_bits, N, K, groupsize):
+    if n_bits == 4:
+        if groupsize == 0:  # channelwise
+            # dotprod params only [1x8x32_neon_dotprod]
+            kai_nr = 8
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_sum_rhs = 4  # sizeof(int32_t)
+            kai_num_bytes_multiplier_rhs = 4  # sizeof(float)
+            kai_num_bytes_bias = 4  # sizeof(float)
+
+            def kai_k_roundedup(k, kr, sr):
+                # Since we pack a float and int32 value at the end of the row,
+                # we must make sure that k is a multiple of 4 for alignment
+                kr_sr_roundedup4 = kai_roundup(kr * sr, 4)
+                return kai_roundup(k, kr_sr_roundedup4)
+
+            def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                k, nr, kr, sr
+            ):
+                k_internal = kai_k_roundedup(k, kr, sr)
+
+                assert (k_internal % 2) == 0, "k_internal must be even"
+
+                return nr * (
+                    (k_internal // 2)
+                    + kai_num_bytes_multiplier_rhs
+                    + kai_num_bytes_sum_rhs
+                    + kai_num_bytes_bias
+                )
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                n, k, nr, kr, sr
+            ):
+                num_rows = kai_roundup(n, nr) // nr
+
+                return (
+                    num_rows
+                    * kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                        k, nr, kr, sr
+                    )
+                )
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                N, K, kai_nr, kai_kr, kai_sr
+            )
+        elif groupsize == 32:  # groupwise
+            # dotprod params only [1x4x32_neon_dotprod]
+            kai_nr = 4
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_multiplier = 2  # sizeof(uint16_t)
+
+            def kai_num_blocks_per_row(k: int, bl: int) -> int:
+                assert (k % 2) == 0, "k must be even"
+                assert (k % bl) == 0, "k must be divisible by bl"
+                return k // bl
+
+            def kai_num_bytes_per_block(bl: int) -> int:
+                return (bl // 2) + kai_num_bytes_multiplier
+
+            def kai_rhs_packed_stride(k: int, nr: int, kr: int, bl: int) -> int:
+                assert (k % 2) == 0, "k must be even"
+                assert (k % kr) == 0, "k must be divisible by kr"
+                assert (k % bl) == 0, "k must be divisible by bl"
+                assert (bl % kr) == 0, "bl must be divisible by kr"
+
+                num_blocks_per_row = kai_num_blocks_per_row(k, bl)
+                num_bytes_per_block = kai_num_bytes_per_block(bl)
+
+                return nr * (num_bytes_per_block * num_blocks_per_row)
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32f16scalep_qsu4c32s16s0(
+                n: int, k: int, nr: int, kr: int, bl: int
+            ) -> int:
+                assert (k % 2) == 0, "k must be even"
+                assert (k % kr) == 0, "k must be divisible by kr"
+                assert (k % bl) == 0, "k must be divisible by bl"
+                assert (n % nr) == 0, "n must be divisible by nr"
+
+                # Note: kr is unused in this function, but kept as a parameter for consistency
+
+                num_rows = n // nr
+
+                return num_rows * kai_rhs_packed_stride(k, nr, kr, bl)
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32f16scalep_qsu4c32s16s0(
+                N, K, kai_nr, kai_kr, groupsize
+            )
+
+
 @register_meta([aten._convert_weight_to_int4pack])
-def meta__convert_weight_to_int4pack(w, inner_k_tiles):
+def meta__convert_weight_to_int4pack(
+    w, inner_k_tiles, qGroupSize, N, qScaleAndZeros, bias
+):
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
         w.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {w.dtype}",
     )
-    n = w.size(0)
-    k = w.size(1) * 2  # w is [n][k / 2] uint8
-    return w.new_empty(
-        (
-            n // 8,
-            k // (inner_k_tiles * 16),
-            32,
-            inner_k_tiles // 2,
-        ),
-        dtype=torch.int32,
-    )
+    if torch.backends.kleidiai.is_available():
+        torch._check(
+            qGroupSize == 0 or qGroupSize == 32, lambda: "Group size must be a 0 or 32"
+        )
+        K = w.size(1) * 2
+        if qGroupSize == 0:
+            torch._check(
+                qScaleAndZeros.numel() != 0,
+                lambda: ": Scales cant be null for channelwise weight packing",
+            )
+        else:
+            torch._check(
+                bias.numel() == 0, lambda: ": Bias not supported in groupwise kernel"
+            )
+            K = (w.size(0) / N) * qGroupSize
+        packed_weight_size = get_kai_packed_weight_size(4, N, K, qGroupSize)
+        return w.new_empty(int(packed_weight_size), dtype=torch.uint8)
+    else:
+        n = w.size(0)
+        k = w.size(1) * 2  # w is [n][k / 2] uint8
+        return w.new_empty(
+            (
+                n // 8,
+                k // (inner_k_tiles * 16),
+                32,
+                inner_k_tiles // 2,
+            ),
+            dtype=torch.int32,
+        )
 
 
 @register_meta([aten._weight_int4pack_mm])
-def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
-    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
-    torch._check(
-        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
-        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
-    )
-    torch._check(
-        w.dtype is torch.int32,
-        lambda: f"expected w to be int32, got {w.dtype}",
-    )
-    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros, N):
+
+    if torch.backends.kleidiai.is_available():
+        torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+        torch._check(
+            x.dtype in [torch.float32],
+            lambda: f"expected x to be f32, got {x.dtype}",
+        )
+    else:
+        torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+        torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
+        torch._check(
+            x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+            lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+        )
+        torch._check(
+            w.dtype is torch.int32,
+            lambda: f"expected w to be int32, got {w.dtype}",
+        )
+        N = w.size(0) * 8
+    M = x.size(0)
+    return x.new_empty(M, N, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int8pack_mm])

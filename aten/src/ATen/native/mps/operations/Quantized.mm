@@ -712,7 +712,12 @@ INSTANTIATE_MV(bfloat);
 
 )METAL_QUANTIZED");
 
-Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
+Tensor _convert_weight_to_int4pack_mps(const Tensor& in,
+                                       int64_t innerKTiles,
+                                       const int64_t qGroupSize,
+                                       int64_t N,
+                                       const Tensor& qScaleAndZeros,
+                                       const Tensor& bias) {
   TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
   TORCH_CHECK(in.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
@@ -721,7 +726,7 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
               innerKTiles);
 
   auto weight = in.contiguous();
-  auto N = weight.size(0);
+  N = weight.size(0);
   auto Kdiv2 = weight.size(1);
   auto K = Kdiv2 * 2;
 
@@ -758,11 +763,15 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
   return weight_packed;
 }
 
-Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
+Tensor _weight_int4pack_mm_mps(const Tensor& A,
+                               const Tensor& B,
+                               const nt64_t qGroupSize,
+                               const Tensor& qScaleAndZeros,
+                               int64_t N) {
   constexpr int64_t kNTileSize = 8;
 
   auto M = A.size(0);
-  auto N = B.size(0) * kNTileSize;
+  N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,

@@ -31,9 +31,20 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, CDNA2OrLater
-from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
+from torch.testing._internal.common_cuda import (
+    SM53OrLater,
+    SM80OrLater,
+    SM90OrLater,
+    tf32_on_and_off,
+    _get_magma_version,
+    _get_torch_cuda_version,
+    CDNA2OrLater,
+)
+from torch.testing._internal.common_quantization import (
+    _group_quantize_tensor,
+    _dynamically_quantize_per_channel,
+    _group_quantize_tensor_symmetric,
+)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -898,7 +909,6 @@ class TestLinalg(TestCase):
             torch.randn((3, 52, 52), device=device, dtype=dtype),
             torch.randn((4, 2, 26, 26), device=device, dtype=dtype))
 
-
         ops = (torch.det, torch.Tensor.det,
                torch.linalg.det)
         for t in tensors:
@@ -1426,7 +1436,6 @@ class TestLinalg(TestCase):
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
-
 
     @onlyCUDA
     @dtypes(torch.bfloat16, torch.float16)
@@ -4296,7 +4305,6 @@ class TestLinalg(TestCase):
             triangular_solve_zero_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                                upper, unitriangular, transpose)
 
-
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -4416,7 +4424,6 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
-
 
     def check_single_matmul(self, x, y):
 
@@ -5544,7 +5551,6 @@ class TestLinalg(TestCase):
                     else:
                         self.assertEqual(B_, X_ @ A)
 
-
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
@@ -5577,7 +5583,6 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -5605,7 +5610,6 @@ class TestLinalg(TestCase):
             for b, n in shapes:
                 yield make_arg((b, n, n)), make_arg((b, n, rhs))
 
-
         for A, B in gen_matrices():
             LU, pivots = torch.linalg.lu_factor(A)
             for backend in backends:
@@ -5619,7 +5623,6 @@ class TestLinalg(TestCase):
                         self.assertEqual(B_left, A_adj @ X)
                     else:
                         self.assertEqual(B_left, X @ A_adj)
-
 
     @onlyCPU
     @dtypes(*floating_and_complex_types())
@@ -5661,7 +5664,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
-
         # Rectangular tests
         sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
         B = torch.randn(2, 3, 5, device=device, dtype=dtype)
@@ -5677,7 +5679,6 @@ class TestLinalg(TestCase):
         pivots[0] = 4
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
-
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -6287,7 +6288,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
             self.assertEqual(out, y_ref)
 
-
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
@@ -6465,8 +6465,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     def test__convert_weight_to_int4pack(self, device):
         # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
-        test_list = [((64, 32), 2), ((64, 48), 2), ((64, 64), 2), ((256, 128), 4), ((256, 128), 8)]
-        if self.device_type == 'cuda' and not SM80OrLater:
+        # Weight shape is [K x N]
+        test_list = [
+            ((64, 32), 2),
+            ((64, 48), 2),
+            ((64, 64), 2),
+            ((256, 128), 4),
+            ((256, 128), 8),
+        ]
+        if self.device_type == "cuda" and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
@@ -6474,11 +6481,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.skipTest("_int4_mm is supported only for CDNA2 or later")
 
         torch.manual_seed(1)
+        bias = torch.empty(0)
         for shape, innerKTiles in test_list:
-            b = torch.rand(shape, dtype=torch.bfloat16, device=device)
-            b_uint8, _ = _group_quantize_tensor(b, n_bit=4, q_group_size=32)
-            b_int4pack = torch._convert_weight_to_int4pack(b_uint8, innerKTiles=innerKTiles)
-            b_int4pack_meta = torch._convert_weight_to_int4pack(b_uint8.to(device="meta"), innerKTiles=innerKTiles)
+            if torch.backends.kleidiai.is_available() and device == "cpu":
+                dtype = torch.float32
+                b = torch.rand(shape, dtype=dtype, device=device)
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                    b, n_bit=4, groupsize=32, scheme="symmetric_groupwise"
+                )
+            else:
+                dtype = torch.bfloat16
+                b = torch.rand(shape, dtype=dtype, device=device)
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+                    b, n_bit=4, q_group_size=32
+                )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_uint8, innerKTiles, 32, b.shape[-1], b_scales_and_zeros, bias
+            )
+            b_int4pack_meta = torch._convert_weight_to_int4pack(
+                b_uint8.to(device="meta"),
+                innerKTiles,
+                32,
+                b.shape[-1],
+                b_scales_and_zeros,
+                bias,
+            )
             self.assertEqual(b_int4pack.shape, b_int4pack_meta.shape)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
@@ -6486,9 +6513,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
-    @parametrize("n", [48, 64])
+    @parametrize("n", [4096, 11008])
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == "cuda" and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
@@ -6497,47 +6524,63 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         q_group = 32
         inner_k_tiles = 2
+        bias = torch.empty(0)
 
         torch.manual_seed(1)
         a_bf16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
-                b, n_bit=4, q_group_size=q_group
-            )
+            if torch.backends.kleidiai.is_available() and device == "cpu":
+                b_fp32 = b.to(
+                    dtype=torch.float32
+                )  # Kleidiai only supports float32 datatype
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                    b_fp32, n_bit=4, groupsize=q_group, scheme="symmetric_groupwise"
+                )
+            else:
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+                    b, n_bit=4, q_group_size=q_group
+                )
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_uint8, inner_k_tiles
+                b_uint8, inner_k_tiles, q_group, b.shape[-1], b_scales_and_zeros, bias
             )
-
             return b_int4pack, b_scales_and_zeros
 
-        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros, N):
             return torch._weight_int4pack_mm(
-                a, b_int4pack, q_group, b_scales_and_zeros
+                a, b_int4pack, q_group, b_scales_and_zeros, N
             )
 
-        b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_bf16)
+        b_int4pack, b_scales_and_zeros = convert_weight_to_int4pack(b_bf16)
 
-        for dtype in [torch.bfloat16] + ([torch.float16, torch.float32] if device == "cpu" else []):
+        dtypes = []
+        if torch.backends.kleidiai.is_available() and device == "cpu":
+            # Kleidiai only supports float32 datatype
+            dtypes = [torch.float32]
+        else:
+            dtypes = [torch.bfloat16]
+            if device == "cpu":
+                dtypes.extend([torch.float16, torch.float32])
+
+        for dtype in dtypes:
             a = a_bf16.to(dtype=dtype)
             b = b_bf16.to(dtype=dtype)
-            b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros.to(dtype=dtype)
             ref = torch.mm(a, b)
-            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros, b.shape[-1])
 
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
-
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
-    @parametrize("n", [48, 64])
+    @parametrize("n", [4096, 11008])
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == "cuda" and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
@@ -6546,25 +6589,40 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         q_group = 32
         inner_k_tiles = 2
-
+        bias = torch.empty(0)
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
-        b_int32, b_scales_and_zeros = _group_quantize_tensor(
-            b, n_bit=4, q_group_size=q_group
-        )
+        def convert_weight_to_int4pack(b):
+            if torch.backends.kleidiai.is_available() and device == "cpu":
+                b_fp32 = b.to(
+                    dtype=torch.float32
+                )  # Kleidiai only supports float32 datatype
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                    b_fp32, n_bit=4, groupsize=q_group, scheme="symmetric_groupwise"
+                )
+            else:
+                b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+                    b, n_bit=4, q_group_size=q_group
+                )
+            return b_uint8, b_scales_and_zeros
+
+        b_uint8, b_scales_and_zeros = convert_weight_to_int4pack(b)
 
         @torch.compile
-        def int4_mm(a, b_int32, b_scales_and_zeros):
+        def int4_mm(a, b_uint8, b_scales_and_zeros):
             b_int4pack = torch._convert_weight_to_int4pack(
-                b_int32, inner_k_tiles
+                b_uint8, inner_k_tiles, q_group, b.shape[-1], b_scales_and_zeros, bias
             )
             return torch._weight_int4pack_mm(
-                a, b_int4pack, q_group, b_scales_and_zeros
+                a, b_int4pack, q_group, b_scales_and_zeros, b.shape[-1]
             )
 
-        res = int4_mm(a, b_int32, b_scales_and_zeros)
+        if torch.backends.kleidiai.is_available() and device == "cpu":
+            a = a.to(dtype=torch.float32)
+            b = b.to(dtype=torch.float32)
+        res = int4_mm(a, b_uint8, b_scales_and_zeros)
         ref = torch.mm(a, b)
 
         mean_err = ((res - ref).abs() / ref).mean()
