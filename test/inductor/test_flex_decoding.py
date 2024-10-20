@@ -3,7 +3,6 @@
 
 import functools
 from collections import namedtuple
-from contextlib import nullcontext
 from typing import Callable, Optional, Tuple, Union
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
@@ -607,17 +606,13 @@ class TestFlexDecoding(InductorTestCase):
 
         self.run_test(bias_mod, dtype)
 
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
+        self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)

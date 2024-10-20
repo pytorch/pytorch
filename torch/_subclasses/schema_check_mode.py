@@ -40,7 +40,7 @@ def is_iterable_of_tensors(iterable):
         for t in iter(iterable):
             if not isinstance(t, torch.Tensor):
                 return False
-    except TypeError:
+    except TypeError as te:
         return False
     return True
 
@@ -116,7 +116,7 @@ class SchemaCheckMode(TorchDispatchMode):
             if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
                 try:
                     return e.elem
-                except AttributeError:
+                except AttributeError as t:
                     return e
             return e
 
@@ -129,7 +129,7 @@ class SchemaCheckMode(TorchDispatchMode):
                             deepcopy(current.stride()),
                             current._typed_storage()._cdata,
                         )
-                    except AttributeError:
+                    except AttributeError as t:
                         return None
                 # Sparse CSR tensors do not have strides or storage
                 elif e.layout != torch.sparse_csr:

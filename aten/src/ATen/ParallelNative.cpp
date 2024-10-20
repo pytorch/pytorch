@@ -209,8 +209,8 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
 #ifndef C10_MOBILE
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
   if (!num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
     // num_intraop_threads either stores a positive integer or CONSUMED,
@@ -229,8 +229,9 @@ void set_num_threads(int nthreads) {
     }
   }
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  pool->set_thread_count(nthreads);
 #endif // C10_MOBILE
 }
 
