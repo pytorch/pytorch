@@ -1042,7 +1042,7 @@ class PythonSysModulesVariable(VariableTracker):
         return k, has_key
 
     def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        _k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
@@ -1063,6 +1063,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        k, _has_key = self._contains_helper(tx, key)
         source = self.source and GetItemSource(self.source, k)
         return VariableTracker.build(tx, sys.modules[k], source)
