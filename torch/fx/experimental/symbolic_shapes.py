@@ -6087,6 +6087,12 @@ class ShapeEnv:
 
         # TODO: split conjunctions and evaluate them separately
 
+        if isinstance(
+            orig_expr,
+            (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
+        ):
+            return orig_expr
+
         # Don't track this one
         @functools.lru_cache(None)
         def compute_concrete_val() -> sympy.Basic:

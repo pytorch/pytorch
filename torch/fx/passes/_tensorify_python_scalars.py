@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Union
+
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
-
-from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
 import torch
 import torch.fx as fx
@@ -19,6 +18,7 @@ from torch.fx.graph_module import GraphModule  # noqa: TCH001
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
 
