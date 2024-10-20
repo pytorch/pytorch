@@ -244,7 +244,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(fn, default_args_generator((x,)), 2)
+
+        # when testing with dynamic shape, symbols are lifted as input
+        arg_count = 3 if "DynamicShape" in str(self) else 2
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -260,7 +263,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(fn, default_args_generator((x,)), 3, 4)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 4)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -273,14 +278,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), 3, 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 3)
 
     def test_capture_untracked_global(self):
         def f(x):
             return wrap(lambda x: x + global_var, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_symint_input(self):
         def f(x):
@@ -488,7 +497,9 @@ class GraphModule(torch.nn.Module):
             def g(x):
                 return wrap(lambda x: x + y, x)
 
-            self._test_wrap_simple(g, default_args_generator((x,)), 3)
+            # when testing with dynamic shape, a symbol is lifted as input
+            arg_count = 4 if "DynamicShape" in str(self) else 3
+            self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
             return g(x)
 
         f(x, y)
@@ -500,7 +511,9 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return wrap(lambda x: x + y, x)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_capture_tracked_nested(self):
         x = torch.randn(3, 3)
@@ -509,7 +522,9 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_inlined_functions(self):
         def g(x, y):
@@ -520,7 +535,9 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if "DynamicShape" in str(self) else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_same_freevar_twice(self):
         free = torch.randn(3)
@@ -537,7 +554,9 @@ class GraphModule(torch.nn.Module):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(f, default_args_generator((x,)), 2, 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 3 if "DynamicShape" in str(self) else 2
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count, 3)
 
     def test_register_subclass(self):
         from torch._higher_order_ops.cond import cond_op
@@ -1522,8 +1541,8 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 3 inputs (buffer, x, z)
-                self.assertEqual(len(operands), 3)
+                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1535,7 +1554,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 3)
+                    self.assertEqual(num_placeholders, 4)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
