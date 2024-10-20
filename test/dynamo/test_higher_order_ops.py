@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 import enum
 import functools
 import pprint
@@ -401,7 +402,7 @@ class GraphModule(torch.nn.Module):
     def test_wrap_pytree_kwargs(self):
         def f(x, y, z):
             def fn(*, x, y, z):
-                z1, z2 = z
+                z1, _ = z
                 return (x * 2) + y + z1
 
             return wrap(fn, x=x, y=y, z=z)
@@ -434,7 +435,6 @@ class GraphModule(torch.nn.Module):
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
-        y = 4.0
 
         def fn(x, y, z):
             if z:
@@ -1165,9 +1165,6 @@ class GraphModule(torch.nn.Module):
         self._test_wrap_simple(f, default_args_generator((x, y, 8)), 2)
 
     def test_map_subgraph_name_is_valid(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3)
 
@@ -1206,8 +1203,6 @@ def forward(self, child, l_y_):
             )
 
     def test_map_multi_return(self):
-        cnt = CompileCounter()
-
         def f(x):
             return control_flow.map(lambda x: (x.sin(), x.sin()), x)
 
@@ -1236,8 +1231,6 @@ def forward(self, child):
             )
 
     def test_map_pytree_return(self):
-        cnt = CompileCounter()
-
         def _construct_pytree(a):
             return (a, [[[a]]], a, (a, (a,), a), {"a": a})
 
@@ -1286,9 +1279,6 @@ def forward(self, child):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_map_symint_input(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         def fn(x, y):
             def inner(x, y):
                 return torch.sin(x + y)
@@ -1320,9 +1310,6 @@ def forward(self, child, const_unused):
             )
 
     def test_map_lowers_to_graph(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         def fn(x, y):
             def inner(x, y):
                 return torch.sin(x + y)
@@ -1379,7 +1366,7 @@ def forward(self, child, const_unused):
             rand_44.reshape(2, 8),
         ]
         for x in inps:
-            compiled_ret = torch.compile(
+            compiled_ret = torch.compile(  # noqa: F841
                 control_flow.map, backend=backend, fullgraph=True
             )(inner, x)
             eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), ())
@@ -2348,7 +2335,7 @@ class GraphModule(torch.nn.Module):
 
             return control_flow.map(inner, xs, y).sin()
 
-        result = map_f(xs, y)
+        map_f(xs, y)
 
         gm = backend.graphs[0]
         actual_stack = self._get_source_fn_stack(gm, {"cos", "add", "sin"})
@@ -2523,7 +2510,6 @@ def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt,
             return torch.cond(pred, true_fn, false_fn, [pytree_in])
 
         backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
         compiled_res = torch.compile(fn, backend=backend)(pred, inp)
         eager_res = fn(pred, inp)
         self.assertEqual(compiled_res, eager_res)
@@ -2664,7 +2650,7 @@ class GraphModule(torch.nn.Module):
 
         msg = "hints_wrapper - key hints not provided"
         with self.assertRaisesRegex(RuntimeError, msg):
-            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+            torch.compile(fn_with_hints, backend=cnt)(x, y)
 
     def test_hints_wrapper_incorrect_type(self):
         def fn_with_hints(x, y):
@@ -2683,7 +2669,7 @@ class GraphModule(torch.nn.Module):
 
         msg = r"hints must be a dict containing int, float, bool or str value,"
         with self.assertRaisesRegex(RuntimeError, msg):
-            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+            torch.compile(fn_with_hints, backend=cnt)(x, y)
 
     def test_hints_wrapper_pytree_inputs(self):
         def fn_with_hints(x, y):
@@ -2697,7 +2683,6 @@ class GraphModule(torch.nn.Module):
             return res
 
         backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
 
         x = torch.randn(2, 4)
         y = torch.ones(4)
@@ -2927,10 +2912,10 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             return torch.vmap(lambda x: x.sin())(x)
 
         x = torch.zeros(3, 3, 4, 5)
-        y = torch.vmap(fn, randomness="same")(x)
+        torch.vmap(fn, randomness="same")(x)
         self.assertEqual(len(records), 0)  # sanity check
 
-        y = torch.vmap(fn, randomness="different")(x)
+        torch.vmap(fn, randomness="different")(x)
         self.assertGreater(len(records), 0)
         record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
@@ -5345,9 +5330,9 @@ class GraphModule(torch.nn.Module):
             return torch.vmap(lambda x: x.sin())(x)
 
         x = torch.zeros(3, 3, 4, 5)
-        y = torch.vmap(fn)(x)
+        torch.vmap(fn)(x)
         # should not recompile on second call. See Pytorch issue #118493
-        y = torch.vmap(fn)(x)
+        torch.vmap(fn)(x)
 
     @xfailIfTorchDynamo
     @config.patch(error_on_recompile=True)
@@ -5357,7 +5342,7 @@ class GraphModule(torch.nn.Module):
             return torch.vmap(lambda x: x.sin())(x)
 
         x = torch.zeros(3, 3, 4, 5)
-        y = torch.vmap(fn)(x)
+        torch.vmap(fn)(x)
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             fn(x)
 

@@ -145,7 +145,7 @@ class ScheduleTest(MultiProcContinousTest):
                 schedule.step(x)
             elif self.rank == self.world_size - 1:
                 losses = []
-                out = schedule.step(target=target, losses=losses)
+                schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
 
@@ -575,7 +575,7 @@ class ScheduleTest(MultiProcContinousTest):
                     schedule.step(x)
                 elif self.rank == self.world_size - 1:
                     losses = []
-                    out = schedule.step(target=target, losses=losses)
+                    schedule.step(target=target, losses=losses)
                 else:
                     schedule.step()
         self.assertEqual(

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import collections
 import contextlib
@@ -2900,7 +2901,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.x = res
                 return self.Linear2(res)
 
-        N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
+        N, D_in, H, inner = 2, 2, 2, 4
         model = ReplayMutation(D_in, H, inner)
         model2 = copy.deepcopy(model)
         input = torch.ones(N, D_in)

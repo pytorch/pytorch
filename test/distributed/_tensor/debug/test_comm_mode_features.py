@@ -251,7 +251,7 @@ class TestCommModeFeatures(DTensorTestBase):
                 comm_mode.comm_module_counts,
                 {"Global": {"forward": {}, "backward": {}}},
             )
-            output_tp = model(inp)
+            model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)
         model2 = Transformer(model_args).to(device=self.device_type)
@@ -264,7 +264,7 @@ class TestCommModeFeatures(DTensorTestBase):
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            output = model2(inp)
+            model2(inp)
 
         # checks to see if all collectives were correctly traced at the module-level
         self.assertEqual(

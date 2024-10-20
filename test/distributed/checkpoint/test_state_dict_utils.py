@@ -104,7 +104,7 @@ class TestStateDictUtils(DTensorTestBase):
             return tensor, dist_tensor
 
         ltensor, ldtensor = [], []
-        for i in range(10):
+        for _ in range(10):
             tensor, dtensor = create_dtensor()
             ltensor.append(tensor)
             ltensor.append(torch.ones(10, device=torch.device("cuda")))

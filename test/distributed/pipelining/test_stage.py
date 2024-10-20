@@ -311,7 +311,6 @@ class StageTest(MultiProcContinousTest):
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
         x = torch.randn(batch_size, d_hid, device=self.device)
-        target = torch.randn(batch_size, d_hid, device=self.device)
 
         stage_with_dw_builder = PipelineStage(
             stage_mod,

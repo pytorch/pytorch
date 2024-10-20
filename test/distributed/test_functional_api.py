@@ -96,7 +96,7 @@ class TestExpand(MultiThreadedTestCase):
         tag, rankset, group_size = ft_c._expand_group(dist.group.WORLD, "bla")
         self.assertEqual("bla", tag)
 
-        my_pg, others = new_subgroups(group_size=2)
+        my_pg, _ = new_subgroups(group_size=2)
         tag, rankset, group_size = ft_c._expand_group(my_pg)
         self.assertEqual(c10d._get_group_tag(my_pg), tag)
         self.assertEqual(dist.get_process_group_ranks(my_pg), rankset)
@@ -464,7 +464,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = dist.Backend.NCCL
-        BACKEND = dist.Backend.NCCL
         self._spawn_processes()
 
     @property
@@ -581,7 +580,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
-        compiled_allreduce = torch.compile(allreduce, fullgraph=True)
+        compiled_allreduce = torch.compile(allreduce, fullgraph=True)  # noqa: F841
         dist.init_process_group(
             backend="fake",
             rank=0,
@@ -607,9 +606,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
                 return batch * 5
 
         compiled_func = torch.compile(func)
-        ret = compiled_func(
-            torch.ones((100,), device="cuda"), self.process_group, self.rank
-        )
+        compiled_func(torch.ones((100,), device="cuda"), self.process_group, self.rank)
         dist.barrier()
 
 
@@ -707,7 +704,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             out = compiled(t, self.world_size)
             out.backward()
 
-        res, codes = run_and_get_code(run_with_backward)
+        _, codes = run_and_get_code(run_with_backward)
         for code in codes:
             FileCheck().check_count(
                 "_c10d_functional.all_to_all_single.default", 1, exactly=True

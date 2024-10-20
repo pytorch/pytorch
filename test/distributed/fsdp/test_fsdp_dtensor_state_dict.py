@@ -303,13 +303,13 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
         ):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-                state_dict = model.state_dict()
+                model.state_dict()
 
         with self.assertRaisesRegex(
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
         ):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-                optim_state_dict = FSDP.optim_state_dict(model, optim)
+                FSDP.optim_state_dict(model, optim)
 
 
 instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)
