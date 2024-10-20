@@ -204,6 +204,25 @@ def tensorify_python_scalars(
                             node, tracer=tracer, fake_mode=fake_mode
                         )
 
+            elif (
+                node is not None
+                and node.op == "call_function"
+                and node.target is torch.ops.aten._local_scalar_dense.default
+            ):
+                dtype = node.args[0].meta["val"].dtype
+                if dtype != torch.float64:
+                    continue
+
+                assert isinstance(node.args[0], fx.Node), node.args[0]
+
+                s = node.meta['val']
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                expr_to_sym_proxy[s] = MetaProxy(
+                    node, tracer=tracer, fake_mode=fake_mode
+                )
+
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
@@ -257,6 +276,12 @@ def tensorify_python_scalars(
 
                     remove_node_and_expr_mapping(node)
 
+
+    # DCE symbols (which are guaranteed to be pure) only
+    for proxy in reversed(expr_to_sym_proxy.values()):
+        if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
+            graph.erase_node(proxy.node)
+
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
     nodes = list(graph.nodes)
@@ -309,7 +334,7 @@ def tensorify_python_scalars(
                 node.replace_all_uses_with(replacement_node)
                 remove_node_and_expr_mapping(node)
 
-    # DCE symbols (which are guaranteed to be pure) only
+    # DCE one more time to remove specialized item calls
     for proxy in reversed(expr_to_sym_proxy.values()):
         if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
             graph.erase_node(proxy.node)
