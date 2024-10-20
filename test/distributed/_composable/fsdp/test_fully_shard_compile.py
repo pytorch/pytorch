@@ -104,7 +104,8 @@ class TestFullyShardCompileCompute(FSDPTest):
 class TestFullyShardCompile(FSDPTest):
     fake_pg = not at_least_x_gpu(2)
 
-    # Inductor tests in this class requires bf16 support, so SM arch must be 80 or
+    # This method is an override of the base class.
+    # Tests in this class requires bf16 support, so SM arch must be 80 or
     # higher.
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at

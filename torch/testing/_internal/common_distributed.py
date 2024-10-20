@@ -362,7 +362,7 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     if device.type != "cuda":
         raise ValueError("sm_is_or_later() is only supported for CUDA devices")
 
-    if TEST_WITH_ROCM:
+    if torch.version.hip is not None:
         # ROCm devices may have different compute capability codes
         return False
 
