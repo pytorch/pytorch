@@ -401,35 +401,35 @@ class VariableTrackerContainer(VariableTracker):
     This is a base class for VariableTrackers that contain other VariableTrackers:
     it solves the problem of variables that contain themselves for as_python_constant().
 
-    TODO(rec): VariableTrackerContainer is currently only a base class for classes
-    derived from BaseListVariable, because the only test that exercises
-    "variables that contain themselves" only uses lists, but it should probably
-    also be used for VariableTracker classes that contain dicts or tuples such as
-    ConstantDictVariable.
+    TODO(rec): Find and port any remaining container classes to use
+    VariableTrackerContainer.
 
     TODO(rec): cycle detection is only being done for the as_python_constant()
-    method but there are other recursive methods that might also bust the stack,
-    like as_proxy(), debug_rep() and several others.
+    method but there are other recursive methods that might get into a loop,
+    including as_proxy() and debug_rep().
     """
+
     @final
     def as_python_constant(self) -> Any:
-        return self._as_python_constant_impl([])
+        return self._as_python_constant([])
 
-    def _as_python_constant_impl(self, visited: list[VariableTracker]) -> Any:
+    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
         # This method must be implemented in subclasses
-        unimplemented(f"_as_python_constant_impl: {self}")
+        unimplemented(f"_as_python_constant: {self}")
 
     @final
-    @classmethod
-    def _as_constant(cls, vt: VariableTracker, visited: list[VariableTracker]) -> Any:
-        """Call in subclasses to recursively evaluate items as python constants"""
-        if not isinstance(vt, VariableTrackerContainer):
-            return vt.as_python_constant()
-        elif vt in visited:
-            unimplemented(f"recursive containment {vt}")
+    @staticmethod
+    def _as_constant(item: VariableTracker, visited: list[VariableTracker]) -> Any:
+        """Call _as_constant() from a subclass to recursively evaluate an item as
+        a python constant.
+        """
+        if not isinstance(item, VariableTrackerContainer):
+            return item.as_python_constant()
+        elif item in visited:
+            unimplemented(f"recursive containment {item}")
         else:
-            visited.append(vt)
-            return vt._as_python_constant_impl(visited)
+            visited.append(item)
+            return item._as_python_constant(visited)
 
 
 def typestr(*objs):
