@@ -858,10 +858,12 @@ _LEAF_SPEC = LeafSpec()
 
 
 def treespec_leaf() -> LeafSpec:
+    """Make a treespec representing a leaf node."""
     return _LEAF_SPEC
 
 
 def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
     children = list(iterable)
     if any(not isinstance(child, TreeSpec) for child in children):
         raise ValueError(f"Expected a tuple of TreeSpecs, got: {children!r}.")
@@ -873,6 +875,7 @@ def treespec_dict(
     /,
     **kwargs: TreeSpec,
 ) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
     dct = dict(mapping, **kwargs)
     if any(not isinstance(child, TreeSpec) for child in dct.values()):
         raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
