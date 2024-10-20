@@ -1216,7 +1216,7 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, l_y_):
+def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, l_y_ : torch._subclasses.fake_tensor.FakeTensor):
     child_1 = child[0];  child_1 = None
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
@@ -1248,7 +1248,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child):
+def forward(self, child : torch._subclasses.fake_tensor.FakeTensor):
     child_1 = child.sin()
     child_2 = child.sin();  child = None
     return (child_1, child_2)""",
@@ -1289,7 +1289,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child):
+def forward(self, child : torch._subclasses.fake_tensor.FakeTensor):
     return (child, child, child, child, child, child, child)""",
             )
 
@@ -1332,7 +1332,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, const_unused):
+def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1366,7 +1366,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, const_unused):
+def forward(self, child : torch._subclasses.fake_tensor.FakeTensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1535,16 +1535,14 @@ def forward(self, child, const_unused):
             mod_for_eager(torch.tensor(True), torch.tensor(5)),
         )
 
-        # when testing with dynamic shape, a symbol is lifted as input
-        arg_count = 4 if "DynamicShape" in str(self) else 3
         for node in backend.graphs[0].graph.nodes:
             if (
                 node.op == "call_function"
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 3 inputs (buffer, x, z)
-                self.assertEqual(len(operands), arg_count)
+                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1556,7 +1554,7 @@ def forward(self, child, const_unused):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, arg_count)
+                    self.assertEqual(num_placeholders, 4)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
