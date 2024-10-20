@@ -13,10 +13,6 @@
 
 #include <nlohmann/json.hpp>
 
-namespace {
-constexpr int64_t kCommInitBusyWaitMillis = 10;
-} // namespace
-
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
@@ -34,37 +30,25 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  // only wait for initialization if nonblocking mode is enabled
-  if (!initialized_ && nccl_use_nonblocking()) {
-    waitUntilInitialized(nccl_nonblocking_timeout());
+  if (!initialized_) {
+    waitUntilInitialized();
   }
 
   return ncclComm_;
 }
 
-void NCCLComm::waitUntilInitialized(int timeoutSecs) {
-  auto startTimepoint = std::chrono::steady_clock::now();
-  while (!initialized_) {
-    if (ncclComm_) {
-      ncclResult_t result{};
-      ncclCommGetAsyncError(ncclComm_, &result);
-      if (result == ncclSuccess) {
-        LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
-        initialized_ = true;
-        break;
-      }
-    }
-    auto currentTimepoint = std::chrono::steady_clock::now();
-    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                           currentTimepoint - startTimepoint)
-                           .count();
-    if (timeElapsed > timeoutSecs) {
-      std::string err = "NCCL timeout in communicator initialization.";
-      TORCH_CHECK_WITH(DistBackendError, false, err);
-    }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(kCommInitBusyWaitMillis));
+void NCCLComm::waitUntilInitialized() {
+  // Wait for initialization to complete if in nonblocking mode.
+  // If timeout is reached, throw an exception.
+  if (nccl_use_nonblocking()) {
+    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+    // ncclComm_ should be initialized by now
   }
+  // In blocking mode, this function is nothing but setting initialized_ to
+  // true.
+  initialized_ = true;
+  LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+            << " is initialized.";
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -77,17 +61,55 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
+#ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       std::nullopt);
+#else
+  // After calling ncclCommSplit in non-blocking mode, we should wait for the
+  // source communicator to be out of ncclInProgress state.
+  // Reason 1:
+  //   it's unsafe to call new operations on the parent comm while it's in
+  //   ncclInProgress state.
+  // Reason 2:
+  //   as of NCCL 2.23, the ptr value of child comm will not be filled until the
+  //   state of parent comm is ncclSuccess. This may change in the future. See:
+  //   https://github.com/NVIDIA/nccl/issues/1472
+  C10D_NCCL_CHECK_TIMEOUT_SLEEP(
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
+      sourceComm, // wait on parent comm
+      std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout =
+        nccl_nonblocking_timeout() > 0 ? nccl_nonblocking_timeout() : 30 * 60;
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
+    }
+  }
+  // comm->ncclComm_ should have valid ptr by now, but not necessarily
+  // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
+  // its initialization.
+#endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
-  if (!nccl_use_nonblocking()) {
-    comm->initialized_ = true;
-  }
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
   return comm;
 }
 #endif
@@ -597,7 +619,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
       auto sizes = new_list();
       for (auto dim : dims) {
         auto arg_sizes = new_list();
-        for (C10_UNUSED auto i : c10::irange(dim)) {
+        for ([[maybe_unused]] auto i : c10::irange(dim)) {
           arg_sizes.push_back(*it++);
         }
         sizes.push_back(arg_sizes);

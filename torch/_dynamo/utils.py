@@ -236,16 +236,6 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
     _add_time_spent(key, "remote_cache_time_saved", time_saved)
 
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get a bunch of metadata about cache hits and misses to use in chromium events"""
-    cache_stats = {
-        "fxgraph_cache_hit": counters["inductor"]["fxgraph_cache_hit"],
-        "fxgraph_cache_miss": counters["inductor"]["fxgraph_cache_miss"],
-        "fxgraph_cache_bypass": counters["inductor"]["fxgraph_cache_bypass"],
-    }
-    return cache_stats
-
-
 # dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -290,9 +280,10 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
-            chromium_log.log_event_start(key, start, None)
             if phase_name:
-                chromium_log.log_event_start(phase_name, start)
+                chromium_log.log_event_start(phase_name, start, {"fn_name": key})
+            else:
+                chromium_log.log_event_start(key, start, {})
             yield
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
@@ -306,16 +297,15 @@ def dynamo_timed(
             chromium_log.log_event_end(
                 phase_name,
                 time.time_ns(),
-                {"cache_stats": get_cache_stats()},
+                {},
                 start,
             )
-        chromium_log.log_event_end(
-            key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-        )
+        else:
+            chromium_log.log_event_end(key, time.time_ns(), {}, start)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
-            # fwd only compilation stages: entire_frame_compile, backend_compile.
+            # fwd only compilation stages: entire_frame_compile, backend_compile, aotdispatch.
             # use frame_key as time aggregation key.
             if fwd_only and fail_type is None:
                 _add_time_spent(frame_key, phase_name, time_spent)
@@ -900,7 +890,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Logs the start of a single event.
@@ -909,19 +899,14 @@ class ChromiumEventLogger:
         :param metadata: Any extra metadata associated with this event
         """
 
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
-
-        event = self._log_timed_event(
+        self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -935,8 +920,8 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
-        start_time_ns: Optional[int] = None,
+        metadata: Dict[str, Any],
+        start_time_ns: int,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -945,11 +930,14 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
+        event = self._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            metadata,
+        )
 
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
@@ -960,13 +948,6 @@ class ChromiumEventLogger:
             # or it was skipped due to overlapping events below
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
-
-        event = self._log_timed_event(
-            event_name,
-            time_ns,
-            "E",
-            metadata,
-        )
 
         while event_name != stack[-1]:
             # If the event isn't the most recent one to end, pop
@@ -1044,7 +1025,9 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
+        log_chromium_event_internal(
+            event, self.get_stack(), compile_id, self.id_, time_ns
+        )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -3201,6 +3184,34 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper functions below are to prevent __torch_function__
+# calls from happening in the middle of __torch_function__
+# compiled bytecode
+# They will be skipped which is the desired result
+def call_size(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.size(i)
+
+    return fn(x, i)
+
+
+def call_stride(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.stride(i)
+
+    return fn(x, i)
+
+
+def call_storage_offset(x):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x):
+        return x.storage_offset()
+
+    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
