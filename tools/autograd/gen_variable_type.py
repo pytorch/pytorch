@@ -1534,8 +1534,7 @@ def emit_body(
         f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
     ) -> str:
         """Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(f.func)
-        dispatcher_exprs = dispatcher_sig.exprs()
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)  # noqa: F841
 
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # Ops also always have a function variant of the redispatch API.

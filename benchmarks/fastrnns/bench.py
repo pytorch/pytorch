@@ -205,7 +205,7 @@ def bench(rnn_runners, group_name, print_json=False, sep=" ", **params):
                 result_with_no_info = result._replace(info_fwd="None", info_bwd="None")
                 print_stderr(pretty_print(result_with_no_info, sep=sep))
                 results[name] = result
-            except Exception as e:
+            except Exception:
                 if not print_json:
                     raise
 
