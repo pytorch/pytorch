@@ -2249,10 +2249,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # the subgraph.
         self.launcher_fn_name = self.subgraph_name
 
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        # No need to insert the asserts for the subgraph inputs.
-        pass
-
     def write_header(self) -> None:
         pass
 
