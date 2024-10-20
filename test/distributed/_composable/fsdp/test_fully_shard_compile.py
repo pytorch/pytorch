@@ -412,7 +412,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
+        self.skipTestForOldSm()
         with torch._dynamo.config.patch(
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(
@@ -421,13 +424,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
             fully_shard(model)
-            model_compiled = torch.compile(model, backend="aot_eager")
+            model_compiled = torch.compile(model, backend="inductor")
             for i in range(10):
                 torch.compiler.set_stance(
                     "force_eager" if i < 1 else "default"
                 )  # eager warmup for 1 iteration
                 with torch._dynamo.compiled_autograd.enable(
-                    torch.compile(backend="aot_eager", fullgraph=True)
+                    torch.compile(backend="inductor", fullgraph=True)
                 ):
                     out = model_compiled(inputs)
                     out.sum().backward()
