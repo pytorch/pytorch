@@ -71,8 +71,10 @@ __all__ = [
     "treespec_pprint",
     "is_namedtuple",
     "is_namedtuple_class",
+    "is_namedtuple_instance",
     "is_structseq",
     "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -258,6 +260,11 @@ def is_namedtuple_class(cls: type) -> bool:
     return optree.is_namedtuple_class(cls)
 
 
+def is_namedtuple_instance(obj: object) -> bool:
+    """Return whether the object is an instance of namedtuple."""
+    return optree.is_namedtuple_instance(obj)
+
+
 def is_structseq(obj: Union[object, type]) -> bool:
     """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
     return optree.is_structseq(obj)
@@ -268,11 +275,18 @@ def is_structseq_class(cls: type) -> bool:
     return optree.is_structseq_class(cls)
 
 
+def is_structseq_instance(obj: object) -> bool:
+    """Return whether the object is an instance of PyStructSequence."""
+    return optree.is_structseq_instance(obj)
+
+
 def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
     return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
 
 
 def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
     return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
 
 
@@ -281,6 +295,7 @@ def treespec_dict(
     /,
     **kwargs: TreeSpec,
 ) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
     return optree.treespec_dict(
         mapping,
         **kwargs,
