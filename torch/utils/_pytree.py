@@ -87,8 +87,10 @@ __all__ = [
     "treespec_pprint",
     "is_namedtuple",
     "is_namedtuple_class",
+    "is_namedtuple_instance",
     "is_structseq",
     "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -434,6 +436,12 @@ def is_namedtuple_class(cls: type) -> bool:
     )
 
 
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple_instance(obj: object) -> bool:
+    """Return whether the object is an instance of namedtuple."""
+    return is_namedtuple_class(type(obj))
+
+
 _T_co = TypeVar("_T_co", covariant=True)
 
 
@@ -476,14 +484,19 @@ def is_structseq_class(cls: type) -> bool:
         and isinstance(getattr(cls, "n_sequence_fields", None), int)
         and isinstance(getattr(cls, "n_unnamed_fields", None), int)
     ):
+        # Check the type does not allow subclassing
         try:
-            # Check the type does not allow subclassing
-            class SubClass(cls):  # type: ignore[misc]
-                pass
-
+            types.new_class("subclass", bases=(cls,))
         except TypeError:
             return True
+        return False
     return False
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq_instance(obj: object) -> bool:
+    """Return whether the object is an instance of PyStructSequence."""
+    return is_structseq_class(type(obj))
 
 
 def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
@@ -762,17 +775,19 @@ _private_register_pytree_node(
 )
 
 
-STANDARD_DICT_TYPES: FrozenSet[type] = frozenset(
-    {dict, OrderedDict, defaultdict},
-)
+STANDARD_DICT_TYPES: FrozenSet[type] = frozenset({dict, OrderedDict, defaultdict})
 BUILTIN_TYPES: FrozenSet[type] = frozenset(
-    {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque, structseq},  # type: ignore[arg-type]
+    {
+        tuple,
+        list,
+        dict,
+        namedtuple,  # type: ignore[arg-type]
+        OrderedDict,
+        defaultdict,
+        deque,
+        structseq,
+    },
 )
-
-
-# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
-def _is_namedtuple_instance(tree: Any) -> bool:
-    return is_namedtuple_class(type(tree))
 
 
 def _get_node_type(tree: Any) -> Any:
@@ -975,10 +990,12 @@ _LEAF_SPEC = LeafSpec()
 
 
 def treespec_leaf() -> LeafSpec:
+    """Make a treespec representing a leaf node."""
     return _LEAF_SPEC
 
 
 def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
     children = list(iterable)
     if any(not isinstance(child, TreeSpec) for child in children):
         raise ValueError(f"Expected a tuple of TreeSpecs, got: {children!r}.")
@@ -990,6 +1007,7 @@ def treespec_dict(
     /,
     **kwargs: TreeSpec,
 ) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
     dct = dict(mapping, **kwargs)
     if any(not isinstance(child, TreeSpec) for child in dct.values()):
         raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")

@@ -1,32 +1,31 @@
-import inspect
-
-import torch
+from torch._C import _return_types as return_types
 
 
 __all__ = ["pytree_register_structseq", "all_return_types"]
 
-all_return_types = []
 
-# error: Module has no attribute "_return_types"
-return_types = torch._C._return_types  # type: ignore[attr-defined]
+all_return_types = []
 
 
 def pytree_register_structseq(cls):
-    if torch.utils._pytree.is_structseq_class(cls):
+    from torch.utils._pytree import is_structseq_class
+
+    if is_structseq_class(cls):
         return
 
     raise TypeError(f"Class {cls!r} is not a PyStructSequence class.")
 
 
-for name in dir(return_types):
-    if name.startswith("__"):
+_name = ""
+for _name in dir(return_types):
+    if _name.startswith("__"):
         continue
 
-    _attr = getattr(return_types, name)
-    globals()[name] = _attr
+    _attr = getattr(return_types, _name)
+    globals()[_name] = _attr
 
-    if not name.startswith("_"):
-        __all__.append(name)
+    if not _name.startswith("_"):
+        __all__.append(_name)
         all_return_types.append(_attr)
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
@@ -34,5 +33,9 @@ for name in dir(return_types):
     # is no longer the case.
     # NB: I don't know how to check that something is a "structseq" so we do a fuzzy
     # check for tuple
-    if inspect.isclass(_attr) and issubclass(_attr, tuple):
+    if isinstance(_attr, type) and issubclass(_attr, tuple):
         pytree_register_structseq(_attr)
+
+    del _attr
+
+del _name
