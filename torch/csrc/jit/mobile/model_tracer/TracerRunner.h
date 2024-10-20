@@ -9,9 +9,7 @@
 #include <torch/csrc/jit/mobile/model_tracer/CustomClassTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 const std::vector<std::string> always_included_traced_ops = {
     // The following are called from setup sections.
@@ -38,6 +36,4 @@ TracerResult trace_run(const std::string& input_module_path);
  */
 TracerResult trace_run(const std::vector<std::string>& input_module_paths);
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

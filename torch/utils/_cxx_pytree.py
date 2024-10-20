@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Iterable,
     List,
+    Mapping,
     Optional,
     overload,
     Tuple,
@@ -265,6 +266,27 @@ def is_structseq(obj: Union[object, type]) -> bool:
 def is_structseq_class(cls: type) -> bool:
     """Return whether the class is a class of PyStructSequence."""
     return optree.is_structseq_class(cls)
+
+
+def treespec_leaf() -> TreeSpec:
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[Tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
 
 
 def tree_flatten(

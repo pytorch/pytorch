@@ -76,7 +76,7 @@ def prepare_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -96,7 +96,7 @@ def prepare_pt2e(
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
@@ -148,7 +148,7 @@ def prepare_qat_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -165,7 +165,7 @@ def prepare_qat_pt2e(
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_qat_pt2e")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new

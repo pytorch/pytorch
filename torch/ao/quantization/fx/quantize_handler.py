@@ -199,8 +199,6 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """Common quantized op, first input and first output will be quantized"""
 
-    pass
-
 
 # TODO: remove this class
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):

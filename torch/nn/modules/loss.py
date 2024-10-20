@@ -80,11 +80,11 @@ class L1Loss(_Loss):
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
-    of :math:`n` elements each.
+    of :math:`N` elements each.
 
-    The sum operation still operates over all the elements, and divides by :math:`n`.
+    The sum operation still operates over all the elements, and divides by :math:`N`.
 
-    The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
+    The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Supports real-valued and complex-valued inputs.
 
@@ -564,11 +564,11 @@ class MSELoss(_Loss):
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
-    of :math:`n` elements each.
+    of :math:`N` elements each.
 
-    The mean operation still operates over all the elements, and divides by :math:`n`.
+    The mean operation still operates over all the elements, and divides by :math:`N`.
 
-    The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
+    The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,

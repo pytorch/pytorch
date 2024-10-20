@@ -111,7 +111,6 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,7 +122,6 @@ TensorImpl::TensorImpl(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -137,7 +135,6 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     std::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
@@ -509,7 +506,9 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
   }
   if (r) {
-    r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    if (!r->is_inference()) {
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    }
     r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     return r;
   }

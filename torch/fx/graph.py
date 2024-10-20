@@ -1,32 +1,48 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from collections import defaultdict
-from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-import torch.utils._pytree as pytree
-from . import _pytree as fx_pytree
-from ._compatibility import compatibility
-from torch._C import _NodeIter
-
-import os
+import builtins
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
-from dataclasses import dataclass
-from contextlib import contextmanager
 import copy
 import enum
-import torch
-import keyword
-import re
-import builtins
-import math
-import warnings
+import functools
 import inspect
+import keyword
+import math
+import os
+import re
+import warnings
+from collections import defaultdict
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
-__all__ = ["PythonCode", "CodeGen", "Graph"]
+import torch
+import torch.utils._pytree as pytree
+from torch._C import _NodeIter
+
+from . import _pytree as fx_pytree
+from ._compatibility import compatibility
+from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+
 
 if TYPE_CHECKING:
+    from ._symbolic_trace import Tracer  # noqa: F401
     from .graph_module import GraphModule  # noqa: F401
-    from ._symbolic_trace import Tracer   # noqa: F401
+
+
+__all__ = ["PythonCode", "CodeGen", "Graph"]
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -37,6 +53,8 @@ _origin_type_map = {
     frozenset: FrozenSet,
     tuple: Tuple,
 }
+
+_legal_ops = dict.fromkeys(['call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output'])
 
 
 # Signature for functions thattransforms the body (`list[str]`) of the
@@ -85,14 +103,11 @@ def _snake_case(s: str) -> str:
         ``mod.pascalCase``-> ``mod.pascal_case``
         ``mod.ALL_CAPS`` -> ``mod.all_caps``
     """
-    chars = []
-    prev_lower = False
-    for c in s:
-        if prev_lower and c.isupper():
-            chars.append('_')
-        chars.append(c.lower())
-        prev_lower = c.islower()
-    return ''.join(chars)
+    return _snake_case_sub(s).lower()
+
+
+# Replace occurrences where a lowercase letter is followed by an uppercase letter
+_snake_case_sub = functools.partial(re.compile(r'(?<=[a-z])([A-Z])').sub, r'_\1')
 
 
 def _is_from_torch(obj: Any) -> bool:
@@ -311,7 +326,6 @@ def _parse_stack_trace(stack_trace: str):
     # stacktrace should have innermost frame last, so we
     # iterate backwards to find the first line that starts
     # with 'File '
-    summary_str = ""
     for idx in range(len(lines) - 2, -1, -1):
         line = lines[idx].strip()
         matches = pattern.match(line)
@@ -464,10 +478,10 @@ class CodeGen:
                 return s
             return f
 
-        yellow = make_wrapper_func("yellow")
-        cyan = make_wrapper_func("cyan")
+        yellow = make_wrapper_func("yellow")  # noqa: F841
+        cyan = make_wrapper_func("cyan")  # noqa: F841
         red = make_wrapper_func("red")
-        green = make_wrapper_func("green")
+        green = make_wrapper_func("green")  # noqa: F841
         dim_green = make_wrapper_func("dim_green")
         dim = make_wrapper_func("dim")
         dim_blue = make_wrapper_func("dim_blue")
@@ -738,7 +752,7 @@ class _PyTreeCodeGen(CodeGen):
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         # Given a user function/model:
-        #   myargs = [myargs0, myargs1]
+        #   myargs = (myargs0, myargs1)
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
         #   def forward(self, mypos, *myargs, mykey=None, **mykwargs):
         #
@@ -746,12 +760,12 @@ class _PyTreeCodeGen(CodeGen):
         #   e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
         #
         # Within `forward`, `tree_flatten_spec``still parses args and kwargs separately
-        #   e.g. tree_flatten_spec(([mypos, myargs0, myargs1],
-        #                           {'mykey':mykey, 'mykwargs0':mykwargs0, 'mykwargs1':mykwargs1}),
+        #   e.g. tree_flatten_spec(((mypos, myargs0, myargs1),
+        #                           {'mykey': mykey, 'mykwargs0': mykwargs0, 'mykwargs1': mykwargs1}),
         #                          self._in_spec)
         #
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
-        #   e.g. tree_flatten_spec([mypos, myargs0, myargs1]), self._in_spec)
+        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
 
@@ -762,20 +776,34 @@ class _PyTreeCodeGen(CodeGen):
         fn_definition = super().gen_fn_def(fn_args[:], maybe_return_annotation)
 
         if len(free_vars) > 0:  # pytree has placeholders in it
+
+            class StrReprNoQuotes(str):
+                def __repr__(self) -> str:
+                    return self
+
+            in_spec = self.pytree_info.in_spec
             # when kwargs is present, in_spec is tuple(args, kwargs)
-            has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                self.pytree_info.in_spec.num_children == 2 and \
-                self.pytree_info.in_spec.children_specs[0].type == tuple and \
-                self.pytree_info.in_spec.children_specs[1].type == dict
-            fn_kwargs = '{}'
-            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+            has_args_kwargs_tuple = (
+                in_spec.type is tuple
+                and in_spec.num_children == 2
+                and in_spec.child(0).type is tuple
+                and in_spec.child(1).type is dict
+            )
             if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
-                fn_args = self.pytree_info.orig_args[:count_args]
-                fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
-                                  self.pytree_info.in_spec.children_specs[1].context,
-                                  self.pytree_info.orig_args[count_args:])) + '}'
-                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+                count_args = in_spec.child(0).num_children
+                sig_args = repr(tuple(map(StrReprNoQuotes, fn_args[:count_args])))
+                sig_kwargs = repr(
+                    dict(
+                        zip(
+                            in_spec.child(1).context,
+                            map(StrReprNoQuotes, fn_args[count_args:]),
+                        )
+                    )
+                )
+                fn_signature = f"({sig_args}, {sig_kwargs}), self._in_spec"
+            else:
+                sig_args = repr(tuple(map(StrReprNoQuotes, fn_args)))
+                fn_signature = f"{sig_args}, self._in_spec"
 
             # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
             # we need to split it to two lines:
@@ -817,10 +845,10 @@ class _FindNodesLookupTable:
     def find_nodes(self, *, op: str, target: Optional['Target'] = None):
         if op == "call_function":
             assert target is not None
-            return dict(self.table[(op, target)]).keys()
+            return [*self.table[(op, target)].keys()]
 
         if target is None:
-            return dict(self.table[(op, None)]).keys()
+            return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
         return [node for node in self.table[(op, None)].keys() if node.target == target]
@@ -1011,7 +1039,7 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
+        assert op in _legal_ops
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
@@ -1552,6 +1580,8 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
+            num_warnings = 0
+            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == 'call_function':
                     if not callable(node.target):
@@ -1578,11 +1608,21 @@ class Graph:
                               and not isinstance(new_m_itr, torch.nn.Module)
                               and not isinstance(new_m_itr, torch.nn.Parameter)
                               and atom not in m_itr._buffers):
-                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
-                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target')
+                            if num_warnings < MAX_WARNINGS:
+                                # Don't emit this warning too frequently,
+                                # for very large graphs this can become very expensive
+                                # from a performance perspective.
+                                warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                              'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                              'what \'get_attr\' Nodes typically target')
+                            num_warnings += 1
                         else:
                             m_itr = new_m_itr
+            if num_warnings > MAX_WARNINGS:
+                warnings.warn(
+                    f'Additional {num_warnings - MAX_WARNINGS} warnings '
+                    'suppressed about get_attr references'
+                )
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(self, is_impure_node: Optional[Callable[[Node], bool]] = None):
