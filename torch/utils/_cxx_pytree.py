@@ -28,10 +28,13 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 import optree
-from optree import PyTreeSpec  # direct import for type annotations
+from optree import (  # direct import for type annotations
+    PyTreeSpec as PyTreeSpec,
+    PyTreeSpec as TreeSpec,
+)
 
 import torch.utils._pytree as _pytree
 from torch.utils._pytree import KeyEntry
@@ -86,7 +89,6 @@ R = TypeVar("R")
 
 Context = Any
 PyTree = Any
-TreeSpec = PyTreeSpec
 FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
 UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
 OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
@@ -969,9 +971,14 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return isinstance(instance, TreeSpec) and instance.is_leaf()
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls) -> Self:
+        return treespec_leaf()  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
