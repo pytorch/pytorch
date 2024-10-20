@@ -11,7 +11,7 @@ FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
 @deprecated(
     "torch.fx._pytree.register_pytree_flatten_spec is deprecated and it is now a no-op. "
-    "Please register the flatten_with_keys function in pytree instead.",
+    "Please register the class with `flatten_with_keys` function as pytree node instead.",
     category=FutureWarning,
 )
 def register_pytree_flatten_spec(
@@ -19,10 +19,28 @@ def register_pytree_flatten_spec(
     flatten_fn_spec: FlattenFuncSpec,
     flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
 ) -> None:
-    pass  # no-op
+    # no-op, just check if the node is registered and has flatten_with_keys_fn
+    handler = python_pytree.SUPPORTED_NODES.get(cls)
+    if handler is None:
+        raise ValueError(
+            f"Unsupported node type {cls}, "
+            "please consider registering it as pytree node first."
+        )
+    if handler.flatten_with_keys_fn is None:
+        raise ValueError(
+            f"Unsupported node type {cls}, "
+            "please consider registering the pytree node with `flatten_with_keys` function first."
+        )
+
+
+# TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
+#                  Use a class instead.
+class _DummyLeaf:
+    pass
 
 
 # The pytree may be wrapped with torch.fx.Proxy, so we cannot use `treespec.flatten_up_to(pytree)`.
+# Use the key path API to index into the pytree instead.
 def tree_flatten_spec(
     pytree: PyTree,
     spec: TreeSpec,
@@ -36,9 +54,8 @@ def tree_flatten_spec(
         assert isinstance(spec, PyTreeSpec), "Expected a PyTreeSpec"
         return [accessor(pytree) for accessor in spec.accessors()]
 
-    dummy_leaf = None
-    dummy_tree = python_pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
+    dummy_tree = python_pytree.tree_unflatten([_DummyLeaf] * spec.num_leaves, spec)
     return [
         python_pytree.key_get(pytree, key_path)
-        for key_path, dummy_leaf in python_pytree.tree_leaves_with_path(dummy_tree)
+        for key_path, _ in python_pytree.tree_leaves_with_path(dummy_tree)
     ]
