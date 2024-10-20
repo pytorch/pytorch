@@ -9,7 +9,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -1603,6 +1603,9 @@ class RandomVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.random
+
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+        raise NotImplementedError
 
     @staticmethod
     def is_supported_random_obj(val):

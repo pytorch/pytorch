@@ -2,13 +2,13 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, final, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
@@ -238,16 +238,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        """getattr(self, name) returning a python constant"""
-        raise NotImplementedError
+        v = self.as_python_constant()
+        try:
+            return getattr(v, name)
+        except AttributeError:
+            raise NotImplementedError from None
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        value = self.const_getattr(tx, name)
-        if not variables.ConstantVariable.is_literal(value):
-            raise NotImplementedError
+        from .misc import GetAttrVariable
+
         source = self.source and AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, source=source)
+        try:
+            value = self.const_getattr(tx, name)
+            if not is_function_or_wrapper(value):
+                return VariableTracker.build(tx, value, source)
+        except (NotImplementedError, Unsupported):
+            pass
+        return GetAttrVariable(self, name, source=source)
 
     def is_proxy(self):
         try:
@@ -386,6 +394,42 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
+
+
+class VariableTrackerContainer(VariableTracker):
+    """
+    This is a base class for VariableTrackers that contain other VariableTrackers:
+    it solves the problem of variables that contain themselves for as_python_constant().
+
+    TODO(rec): Find and port any remaining container classes to use
+    VariableTrackerContainer.
+
+    TODO(rec): cycle detection is only being done for the as_python_constant()
+    method but there are other recursive methods that might get into a loop,
+    including as_proxy() and debug_rep().
+    """
+
+    @final
+    def as_python_constant(self) -> Any:
+        return self._as_python_constant([])
+
+    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
+        # This method must be implemented in subclasses
+        unimplemented(f"_as_python_constant: {self}")
+
+    @final
+    @staticmethod
+    def _as_constant(item: VariableTracker, visited: list[VariableTracker]) -> Any:
+        """Call _as_constant() from a subclass to recursively evaluate an item as
+        a python constant.
+        """
+        if not isinstance(item, VariableTrackerContainer):
+            return item.as_python_constant()
+        elif item in visited:
+            unimplemented(f"recursive containment {item}")
+        else:
+            visited.append(item)
+            return item._as_python_constant(visited)
 
 
 def typestr(*objs):

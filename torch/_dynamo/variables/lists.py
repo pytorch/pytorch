@@ -5,7 +5,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -26,7 +26,7 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker, VariableTrackerContainer
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-class BaseListVariable(VariableTracker):
+class BaseListVariable(VariableTrackerContainer):
     @staticmethod
     def cls_for_instance(obj):
         if is_namedtuple(obj):
@@ -81,8 +81,11 @@ class BaseListVariable(VariableTracker):
     def debug_repr_helper(self, prefix, suffix):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def as_python_constant(self):
-        return self.python_type()([x.as_python_constant() for x in self.items])
+    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
+        return self.python_type()(self._as_constant_list(visited))
+
+    def _as_constant_list(self, visited: list[VariableTracker]) -> Any:
+        return [self._as_constant(i, visited) for i in self.items]
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -277,8 +280,8 @@ class RangeVariable(BaseListVariable):
         )
         return result
 
-    def as_python_constant(self):
-        return range(*[x.as_python_constant() for x in self.items])
+    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
+        return range(*self._as_constant_list(visited))
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
@@ -734,12 +737,12 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
-    def as_python_constant(self):
+    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
+        consts = self._as_constant_list(visited)
         if self.is_structseq():
-            # StructSequenceType(iterable)
-            return self.python_type()([x.as_python_constant() for x in self.items])
+            return self.python_type()(consts)
         # NamedTupleType(*iterable)
-        return self.python_type()(*[x.as_python_constant() for x in self.items])
+        return self.python_type()(*consts)
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -824,7 +827,7 @@ class SliceVariable(BaseListVariable):
     def python_type(self):
         return slice
 
-    def as_python_constant(self):
+    def _as_python_constant(self, already_visited: list[VariableTracker]) -> Any:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
