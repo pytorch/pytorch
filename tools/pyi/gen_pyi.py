@@ -210,12 +210,12 @@ logic_ops = (
     "and",
     "or",
     "xor",
-    "iand",
-    "ior",
-    "ixor",  # inplace ops
     "rand",
     "ror",
     "rxor",  # reverse logic
+    "iand",
+    "ior",
+    "ixor",  # inplace ops
 )
 binary_ops = shift_ops + arithmetic_ops + logic_ops
 
@@ -246,14 +246,16 @@ def sig_for_ops(opname: str) -> list[str]:
         return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
-    elif name in comparison_ops:
-        sig = (
-            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
-        )
-        if name in symmetric_comparison_ops:
+    elif name in symmetric_comparison_ops:
+        return [
             # unsafe override https://github.com/python/mypy/issues/5704
-            sig += "  # type: ignore[override]"
-        return [sig]
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
+            f"def {opname}(self, other: object) -> _bool: ...",
+        ]
+    elif name in asymmetric_comparison_ops:
+        return [
+            "def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
