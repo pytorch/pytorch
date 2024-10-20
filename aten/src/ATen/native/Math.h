@@ -1204,22 +1204,30 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
@@ -1231,7 +1239,7 @@ inline T abs_impl(T v) {
 }
 
 template <>
-C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
+[[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
   return v;
 }
 
