@@ -46,7 +46,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import requires_cuda
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 def reset_rng_state():
@@ -325,7 +325,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
@@ -380,7 +380,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, _ = y.tolist()
+                u0, u1 = y.tolist()
                 x = torch.cat([x, x])
                 y = x @ self.weight1
                 z = (x + y @ self.weight2) * u0
@@ -401,7 +401,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 self.weight2 = nn.Parameter(torch.randn(512, 512))
 
             def forward(self, x, y):
-                u0, _ = y.tolist()
+                u0, u1 = y.tolist()
                 a = torch.ones(u0)
                 x = torch.cat([x, x])
                 y = x @ self.weight1
@@ -425,7 +425,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
             def forward(self, x, y):
                 # partition one (contains the u0 def)
-                u0, _ = y.tolist()
+                u0, u1 = y.tolist()
                 x = torch.cat([x, x])
                 y1 = x @ self.weight1
                 # partition two (contains the variable)
@@ -470,7 +470,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             ):
                 super().__init__()
                 layers = []
-                for _ in range(2):
+                for l in range(2):
                     layer = nn.ModuleList(
                         [
                             nn.LayerNorm(96),
@@ -488,7 +488,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                 for m in self.layers:
                     x = x.reshape(B * F, T, H)
                     x = m[0](x)
-                    x, _ = m[1].forward(x, x, x)
+                    x, attn = m[1].forward(x, x, x)
                     x = x.reshape(B, F, T, H)
                 return x
 
@@ -528,7 +528,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
@@ -536,7 +536,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor_static_graph(self):
@@ -561,7 +561,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_activation_checkpointing(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -676,7 +676,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
@@ -701,7 +701,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_activation_checkpointing(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_toy_model_for_activation_checkpointing(
@@ -722,7 +722,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
     @import_transformers_or_skip()
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -767,7 +767,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertTrue(same(correct_results, opt_results))
 
     @import_transformers_or_skip()
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -815,7 +815,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_tensor(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -860,7 +860,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_scalar(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -888,17 +888,16 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_speculation_divergence(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            # TODO: This should be possible to do inside the function, but
             @torch.compile()
             def f(x, y):
-                zx = x.shape  # noqa: F841
-                zy = y.shape  # noqa: F841
+                zx = x.shape
+                zy = y.shape
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -919,7 +918,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_graph_break_empty_graph_still_collective(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -927,10 +926,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                z = y  # noqa: F841
+                z = y
                 print("woof")
-                zx = x.shape  # noqa: F841
-                zy = y.shape  # noqa: F841
+                zx = x.shape
+                zy = y.shape
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -951,7 +950,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_dim_mismatch(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -959,8 +958,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                zx = x.shape  # noqa: F841
-                zy = y.shape  # noqa: F841
+                zx = x.shape
+                zy = y.shape
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -980,7 +979,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_missing_source(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -1002,7 +1001,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_scalar_missing_source(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -1024,7 +1023,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_type_mismatch(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -1058,7 +1057,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     def test_asymmetric_compilation(self):
@@ -1109,7 +1108,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", True)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     @patch.object(torch._inductor.config, "sleep_sec_TESTING_ONLY", 10)
@@ -1199,7 +1198,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -1295,7 +1294,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
         assert config.optimize_ddp
         """
@@ -1364,18 +1363,18 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             opt_outputs = opt_fn(inputs)
             self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_layout_optimizations_training(self):
         self._test_graph_split_inductor_layout_optimizations_impl(
             contextlib.nullcontext
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_layout_optimizations_inference(self):
         self._test_graph_split_inductor_layout_optimizations_impl(torch.no_grad)
 
     @patch.object(config, "optimize_ddp", True)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_transpose(self):
         assert config.optimize_ddp
 
@@ -1466,7 +1465,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_empty_graph_inductor(self):
         def fn():
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
@@ -1557,7 +1556,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
-        m, inputs, _ = get_model(f"cuda:{self.rank}")
+        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
         fsdp_m = torch._dynamo.optimize()(fsdp_m)
         self.assertRaisesRegex(

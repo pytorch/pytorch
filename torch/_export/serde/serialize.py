@@ -127,6 +127,7 @@ ST_DELIMITER = ";"
 _TORCH_TO_SERIALIZE_DTYPE = {
     torch.uint8: ScalarType.BYTE,
     torch.int8: ScalarType.CHAR,
+    torch.uint16: ScalarType.UINT16,
     torch.int16: ScalarType.SHORT,
     torch.int32: ScalarType.INT,
     torch.int64: ScalarType.LONG,
@@ -1108,6 +1109,7 @@ class GraphModuleSerializer(metaclass=Final):
             ],
             in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
             out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
     def serialize_module_call_graph(
@@ -2256,6 +2258,7 @@ class GraphModuleDeserializer(metaclass=Final):
             ],
             in_spec=treespec_loads(module_call_signature.in_spec),
             out_spec=treespec_loads(module_call_signature.out_spec),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None,
         )
 
     def deserialize_module_call_graph(
@@ -2750,7 +2753,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     assert len(graph.outputs) == len(signature.output_specs)
 
     def rank_input(inp) -> Tuple[int, Optional[str], int]:
-        idx, (_arg, spec) = inp
+        idx, (arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
             return 5, None, idx
@@ -2770,7 +2773,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             raise AssertionError(f"Unknown input type: {spec}")
 
     def rank_output(out) -> Tuple[int, Optional[str], int]:
-        idx, (_arg, spec) = out
+        idx, (arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
             return 3, None, idx

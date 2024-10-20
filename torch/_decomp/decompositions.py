@@ -1689,7 +1689,9 @@ def native_layer_norm_backward(
 
     N = prod(inner_dims)  # type: ignore[arg-type]
     M = prod(outer_dims)  # type: ignore[arg-type]
-    if M <= 0 or N <= 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
@@ -2150,7 +2152,7 @@ def _to_copy(
         if dtype is not None and device.type == "cpu":
             x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
             dtype_converted = True
-        x_tensor = torch._prims.device_put(x_tensor, device)
+        x_tensor = torch._prims.device_put(x_tensor, device, non_blocking)
 
     if dtype is not None and not dtype_converted:
         x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
@@ -3823,7 +3825,7 @@ def _upsample_linear(
     scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    n_channels = input.shape[1]
+    n_batch, n_channels = input.shape[:2]
     inp_sizes = input.shape[2:]
     n_dims = len(inp_sizes)
 
@@ -4976,6 +4978,7 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
+    dtype = query.dtype
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",

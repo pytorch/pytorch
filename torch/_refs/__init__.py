@@ -296,6 +296,7 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
     "t_copy",
     "T",
@@ -420,12 +421,12 @@ def _broadcast_shapes(*_shapes):
                     )
                 common_shape[idx] = shape[idx]
             elif guard_size_oblivious(shape[idx] != 1):
-                if common_shape[idx] != shape[idx]:
-                    raise RuntimeError(
-                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
-                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
-                        f"should be broadcastable to {common_shape}"
-                    )
+                torch._check(
+                    common_shape[idx] == shape[idx],
+                    lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                    f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                    f"should be broadcastable to {common_shape}",
+                )
 
     return common_shape
 
@@ -3045,7 +3046,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3139,7 +3140,7 @@ def _normalize(
         a_acc, dim=norm_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    out = (a - mean) * rstd
+    out = (a_acc - mean) * rstd
     return out, mean, rstd
 
 
@@ -3379,6 +3380,7 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
+    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3651,7 +3653,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
     enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
-    permute_order, _sorted_stride = zip(*enumerated_stride)
+    permute_order, sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
     repeat_xtensor = a.expand(urtensor_shape)
@@ -3762,7 +3764,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -6375,6 +6377,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
+squeeze_copy = _make_copy_from_view(aten.squeeze)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
