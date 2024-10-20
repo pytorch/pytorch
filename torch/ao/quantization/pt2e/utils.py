@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 from torch._export import capture_pre_autograd_graph
 
 # Makes sure that quantized_decomposed ops are registered
@@ -13,7 +14,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.utils._pytree import LeafSpec
 
 
 __all__ = [
@@ -107,8 +107,8 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"
-        and dq_node.args[0].target in _QUANTIZE_OPS
+        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
+        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
     ):
         q_node = dq_node.args[0]
     return (q_node, dq_node)
@@ -171,6 +171,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     Return True if the given node refers to an aten batch norm op QAT supports.
     """
     supported_ops = [
+        torch.ops.aten.batch_norm.default,
         torch.ops.aten._native_batch_norm_legit.default,
         # Note: we won't need this op anymore after batch norm consolidation
         # For now, we need to continue to support it because it gives better
@@ -279,25 +280,35 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    # Before:
-    # conv -> bn - (first output) -> users1
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # After:
-    # conv -> (first output) -> users1
-    #       bn -
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # if users2 and users3 are empty then bn will be removed through dead code elimination
-
-    for user in bn_node.users:
-        if (
-            user.op != "call_function"
-            or user.target != operator.getitem
-            or user.args[1] != 0
-        ):
-            continue
-        user.replace_all_uses_with(conv_node)
+    if bn_node.target == torch.ops.aten.batch_norm.default:
+        # With the new training ir, instead of batch_norm + getitem,
+        # we only have the batch_norm node.
+        #
+        # Before:
+        # conv -> bn -> users
+        # After:
+        # conv -> users
+        #       bn has no users now
+        bn_node.replace_all_uses_with(conv_node)
+    else:
+        # Before:
+        # conv -> bn - (first output) -> users1
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # After:
+        # conv -> (first output) -> users1
+        #       bn -
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # if users2 and users3 are empty then bn will be removed through dead code elimination
+        for user in bn_node.users:
+            if (
+                user.op != "call_function"
+                or user.target != operator.getitem
+                or user.args[1] != 0
+            ):
+                continue
+            user.replace_all_uses_with(conv_node)
 
     # If the BN node does not have users, erase it from the graph
     # Note: we need to do this manually because the model can still be in train
@@ -315,9 +326,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     if not has_bn:
         return
     for n in m.graph.nodes:
-        if (
-            n.op != "call_function"
-            or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default
+        if n.op != "call_function" or n.target not in (
+            torch.ops.aten._native_batch_norm_legit_no_training.default,
+            torch.ops.aten.batch_norm.default,
         ):
             continue
         bn_node = n
@@ -352,6 +363,7 @@ def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
+    using_training_ir: bool = True,
     **kwargs,
 ) -> GraphModule:
     """
@@ -361,11 +373,19 @@ def _get_aten_graph_module_for_pattern(
         example_inputs = tuple(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,
-        example_inputs,
-        kwargs,
-    )
+
+    if using_training_ir:
+        aten_pattern = torch.export.export_for_training(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+        ).module()
+    else:
+        aten_pattern = capture_pre_autograd_graph(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+        )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
@@ -382,7 +402,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
@@ -474,7 +494,10 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    args_spec = in_spec.children_specs[0]
+    assert in_spec.type is tuple
+    args_spec = in_spec.child(0)
+    assert args_spec.type is tuple
+    args_spec_children = args_spec.children()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -489,7 +512,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        args_spec.children_specs.append(LeafSpec())
+                        args_spec_children.append(pytree.treespec_leaf())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -500,8 +523,8 @@ def _replace_literals_with_new_placeholders(
         node.args = new_args
 
     # Update `num_nodes`, `num_leaves`, `num_children`.
-    args_spec.__post_init__()
-    in_spec.__post_init__()
+    args_spec = pytree.treespec_tuple(args_spec_children)
+    gm._in_spec = in_spec = pytree.treespec_tuple([args_spec, *in_spec.children()[1:]])
     return gm
 
 

@@ -27,6 +27,12 @@ def parse_args() -> Any:
 
     parser = ArgumentParser("Check PR labels")
     parser.add_argument("pr_num", type=int)
+    # add a flag to return a non-zero exit code if the PR does not have the required labels
+    parser.add_argument(
+        "--exit-non-zero",
+        action="store_true",
+        help="Return a non-zero exit code if the PR does not have the required labels",
+    )
 
     return parser.parse_args()
 
@@ -41,10 +47,13 @@ def main() -> None:
         if not has_required_labels(pr):
             print(LABEL_ERR_MSG)
             add_label_err_comment(pr)
+            if args.exit_non_zero:
+                sys.exit(1)
         else:
             delete_all_label_err_comments(pr)
     except Exception as e:
-        pass
+        if args.exit_non_zero:
+            sys.exit(1)
 
     sys.exit(0)
 

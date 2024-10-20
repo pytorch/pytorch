@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import torch
 import inspect
@@ -127,7 +126,7 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             try:
                 candidate_signature.bind(*args, **kwargs)
                 matched_schemas.append((candidate_signature, schema))
-            except TypeError as e:
+            except TypeError:
                 continue
 
         def throw_if_mutable(schema):
@@ -143,7 +142,6 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             # Matched exactly one schema, unambiguous
             _, schema_to_check = matched_schemas[0]
             throw_if_mutable(schema_to_check)
-            pass
         else:
             # Ambiguous schema match. Since mutability checking is best effort,
             # do nothing.
@@ -216,10 +214,9 @@ def create_type_hint(x):
                 else:
                     return ret_type(Any)
             return ret_type(base_type)
-    except Exception as e:
+    except Exception:
         # We tried to create a type hint for list but failed.
         warnings.warn(f"We were not able to successfully create type hint from the type {x}")
-        pass
     return x
 
 @compatibility(is_backward_compatible=False)
@@ -331,7 +328,7 @@ def normalize_function(
                 try:
                     candidate_signature.bind(*args, **kwargs)
                     matched_schemas.append(candidate_signature)
-                except TypeError as e:
+                except TypeError:
                     continue
 
             if len(matched_schemas) == 0:
@@ -352,7 +349,7 @@ def normalize_function(
                             for arg_name, arg_type in bound_types.arguments.items():
                                 param = candidate_signature.parameters[arg_name]
                                 sig_matches = sig_matches and type_matches(param.annotation, arg_type)
-                        except TypeError as e:
+                        except TypeError:
                             sig_matches = False
                         if sig_matches:
                             new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(candidate_signature, args, kwargs,

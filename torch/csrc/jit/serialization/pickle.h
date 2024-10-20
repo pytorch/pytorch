@@ -60,6 +60,10 @@ TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
 /// `torch::pickle_save` in C++ or `torch.save` in Python
 TORCH_API IValue pickle_load(const std::vector<char>& data);
 
+/// Deserialize a `torch::IValue` from bytes produced by either
+/// `torch::pickle_save` in C++ or `torch.save` in Python with custom object.
+TORCH_API IValue pickle_load_obj(std::string_view data);
+
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return
 /// the number of bytes read.
@@ -116,6 +120,21 @@ class VectorReader : public caffe2::serialize::ReadAdapterInterface {
 
  private:
   std::vector<char> data_;
+};
+
+class StringViewReader : public caffe2::serialize::ReadAdapterInterface {
+ public:
+  StringViewReader(std::string_view data) : data_(data) {}
+
+  size_t size() const override {
+    return data_.size();
+  }
+
+  size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+      const override;
+
+ private:
+  std::string_view data_;
 };
 #endif
 } // namespace torch::jit

@@ -3,7 +3,6 @@ import copyreg
 import functools
 import logging
 import sys
-import threading
 import traceback
 import warnings
 from collections import defaultdict
@@ -109,16 +108,13 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs["async"]
 
 
-_thread_local_state = threading.local()
-
-
 def _get_restore_location(device):
     """Return the map_location location.
 
     Used for rebuild functions where the tensor device is distinct from the storage
     """
 
-    map_location = getattr(_thread_local_state, "map_location", None)
+    map_location = torch.serialization._serialization_tls.map_location
     if map_location is None:
         return device
     else:
@@ -332,6 +328,13 @@ def _rebuild_sparse_tensor(layout, data):
 
 def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
     return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
+
+
+def _rebuild_device_tensor_from_cpu_tensor(data, dtype, device, requires_grad):
+    device = _get_restore_location(device)
+    tensor = data.to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):

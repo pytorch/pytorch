@@ -81,6 +81,12 @@ void atan2_kernel(TensorIteratorBase& iter) {
 }
 
 #if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INTEGRAL_TYPES_V2(TYPE, NAME, ...)  \
+  AT_DISPATCH_V2(                                        \
+      TYPE,                                              \
+      NAME,                                              \
+      AT_WRAP(__VA_ARGS__),                              \
+      AT_EXPAND(AT_INTEGRAL_TYPES_V2))
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...) \
   AT_DISPATCH_V2(                \
       TYPE,                                              \
@@ -104,6 +110,8 @@ void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),       \
       kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
+#define _AT_DISPATCH_INTEGRAL_TYPES_V2(TYPE, NAME, ...)  \
+  AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...) \
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                \
       kComplexHalf, kHalf, kBool, kBFloat16, TYPE, NAME, __VA_ARGS__)
@@ -382,7 +390,7 @@ void bitwise_and_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) { return a && b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_and_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_and_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a & b; },
@@ -395,7 +403,7 @@ void bitwise_or_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) { return a || b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_or_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_or_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a | b; },
@@ -410,7 +418,7 @@ void bitwise_xor_kernel(TensorIteratorBase& iter) {
     // this operation for both Boolean and integral types.
     cpu_kernel(iter, [](bool a, bool b) { return a != b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_xor_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a ^ b; },
@@ -733,7 +741,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
-    const float beta_val(beta);
+    const float beta_val(static_cast<float>(beta));
     const Vectorized<float> beta_val_vec(beta_val);
     const Vectorized<float> point_five_vec(static_cast<float>(0.5));
     cpu_kernel_vec(

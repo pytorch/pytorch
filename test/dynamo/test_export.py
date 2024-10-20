@@ -23,7 +23,6 @@ from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
-from torch.export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -117,7 +116,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     x = arg0
     return pytree.tree_unflatten([x], self._out_spec)""",
         )
@@ -145,7 +144,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     x = arg0
     return pytree.tree_unflatten([2], self._out_spec)""",
         )
@@ -700,7 +699,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     arg0_1 = arg0
     return pytree.tree_unflatten([arg0_1], self._out_spec)""",
         )
@@ -728,7 +727,7 @@ def forward(self, x, y):
             out_graph.code.strip(),
             """\
 def forward(self, x, y):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     arg0_1 = arg0
     return pytree.tree_unflatten([2], self._out_spec)""",
         )
@@ -1878,7 +1877,7 @@ def forward(self, x, y):
                 out_graph.code.strip(),
                 """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     size = l_x_.size()
     getitem = size[0];  size = None
@@ -2087,7 +2086,7 @@ def forward(self, l_x_):
             gm.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     arg0_1 = arg0
     ones_like = torch.ops.aten.ones_like.default(arg0_1, pin_memory = False)
     matmul = torch.ops.aten.matmul.default(arg0_1, ones_like);  arg0_1 = ones_like = None
@@ -2495,6 +2494,19 @@ def forward(self, x):
 
         torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
 
+    def test_export_fast_binary_broadcast_check_unbacked(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().cuda()
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar))
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2721,7 +2733,7 @@ def forward(self, x):
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+            ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
             torch.export.export(
                 bar,
@@ -2741,36 +2753,6 @@ def forward(self, x):
                 if node.op == "placeholder"
             ],
             ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
-        )
-
-    @config.patch(
-        capture_dynamic_output_shape_ops=True,
-        specialize_int=True,
-        capture_scalar_outputs=True,
-    )
-    def test_export_preserve_constraints_as_metadata_scalar(self):
-        def f(x, y):
-            b = x.item()
-            torch._check_is_size(b)
-            return torch.empty((b, y.shape[0]))
-
-        x = torch.tensor([3])
-        y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
-        dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
-        gm, _ = torch._dynamo.export(
-            f,
-            dynamic_shapes=dynamic_shapes,
-            aten_graph=True,
-            tracing_mode="symbolic",
-        )(*example_inputs)
-
-        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            f, example_inputs, dynamic_shapes=dynamic_shapes
-        )
-        self.assertEqual(
-            gm.meta["input_shape_constraints"],
-            [c.serializable_spec for c in constraints],
         )
 
     @torch._dynamo.config.patch(
@@ -2858,11 +2840,6 @@ def forward(self, x):
             torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
         dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, {0: dimx_0})
         torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
-
-    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
-        x = torch.ones(6, 4, 4)
-        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
-            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
 
     def test_export_dynamic_dim_range_constraint(self):
         x = torch.ones(6, 4, 4)
@@ -3070,23 +3047,6 @@ def forward(self, x):
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
-
-    def test_export_mark_dynamic_conflict_dynamic_dim(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.mark_dynamic(y, 0)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Constraints violated",
-        ):
-            torch._dynamo.export(
-                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dim")},)
-            )(y)
 
     def test_export_dynamic_dim_cleanup(self):
         y = torch.randn([3, 3, 3])
@@ -3478,7 +3438,7 @@ def forward(self, x):
             gm.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     arg0_1 = arg0
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
     slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
@@ -3571,7 +3531,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
         arg1: "f32[s1, s2]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
         l_x_ = arg1
 
         sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
@@ -3582,7 +3542,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
         arg1: "f32[s1, s2]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
         l_x_ = arg1
 
         cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
@@ -3928,7 +3888,7 @@ G['macademia'], accessed at:
             out_graph.code.strip(),
             """\
 def forward(self, pred, x):
-    arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+    arg0, arg1, = fx_pytree.tree_flatten_spec(((pred, x), {}), self._in_spec)
     l_pred_ = arg0
     l_x_ = arg1
     a = torch.ones(6, 4)
@@ -4351,7 +4311,7 @@ def forward(self, arg0_1, arg1_1):
             gm.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     x = torch.cos(l_x_);  l_x_ = None
     x_1 = torch.sin(x);  x = None
@@ -4373,7 +4333,7 @@ def forward(self, x):
             gm2.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     x = torch.cos(l_x_);  l_x_ = None
     x_1 = torch.sin(x);  x = None
@@ -4408,7 +4368,7 @@ def forward(self, x):
             gm1.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
@@ -4417,7 +4377,7 @@ def forward(self, x):
             gm2.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
@@ -4439,7 +4399,7 @@ def forward(self, x):
             gm2.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     x = torch.cos(l_x_);  l_x_ = None
     sin = torch.sin(x);  x = None
@@ -4499,7 +4459,7 @@ def forward(self, x):
             gm.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_args_0_ + 1;  l_args_0_ = None
@@ -4522,7 +4482,7 @@ def forward(self, x):
             gm_no_inference.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
     add = l_args_0_ + 1;  l_args_0_ = None
@@ -4544,7 +4504,7 @@ def forward(self, x):
             gm.code.strip(),
             """\
 def forward(self, x):
-    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    arg0, = fx_pytree.tree_flatten_spec(((x,), {}), self._in_spec)
     l_x_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
     add = l_x_ + 1;  l_x_ = None
@@ -4578,7 +4538,7 @@ def forward(self, x):
             gm.code.strip(),
             """\
 def forward(self, x, b, y):
-    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y), {}), self._in_spec)
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
@@ -4594,7 +4554,7 @@ def forward(self, x, b, y):
             gm.code.strip(),
             """\
 def forward(self, x, b, y):
-    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(((x, b, y), {}), self._in_spec)
     l_x_ = arg0
     l_b_ = arg1
     l_y_ = arg2
@@ -4605,10 +4565,7 @@ def forward(self, x, b, y):
     return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
         )
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
-        ):
-            gm, _ = torch._dynamo.export(fn)(x, b, y)
+        gm, _ = torch._dynamo.export(fn)(x, b, y)
 
     def test_dynamo_list_index(self):
         def fn(x, in_list):
