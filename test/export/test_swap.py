@@ -343,7 +343,7 @@ def forward(self, x, y):
             swapped_gm.code.strip(),
             """\
 def forward(self, x, y):
-    x, y, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
+    x, y, = fx_pytree.tree_flatten_spec(((x, y), {}), self._in_spec)
     _spec_0 = self._spec_0
     _spec_3 = self._spec_3
     tree_unflatten = torch.utils._pytree.tree_unflatten([x, y], _spec_0);  x = y = _spec_0 = None

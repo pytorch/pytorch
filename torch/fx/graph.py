@@ -1,32 +1,48 @@
 # mypy: allow-untyped-defs
-from collections import defaultdict
-from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-import torch.utils._pytree as pytree
-from . import _pytree as fx_pytree
-from ._compatibility import compatibility
-from torch._C import _NodeIter
-
-import os
+import builtins
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
-from dataclasses import dataclass
-from contextlib import contextmanager
 import copy
 import enum
-import torch
-import keyword
-import re
-import builtins
-import math
-import warnings
-import inspect
 import functools
+import inspect
+import keyword
+import math
+import os
+import re
+import warnings
+from collections import defaultdict
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+)
 
-__all__ = ["PythonCode", "CodeGen", "Graph"]
+import torch
+import torch.utils._pytree as pytree
+from torch._C import _NodeIter
+
+from . import _pytree as fx_pytree
+from ._compatibility import compatibility
+from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+
 
 if TYPE_CHECKING:
+    from ._symbolic_trace import Tracer  # noqa: F401
     from .graph_module import GraphModule  # noqa: F401
-    from ._symbolic_trace import Tracer   # noqa: F401
+
+
+__all__ = ["PythonCode", "CodeGen", "Graph"]
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -736,7 +752,7 @@ class _PyTreeCodeGen(CodeGen):
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         # Given a user function/model:
-        #   myargs = [myargs0, myargs1]
+        #   myargs = (myargs0, myargs1)
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
         #   def forward(self, mypos, *myargs, mykey=None, **mykwargs):
         #
@@ -744,12 +760,12 @@ class _PyTreeCodeGen(CodeGen):
         #   e.g forward(self, mypos, myargs0, myargs1, mykey, mykwargs0, mykwargs1):
         #
         # Within `forward`, `tree_flatten_spec``still parses args and kwargs separately
-        #   e.g. tree_flatten_spec(([mypos, myargs0, myargs1],
-        #                           {'mykey':mykey, 'mykwargs0':mykwargs0, 'mykwargs1':mykwargs1}),
+        #   e.g. tree_flatten_spec(((mypos, myargs0, myargs1),
+        #                           {'mykey': mykey, 'mykwargs0': mykwargs0, 'mykwargs1': mykwargs1}),
         #                          self._in_spec)
         #
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
-        #   e.g. tree_flatten_spec([mypos, myargs0, myargs1]), self._in_spec)
+        #   e.g. tree_flatten_spec((mypos, myargs0, myargs1), self._in_spec)
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
 
@@ -760,20 +776,33 @@ class _PyTreeCodeGen(CodeGen):
         fn_definition = super().gen_fn_def(fn_args[:], maybe_return_annotation)
 
         if len(free_vars) > 0:  # pytree has placeholders in it
+
+            class StrReprNoQuotes(str):
+                def __repr__(self) -> str:
+                    return self
+
             # when kwargs is present, in_spec is tuple(args, kwargs)
-            has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                self.pytree_info.in_spec.num_children == 2 and \
-                self.pytree_info.in_spec.children_specs[0].type == tuple and \
-                self.pytree_info.in_spec.children_specs[1].type == dict
-            fn_kwargs = '{}'
-            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+            has_args_kwargs_tuple = (
+                self.pytree_info.in_spec.type is tuple
+                and self.pytree_info.in_spec.num_children == 2
+                and self.pytree_info.in_spec.children_specs[0].type is tuple
+                and self.pytree_info.in_spec.children_specs[1].type is dict
+            )
             if has_args_kwargs_tuple:
                 count_args = self.pytree_info.in_spec.children_specs[0].num_children
-                fn_args = self.pytree_info.orig_args[:count_args]
-                fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
-                                  self.pytree_info.in_spec.children_specs[1].context,
-                                  self.pytree_info.orig_args[count_args:])) + '}'
-                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+                sig_args = repr(tuple(map(StrReprNoQuotes, fn_args[:count_args])))
+                sig_kwargs = repr(
+                    dict(
+                        zip(
+                            self.pytree_info.in_spec.children_specs[1].context,
+                            map(StrReprNoQuotes, fn_args[count_args:]),
+                        )
+                    )
+                )
+                fn_signature = f"({sig_args}, {sig_kwargs}), self._in_spec"
+            else:
+                sig_args = repr(tuple(map(StrReprNoQuotes, fn_args)))
+                fn_signature = f"{sig_args}, self._in_spec"
 
             # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
             # we need to split it to two lines:
