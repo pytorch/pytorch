@@ -2125,7 +2125,7 @@ class SubgraphTracer(fx.Tracer):
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
-    
+
     def maybe_bind_symbols(self, example_value, src: Optional[Source]):
         if isinstance(example_value, torch.Tensor):
             return self.handle_tensor(example_value, src)
