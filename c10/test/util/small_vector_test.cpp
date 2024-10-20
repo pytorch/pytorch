@@ -888,8 +888,8 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
 }
 
 struct MovedFrom {
-  bool hasValue;
-  MovedFrom() : hasValue(true) {}
+  bool hasValue{true};
+  MovedFrom() = default;
   MovedFrom(MovedFrom&& m) noexcept : hasValue(m.hasValue) {
     m.hasValue = false;
   }
@@ -1107,7 +1107,7 @@ class SmallVectorReferenceInvalidationTest : public SmallVectorTestBase {
 
   template <class T>
   static bool isValueType() {
-    return std::is_same<T, typename VectorT::value_type>::value;
+    return std::is_same_v<T, typename VectorT::value_type>;
   }
 
   void SetUp() override {

@@ -140,7 +140,7 @@ class _ModuleMeta:
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX dynamo tracer."""
         module_name, (qualified_name, module_class) = raw_meta
-        return _ModuleMeta(module_name, module_class, raw_meta)
+        return _ModuleMeta(module_name.split("@")[0], module_class, raw_meta)
 
     @classmethod
     def from_raw_meta(

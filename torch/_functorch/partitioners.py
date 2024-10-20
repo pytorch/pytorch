@@ -863,6 +863,14 @@ def solve_min_cut(
             return True
         if can_fuse_into_triton_kernel_wrapper_functional(a, b):
             return True
+        if (
+            a.target is operator.getitem
+            and a.args[0].target
+            is torch.ops.higher_order.triton_kernel_wrapper_functional
+        ):
+            # if a is the output of a user triton kernel,
+            # then (by default) we will not be able to fuse b into it
+            return False
         return op_types.is_fusible(a) and op_types.is_fusible(b)
 
     try:

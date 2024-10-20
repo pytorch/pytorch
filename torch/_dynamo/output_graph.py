@@ -660,7 +660,7 @@ class OutputGraph:
 
         assert arg.fake_tensor is not None
 
-        def bind_symint(s, prop):
+        def bind_symint(s: torch.SymInt, prop):
             if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
                 return
             s0 = s.node.expr
@@ -677,6 +677,7 @@ class OutputGraph:
                 source=prop,
             )
             set_example_value(proxy.node, s)
+            assert isinstance(s, torch.SymInt)
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
@@ -1994,7 +1995,11 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                 (
                     rv.node.name,
-                    rv.node.meta["nn_module_stack"][target][1],
+                    next(
+                        ty
+                        for k, (_, ty) in rv.node.meta["nn_module_stack"].items()
+                        if k.split("@")[0] == target
+                    ),
                 )
             ]
 

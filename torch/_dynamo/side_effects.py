@@ -276,7 +276,13 @@ class SideEffects:
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
-            obj = object_new(user_cls)
+            try:
+                obj = object_new(user_cls)
+            except TypeError:
+                # TODO(anijain2305/jansel) - Even though object.__new__ is same
+                # as user_cls.__new__, calling object.__new__(user_cls) fails
+                # with TypeError.
+                unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
@@ -421,16 +427,15 @@ class SideEffects:
 
     def codegen_save_tempvars(self, cg: PyCodegen):
         for var in self._get_modified_vars():
-            if isinstance(
-                var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
-            ) and isinstance(var, variables.NewCellVariable):
+            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
+                var, variables.NewCellVariable
+            ):
                 cg.add_push_null(
                     lambda: cg.load_import_from(utils.__name__, "make_cell")
                 )
                 cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
-                if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -590,21 +595,36 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
+
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
+                if var.should_reconstruct_all:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.should_reconstruct_all:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):

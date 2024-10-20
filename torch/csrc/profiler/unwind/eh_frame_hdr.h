@@ -1,5 +1,5 @@
 #pragma once
-#include <stdint.h>
+#include <cstdint>
 #include <ostream>
 
 #include <torch/csrc/profiler/unwind/lexer.h>

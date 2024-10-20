@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 static bool in_bad_fork = false; // True for children forked after mtia init
 
@@ -88,5 +87,4 @@ void initModule(PyObject* module) {
   });
 }
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia

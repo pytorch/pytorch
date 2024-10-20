@@ -554,7 +554,8 @@ struct TraceContext {
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "TraceContext", /* tp_name */
     sizeof(TraceContext), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
