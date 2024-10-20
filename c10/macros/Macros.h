@@ -118,6 +118,14 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
+#ifndef FBCODE_CAFFE2
+/// DEPRECATED: Warn if a type or return value is discarded.
+#define C10_NODISCARD [[nodiscard]]
+
+/// DEPRECATED: Suppress an unused variable.
+#define C10_UNUSED [[maybe_unused]]
+#endif
+
 #if !defined(__has_attribute)
 #define __has_attribute(x) 0
 #endif
