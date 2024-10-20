@@ -12,6 +12,6 @@ torch.accelerator
     current_stream
     device_count
     is_available
-    set_device
+    set_device_idx
     set_stream
     synchronize
