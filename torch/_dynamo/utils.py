@@ -2479,7 +2479,7 @@ class numpy_to_tensor_wrapper:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2503,7 +2503,7 @@ class numpy_method_wrapper:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2522,7 +2522,7 @@ class numpy_operator_wrapper:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -3097,7 +3097,7 @@ class Lit:
     def __init__(self, s):
         self.s = s
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.s
 
 
