@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Union
+from sympy import Integer, Number, Symbol
+from sympy.logic.boolalg import BooleanAtom
+
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
 import torch
 import torch.fx as fx
@@ -124,10 +128,6 @@ def tensorify_python_scalars(
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
-        from sympy import Integer, Number, Symbol
-        from sympy.logic.boolalg import BooleanAtom
-
-        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # hash cons
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
@@ -272,6 +272,7 @@ def tensorify_python_scalars(
                     isinstance(a, fx.Node)
                     and "val" in a.meta
                     and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    and isinstance(zf.node.expr, Symbol)
                 ):
                     transform = True
                     args.append(float(zf))
@@ -283,6 +284,7 @@ def tensorify_python_scalars(
                     isinstance(v, fx.Node)
                     and "val" in v.meta
                     and isinstance(zf := v.meta["val"], torch.SymFloat)
+                    and isinstance(zf.node.expr, Symbol)
                 ):
                     transform = True
                     kwargs[k] = float(zf)
