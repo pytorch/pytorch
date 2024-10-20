@@ -81,7 +81,7 @@ class DataLoaderBase {
     // Send one 'quit' message per worker. Since a worker dies (exits its
     // thread) after receiving this message, each `QuitWorker()` message will be
     // read by exactly one worker.
-    for (C10_UNUSED const auto w : c10::irange(options_.workers)) {
+    for ([[maybe_unused]] const auto w : c10::irange(options_.workers)) {
       push_job(QuitWorker());
     }
     for (auto& worker : workers_) {
@@ -144,7 +144,7 @@ class DataLoaderBase {
   /// Schedules `requested_jobs` many new batches to be fetched. The actual
   /// number of jobs scheduled may be less if the DataLoader exhausts.
   void prefetch(size_t requested_jobs) {
-    for (C10_UNUSED const auto r : c10::irange(requested_jobs)) {
+    for ([[maybe_unused]] const auto r : c10::irange(requested_jobs)) {
       if (auto batch_request = get_batch_request()) {
         this->push_job(std::move(*batch_request));
       } else {
