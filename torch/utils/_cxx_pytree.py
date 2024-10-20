@@ -245,10 +245,12 @@ def _private_register_pytree_node(
 
 
 def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
     return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
 
 
 def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
     return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
 
 
@@ -257,6 +259,7 @@ def treespec_dict(
     /,
     **kwargs: TreeSpec,
 ) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
     return optree.treespec_dict(
         mapping,
         **kwargs,
