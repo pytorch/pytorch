@@ -202,7 +202,7 @@ sycl::event convolution(
   #endif
 
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32Mkldnn();
+  bool allow_tf32 = ctx.allowTF32Onednn();
   if(allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
@@ -295,7 +295,7 @@ sycl::event convolution_backward_weights(
   #endif
 
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32Mkldnn();
+  bool allow_tf32 = ctx.allowTF32Onednn();
   if(allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
@@ -404,7 +404,7 @@ sycl::event convolution_backward_data(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
 
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32Mkldnn();
+  bool allow_tf32 = ctx.allowTF32Onednn();
   if(allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
