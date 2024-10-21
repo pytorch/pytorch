@@ -84,10 +84,32 @@ Several example transformations can be found at the
 repository.
 '''
 
-from ._symbolic_trace import PH, ProxyableClassMeta, symbolic_trace, Tracer, wrap
-from .graph import CodeGen, Graph
-from .graph_module import GraphModule
-from .interpreter import Interpreter as Interpreter, Transformer as Transformer
-from .node import has_side_effect, map_arg, Node
-from .proxy import Proxy
-from .subgraph_rewriter import replace_pattern
+from torch.fx._symbolic_trace import (  # noqa: F401
+    PH,
+    ProxyableClassMeta,
+    symbolic_trace,
+    Tracer,
+    wrap,
+)
+from torch.fx.graph import CodeGen, Graph  # noqa: F401
+from torch.fx.graph_module import GraphModule
+from torch.fx.interpreter import Interpreter, Transformer
+from torch.fx.node import has_side_effect, map_arg, Node
+from torch.fx.proxy import Proxy
+from torch.fx.subgraph_rewriter import replace_pattern
+
+
+__all__ = [
+    "symbolic_trace",
+    "Tracer",
+    "wrap",
+    "Graph",
+    "GraphModule",
+    "Interpreter",
+    "Transformer",
+    "Node",
+    "Proxy",
+    "replace_pattern",
+    "has_side_effect",
+    "map_arg",
+]
