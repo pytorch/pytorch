@@ -1176,11 +1176,11 @@ def dispatch_trace(
 def wrap_key(
     f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool
 ) -> Callable[_P, R]:
-    flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
+    flat_tensors, _tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
-        flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
+        flat_proxies, _proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
@@ -1733,7 +1733,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
-        except _ModuleNotInstalledAsSubmoduleError as e:
+        except _ModuleNotInstalledAsSubmoduleError:
             warnings.warn(
                 f"Unable to find the path of the module {m}. "
                 "This might be because the module was not properly registered "
