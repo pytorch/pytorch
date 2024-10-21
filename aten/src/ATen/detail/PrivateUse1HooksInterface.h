@@ -32,7 +32,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
       C10_UNUSED DeviceIndex device_index = -1) const override {
     // TODO(FFFrog): Perserved for BC and will be removed in the future.
     if (at::GetGeneratorPrivate().has_value())
-      at::GetGeneratorForPrivateuse1(device_index);
+      return at::GetGeneratorForPrivateuse1(device_index);
 
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
