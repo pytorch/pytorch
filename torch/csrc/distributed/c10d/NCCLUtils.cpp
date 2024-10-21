@@ -95,8 +95,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     // comm ptr is valid. Therefore we add a manual wait here for safety.
     // TODO: remove this wait after NCCL fix the semantics.
     auto startTime = std::chrono::steady_clock::now();
-    auto timeout =
-        nccl_nonblocking_timeout() > 0 ? nccl_nonblocking_timeout() : 30 * 60;
+    auto timeout = nccl_nonblocking_timeout();
     while (!comm->ncclComm_) {
       C10D_CHECK_TIMEOUT(startTime, timeout);
       C10D_SCHED_SLEEP();
@@ -179,23 +178,18 @@ bool nccl_use_nonblocking() {
   return nccl_use_nonblocking_;
 }
 
-int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      timeout = strtol(val, nullptr, 0);
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
