@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import logging
 import os
@@ -110,6 +111,20 @@ def compile_time_strobelight_meta(phase_name):
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
 def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
+
+
+def torch_scope(operation: str):
+    class ScopeContext(contextlib.AbstractContextManager):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def set_metadata(self, key, val):
+            pass
+
+    return ScopeContext()
 
 
 def log_compilation_event(metrics):
