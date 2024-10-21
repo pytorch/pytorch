@@ -80,6 +80,7 @@ namespace {
 
 IMPL_SEND(CPU)
 IMPL_SEND(CUDA)
+IMPL_SEND(XPU)
 IMPL_SEND(PrivateUse1)
 
 #define IMPL_RECV(DEV)                                                        \
@@ -95,6 +96,7 @@ IMPL_SEND(PrivateUse1)
 
 IMPL_RECV(CPU)
 IMPL_RECV(CUDA)
+IMPL_RECV(XPU)
 IMPL_RECV(PrivateUse1)
 
 #define IMPL_RECV_ANY_SOURCE(DEV)                            \
@@ -109,6 +111,7 @@ IMPL_RECV(PrivateUse1)
 
 IMPL_RECV_ANY_SOURCE(CPU)
 IMPL_RECV_ANY_SOURCE(CUDA)
+IMPL_RECV_ANY_SOURCE(XPU)
 IMPL_RECV_ANY_SOURCE(PrivateUse1)
 
 #define IMPL_REDUCE(DEV)                                     \
@@ -132,6 +135,7 @@ IMPL_RECV_ANY_SOURCE(PrivateUse1)
 
 IMPL_REDUCE(CPU)
 IMPL_REDUCE(CUDA)
+IMPL_REDUCE(XPU)
 IMPL_REDUCE(PrivateUse1)
 
 #define IMPL_BROADCAST(DEV)                                                   \
@@ -157,6 +161,7 @@ IMPL_REDUCE(PrivateUse1)
 
 IMPL_BROADCAST(CPU)
 IMPL_BROADCAST(CUDA)
+IMPL_BROADCAST(XPU)
 IMPL_BROADCAST(PrivateUse1)
 
 // Return input tensors as output tensors to make inplace allreduce look like
@@ -181,6 +186,7 @@ IMPL_BROADCAST(PrivateUse1)
 
 IMPL_ALLREDUCE(CPU)
 IMPL_ALLREDUCE(CUDA)
+IMPL_ALLREDUCE(XPU)
 IMPL_ALLREDUCE(PrivateUse1)
 
 #define IMPL_ALLREDUCE_COALESCED(DEV)                             \
@@ -199,6 +205,7 @@ IMPL_ALLREDUCE(PrivateUse1)
 
 IMPL_ALLREDUCE_COALESCED(CPU)
 IMPL_ALLREDUCE_COALESCED(CUDA)
+IMPL_ALLREDUCE_COALESCED(XPU)
 IMPL_ALLREDUCE_COALESCED(PrivateUse1)
 
 // Copy output tensors (not storage) so that this can be used in a functional
@@ -223,6 +230,7 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
 // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
 IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
+IMPL_ALLGATHER(XPU)
 IMPL_ALLGATHER(PrivateUse1)
 
 #define IMPL__ALLGATHER_BASE(DEV)                                           \
@@ -243,6 +251,7 @@ IMPL_ALLGATHER(PrivateUse1)
 
 IMPL__ALLGATHER_BASE(CPU)
 IMPL__ALLGATHER_BASE(CUDA)
+IMPL__ALLGATHER_BASE(XPU)
 IMPL__ALLGATHER_BASE(PrivateUse1)
 
 #define IMPL_ALLGATHER_COALESCED(DEV)                                        \
@@ -259,6 +268,7 @@ IMPL__ALLGATHER_BASE(PrivateUse1)
 
 IMPL_ALLGATHER_COALESCED(CPU)
 IMPL_ALLGATHER_COALESCED(CUDA)
+IMPL_ALLGATHER_COALESCED(XPU)
 IMPL_ALLGATHER_COALESCED(PrivateUse1)
 
 #define IMPL_ALLGATHER_INTO_TENSOR_COALESCED(DEV)                       \
@@ -274,6 +284,7 @@ IMPL_ALLGATHER_COALESCED(PrivateUse1)
 
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(XPU)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
 
 #define IMPL_REDUCE_SCATTER(DEV)                                              \
@@ -297,6 +308,7 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
 
 IMPL_REDUCE_SCATTER(CPU)
 IMPL_REDUCE_SCATTER(CUDA)
+IMPL_REDUCE_SCATTER(XPU)
 IMPL_REDUCE_SCATTER(PrivateUse1)
 
 #define IMPL__REDUCE_SCATTER_BASE(DEV)                                         \
@@ -321,6 +333,7 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
 
 IMPL__REDUCE_SCATTER_BASE(CPU)
 IMPL__REDUCE_SCATTER_BASE(CUDA)
+IMPL__REDUCE_SCATTER_BASE(XPU)
 IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 
 #define IMPL_REDUCE_SCATTER_TENSOR_COALESCED(DEV)                       \
@@ -342,6 +355,7 @@ IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CPU)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CUDA)
+IMPL_REDUCE_SCATTER_TENSOR_COALESCED(XPU)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
 
 #define IMPL_GATHER(DEV)                                                       \
@@ -361,6 +375,7 @@ IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
 
 IMPL_GATHER(CPU)
 IMPL_GATHER(CUDA)
+IMPL_GATHER(XPU)
 IMPL_GATHER(PrivateUse1)
 
 #define IMPL_SCATTER(DEV)                                                      \
@@ -383,6 +398,7 @@ IMPL_GATHER(PrivateUse1)
 
 IMPL_SCATTER(CPU)
 IMPL_SCATTER(CUDA)
+IMPL_SCATTER(XPU)
 IMPL_SCATTER(PrivateUse1)
 
 #define IMPL_ALLTOALL(DEV)                                                   \
@@ -404,6 +420,7 @@ IMPL_SCATTER(PrivateUse1)
 
 IMPL_ALLTOALL(CPU)
 IMPL_ALLTOALL(CUDA)
+IMPL_ALLTOALL(XPU)
 IMPL_ALLTOALL(PrivateUse1)
 
 #define IMPL_ALLTOALL_BASE(DEV)                                   \
@@ -425,6 +442,7 @@ IMPL_ALLTOALL(PrivateUse1)
 
 IMPL_ALLTOALL_BASE(CPU)
 IMPL_ALLTOALL_BASE(CUDA)
+IMPL_ALLTOALL_BASE(XPU)
 IMPL_ALLTOALL_BASE(PrivateUse1)
 
 #define IMPL_BARRIER(DEV)                                                    \
@@ -440,6 +458,7 @@ IMPL_ALLTOALL_BASE(PrivateUse1)
 
 IMPL_BARRIER(CPU)
 IMPL_BARRIER(CUDA)
+IMPL_BARRIER(XPU)
 IMPL_BARRIER(PrivateUse1)
 // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 
@@ -491,6 +510,7 @@ namespace {
 #define REGISTER_C10D_OP(FUNC)  \
   REGISTER_C10D_OP1(FUNC, CPU)  \
   REGISTER_C10D_OP1(FUNC, CUDA) \
+  REGISTER_C10D_OP1(FUNC, XPU)  \
   REGISTER_C10D_OP1(FUNC, PrivateUse1)
 
 // Now we start to register ops with the three device keys
