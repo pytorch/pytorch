@@ -5328,9 +5328,6 @@ class ShapeEnv:
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
 
-        # Purposely break things so we log failing repros...
-        return expr
-
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
 
