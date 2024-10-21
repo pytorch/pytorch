@@ -8,8 +8,7 @@
 #include <torch/nn/modules/container/any.h>
 #include <torch/nn/options/transformerlayer.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `Transformer` module
 ///
@@ -60,5 +59,4 @@ struct TORCH_API TransformerOptions {
   TORCH_ARG(AnyModule, custom_decoder);
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
