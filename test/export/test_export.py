@@ -6811,12 +6811,11 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         model = Model()
         with torch.no_grad():
-            exported_program = torch.export._trace._export(
+            exported_program = torch.export.export_for_training(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
                 dynamic_shapes=None,
-                pre_dispatch=True,
                 strict=False,
             )
 
@@ -6869,12 +6868,11 @@ def forward(self, x, b_t, y):
         # no grad
         model = Model()
         with torch.no_grad():
-            ep_nograd = torch.export._trace._export(
+            ep_nograd = torch.export.export_for_training(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
                 dynamic_shapes=None,
-                pre_dispatch=True,
                 strict=False,
             )
         # check that only sub op is wrapped with grad_enabled
@@ -6890,12 +6888,11 @@ def forward(self, x, b_t, y):
 
         # enable grad
         model = Model()
-        ep_grad = torch.export._trace._export(
+        ep_grad = torch.export.export_for_training(
             model,
             (torch.tensor(10), torch.tensor(12)),
             {},
             dynamic_shapes=None,
-            pre_dispatch=True,
             strict=False,
         )
         # check that only add op is wrapped with grad_enabled
