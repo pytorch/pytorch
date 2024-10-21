@@ -500,10 +500,10 @@ def _register_quantized_linear_binary_lowering(
             # will be reshaped from 2D back to 3D if the input is 3D.
             # This causes _can_be_inplace(x2) to return False if x2 happens
             # to be the output of QLinear in this scenario.
-            # Use binary add post op for this case.
+            # Use post op binary_add for this case.
             # Refer to test case:
             #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
-            # 2. Use binary add post op for broadcast add.
+            # 2. Use post op binary_add for broadcast add.
             binary_op_name = "add"
 
         computation_args = (

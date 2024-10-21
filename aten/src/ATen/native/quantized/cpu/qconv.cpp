@@ -1956,7 +1956,7 @@ class QConvoneDNN final {
           )
         )
       ),
-      "post_op sum, binary_add, sum_relu or binary_add_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+      "post_op sum, binary_add, sum_relu and binary_add_relu are supported for quantized pointwise conv2d. Got binary_post_op: ",
       binary_attr,
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
