@@ -1,12 +1,6 @@
-#include <torch/csrc/Generator.h>
-
-#include <ATen/ATen.h>
-#include <ATen/CPUGeneratorImpl.h>
-#include <structmember.h>
-
-#include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -14,15 +8,12 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#include <ATen/ATen.h>
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/detail/XPUHooksInterface.h>
+
+#include <structmember.h>
 #include <utility>
-
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#endif
-
-#ifdef USE_MPS
-#include <ATen/mps/MPSGeneratorImpl.h>
-#endif
 
 using namespace at;
 using namespace torch;
