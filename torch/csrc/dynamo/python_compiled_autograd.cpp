@@ -493,7 +493,8 @@ static TraceState call_begin_capture(
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(inputs));
-  return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
+  return check(
+      PyObject_CallMethodObjArgs(self, method_name, pyinput.get(), nullptr));
 }
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
@@ -504,7 +505,7 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
       return;
     }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+    if (PyObject_CallMethodObjArgs(get(), method_name, nullptr) == nullptr) {
       PyErr_WriteUnraisable(get());
       PyErr_Clear();
     }
@@ -820,7 +821,15 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
 }
 
 PyObject* torch_c_dynamo_compiled_autograd_init() {
-  return PyModule_Create(&_module);
+  PyObject* mod = PyModule_Create(&_module);
+  if (mod == nullptr) {
+    return nullptr;
+  }
+
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+#endif
+  return mod;
 }
 
 } // namespace torch::dynamo::autograd

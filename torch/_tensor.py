@@ -300,6 +300,20 @@ class Tensor(torch._C.TensorBase):
             torch.serialization._serialization_tls.materialize_fake_tensors
         )
 
+        if self.device.type == "xla" or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
+        ):
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
+            cpu_tensor = self.cpu()
+            return (
+                torch._utils._rebuild_device_tensor_from_cpu_tensor,
+                (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
+            )
+        # Legacy comment that does not hold anymore.
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -310,10 +324,7 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "maia"] or (
-            not torch._C._has_storage(self)
-            and self.device.type == torch._C._get_privateuse1_backend_name()
-        ):
+        if self.device.type in ["mtia", "maia"]:
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.

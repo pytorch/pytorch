@@ -1314,7 +1314,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/IndexingUtils.cpp",
     "aten/src/ATen/native/Integration.cpp",
     "aten/src/ATen/native/Itertools.cpp",
-    "aten/src/ATen/native/LegacyBridge.cpp",
     "aten/src/ATen/native/Lerp.cpp",
     "aten/src/ATen/native/Linear.cpp",
     "aten/src/ATen/native/LinearAlgebra.cpp",
