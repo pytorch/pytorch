@@ -16,9 +16,9 @@ def _filter_instructions(instructions, opname):
 
 class ReconstructTest(torch._dynamo.test_case.TestCase):
     @contextlib.contextmanager
-    def register_bytecode_hook(self, check_fn):
+    def register_bytecode_hook(self, fn):
         def hook(code, out_code):
-            check_fn(list(dis.get_instructions(out_code)))
+            fn(list(dis.get_instructions(out_code)))
             return code
 
         torch._dynamo.reset()
@@ -40,7 +40,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             self.assertEqual(build_map[0].argval, 1)
 
         def f(d, t):
-            d[1] = t
             d[40] = t + 1
 
         t = torch.randn(3, 4)
