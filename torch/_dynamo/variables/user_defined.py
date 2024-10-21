@@ -565,7 +565,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return RandomVariable(random_object)
         elif (
             not self.is_standard_new()
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and (
+                SideEffects.cls_supports_mutation_side_effects(self.value)
+                or is_standard_setattr(
+                    inspect.getattr_static(self.value, "__setattr__", None)
+                )
+            )
             and self.source
         ):
             return tx.inline_user_function_return(
