@@ -1,0 +1,42 @@
+# mypy: ignore-errors
+
+import collections
+import functools
+import inspect
+import operator
+import types
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+import torch
+import torch.fx
+from torch._guards import Source
+
+from .. import polyfills, variables
+from ..bytecode_transformation import create_call_function, create_instruction
+from ..exc import raise_observed_exception, unimplemented
+from ..source import AttrSource
+from ..utils import (
+    get_fake_value,
+    guard_if_dyn,
+    is_namedtuple,
+    istype,
+    iter_contains,
+    Lit,
+    namedtuple_fields,
+    odict_values,
+    OrderedSet,
+    set_example_value,
+)
+from .base import MutableLocal, VariableTracker, VariableTrackerContainer
+from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
+from .iter import IteratorVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+class BaseListVariable(VariableTrackerContainer):
+    our_container = set
