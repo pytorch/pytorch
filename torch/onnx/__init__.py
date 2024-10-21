@@ -149,7 +149,7 @@ def export(
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool | None = None,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -281,7 +281,10 @@ def export(
             Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
             at the same time.
         report: Whether to generate a markdown report for the export process.
-        optimize: Whether to optimize the exported model.
+        optimize: Whether to optimize the exported model. By default when unspecified, when ``f`` is provided (backward compatible usage),
+            optimization is performed by default. When ``f`` is ``None`` (recommended),
+            the resulting :class:`torch.onnx.ONNXProgram` will contain the un-optimized model.
+            You may run ``onnx_program.optimize()`` to optimize the model.
         verify: Whether to verify the exported model using ONNX Runtime.
         profile: Whether to profile the export process.
         dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
