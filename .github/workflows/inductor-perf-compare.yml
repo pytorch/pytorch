@@ -13,8 +13,8 @@ concurrency:
 permissions: read-all
 
 jobs:
-  get-build-label-type:
-    name: get-build-label-type
+  get-default-label-prefix:
+    name: get-default-label-prefix
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
@@ -36,10 +36,10 @@ jobs:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs:
-      - get-build-label-type
+      - get-default-label-prefix
       - get-test-label-type
     with:
-      runner_prefix: "${{ needs.get-build-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
