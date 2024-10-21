@@ -37,7 +37,7 @@ std::ostream& operator<<(std::ostream & out, const Scalar& s) {
 std::string toString(const Scalar& s) {
   std::stringstream out;
   out << s;
-  return out.str();
+  return std::move(out).str();
 }
 }
 namespace at {

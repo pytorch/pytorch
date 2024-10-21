@@ -706,7 +706,7 @@ def _export_to_aten_ir(
         + len(graph_signature.buffers)
         + len(graph_signature.input_tokens)
     )
-    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs, constant_attrs)
+    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1531,7 +1531,7 @@ def _export_to_aten_ir_make_fx(
             gm.meta.update(mod.meta)
 
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    set_missing_meta_vals(gm, flat_args, params_len, constant_attrs)
+    set_missing_meta_vals(gm, flat_args, params_len)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1595,12 +1595,13 @@ def _export_to_aten_ir_make_fx(
     )
 
 
-def set_missing_meta_vals(gm, flat_args, num_params_buffers, constant_attrs):
+def set_missing_meta_vals(gm, flat_args, num_params_buffers):
     # Sets missing metadata to address two problems:
     # 1. aot_export adds symint metadata for placeholders with int values; since
     #    these become specialized, we replace such metadata with the original values.
-    # 2. constant attributes need to have metadata set before lifting them because
-    #    computing the graph signature depends on it.
+    # 2. any tensor attributes that are not params / buffers, i.e., are constants
+    #    need to have their metadata set before lifting them because it is needed
+    #    for computing the exported program's signature.
     index = 0
     fake_mode = detect_fake_mode(flat_args)
     for node in gm.graph.nodes:
@@ -1610,9 +1611,15 @@ def set_missing_meta_vals(gm, flat_args, num_params_buffers, constant_attrs):
                 if not isinstance(user_arg, torch.Tensor):
                     node.meta["val"] = user_arg
             index += 1
-        if node.op == "get_attr" and "val" not in node.meta:
+        if node.op == "get_attr":
             val = _get_attr(gm, node.target)
-            if val in constant_attrs and isinstance(val, torch.Tensor):
+            if isinstance(val, torch.Tensor):
+                assert "val" not in node.meta, (
+                    f"Found attribute {node.target} that has already been fakified "
+                    "but not yet lifted as an input. This should be impossible because "
+                    "(1) we should have already fakified AND lifted params/buffers "
+                    "(2) we should have NOT yet fakified OR lifted tensor constants. "
+                )
                 node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
 
 
