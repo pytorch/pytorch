@@ -863,19 +863,19 @@ class X86InductorQuantizer(Quantizer):
                 binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
                     quantization_config
                 )
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map=binary_node_input_qspec_map,
-                    _annotated=True,
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map=binary_node_input_qspec_map,
+                        _annotated=True,
+                    )
                 )
-                unary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize([binary_node, unary_node])
@@ -933,14 +933,14 @@ class X86InductorQuantizer(Quantizer):
                 binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
                     quantization_config
                 )
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map=binary_node_input_qspec_map,
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map=binary_node_input_qspec_map,
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(binary_node)
@@ -990,13 +990,13 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             if quantization_config is not None:
-                unary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(unary_node)
@@ -1031,13 +1031,13 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             if quantization_config is not None:
-                bn_output_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                bn_output_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(bn_output_node)
@@ -1611,19 +1611,19 @@ class X86InductorQuantizer(Quantizer):
                     linear_node, False, quantization_config
                 )
                 # We don't insert q-dq before the binary input node due to accuracy issues
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map={},
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=(not has_unary),
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map={},
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=(not has_unary),
+                    )
                 )
                 if unary_node is not None:
-                    unary_node.meta[
-                        QUANT_ANNOTATION_KEY
-                    ] = _X86InductorQuantizationAnnotation(
-                        _annotated=True,
-                        _is_output_of_quantized_pattern=True,
+                    unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                        _X86InductorQuantizationAnnotation(
+                            _annotated=True,
+                            _is_output_of_quantized_pattern=True,
+                        )
                     )
 
     def validate(self, model: torch.fx.GraphModule) -> None:

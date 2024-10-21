@@ -84,7 +84,9 @@ class ModelReport:
         >>> # xdoctest: +SKIP
         >>> # get the necessary qconfig
         >>> config = PrepareCustomConfig()
-        >>> skipped_module_names, skipped_module_classes = get_skipped_module_name_and_classes(config, False)
+        >>> skipped_module_names, skipped_module_classes = (
+        ...     get_skipped_module_name_and_classes(config, False)
+        ... )
 
         >>> # initialize our model and get GraphModule
         >>> model = SomeModel()
@@ -92,7 +94,12 @@ class ModelReport:
         >>> graph_module = GraphModule(model, tracer.trace(model))
 
         >>> # get our set of detectors and ModelReport instance
-        >>> detector_set = set([DynamicStaticDetector(tolerance=0.5), InputWeightEqualizationDetector(ratio_threshold=0.7)])
+        >>> detector_set = set(
+        ...     [
+        ...         DynamicStaticDetector(tolerance=0.5),
+        ...         InputWeightEqualizationDetector(ratio_threshold=0.7),
+        ...     ]
+        ... )
         >>> tracer_reporter = ModelReport(graph_module, tracer_detector_set)
 
         >>> # now we insert the observers and callibrate the model

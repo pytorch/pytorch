@@ -33,6 +33,7 @@ class LSTMCell(torch.nn.Module):
         ...     hx, cx = rnn(input[i], (hx, cx))
         ...     output.append(hx)
     """
+
     _FLOAT_MODULE = torch.nn.LSTMCell
 
     def __init__(
@@ -104,8 +105,9 @@ class LSTMCell(torch.nn.Module):
     def initialize_hidden(
         self, batch_size: int, is_quantized: bool = False
     ) -> Tuple[Tensor, Tensor]:
-        h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros(
-            (batch_size, self.hidden_size)
+        h, c = (
+            torch.zeros((batch_size, self.hidden_size)),
+            torch.zeros((batch_size, self.hidden_size)),
         )
         if is_quantized:
             (h_scale, h_zp) = self.initial_hidden_state_qparams
@@ -239,8 +241,9 @@ class _LSTMLayer(torch.nn.Module):
         if hx_fw is None and cx_fw is None:
             hidden_fw = None
         else:
-            hidden_fw = torch.jit._unwrap_optional(hx_fw), torch.jit._unwrap_optional(
-                cx_fw
+            hidden_fw = (
+                torch.jit._unwrap_optional(hx_fw),
+                torch.jit._unwrap_optional(cx_fw),
             )
         result_fw, hidden_fw = self.layer_fw(x, hidden_fw)
 
@@ -329,6 +332,7 @@ class LSTM(torch.nn.Module):
         >>> print(rnn.layers[0].weight_hh)
         AssertionError: There is no reverse path in the non-bidirectional layer
     """
+
     _FLOAT_MODULE = torch.nn.LSTM
 
     def __init__(

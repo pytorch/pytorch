@@ -1052,14 +1052,16 @@ def convert(
 
     assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
-    node_name_to_scope: Dict[
-        str, Tuple[str, type]
-    ] = observed_graph_module_attrs.node_name_to_scope
+    node_name_to_scope: Dict[str, Tuple[str, type]] = (
+        observed_graph_module_attrs.node_name_to_scope
+    )
     prepare_custom_config: PrepareCustomConfig = (
         observed_graph_module_attrs.prepare_custom_config
     )
     observed_node_names: Set[str] = observed_graph_module_attrs.observed_node_names
-    node_name_to_qconfig: Dict[str, QConfigAny] = observed_graph_module_attrs.node_name_to_qconfig  # type: ignore[assignment]
+    node_name_to_qconfig: Dict[str, QConfigAny] = (
+        observed_graph_module_attrs.node_name_to_qconfig
+    )  # type: ignore[assignment]
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1075,14 +1077,18 @@ def convert(
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if qconfig_mapping:
-        prepare_qconfig_mapping: QConfigMapping = observed_graph_module_attrs.qconfig_mapping  # type: ignore[assignment]
+        prepare_qconfig_mapping: QConfigMapping = (
+            observed_graph_module_attrs.qconfig_mapping
+        )  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
         if observed_graph_module_attrs.is_qat:
             _update_qconfig_for_qat(qconfig_mapping, backend_config)
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
-        _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
+        _compare_prepare_convert_qconfig_mappings(
+            prepare_qconfig_mapping, qconfig_mapping
+        )  # type: ignore[arg-type]
         convert_node_name_to_qconfig = _generate_node_name_to_qconfig(
             model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope
         )

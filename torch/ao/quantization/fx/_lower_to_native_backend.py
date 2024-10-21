@@ -433,7 +433,9 @@ def _load_packed_weight(
 ):
     attrs_to_pop = []
     for attr_name in state_dict:
-        if attr_name.startswith("_packed_weight") and isinstance(state_dict[attr_name], torch._C.ScriptObject):  # type: ignore[attr-defined] # noqa: B950
+        if attr_name.startswith("_packed_weight") and isinstance(
+            state_dict[attr_name], torch._C.ScriptObject
+        ):  # type: ignore[attr-defined] # noqa: B950
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
@@ -578,8 +580,8 @@ def _match_static_pattern(
     # (2) There must be at least one dequantize node
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
-        assert i < len(
-            ref_node.args
+        assert (
+            i < len(ref_node.args)
         ), f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
         arg = ref_node.args[i]
         if is_dequantize_node(arg):
@@ -666,7 +668,11 @@ def _lower_static_weighted_ref_module(
             STATIC_LOWER_FUSED_MODULE_MAP.keys()
         )
         (q_node, relu_node, ref_node) = _match_static_pattern(
-            n, modules, qconfig_map, matching_modules, dequantize_node_arg_indices=[0]  # type: ignore[arg-type]
+            n,
+            modules,
+            qconfig_map,
+            matching_modules,  # type: ignore[arg-type]
+            dequantize_node_arg_indices=[0],
         )
         if q_node is None:
             continue
@@ -724,7 +730,10 @@ def _lower_static_weighted_ref_module_with_two_inputs(
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
         matching_modules = list(STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP.keys())
         (q_node, ref_node) = _match_static_pattern_with_two_inputs(
-            n, modules, qconfig_map, matching_modules  # type: ignore[arg-type]
+            n,
+            modules,
+            qconfig_map,
+            matching_modules,  # type: ignore[arg-type]
         )
         if q_node is None:
             continue

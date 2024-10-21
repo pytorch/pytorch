@@ -93,6 +93,7 @@ def _run_on_profiler_stop():
 @dataclass
 class _ProfilerStats:
     "Profiler timing and stats used by developers to catch issues/regressions"
+
     profiling_window_duration_sec: float = 0
     number_of_events: int = 0
     profiler_prepare_call_duration_us: int = 0
@@ -695,11 +696,10 @@ class record_function(_ContextDecorator):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
-        ...         z = y ** 3
+        ...     y = x**2
+        ...     with torch.autograd.profiler.record_function("label-z"):  # label the block
+        ...         z = y**3
         ...     y.backward()
-        ...
         >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
