@@ -524,6 +524,7 @@ class PythonWrapperCodegen(CodeGen):
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: Set[str] = set()
+        self.allocated_workspaces: Dict[str, Any] = {}
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -1544,7 +1545,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(line)
             self.writeline(self.make_zero_buffer(name))
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
-            prior = V.graph.allocated_workspaces.get(name)
+            prior = self.allocated_workspaces.get(name)
             if prior:
                 assert isinstance(prior, AllocateLine)
                 # expand existing allocation
@@ -1552,7 +1553,7 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 self.writeline(line)
                 self.writeline(self.make_zero_buffer(name))
-                V.graph.allocated_workspaces[name] = line
+                self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
 

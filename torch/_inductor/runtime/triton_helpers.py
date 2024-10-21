@@ -660,3 +660,6 @@ def gpu_barrier(
 
         if prior != count_down * (total - 1):  # did the cas decrement already?
             tl.atomic_add(sem, -count_down, sem="relaxed")
+
+    # TODO(jansel): is this needed?
+    tl.debug_barrier()
