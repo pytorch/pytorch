@@ -250,7 +250,6 @@ class AutoChunkerTransform:
             seen_chunk_dim = set()
             for arg in _pytree.tree_flatten((orig_nd.args, orig_nd.kwargs))[0]:
                 if isinstance(arg, torch.fx.Node) and "chunk_dim" in arg.meta:
-                    assert arg.meta["chunk_dim"] not in seen_chunk_dim, orig_nd.format_node()
                     seen_chunk_dim.add(arg.meta["chunk_dim"])
     
             assert len(seen_chunk_dim) == 1, orig_nd.format_node()
