@@ -683,6 +683,10 @@ static PyObject* THPVariable_as_subclass(
       "cls must be a type (got ",
       Py_TYPE(cls)->tp_name,
       ")");
+  // guard completely turns off torch dispatch modes, doesn't just pop off the
+  // stack
+  torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
+  c10::impl::DisablePythonDispatcher dpd_g;
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),

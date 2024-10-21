@@ -5,9 +5,7 @@
 #include <torch/nn/modules/utils.h>
 #include <torch/nn/options/pooling.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -1148,6 +1146,4 @@ inline Tensor lp_pool3d(
       options.ceil_mode());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -369,12 +369,15 @@ def generate_wheels_matrix(
 
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
-                gpu_arch_type == "rocm" or os not in ["linux", "linux-s390x"]
+                gpu_arch_type == "rocm"
+                or os not in ["linux", "linux-s390x", "macos-arm64"]
             ) and python_version in ["3.13", "3.13t"]:
                 continue
 
-            # TODO: Enable python 3.13t on xpu and cpu-s390x
-            if gpu_arch_type in ["xpu", "cpu-s390x"] and python_version == "3.13t":
+            # TODO: Enable python 3.13t on xpu and cpu-s390x or MacOS
+            if (
+                gpu_arch_type in ["xpu", "cpu-s390x"] or os == "macos-arm64"
+            ) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
