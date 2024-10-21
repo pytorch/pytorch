@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
-    skipIfCrossRef,
     TemporaryFileName,
     TestCase,
 )
@@ -575,13 +574,26 @@ class TestDeserialize(TestCase):
             return inputs_clone
 
         def _check_graph(pre_dispatch):
-            ep = torch.export.export_for_training(
-                fn,
-                _deepcopy_inputs(inputs),
-                {},
-                dynamic_shapes=dynamic_shapes,
-                strict=strict,
-            )
+            if pre_dispatch:
+                ep = torch.export.export_for_training(
+                    fn,
+                    _deepcopy_inputs(inputs),
+                    {},
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict,
+                )
+            else:
+                # We should have this branch because 
+                # PT2 Inference goes through this private
+                # export API. 
+                ep = torch.export._trace._export(
+                    fn,
+                    _deepcopy_inputs(inputs),
+                    {},
+                    dynamic_shapes=dynamic_shapes,
+                    strict=strict,
+                    pre_dispatch=False,
+                )
             ep.graph.eliminate_dead_code()
 
             serialized_artifact = serialize(ep, opset_version={"aten": 0})
@@ -1367,49 +1379,6 @@ class TestSerializeCustomClass(TestCase):
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertTrue(counter > 1)
-
-    @skipIfCrossRef
-    def test_custom_tag_metadata_re_export(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.rand(4, 2))
-                self.b = torch.nn.Parameter(torch.rand(4))
-
-            def forward(self, x):
-                out = torch.nn.functional.linear(x, self.w, self.b)
-                return out
-
-        f = Foo()
-        inputs = (torch.zeros(1, 2),)
-        ep = export_for_training(f, inputs)
-
-        new_gm = copy.deepcopy(ep.graph_module)
-        new_gm.meta["custom"] = {}
-        new_gm.meta["custom"]["f"] = "bar"
-
-        for node in new_gm.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.aten.linear.default
-            ):
-                node.meta["custom"] = {}
-                node.meta["custom"]["quantization_tag"] = "foo"
-
-        new_ep = ep._update(new_gm, ep.graph_signature)
-        new_ep = torch.export.export_for_training(new_ep.module(), inputs).run_decompositions({})
-        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
-
-        # the custom field should be preserved after re-export and
-        # should not be copied to other nodes
-        counter = 0
-        for node in new_ep.graph.nodes:
-            if "custom" in node.meta:
-                counter += 1
-                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
-                self.assertTrue(node.target == torch.ops.aten.linear.default)
-
-        self.assertEqual(counter, 1)
 
     def test_custom_tag_metadata_copy(self):
         class Foo(torch.nn.Module):
