@@ -13,7 +13,7 @@
 namespace at::native {
 
 #if AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char atan_name[] = "atan_impl";
+constexpr char atan_name[] = "atan_impl";
 #endif
 
 void atan_kernel_cuda(TensorIteratorBase& iter) {
