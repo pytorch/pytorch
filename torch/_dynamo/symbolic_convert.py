@@ -1912,7 +1912,7 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        result = obj.call_method(self, "__setitem__", [key, val], {})
+        obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
         obj, key = self.popn(2)
@@ -2027,7 +2027,6 @@ class InstructionTranslatorBase(
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
-        old_stack = list(self.stack)
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -3240,7 +3239,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
@@ -3439,7 +3438,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

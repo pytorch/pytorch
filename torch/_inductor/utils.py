@@ -1971,7 +1971,6 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
 
 def shape_env_from_inputs(inputs: List[torch.Tensor]):
-    shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that

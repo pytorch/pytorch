@@ -420,7 +420,7 @@ class ModelReport:
         features_by_module: OrderedDict[str, Dict] = OrderedDict()
 
         # we loop through modules in graph in order
-        for fqn, module in self._model.named_modules():
+        for fqn, _module in self._model.named_modules():
             # find that fqn in fqns_to_features
             if fqn in module_fqns_to_features:
                 # add it to our ordered dict

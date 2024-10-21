@@ -126,11 +126,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        output_msg = (
-            subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
-        )
+        subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
     except subprocess.SubprocessError:
@@ -191,7 +187,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
             .decode(*SUBPROCESS_DECODE_ARGS)
         )
         return "Microsoft" in output_msg.splitlines()[0]
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         return False
 
     return False
@@ -232,7 +228,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
                 _check_minimal_version(TorchVersion(icx_ver))
 
         return is_intel_compiler
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         return False
     except subprocess.SubprocessError:
         # --version args not support.
@@ -273,12 +269,12 @@ def get_compiler_version_info(compiler: str) -> str:
         version_string = subprocess.check_output(
             [compiler, "-v"], stderr=subprocess.STDOUT, env=env
         ).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
+    except Exception:
         try:
             version_string = subprocess.check_output(
                 [compiler, "--version"], stderr=subprocess.STDOUT, env=env
             ).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
+        except Exception:
             return ""
     # Mutiple lines to one line string.
     version_string = version_string.replace("\r", "_")
@@ -857,7 +853,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-            omp_module = cdll.LoadLibrary(omp_path)
+            cdll.LoadLibrary(omp_path)
     except subprocess.SubprocessError:
         pass
 
@@ -873,7 +869,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
             omp_path = output.rstrip()
             if os.path.isfile(omp_path):
                 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-                omp_module = cdll.LoadLibrary(omp_path)
+                cdll.LoadLibrary(omp_path)
                 return True
         except subprocess.SubprocessError:
             pass
@@ -1173,7 +1169,7 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
             and path.startswith(os.environ["CUDA_HOME"])
             and not os.path.exists(f"{path}/libcudart_static.a")
         ):
-            for root, dirs, files in os.walk(path):
+            for root, _dirs, files in os.walk(path):
                 if "libcudart_static.a" in files:
                     lpaths[i] = os.path.join(path, root)
                     lpaths.append(os.path.join(lpaths[i], "stubs"))
@@ -1335,7 +1331,7 @@ def get_name_and_dir_from_output_file_path(
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
     name_and_ext = os.path.basename(file_path)
-    name, ext = os.path.splitext(name_and_ext)
+    name, _ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
     return name, dir

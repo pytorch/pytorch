@@ -278,7 +278,7 @@ class SubprocMain:
         job = pickle.loads(data)
         try:
             result = job()
-        except Exception as e:
+        except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
         return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
 

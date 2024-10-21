@@ -1871,8 +1871,6 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
 
-            example_value = unspec_var.proxy.node.meta["example_value"]
-
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
@@ -2134,8 +2132,6 @@ def wrap_fx_proxy_cls(
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
-
-    initial_example_value = example_value
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
@@ -2482,7 +2478,6 @@ def _automatic_dynamic(
     def update_frame_state(size, stride):
         # Intentionally shadow e from parent scope so it is not accidentally
         # called
-        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
@@ -2756,7 +2751,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(
+        static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,
