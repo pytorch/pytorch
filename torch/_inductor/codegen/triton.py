@@ -2779,7 +2779,7 @@ class TritonKernel(SIMDKernel):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            "autotune_hints": set(self.autotune_hints),
+            "autotune_hints": OrderedSet(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,

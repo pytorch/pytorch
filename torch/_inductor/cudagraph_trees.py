@@ -60,7 +60,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -96,6 +95,7 @@ from torch._inductor.cudagraph_utils import (
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils.weak import TensorWeakRef
 
 
@@ -649,7 +649,7 @@ class CUDAWarmupNode:
         # We use a weakref to the inputs storage, in case a block which was previously
         # allocated to the general caching allocator pool gets reallocated to a private pool.
 
-        non_cudagraph_inps_storage_ptrs = set()
+        non_cudagraph_inps_storage_ptrs = OrderedSet[Any]()
         for storage in non_cudagraph_inps_storages:
             s = storage()
             if s is not None:
@@ -834,7 +834,8 @@ class CUDAGraphNode:
         ]
 
         self.static_input_idxs: List[int] = list(
-            set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
+            OrderedSet(wrapped_function.static_input_idxs)
+            | OrderedSet(self.cudagraph_managed_idxs)
         )
 
         self.non_static_input_idx: LevelList[int] = [
@@ -1465,8 +1466,8 @@ class CUDAGraphNode:
 
         live_blocks = get_block_addrs(self.cuda_graphs_pool)
 
-        live_storage_data_ptrs = set()
-        live_storage_weak_ptrs = set()
+        live_storage_data_ptrs = OrderedSet[Any]()
+        live_storage_weak_ptrs = OrderedSet[Any]()
 
         for depth, outputs_liveness in enumerate(expected_liveness):
             for output_idx, output_liveness in enumerate(outputs_liveness):
@@ -1826,14 +1827,14 @@ class CUDAGraphTreeManager:
 
         self.ids_to_stack_traces: Dict[FunctionID, Optional[StackTraces]] = {}
 
-        self.warmed_up_functions: Set[FunctionID] = set()
+        self.warmed_up_functions: OrderedSet[FunctionID] = OrderedSet()
         # if we fail to increment generation, and are stuck warming up,
         # only warn on each function once
-        self.warned_functions: Set[FunctionID] = set()
+        self.warned_functions: OrderedSet[FunctionID] = OrderedSet()
         torch._C._set_cached_tensors_enabled(True)
 
         # warn only once if a function mutates inputs
-        self.warned_mutation: Set[FunctionID] = set()
+        self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
@@ -2403,7 +2404,7 @@ class CUDAGraphTreeManager:
 
                 stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
-        deleted = set()
+        deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
@@ -2456,7 +2457,7 @@ class CUDAGraphTreeManager:
         )
 
         # NB: deduplicate aliased outputs
-        for ptr in set(ptrs_to_deallocate):
+        for ptr in OrderedSet(ptrs_to_deallocate):
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
