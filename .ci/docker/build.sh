@@ -357,7 +357,7 @@ case "$image" in
     ;;
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=15
     CONDA_CMAKE=yes
     CUDA_VERSION=12.4
     CUDNN_VERSION=9
