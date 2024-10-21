@@ -32,7 +32,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeIs
 from weakref import ReferenceType
 
 import torch
@@ -61,6 +60,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from typing_extensions import Self, TypeIs
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -151,14 +151,15 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
-def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
-    assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors: List[Tensor] = []
+def get_plain_tensors(
+    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
+) -> List[Tensor]:
+    # This function is used in Runtime, do not add redundant asserts
+    plain_tensors: List[Tensor] = [] if out_append_list is not None else []
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            assert isinstance(curr, Tensor)
             plain_tensors.append(curr)
             continue
 
