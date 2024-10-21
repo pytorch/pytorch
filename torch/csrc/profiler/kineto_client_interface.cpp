@@ -75,13 +75,12 @@ class LibKinetoClient : public libkineto::ClientInterface {
 namespace {
 
 int get_init_delay() {
-  const char* delay_c = std::getenv("KINETO_DAEMON_INIT_DELAY_S");
-  if (!delay_c) {
+  auto delay_c = c10::utils::get_env("KINETO_DAEMON_INIT_DELAY_S");
+  if (!delay_c.has_value()) {
     return -1;
   }
-  std::string delay_s{delay_c};
   try {
-    return std::stoi(delay_s);
+    return std::stoi(delay_c.value());
   } catch (const std::invalid_argument& _) {
     return -1;
   }
@@ -99,7 +98,7 @@ struct RegisterLibKinetoClient {
       libkineto::api().suppressLogMessages();
     };
 
-    if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
+    if (c10::utils::has_env("KINETO_USE_DAEMON")) {
       int init_delay_s = get_init_delay();
       if (init_delay_s > 0) {
         std::thread t([init_delay_s, kineto_init]() {
