@@ -329,6 +329,40 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_input_mutation(self):
+        def gn(x, y):
+            x.add_(1)
+            return (torch.mul(x, y),)
+
+        def fn(x, y):
+            return invoke_subgraph(gn, None, (x, y))[0]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x, y)
+
+    def test_input_aliasing(self):
+        def gn(x, y):
+            return (x, torch.mul(x, y))
+
+        def fn(x, y):
+            outs = invoke_subgraph(gn, None, (x, y))
+            return outs[0] * outs[1]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x, y)
+
 
 if __name__ == "__main__":
     run_tests()
