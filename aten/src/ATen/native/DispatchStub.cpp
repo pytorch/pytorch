@@ -25,7 +25,7 @@ static inline bool cpu_has_vxe()
 #endif
 
 static CPUCapability compute_cpu_capability() {
-  auto envar = c10::utils::get_env("ATEN_CPU_CAPABILITY");
+  const auto envar = c10::utils::get_env("ATEN_CPU_CAPABILITY");
   if (envar.has_value()) {
 #if defined(HAVE_VSX_CPU_DEFINITION)
     if (envar == "vsx") {
