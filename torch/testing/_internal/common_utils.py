@@ -638,6 +638,8 @@ class parametrize(_TestParametrizer):
             return value.formatted_name
         elif isinstance(value, (int, float, str)):
             return f"{name}_{str(value).replace('.', '_')}"
+        elif inspect.isclass(value):
+            return f"{name}_{value.__name__}"
         else:
             return f"{name}{idx}"
 
