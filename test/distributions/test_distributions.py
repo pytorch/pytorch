@@ -5389,6 +5389,9 @@ class TestKL(DistributionsTestCase):
         )
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        multinomial = tuple(
+            Multinomial(total_count=1, probs=cat.probs) for cat in categorical
+        )
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(
@@ -5458,6 +5461,7 @@ class TestKL(DistributionsTestCase):
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
+            (multinomial, multinomial),
             (normal, gumbel),
             (normal, laplace),
             (normal, normal),
@@ -5521,6 +5525,14 @@ class TestKL(DistributionsTestCase):
             (Laplace(-1, 2), Gamma(3, 4)),
             (Laplace(-1, 2), Pareto(3, 4)),
             (Laplace(-1, 2), Uniform(-3, 4)),
+            (
+                Multinomial(probs=torch.tensor([0.9, 0.1])),
+                Multinomial(probs=torch.tensor([1.0, 0.0])),
+            ),
+            (
+                Multinomial(probs=torch.tensor([[0.9, 0.1], [0.9, 0.1]])),
+                Multinomial(probs=torch.tensor([1.0, 0.0])),
+            ),
             (Normal(-1, 2), Beta(3, 4)),
             (Normal(-1, 2), Chi2(3)),
             (Normal(-1, 2), Exponential(3)),
