@@ -1374,9 +1374,9 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             return False
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
-        K = max(A_size[-1], B_size[-2])
         M = A_size[-2]
         N = B_size[-1]
+        K = max(M, N)
         if K != A_size[-1] and K != 2 * A_size[-2]:
             return False
         if K != B_size[-2]:
