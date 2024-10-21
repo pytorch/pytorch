@@ -44,6 +44,7 @@ from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    dynamo_timed,
     flatten_graph_inputs,
     lazy_format_graph_code,
 )
@@ -308,12 +309,13 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        # as we don't have recursive example inputs, passing empty set here
-        new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-        setattr(gm, subgraph_name, new_subgraph)
-    return pre_grad_passes(gm, example_inputs)
+    with dynamo_timed("_recursive_pre_grad_passes"):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            # as we don't have recursive example inputs, passing empty set here
+            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+            setattr(gm, subgraph_name, new_subgraph)
+        return pre_grad_passes(gm, example_inputs)
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
@@ -324,10 +326,11 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+    with dynamo_timed("_recursive_post_grad_passes"):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            _recursive_post_grad_passes(subgraph, is_inference)
+        post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -513,18 +516,20 @@ class _CompileFxCallableEx(Protocol):
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    cudagraphs: Optional[BoxedBool] = None,
-    static_input_idxs: Sequence[int] = (),
-    is_backward: bool = False,
-    graph_id: Optional[int] = None,
-    cpp_wrapper: bool = False,
-    aot_mode: bool = False,
-    is_inference: bool = False,
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    user_visible_outputs: Optional[Dict[str, None]] = None,
-    layout_opt: Optional[bool] = None,
-    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
+    **kwargs: Unpack[_CompileFxKwargsEx],
 ) -> Union[CompiledFxGraph, str]:
+    kwargs.setdefault("cudagraphs", None)
+    kwargs.setdefault("static_input_idxs", ())
+    kwargs.setdefault("is_backward", False)
+    kwargs.setdefault("graph_id", None)
+    kwargs.setdefault("cpp_wrapper", False)
+    kwargs.setdefault("aot_mode", False)
+    kwargs.setdefault("is_inference", False)
+    kwargs.setdefault("boxed_forward_device_index", None)
+    kwargs.setdefault("user_visible_outputs", None)
+    kwargs.setdefault("layout_opt", None)
+    kwargs.setdefault("extern_node_serializer", None)
+
     # Need with_fresh_cache_if_config for compile_fx_inner even if we already have one for
     # compile_fx. The reason is the compilation for backward graph may happen after
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
@@ -543,17 +548,7 @@ def compile_fx_inner(
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
-            cudagraphs=cudagraphs,
-            static_input_idxs=static_input_idxs,
-            is_backward=is_backward,
-            graph_id=graph_id,
-            cpp_wrapper=cpp_wrapper,
-            aot_mode=aot_mode,
-            is_inference=is_inference,
-            boxed_forward_device_index=boxed_forward_device_index,
-            user_visible_outputs=user_visible_outputs,
-            layout_opt=layout_opt,
-            extern_node_serializer=extern_node_serializer,
+            **kwargs,
         )
 
 
@@ -570,7 +565,7 @@ def _compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    aot_mode = graph_kwargs["aot_mode"]
+    aot_mode: bool = graph_kwargs.setdefault("aot_mode", False)
 
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -580,14 +575,15 @@ def _compile_fx_inner(
         _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
-    static_input_idxs = graph_kwargs["static_input_idxs"]
-
+    static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
 
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
     ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
+    if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
+        graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -595,11 +591,6 @@ def _compile_fx_inner(
             boxed_forward_device_index=boxed_forward_device_index,
             **graph_kwargs,
         )
-
-    cudagraphs = graph_kwargs.get("cudagraphs")
-    if not cudagraphs:
-        cudagraphs = BoxedBool(config.triton.cudagraphs)
-        graph_kwargs["cudagraphs"] = cudagraphs
 
     start = time.time()
 
