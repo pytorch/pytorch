@@ -202,7 +202,7 @@ def validate_args_and_maybe_create_graph_inputs(
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    tracer.create_graph_input(arg_name, example_value)
+                    tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 elif a.maybe_fx_node() is not None:
                     node = a.maybe_fx_node()
                     example_value = node.meta["example_value"]
@@ -211,7 +211,9 @@ def validate_args_and_maybe_create_graph_inputs(
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    new_proxy = tracer.create_graph_input(arg_name, example_value)
+                    new_proxy = tracer.create_graph_input(
+                        arg_name, a.python_type(), example_value
+                    )
                     example_value = (
                         node.meta["example_value"]
                         if "example_value" in node.meta
@@ -236,7 +238,9 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else f"const_unused_{sub_args_names[idx]}"
                 )
-                tracer.create_graph_input(arg_name, a.as_python_constant())
+                tracer.create_graph_input(
+                    arg_name, a.python_type(), a.as_python_constant()
+                )
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
@@ -247,7 +251,7 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else sub_args_names[idx]
                 )
-                tracer.create_graph_input(arg_name, example_value)
+                tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
@@ -256,7 +260,9 @@ def validate_args_and_maybe_create_graph_inputs(
                     node.meta["example_value"] if "example_value" in node.meta else None
                 )
                 arg_name = node.name if sub_args_names is None else sub_args_names[idx]
-                new_proxy = tracer.create_graph_input(arg_name, example_value)
+                new_proxy = tracer.create_graph_input(
+                    arg_name, a.python_type(), example_value
+                )
                 new_arg = wrap_fx_proxy_cls(
                     target_cls=type(a),
                     tx=tx,
