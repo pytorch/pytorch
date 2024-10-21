@@ -81,9 +81,6 @@ def draw_buffers(
         dtype = None
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
-        if hasattr(V.graph, "stream_graph") and V.graph.stream_graph:
-            ssnode = V.graph.stream_graph.op_to_ssnode[node.name]
-            node.meta["stream_id"] = ssnode.stream_id
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
         node.meta["tensor_meta"] = metadata
@@ -174,8 +171,6 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             first_node = fx_node
 
     # create edges between nodes
-    buf_last_update_op: Dict[str, str] = {}
-    added: Dict[str, fx.node.Node] = {}
     for snode in snodes:
         name = snode.get_name()
         deps = snode.read_writes.reads
@@ -183,12 +178,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         fx_node = node_to_fx_node[name]
         new_args = []
         for dep in deps:
-            last_update_op = buf_last_update_op.get(dep.name, None)
-            name_to_buf = V.graph.scheduler.name_to_buf.get(dep.name, None)
-            if last_update_op:
-                dep_node = op_to_fx_node[last_update_op]
-            elif name_to_buf and name_to_buf.defining_op.get_name() == name:
-                continue
+            if dep.name in buf_to_fx_node:
+                dep_node = buf_to_fx_node[dep.name]
             else:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)
@@ -196,8 +187,6 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             if dep_node == fx_node:  # to avoid cycles
                 continue
             new_args.append(dep_node)
-        for output in snode.outputs_by_name.keys():
-            buf_last_update_op[output] = name
 
         fx_node.args = tuple(new_args)
 
