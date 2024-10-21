@@ -75,9 +75,6 @@ ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
 template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
-  DefaultMobileCPUAllocator() = default;
-  ~DefaultMobileCPUAllocator() override = default;
-
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
       return;
