@@ -105,12 +105,14 @@ def allow_in_graph(fn):
 
         torch.compiler.allow_in_graph(my_custom_function)
 
+
         @torch.compile(...)
         def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
             return x
+
 
         fn(...)
 
@@ -239,13 +241,14 @@ def set_stance(stance: str, force_backend=None):
     .. code-block:: python
 
         @torch.compile
-        def foo(x):
-            ...
+        def foo(x): ...
+
 
         @torch.compiler.set_stance("force_eager")
         def bar():
             # will not be compiled
             foo(...)
+
 
         bar()
 
@@ -296,6 +299,7 @@ def cudagraph_mark_step_begin():
         @torch.compile(mode="reduce-overhead")
         def rand_foo():
             return torch.rand([4], device="cuda")
+
 
         for _ in range(5):
             torch.compiler.cudagraph_mark_step_begin()
