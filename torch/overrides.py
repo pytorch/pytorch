@@ -28,7 +28,7 @@ import functools
 import types
 import warnings
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Set, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 import torch
 from torch._C import (
@@ -1588,7 +1588,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Callable[[Any], Type] = None,
+    get_type_fn: Optional[Callable[[Any], Type]] = None,
 ) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
