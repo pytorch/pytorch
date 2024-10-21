@@ -75,14 +75,6 @@ class TORCH_API TCPStore : public Store {
 
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
-  [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
-      const std::string& masterAddr,
-      std::uint16_t masterPort,
-      std::optional<int> numWorkers = std::nullopt,
-      bool isServer = false,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout,
-      bool waitWorkers = true);
-
   ~TCPStore() override;
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;

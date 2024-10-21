@@ -160,12 +160,12 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 // Protect from infinite recursion by initializing dispatch to self and checking
 // that values are different after linalg library were loaded
 
-namespace cuda {
-namespace detail {
+
+namespace cuda::detail {
 void registerLinalgDispatch(const LinalgDispatch& disp_) {
   disp = disp_;
 }
-}} //namespace cuda::detail
+} //namespace cuda::detail
 
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
     getTorchLinalgLibrary();

@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/core/config.h>
 
+// NOLINTBEGIN(misc-use-internal-linkage)
 C10_DEFINE_bool(torch_lazy_ir_debug, false, "Enable lazy tensor IR debugging");
 
 C10_DEFINE_bool(
@@ -71,8 +72,7 @@ C10_DEFINE_int(
     4096,
     "Set the size for the shape cache used for shape inference");
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::string& getLTCForceFallback() {
   static std::string config;
@@ -87,5 +87,5 @@ std::string& getLTCForceFallback() {
   return config;
 }
 
-} // namespace lazy
-} // namespace torch
+// NOLINTEND(misc-use-internal-linkage)
+} // namespace torch::lazy

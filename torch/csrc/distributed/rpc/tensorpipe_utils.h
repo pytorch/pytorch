@@ -111,7 +111,7 @@ tensorpipeAllocate(
 // to be available and can thus only be performed once the asynchronous read has
 // completed. The holder can be destroyed once this function returns.
 TORCH_API c10::intrusive_ptr<Message> tensorpipeDeserialize(
-    tensorpipe::Descriptor&& tpDescriptor,
+    const tensorpipe::Descriptor& tpDescriptor,
     TensorpipeReadBuffers&& holder);
 
 } // namespace torch::distributed::rpc

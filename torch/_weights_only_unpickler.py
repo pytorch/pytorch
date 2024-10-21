@@ -150,6 +150,9 @@ def _tensor_rebuild_functions():
         # Reasoning is that we don't have control over the numpy functions, but
         # this utility is provided by pytorch
         torch._utils._rebuild_device_tensor_from_numpy,
+        # In 2.6, we should no longer have a dependency on numpy and the above
+        # _rebuild_device_tensor_from_numpy function.
+        torch._utils._rebuild_device_tensor_from_cpu_tensor,
     }
 
 

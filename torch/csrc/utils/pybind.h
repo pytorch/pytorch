@@ -19,6 +19,8 @@
 
 namespace py = pybind11;
 
+#define IS_PYBIND_2_13_PLUS PYBIND11_VERSION_HEX >= 0x020D0000
+
 // This makes intrusive_ptr to be available as a custom pybind11 holder type,
 // see
 // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers

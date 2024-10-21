@@ -1344,6 +1344,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
+        Tensor._clear_non_serializable_cached_data: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
@@ -2081,6 +2082,16 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+@contextlib.contextmanager
+def _enable_torch_function():
+    old_state = torch._C._get_torch_function_state()
+    try:
+        torch._C._set_torch_function_state(torch._C._TorchFunctionState.ENABLED)
+        yield
+    finally:
+        torch._C._set_torch_function_state(old_state)
 
 
 @contextlib.contextmanager

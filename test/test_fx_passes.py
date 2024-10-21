@@ -360,7 +360,7 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions = []
         for node_names in partition:
-            partitions.append([nodes_by_name[name] for name in node_names])
+            partitions.append(dict.fromkeys([nodes_by_name[name] for name in node_names]))
 
         fused_graph = fuse_by_partitions(gm, partitions)
 
@@ -385,7 +385,7 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions = []
         for node_names in partition:
-            partitions.append([nodes_by_name[name] for name in node_names])
+            partitions.append(dict.fromkeys([nodes_by_name[name] for name in node_names]))
 
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)

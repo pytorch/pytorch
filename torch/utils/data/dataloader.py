@@ -1268,7 +1268,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # test.
                 # See NOTE [ DataLoader on Linux and open files limit ]
                 fds_limit_margin = 10
-                fs = [tempfile.NamedTemporaryFile() for i in range(fds_limit_margin)]
+                [tempfile.NamedTemporaryFile() for i in range(fds_limit_margin)]
             except OSError as e:
                 if e.errno == errno.EMFILE:
                     raise RuntimeError(

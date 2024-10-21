@@ -133,7 +133,6 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
   }
   ++it;
 
-  std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
     ++it;

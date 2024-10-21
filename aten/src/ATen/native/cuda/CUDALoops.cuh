@@ -50,8 +50,7 @@
 #define ASSERT_HOST_DEVICE_LAMBDA(type)
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
@@ -344,5 +343,4 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

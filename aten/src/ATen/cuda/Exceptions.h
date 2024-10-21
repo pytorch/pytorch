@@ -157,18 +157,19 @@ constexpr const char* _cusolver_backend_suggestion =            \
 // See NOTE [ USE OF NVRTC AND DRIVER API ].
 #if !defined(USE_ROCM)
 
-#define AT_CUDA_DRIVER_CHECK(EXPR)                                                                               \
-  do {                                                                                                           \
-    CUresult __err = EXPR;                                                                                       \
-    if (__err != CUDA_SUCCESS) {                                                                                 \
-      const char* err_str;                                                                                       \
-      CUresult get_error_str_err C10_UNUSED = at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str);  \
-      if (get_error_str_err != CUDA_SUCCESS) {                                                                   \
-        AT_ERROR("CUDA driver error: unknown error");                                                            \
-      } else {                                                                                                   \
-        AT_ERROR("CUDA driver error: ", err_str);                                                                \
-      }                                                                                                          \
-    }                                                                                                            \
+#define AT_CUDA_DRIVER_CHECK(EXPR)                                          \
+  do {                                                                      \
+    CUresult __err = EXPR;                                                  \
+    if (__err != CUDA_SUCCESS) {                                            \
+      const char* err_str;                                                  \
+      [[maybe_unused]] CUresult get_error_str_err =                         \
+          at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str); \
+      if (get_error_str_err != CUDA_SUCCESS) {                              \
+        AT_ERROR("CUDA driver error: unknown error");                       \
+      } else {                                                              \
+        AT_ERROR("CUDA driver error: ", err_str);                           \
+      }                                                                     \
+    }                                                                       \
   } while (0)
 
 #else

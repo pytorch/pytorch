@@ -7,6 +7,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import math
 import tempfile
 import unittest
 import zipfile
@@ -35,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     TemporaryFileName,
     TestCase,
 )
@@ -173,6 +175,28 @@ class TestSerialize(TestCase):
         orig_out = exp_program.module()(*orig_args, **orig_kwargs)
         loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
         self.assertEqual(orig_out, loaded_out)
+
+    def test_metadata_run_decomp_serder(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        exp_program = torch.export.export_for_training(M(), (torch.randn(4, 4),))
+
+        output_buffer = io.BytesIO()
+        # Tests that example forward arg names are preserved when saving and loading module.
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+
+        ep = loaded_model.run_decompositions({})
+        # We should preserve the original module name
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x);  x = None
+    return (sin,)""",
+        )
 
     def test_metadata_parsing_with_layer_split(self):
         # Tests that modules with more complicated layer patterns can be serialized
@@ -808,6 +832,26 @@ class TestDeserialize(TestCase):
 
         self.check_graph(M(), inputs)
 
+    def test_arg_from(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("compress_weight", torch.ones((10, 10)))
+                self.register_buffer("compress_bias", torch.ones(10))
+
+            def forward(self) -> None:
+                if self.compress_weight is None or self.compress_bias is None:
+                    return
+                torch.nn.init.kaiming_uniform_(self.compress_weight, a=math.sqrt(5))
+                fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(
+                    self.compress_weight
+                )
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                torch.nn.init.uniform_(self.compress_bias, -bound, bound)
+
+        with torch.no_grad():
+            self.check_graph(M(), ())
+
     def test_map(self):
         from functorch.experimental import control_flow
 
@@ -1334,36 +1378,48 @@ class TestSerializeCustomClass(TestCase):
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertTrue(counter > 1)
 
-    # TODO For some reason, this doesn't work on Windows ONLY.
-    # def test_custom_tag_metadata_reexport(self):
-    #     class Foo(torch.nn.Module):
-    #         def forward(self, x):
-    #             return x + x
-    #
-    #     f = Foo()
-    #
-    #     inputs = (torch.zeros(4, 4),)
-    #     ep = export(f, inputs)
-    #
-    #     new_gm = copy.deepcopy(ep.graph_module)
-    #     new_gm.meta["custom"] = {}
-    #     new_gm.meta["custom"]["f"] = "bar"
-    #
-    #     for node in new_gm.graph.nodes:
-    #         if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-    #             node.meta["custom"] = {}
-    #             node.meta["custom"]["quantization_tag"] = "foo"
-    #
-    #     new_ep = ep._update(new_gm, ep.graph_signature)
-    #     new_ep = torch.export.export(new_ep.module(), inputs)
-    #
-    #     self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
-    #     counter = 0
-    #     for node in new_ep.graph.nodes:
-    #         if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-    #             counter += 1
-    #             self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
-    #     self.assertEqual(counter, 1)
+    @skipIfCrossRef
+    def test_custom_tag_metadata_re_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.rand(4, 2))
+                self.b = torch.nn.Parameter(torch.rand(4))
+
+            def forward(self, x):
+                out = torch.nn.functional.linear(x, self.w, self.b)
+                return out
+
+        f = Foo()
+        inputs = (torch.zeros(1, 2),)
+        ep = export(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        for node in new_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.linear.default
+            ):
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        new_ep = torch.export.export(new_ep.module(), inputs)
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+
+        # the custom field should be preserved after re-export and
+        # should not be copied to other nodes
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if "custom" in node.meta:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+                self.assertTrue(node.target == torch.ops.aten.linear.default)
+
+        self.assertEqual(counter, 1)
 
     def test_custom_tag_metadata_copy(self):
         class Foo(torch.nn.Module):

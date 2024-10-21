@@ -10,9 +10,7 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 using torch::autograd::edge_list;
@@ -368,7 +366,8 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
       // block and can be deallocated (release any references to grad tensors
       // as part of inputs_)
       NodeTask task = cpu_ready_queue->pop();
-      if (!(local_graph_task = task.base_.lock())) {
+      local_graph_task = task.base_.lock();
+      if (!local_graph_task) {
         continue;
       }
       if (task.fn_ && !local_graph_task->has_error_.load()) {
@@ -631,14 +630,12 @@ size_t DistEngine::numBackwardPasses() const {
   return initializedContextIds_.size();
 }
 
-std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
-  std::unordered_map<std::string, int> debugInfo;
-  debugInfo[kNumBackwardPasses] = numBackwardPasses();
-  debugInfo[kNumAutogradContexts] =
-      DistAutogradContainer::getInstance().numAutogradContexts();
+std::unordered_map<std::string, int64_t> DistEngine::getDebugInfo() const {
+  std::unordered_map<std::string, int64_t> debugInfo;
+  debugInfo[kNumBackwardPasses] = static_cast<int64_t>(numBackwardPasses());
+  debugInfo[kNumAutogradContexts] = static_cast<int64_t>(
+      DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

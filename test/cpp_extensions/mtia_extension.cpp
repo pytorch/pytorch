@@ -139,7 +139,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
 struct MTIAHooks : public at::MTIAHooksInterface {
   explicit MTIAHooks(at::MTIAHooksArgs) {}
-  void initMTIA() const override {}
+  void init() const override {}
 
   bool hasMTIA() const override {
     return true;

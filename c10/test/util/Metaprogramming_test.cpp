@@ -88,10 +88,10 @@ using is_my_movable_only_class =
     std::is_same<MovableOnly, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 struct CopyCounting {
-  int move_count;
-  int copy_count;
+  int move_count{0};
+  int copy_count{0};
 
-  CopyCounting() : move_count(0), copy_count(0) {}
+  CopyCounting() {}
   CopyCounting(const CopyCounting& rhs)
       : move_count(rhs.move_count), copy_count(rhs.copy_count + 1) {}
   CopyCounting(CopyCounting&& rhs) noexcept

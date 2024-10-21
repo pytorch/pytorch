@@ -127,8 +127,7 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
 
 
 def new_token_tensor() -> torch.Tensor:
-    # Use dtype bool to not affect Inductor dtype promotions
-    return torch.tensor([], dtype=torch.bool)
+    return torch.tensor([])
 
 
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)

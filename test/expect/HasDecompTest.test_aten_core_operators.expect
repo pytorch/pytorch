@@ -174,8 +174,6 @@ aten::cumsum
 aten::cumsum.out
 aten::cumsum_
 aten::diagonal
-aten::diagonal_copy
-aten::diagonal_copy.out
 aten::diagonal_scatter
 aten::diagonal_scatter.out
 aten::digamma
@@ -513,9 +511,11 @@ aten::uniform_
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_bicubic2d.out
+aten::upsample_bilinear2d
 aten::upsample_nearest1d.out
 aten::upsample_nearest2d.out
 aten::upsample_nearest3d.out
+aten::upsample_trilinear3d
 aten::var.correction
 aten::var.correction_out
 aten::var_mean.correction

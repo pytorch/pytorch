@@ -1,7 +1,7 @@
 #include <OpenReg.h>
 
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <iostream>
 
@@ -11,17 +11,69 @@ namespace {
 // Python dictionary where real implementations can be found
 PyObject* py_registry;
 
+using host_ptr_t = uint64_t;
+
+struct HostAllocator final : at::Allocator {
+  HostAllocator() = default;
+
+  at::DataPtr allocate(size_t nbytes) override {
+    py::gil_scoped_acquire acquire;
+    void* data = nullptr;
+    if (nbytes > 0) {
+      data = reinterpret_cast<void*>(get_method("hostMalloc")(nbytes).cast<host_ptr_t>());
+      TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
+    }
+    return {data, data, &ReportAndDelete, at::Device(at::kCPU)};
+  }
+
+  static void ReportAndDelete(void* ptr) {
+    if (!ptr) {
+      return;
+    }
+    py::gil_scoped_acquire acquire;
+    TORCH_CHECK(
+        get_method("hostFree")(reinterpret_cast<host_ptr_t>(ptr)).cast<bool>(),
+        "Failed to free memory pointer at ", ptr);
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &ReportAndDelete;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    py::gil_scoped_acquire acquire;
+    get_method("hostCopyData")(reinterpret_cast<host_ptr_t>(dest), reinterpret_cast<host_ptr_t>(src), count);
+  }
+};
+static HostAllocator global_host_alloc;
+
+
 // C++ hooks implementation
 struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
-    OpenRegHooksInterface(OpenRegHooksArgs) {};
-    ~OpenRegHooksInterface() override = default;
+  OpenRegHooksInterface(OpenRegHooksArgs) {};
+  ~OpenRegHooksInterface() override = default;
 
-      bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
-          return get_method("hasPrimaryContext")(device_index).cast<bool>();
-      }
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+    return get_method("hasPrimaryContext")(device_index).cast<bool>();
+  }
+
+  at::Allocator* getPinnedMemoryAllocator() const override {
+    return &global_host_alloc;
+  }
+
+  bool isPinnedPtr(const void* data) const override {
+    py::gil_scoped_acquire acquire;
+    return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data)).cast<bool>();
+  }
 };
+
+int register_hook() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface(OpenRegHooksArgs{}));
+  return 0;
+}
+int temp_register_hook = register_hook();
 
 TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
 C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
@@ -195,7 +247,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Wait (by blocking the calling thread) until all the work previously
    * enqueued on the stream has completed running on the device.
    */
-  virtual void synchronizeStream(const c10::Stream& stream) const {
+  virtual void synchronizeStream(const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
     get_method("synchronizeStream")(stream);
   }
@@ -237,14 +289,14 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 
 // Setter for the python dictionary with implementations
 void set_impl_registry(PyObject* registry) {
-    py_registry = registry;
+  py_registry = registry;
 }
 
 py::function get_method(const char* name) {
-    auto dict = py::cast<py::dict>(py_registry);
+  auto dict = py::cast<py::dict>(py_registry);
     TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
         "an implementation for '", name, "' make sure to add it in the __init__.py "
-        "file and register it.")
-    return dict[name];
+      "file and register it.")
+  return dict[name];
 }
 } // openreg

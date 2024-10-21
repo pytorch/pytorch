@@ -88,7 +88,7 @@ static bool EmbeddingLookupGenericSlowIdx(
           const int64_t data_size,                                                                    \
           const InType* input,                                                                        \
           const IndexType* indices,                                                                   \
-          const IndexType* offsets,                                                                     \
+          const IndexType* offsets,                                                                   \
           const float* weights,                                                                       \
           const float* scale_bias,                                                                    \
           bool normalize_by_lengths,                                                                  \
@@ -113,6 +113,9 @@ static bool EmbeddingLookupGenericSlowIdx(
   decltype(                                                                                           \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
+  decltype(                                                                                           \
+      EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
+      EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__sve;      \
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
           const int64_t block_size,                                                                   \
@@ -121,7 +124,7 @@ static bool EmbeddingLookupGenericSlowIdx(
           const int64_t data_size,                                                                    \
           const InType* input,                                                                        \
           const IndexType* indices,                                                                   \
-          const IndexType* offsets,                                                                     \
+          const IndexType* offsets,                                                                   \
           const float* weights,                                                                       \
           const float* scale_bias,                                                                    \
           bool normalize_by_lengths,                                                                  \
@@ -131,6 +134,19 @@ static bool EmbeddingLookupGenericSlowIdx(
     } else {                                                                                          \
       CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");                             \
     }                                                                                                 \
+    SVE_DO(                                                                                           \
+        EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                   \
+        output_size,                                                                                  \
+        index_size,                                                                                   \
+        data_size,                                                                                    \
+        input,                                                                                        \
+        indices,                                                                                      \
+        offsets,                                                                                      \
+        weights,                                                                                      \
+        scale_bias,                                                                                   \
+        normalize_by_lengths,                                                                         \
+        out);                                                                                         \
     AVX2_FMA_DO(                                                                                      \
         EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
         block_size,                                                                                   \
@@ -166,7 +182,7 @@ static bool EmbeddingLookupGenericSlowIdx(
       const int64_t data_size,                                                                        \
       const InType* input,                                                                            \
       const IndexType* indices,                                                                       \
-      const IndexType* offsets,                                                                         \
+      const IndexType* offsets,                                                                       \
       const float* weights,                                                                           \
       const float* scale_bias,                                                                        \
       bool normalize_by_lengths,                                                                      \

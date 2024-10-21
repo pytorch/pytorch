@@ -6,6 +6,12 @@ import unittest
 from typing import Callable, List, Optional
 from unittest import mock
 
+
+try:
+    from test_aot_inductor_utils import AOTIRunnerUtil
+except ImportError:
+    from .test_aot_inductor_utils import AOTIRunnerUtil
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -156,22 +162,27 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False, True))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @parametrize("use_aoti", (False, True))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool, max_autotune_gemm_backends: str, use_aoti: bool
     ):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
-
         if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
             return
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
-        def mm(a, b):
-            return a @ b
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel()
         a = torch.randn(128, 16).cuda().half()
         b = torch.randn(16, 128).cuda().half()
 
@@ -184,8 +195,15 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
+            Y = model(a, b)
+            if use_aoti:
+                Y_compiled = AOTIRunnerUtil.run(
+                    "cuda",
+                    model,
+                    (a, b),
+                )
+            else:
+                Y_compiled = torch.compile(model, dynamic=dynamic)(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")

@@ -32,7 +32,7 @@ concurrency:
 jobs:
   build-docker:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: am2.linux.9xlarge.ephemeral
+    runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["11.8", "12.1", "12.4", "cpu"]
@@ -62,5 +62,11 @@ jobs:
           fi
       - name: Build Docker Image
         if: env.WITH_PUSH == 'true'
-        run: |
-          .ci/docker/conda/build.sh conda-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/conda/build.sh conda-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}

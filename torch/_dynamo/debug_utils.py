@@ -680,6 +680,12 @@ class InputWriter:
             + f")  # {name}"
         )
 
+    # write out that the arg was filtered out as it is constant
+    def const(self, name) -> None:
+        self._lines.append(
+            f"reader.const({name!r})  # {name}, filtered out during compilation"
+        )
+
     # TODO: this doesn't actually symint atm
     def symint(self, name, val) -> None:
         if isinstance(val, torch.SymInt):

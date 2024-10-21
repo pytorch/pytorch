@@ -4,7 +4,6 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -584,7 +583,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.cuda.amp.autocast(dtype=torch.float64):
+                with torch.autocast(device_type="cuda", dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
                 return c_float64
 
@@ -604,7 +603,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_is_autocast_cpu_enabled(self):
         def fn(a_float32, b_float32):
-            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                 c_float16 = torch.mm(a_float32, b_float32)
                 if torch.is_autocast_cpu_enabled():
                     c_float16 = c_float16 + 1
@@ -888,12 +887,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_arguments_binding(self):
         def f1(x):
-            with torch.cuda.amp.autocast(False):
+            with torch.autocast(device_type="cuda", enabled=False):
                 x = torch.sin(x + 1)
             return x
 
         def f2(x):
-            with torch.cpu.amp.autocast(False):
+            with torch.autocast(device_type="cpu", enabled=False):
                 x = torch.cos(x + 1)
             return x
 
@@ -917,14 +916,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return new_fwd
 
         def autocast_func_cuda(orig_func):
-            @torch.cuda.amp.autocast(dtype=torch.float16)
+            @torch.autocast(device_type="cuda", dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
             return new_fwd
 
         def autocast_func_cpu(orig_func):
-            @torch.cpu.amp.autocast(dtype=torch.float16)
+            @torch.autocast(device_type="cpu", dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 

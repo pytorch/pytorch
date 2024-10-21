@@ -143,17 +143,17 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
 Tensor _remove_batch_dim(
     const Tensor& self,
     int64_t level,
-    int64_t batch_size,
+    const c10::SymInt& batch_size,
     int64_t out_dim) {
   TORCH_CHECK(
       out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
       "Nested tensors can only be vmapped over dim=0, but got dim=",
       out_dim);
   if (!has_level(self, level)) {
-    auto self_sizes = self.sizes();
-    VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
+    auto self_sizes = self.sym_sizes();
+    VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    auto result = self.expand(expanded_sizes);
+    auto result = self.expand_symint(expanded_sizes);
     return result;
   }
 
@@ -392,13 +392,13 @@ static void _set_dynamic_layer_keys_included(bool value) {
 }
 
 static void dump_dls() {
-  std::cout << getDynamicLayerStack() << std::endl;
+  std::cout << getDynamicLayerStack() << '\n';
 }
 
 static void dump_local_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+  std::cout << "[Local Include] " << tls.included_ << '\n';
+  std::cout << "[Local Exclude] " << tls.excluded_ << '\n';
 }
 
 namespace {

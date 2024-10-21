@@ -307,6 +307,17 @@ macro(torch_hip_get_arch_list store_var)
 endmacro()
 
 ##############################################################################
+# Get the XPU arch flags specified by TORCH_XPU_ARCH_LIST.
+# Usage:
+#   torch_xpu_get_arch_list(variable_to_store_flags)
+#
+macro(torch_xpu_get_arch_list store_var)
+  if(DEFINED ENV{TORCH_XPU_ARCH_LIST})
+    set(${store_var} $ENV{TORCH_XPU_ARCH_LIST})
+  endif()
+endmacro()
+
+##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
 # Usage:
 #   torch_cuda_get_nvcc_gencode_flag(variable_to_store_flags)

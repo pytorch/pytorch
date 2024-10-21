@@ -226,7 +226,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
         if (num_classes <= 0) {
             AT_ERROR("Can not infer total number of classes from empty tensor.");
         } else {
-            shape.push_back(num_classes);
+            shape.emplace_back(num_classes);
             return at::empty_symint(shape, self.options());
         }
     }
@@ -246,7 +246,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
     //   TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
     // }
 
-    shape.push_back(num_classes);
+    shape.emplace_back(num_classes);
     Tensor ret = at::zeros_symint(shape, self.options());
     return ret.scatter(-1, self.unsqueeze(-1), 1);
 }

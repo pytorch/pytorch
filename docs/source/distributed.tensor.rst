@@ -183,6 +183,7 @@ these features.
 .. automodule:: torch.distributed.tensor.experimental
 .. currentmodule:: torch.distributed.tensor.experimental
 
+.. autofunction:: context_parallel
 .. autofunction:: local_map
 .. autofunction:: register_sharding
 

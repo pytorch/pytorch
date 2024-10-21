@@ -238,9 +238,7 @@ class TensorVariable(VariableTracker):
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
-                from .builder import SourcelessBuilder
-
-                return SourcelessBuilder.create(tx, example_value)
+                return VariableTracker.build(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError
@@ -277,12 +275,9 @@ class TensorVariable(VariableTracker):
             # Note - at a certain point we may want to handle
             raise NotImplementedError
 
-        from ..guards import GuardBuilder
-        from .builder import VariableBuilder
-
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
-        return VariableBuilder(tx, attr_source)(real_value)
+        return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
         if self.ndim is not None:
@@ -510,8 +505,36 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
+
+        # Only override builtin tensor methods
+        # The user can manually add override handling
+        # with a decorator for other methods (e.g. a dispatch subclass with other methods)
+        has_torch_function_override = False
+        try:
+            inspect.getattr_static(torch.Tensor, name)
+            has_torch_function_override = True
+        except AttributeError:
+            has_torch_function_override = False
+
+        if (
+            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            and has_torch_function_override
+        ):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx, AttrSource(AttrSource(self.source, "__class__"), name)
+                )(inspect.getattr_static(torch.Tensor, name))
+            else:
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
+
+            return dispatch_torch_function(
+                tx, func_var, tuple([self] + list(args)), kwargs
+            )
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -603,6 +626,10 @@ class TensorVariable(VariableTracker):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
+    def method_is_inference(self):
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return ConstantVariable.create(fake.is_inference())
+
     def method_is_complex(self):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_complex)
@@ -663,7 +690,6 @@ class TensorVariable(VariableTracker):
     def method_as_subclass(self, cls):
         if isinstance(cls, TensorSubclassVariable) and cls.source:
             from ..symbolic_convert import InstructionTranslator
-            from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
 
             tx = InstructionTranslator.current_tx()
@@ -673,10 +699,11 @@ class TensorVariable(VariableTracker):
             # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
             # It is up to the user whether this is correct behavior or not.
             py_cls = cls.as_python_constant()
-            torch_fn = VariableBuilder(
+            torch_fn = VariableTracker.build(
                 tx,
+                py_cls.__torch_function__.__func__,
                 AttrSource(AttrSource(cls.source, "__torch_function__"), "__func__"),
-            )(py_cls.__torch_function__.__func__)
+            )
 
             return TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, torch_fn
@@ -718,7 +745,6 @@ class TensorVariable(VariableTracker):
 
     def method_tolist(self):
         from ..symbolic_convert import InstructionTranslator
-        from .builder import SourcelessBuilder
 
         tx = InstructionTranslator.current_tx()
 
@@ -755,18 +781,42 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder.create(tx, out)
+        return VariableTracker.build(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
 
     def method_data_ptr(self, *args, **kwargs):
-        unimplemented("Tensor.data_ptr")
+        return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
+
+    def method___getitem__(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import wrap_fx_proxy
+
+        tx = InstructionTranslator.current_tx()
+        if isinstance(args[0], SymNodeVariable):
+            # Standard indexing will force specialization due to
+            # __index__.  Rewrite as a regular torch op which will
+            # trace fine
+            fn, args = torch.select, [
+                variables.ConstantVariable.create(0),
+                args[0],
+            ]
+        else:
+            fn = operator.getitem
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            fn,
+            *proxy_args_kwargs([self] + list(args), kwargs),
+        )
+
+        return wrap_fx_proxy(tx, proxy)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -801,10 +851,9 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         if value is not None:
             from .. import polyfills
-            from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.addcmul_inplace),
+                VariableTracker.build(tx, polyfills.addcmul_inplace),
                 [self, tensor1, tensor2, value],
                 {},
             )
@@ -818,15 +867,6 @@ class TensorVariable(VariableTracker):
             else:
                 return False
 
-        if (
-            has_bool_key(key)
-            and isinstance(value, TensorVariable)
-            and value.requires_grad
-            and torch.is_grad_enabled()
-        ):
-            unimplemented(
-                "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
-            )
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
@@ -1006,12 +1046,15 @@ class TensorVariable(VariableTracker):
 
             from .builder import wrap_fx_proxy
 
+            self_proxy = self.as_proxy()
+            self_proxy.node.meta["has_backward_hook"] = True
+
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(), bw_state_proxy),
+                    (self_proxy, bw_state_proxy),
                     {},
                 ),
             )
@@ -1105,9 +1148,7 @@ class SymNodeVariable(VariableTracker):
 
     def as_tensor(self, tx):
         if self._tensor_var is None:
-            from .builder import SourcelessBuilder
-
-            self._tensor_var = SourcelessBuilder.create(
+            self._tensor_var = VariableTracker.build(
                 tx, torch.scalar_tensor
             ).call_function(tx, [self], {})
         return self._tensor_var
@@ -1312,12 +1353,10 @@ class TensorSubclassVariable(VariableTracker):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
 
-            torch_fn = VariableBuilder(
-                tx, AttrSource(self.source, "__torch_function__")
-            )(self.value.__torch_function__)
+            source = AttrSource(self.source, "__torch_function__")
+            torch_fn = VariableTracker.build(tx, self.value.__torch_function__, source)
 
             return TensorWithTFOverrideVariable.from_tensor_var(
                 tx, args[0], self.value, torch_fn
@@ -1388,4 +1427,19 @@ class UntypedStorageVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
+        codegen.call_method(0)
+
+
+class DataPtrVariable(VariableTracker):
+    def __init__(
+        self,
+        from_tensor: TensorVariable,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs),
+        self.from_tensor = from_tensor
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor, allow_cache=False)
+        codegen.load_method("data_ptr")
         codegen.call_method(0)

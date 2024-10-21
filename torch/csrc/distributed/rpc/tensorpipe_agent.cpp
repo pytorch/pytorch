@@ -161,14 +161,14 @@ C10_DEFINE_REGISTRY_WITHOUT_WARNING(
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
-    char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-    if (ifnameEnv != nullptr) {
+    auto ifnameEnv = c10::utils::get_env(kSocketIfnameEnvVar.c_str());
+    if (ifnameEnv.has_value()) {
       auto [error, result] =
-          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
+          tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv.value());
       if (error) {
         LOG(WARNING) << "Failed to look up the IP address for interface "
-                     << ifnameEnv << " (" << error.what() << "), defaulting to "
-                     << kDefaultUvAddress;
+                     << ifnameEnv.value() << " (" << error.what()
+                     << "), defaulting to " << kDefaultUvAddress;
         return kDefaultUvAddress;
       }
       return result;
@@ -263,7 +263,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (const auto laneIdx C10_UNUSED : c10::irange(kNumUvThreads)) {
+  for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
@@ -301,7 +301,9 @@ void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
 }
 
 float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
-  return currentCount_ == 0 ? 0 : currentSum_ / (float)currentCount_;
+  return currentCount_ == 0
+      ? 0
+      : static_cast<float>((double)currentSum_ / (double)currentCount_);
 }
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
@@ -393,7 +395,7 @@ TensorPipeAgent::TensorPipeAgent(
           WorkerInfo(std::move(selfName), selfId),
           std::move(cb),
           std::chrono::milliseconds(
-              (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
+              static_cast<long>(opts.rpcTimeoutSeconds * kSecToMsConversion))),
       isStaticGroup_(worldSize.has_value()),
       store_(store),
       opts_(std::move(opts)),
@@ -428,7 +430,7 @@ void TensorPipeAgent::startImpl() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is starting";
 
   std::vector<std::string> addresses;
-  int lowestPriority = std::numeric_limits<int>::max();
+  int64_t lowestPriority = std::numeric_limits<int64_t>::max();
   std::string lowestPriorityTransport;
 
   // Register transports
@@ -442,8 +444,8 @@ void TensorPipeAgent::startImpl() {
       }
       // Assign priorities in reverse order of occurrence in the vector, so that
       // a transport that comes before another receives a higher priority.
-      priority =
-          opts_.transports->size() - 1 - (iter - opts_.transports->begin());
+      priority = static_cast<std::ptrdiff_t>(opts_.transports->size()) - 1 -
+          (iter - opts_.transports->begin());
     }
     std::unique_ptr<TransportRegistration> reg =
         TensorPipeTransportRegistry()->Create(key);
@@ -472,7 +474,8 @@ void TensorPipeAgent::startImpl() {
       }
       // Assign priorities in reverse order of occurrence in the vector, so
       // that a channel that comes before another receives a higher priority.
-      priority = opts_.channels->size() - 1 - (iter - opts_.channels->begin());
+      priority = static_cast<std::ptrdiff_t>(opts_.channels->size()) - 1 -
+          (iter - opts_.channels->begin());
     }
     std::unique_ptr<ChannelRegistration> reg =
         TensorPipeChannelRegistry()->Create(key);
@@ -576,8 +579,8 @@ void TensorPipeAgent::pipeRead(
 
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
-          c10::intrusive_ptr<Message> rpcMessage = tensorpipeDeserialize(
-              std::move(tpDescriptor), std::move(*tpBuffers));
+          c10::intrusive_ptr<Message> rpcMessage =
+              tensorpipeDeserialize(tpDescriptor, std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(streams));
         });
@@ -586,12 +589,12 @@ void TensorPipeAgent::pipeRead(
 
 void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    c10::intrusive_ptr<Message> rpcMessage,
+    const c10::intrusive_ptr<Message>& rpcMessage,
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
   auto [tpMessage, tpBuffers] =
-      tensorpipeSerialize(std::move(rpcMessage), std::move(devices), streams);
+      tensorpipeSerialize(rpcMessage, std::move(devices), streams);
 
   pipe->write(
       std::move(tpMessage),
@@ -622,13 +625,14 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   if (!futureResponseMessage.hasError()) {
     c10::intrusive_ptr<Message> responseMessage =
         futureResponseMessage.value().toCustomClass<Message>();
-    responseMessage->setId(messageId);
+    responseMessage->setId(static_cast<int64_t>(messageId));
 
     std::vector<c10::Device> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage);
     } catch (const std::exception& e) {
-      responseMessage = createExceptionResponse(e.what(), messageId);
+      responseMessage =
+          createExceptionResponse(e.what(), static_cast<int64_t>(messageId));
     }
 
     for (const auto& tensor : responseMessage->tensors()) {
@@ -650,7 +654,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   oss.str(),
                   "which is not yet supported. Please file a feature request "
                   "issue in PyTorch GitHub repo."),
-              messageId);
+              static_cast<int64_t>(messageId));
           break;
         }
       }
@@ -658,7 +662,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     pipeWrite(
         pipe,
-        std::move(responseMessage),
+        responseMessage,
         std::move(devices),
         std::move(streams),
         [this, pipe, messageId](const tensorpipe::Error& error) {
@@ -679,7 +683,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(
-            futureResponseMessage.tryRetrieveErrorMessage(), messageId),
+            futureResponseMessage.tryRetrieveErrorMessage(),
+            static_cast<int64_t>(messageId)),
         /* devices */ {},
         std::move(streams),
         [this, pipe, messageId](const tensorpipe::Error& error) {
@@ -826,7 +831,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
   }
   uint64_t messageId = nextMessageID_++;
-  requestMessage->setId(messageId);
+  requestMessage->setId(static_cast<int64_t>(messageId));
 
   {
     std::unique_lock<std::mutex> lock(clientPipe.mutex_);
@@ -895,7 +900,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
           getDevicesOfTensors(requestMessage->tensors())));
   pipeWrite(
       clientPipe.pipe_,
-      std::move(requestMessage),
+      requestMessage,
       std::move(devices),
       std::move(streams),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {

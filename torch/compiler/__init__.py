@@ -12,6 +12,7 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_stance",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -48,7 +49,8 @@ def allow_in_graph(fn):
     If you are using :func:`torch.compile` (with backend="inductor" (the default)), or
     :func:`torch.export.export`, and trying to black-box a Python function throughout
     all tracing, do not use this API.
-    Instead, please create a custom operator (see :ref:`custom-ops-landing-page`)
+    Instead, please create a custom operator (see `PyTorch Custom Operators Landing Page
+    <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_)
 
     .. warning::
 
@@ -104,7 +106,7 @@ def allow_in_graph(fn):
         torch.compiler.allow_in_graph(my_custom_function)
 
         @torch.compile(...)
-        def fn(a):
+        def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
@@ -216,7 +218,7 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides both a decorator and a context manager to disable compilation on a function
+    This function provides a decorator to disable compilation on a function
     It also provides the option of recursively disabling called functions
 
     Args:
@@ -226,6 +228,58 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+
+def set_stance(stance: str, force_backend=None):
+    """
+    Set the current stance of the compiler.
+    Can be used as a function, context manager, or decorator.
+    Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
+
+    .. code-block:: python
+
+        @torch.compile
+        def foo(x):
+            ...
+
+        @torch.compiler.set_stance("force_eager")
+        def bar():
+            # will not be compiled
+            foo(...)
+
+        bar()
+
+        with torch.compiler.set_stance("force_eager"):
+            # will also not be compiled
+            foo(...)
+
+        torch.compiler.set_stance("force_eager")
+        # will also not be compiled
+        foo(...)
+        torch.compiler.set_stance("default")
+
+        # will be compiled
+        foo(...)
+
+    Args:
+        stance: The stance to set the compiler to. Valid values are:
+
+            - "default": The default stance, used for normal compilation.
+            - "force_eager": Ignore all `torch.compile` directives.
+            - "eager_on_recompile": Run code eagerly when a recompile is necessary.
+              If there is cached compiled code valid for the input, it will still be used.
+            - "fail_on_recompile": Raise an error when recompiling a function.
+
+        force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
+            to use a specific backend. Otherwise, an error is raised.
+    """
+    import torch._dynamo
+
+    return torch._dynamo.set_stance(stance, force_backend=force_backend)
+
+
+# forbid in graph
+set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def cudagraph_mark_step_begin():

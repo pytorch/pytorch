@@ -21,6 +21,9 @@ TORCH_API bool is_amx_tile_supported();
 // Enable the system to use AMX instructions.
 TORCH_API bool init_amx();
 
+// Detect if CPU supports Arm(R) architecture SVE ISA
+TORCH_API bool is_arm_sve_supported();
+
 // Get the L1 cache size per core in Byte
 TORCH_API uint32_t L1d_cache_size();
 

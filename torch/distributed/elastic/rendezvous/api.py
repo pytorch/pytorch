@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, ClassVar, Dict, Optional
 
 from torch.distributed import Store
-from torch.distributed.elastic.utils.distributed import get_free_port as _get_free_port
+from torch.distributed.elastic.utils.distributed import get_free_port
 
 
 __all__ = [
@@ -69,7 +69,10 @@ class RendezvousStoreInfo:
 
     @staticmethod
     def build(
-        rank: int, store: Store, local_addr: Optional[str]
+        rank: int,
+        store: Store,
+        local_addr: Optional[str],
+        server_port: Optional[int] = None,
     ) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
@@ -79,11 +82,13 @@ class RendezvousStoreInfo:
             rank: rank of the current node
             store: store to use for rendezvous
             local_addr: address of the current node, if not provided will be resolved from hostname
+            server_port: port of the TCPStore server, when the TCPStore is shared.
         """
         # TODO swap to collectives comms API
         if rank == 0:
             addr = local_addr or socket.getfqdn()
-            port = _get_free_port()
+            # When TCPStore is not shared, we fallback to get_free_port.
+            port = server_port or get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 

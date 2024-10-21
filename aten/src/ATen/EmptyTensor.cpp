@@ -18,6 +18,8 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasMTIA()) {
+      return at::detail::getMTIAHooks().getPinnedMemoryAllocator();
     } else if (at::globalContext().hasXPU()) {
       return at::detail::getXPUHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {

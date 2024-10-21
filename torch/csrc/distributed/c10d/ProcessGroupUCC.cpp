@@ -1,6 +1,8 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/env.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -157,11 +159,10 @@ void read_config() {
   torch_ucc_config.enable_comms_logger = false;
 
   // read all torch_ucc env. variables and update the map
-  char* env;
-  for (auto& torch_ucc_env : torch_ucc_envs_map) {
-    env = std::getenv(torch_ucc_env.first.c_str());
-    if (env) {
-      torch_ucc_envs_map[torch_ucc_env.first] = std::string(env);
+  for (auto& [env_name, value] : torch_ucc_envs_map) {
+    auto env = c10::utils::get_env(env_name.c_str());
+    if (env.has_value()) {
+      value = std::move(env.value());
     }
   }
 
@@ -273,6 +274,9 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
   }
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
   return true;
 }
 

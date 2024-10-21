@@ -324,23 +324,19 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = config_vals.at(0);
         // skip kSpatialDim
         unsigned idx = 1;
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           stride_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           dilation_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           output_padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }

@@ -249,23 +249,10 @@ class SendBuffer {
 using detail::Socket;
 
 // TCPStore class methods
-TCPStore::TCPStore(
-    const std::string& masterAddr,
-    std::uint16_t masterPort,
-    std::optional<int> numWorkers,
-    bool isServer,
-    const std::chrono::milliseconds& timeout,
-    bool waitWorkers)
-    : TCPStore{
-          masterAddr,
-          TCPStoreOptions{
-              masterPort,
-              isServer,
-              numWorkers ? std::optional<std::size_t>(*numWorkers)
-                         : std::nullopt,
-              waitWorkers,
-              timeout}} {}
 
+// Although we still allow multi-params in ctor in Python, that behavior is
+// removed from cpp and we construct the opts implicitly for users in the pybind
+// of TCPStore.
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},

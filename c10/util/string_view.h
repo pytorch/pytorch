@@ -149,7 +149,7 @@ class basic_string_view final {
     return std::numeric_limits<difference_type>::max();
   }
 
-  C10_NODISCARD constexpr bool empty() const noexcept {
+  [[nodiscard]] constexpr bool empty() const noexcept {
     return size() == 0;
   }
 

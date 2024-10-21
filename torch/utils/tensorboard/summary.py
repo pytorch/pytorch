@@ -398,7 +398,7 @@ def tensor_proto(tag, tensor):
     """Outputs a `Summary` protocol buffer containing the full tensor.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
-      name: A name for the generated node. Will also serve as the series name in
+      tag: A name for the generated node. Will also serve as the series name in
         TensorBoard.
       tensor: Tensor to be converted to protobuf
     Returns:
@@ -665,7 +665,7 @@ def make_video(tensor, fps):
         return
     import tempfile
 
-    t, h, w, c = tensor.shape
+    _t, h, w, c = tensor.shape
 
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)

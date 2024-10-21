@@ -78,6 +78,33 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    def _clear_non_serializable_cached_data(self):
+        r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
+        from being serialized.
+
+        For example, subclasses with custom dispatched sizes / strides cache this info in
+        non-serializable PyCapsules within the ``__dict__``, and this must be cleared out for
+        serialization to function.
+
+        Any subclass that overrides this MUST call ``super()._clear_non_serializable_cached_data().``
+        Additional data cleared within the override must be able to be re-cached transparently
+        to avoid breaking subclass functionality.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor._clear_non_serializable_cached_data, (self,), self
+            )
+        # NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
+        # this info via non-serializable PyCapsules.
+        CACHED_SIZES_STRIDES_KEYS = [
+            "_sym_sizes_capsule",
+            "_sym_sizes_capsule_len",
+            "_sym_strides_capsule",
+            "_sym_strides_capsule_len",
+        ]
+        for key in CACHED_SIZES_STRIDES_KEYS:
+            self.__dict__.pop(key, None)
+
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -203,6 +230,8 @@ class Tensor(torch._C.TensorBase):
                     if hasattr(self, slot):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
+            # don't try to deepcopy non-serializable cached data
+            self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
@@ -227,6 +256,9 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        # sizes / strides cache needs to be cleared here because it'll just be re-cached
+        # if cleared earlier. Note that state references the -actual- tensor dict.
+        self._clear_non_serializable_cached_data()
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -268,6 +300,20 @@ class Tensor(torch._C.TensorBase):
             torch.serialization._serialization_tls.materialize_fake_tensors
         )
 
+        if self.device.type == "xla" or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
+        ):
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
+            cpu_tensor = self.cpu()
+            return (
+                torch._utils._rebuild_device_tensor_from_cpu_tensor,
+                (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
+            )
+        # Legacy comment that does not hold anymore.
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -278,10 +324,7 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "maia"] or (
-            not torch._C._has_storage(self)
-            and self.device.type == torch._C._get_privateuse1_backend_name()
-        ):
+        if self.device.type in ["mtia", "maia"]:
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
@@ -1353,7 +1396,7 @@ class Tensor(torch._C.TensorBase):
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
-    def unflatten(self, dim, sizes):
+    def unflatten(self, dim, sizes):  # type: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
 

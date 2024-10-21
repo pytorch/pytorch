@@ -4,12 +4,7 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    load_state_dict,
-    save_state_dict,
-)
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter, load, save
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
@@ -71,13 +66,13 @@ class TestDistributedCheckpoint(FSDPTest):
         ):
             state_dict = model.state_dict()
 
-        save_state_dict(state_dict, writer)
+        save(state_dict, writer)
 
         with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
             new_model, state_dict_type
         ):
             state_dict = new_model.state_dict()
-            load_state_dict(state_dict, reader)
+            load(state_dict, reader)
             new_model.load_state_dict(state_dict)
 
         with FullyShardedDataParallel.summon_full_params(

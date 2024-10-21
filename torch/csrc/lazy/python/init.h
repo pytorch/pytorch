@@ -3,10 +3,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 TORCH_PYTHON_API void initLazyBindings(PyObject* module);
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

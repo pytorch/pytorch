@@ -209,8 +209,13 @@ public:
     }
     return vector;
   }
-  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
-                          const Vectorized<T>& mask) {
+// Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
+#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+  static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
+#else
+  static Vectorized<T> blendv(const Vectorized<T>& a,
+#endif
+    const Vectorized<T>& b, const Vectorized<T>& mask) {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
@@ -990,7 +995,7 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>();  // "zero out" mask
+  mask = Vectorized<T>(static_cast<T>(0));  // "zero out" mask
   return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
@@ -1116,7 +1121,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;

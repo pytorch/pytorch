@@ -75,6 +75,7 @@ SUPPORTED_QDTYPES = [
     torch.qint32,
     torch.uint8,
     torch.int8,
+    torch.uint16,
     torch.int16,
     torch.int32,
     torch.float8_e5m2,

@@ -1663,13 +1663,7 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Mps:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
-
+      check_input_same_type_as_parameters(input, weight, bias);
       output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
@@ -1679,12 +1673,7 @@ at::Tensor _convolution(
       break;
     case ConvBackend::MpsTranspose:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
+      check_input_same_type_as_parameters(input, weight, bias);
       output = at::_mps_convolution_transpose(
           input.contiguous(backend_memory_format), weight,
           params.padding, params.output_padding,

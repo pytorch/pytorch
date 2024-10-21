@@ -2,12 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 PyMethodDef* python_functions();
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

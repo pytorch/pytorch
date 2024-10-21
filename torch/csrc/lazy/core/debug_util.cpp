@@ -13,8 +13,7 @@
 #include <sstream>
 #include <unordered_set>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 std::string GetEnvString(const char* name, const std::string& defval) {
@@ -169,5 +168,4 @@ bool DebugUtil::ExperimentEnabled(const std::string& name) {
   return xset->find(name) != xset->end();
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

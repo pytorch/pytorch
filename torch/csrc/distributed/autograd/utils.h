@@ -5,9 +5,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // This method is used to attach the 'send' autograd function to the autograd
 // graph when we use RPC. This method creates a new 'send' autograd function
@@ -55,6 +53,4 @@ TORCH_API c10::intrusive_ptr<c10::ivalue::Future> sendMessageWithAutograd(
     const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
     bool forceDisableProfiling = false);
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

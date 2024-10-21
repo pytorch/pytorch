@@ -14,7 +14,7 @@ CUDAPluggableAllocatorDeleterContext::CUDAPluggableAllocatorDeleterContext(
     size_t size,
     int device,
     cudaStream_t stream)
-    : free_fn_(free_fn),
+    : free_fn_(std::move(free_fn)),
       data_(data),
       size_(size),
       device_(device),

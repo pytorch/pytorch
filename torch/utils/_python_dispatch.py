@@ -314,6 +314,17 @@ class TensorWithFlatten(Protocol):
     def stride(self, dim: int) -> int:
         ...
 
+    @overload
+    def size(self, dim: None = None) -> Tuple[int, ...]:
+        ...
+
+    @overload
+    def size(self, dim: int) -> int:
+        ...
+
+    def storage_offset(self) -> int:
+        ...
+
     def dim(self) -> int:
         ...
 
@@ -452,7 +463,6 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:

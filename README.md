@@ -27,8 +27,8 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
       - [NVIDIA CUDA Support](#nvidia-cuda-support)
       - [AMD ROCm Support](#amd-rocm-support)
       - [Intel GPU Support](#intel-gpu-support)
-    - [Install Dependencies](#install-dependencies)
     - [Get the PyTorch Source](#get-the-pytorch-source)
+    - [Install Dependencies](#install-dependencies)
     - [Install PyTorch](#install-pytorch)
       - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
@@ -161,9 +161,34 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 #### Prerequisites
 If you are installing from source, you will need:
 - Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
-- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required)
+- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
+- Visual Studio or Visual Studio Build Tool on Windows
 
-We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+\* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
+Professional, or Community Editions. You can also install the build tools from
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
+come with Visual Studio Code by default.
+
+\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+
+An example of environment setup is shown below:
+
+* Linux:
+
+```bash
+$ source <CONDA_INSTALL_DIR>/bin/activate
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+```
+
+* Windows:
+
+```bash
+$ source <CONDA_INSTALL_DIR>\Scripts\activate.bat
+$ conda create -y -n <CONDA_NAME>
+$ conda activate <CONDA_NAME>
+$ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+```
 
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
@@ -183,6 +208,8 @@ If you want to compile with ROCm support, install
 - [AMD ROCm](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) 4.0 and above installation
 - ROCm is currently supported only for Linux systems.
 
+By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
+
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
@@ -194,12 +221,23 @@ If you want to compile with Intel GPU support, follow these
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
+#### Get the PyTorch Source
+```bash
+git clone --recursive https://github.com/pytorch/pytorch
+cd pytorch
+# if you are updating an existing checkout
+git submodule sync
+git submodule update --init --recursive
+```
+
 #### Install Dependencies
 
 **Common**
 
 ```bash
 conda install cmake ninja
+# Run this command on native Windows
+conda install rust
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
@@ -235,15 +273,6 @@ pip install mkl-static mkl-include
 conda install -c conda-forge libuv=1.39
 ```
 
-#### Get the PyTorch Source
-```bash
-git clone --recursive https://github.com/pytorch/pytorch
-cd pytorch
-# if you are updating an existing checkout
-git submodule sync
-git submodule update --init --recursive
-```
-
 #### Install PyTorch
 **On Linux**
 
@@ -262,7 +291,7 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
 
@@ -284,13 +313,6 @@ python3 setup.py develop
 
 **On Windows**
 
-Choose Correct Visual Studio Version.
-
-PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
-Professional, or Community Editions. You can also install the build tools from
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
-come with Visual Studio Code by default.
-
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 **CPU-only builds**
@@ -298,7 +320,6 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 In this mode PyTorch computations will run on your CPU, not your GPU
 
 ```cmd
-conda activate
 python setup.py develop
 ```
 
@@ -352,14 +373,14 @@ with such a step.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```

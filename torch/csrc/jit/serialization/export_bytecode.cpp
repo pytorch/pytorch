@@ -149,7 +149,6 @@ mobile::Code compileGraphToMobileCode(
 
   // operator names
   std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
   int next_new_op_index = 0;
 
   auto op_to_specified_args = code.op_to_num_specified_args();

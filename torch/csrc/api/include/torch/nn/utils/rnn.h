@@ -5,10 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace nn {
-namespace utils {
-namespace rnn {
+namespace torch::nn::utils::rnn {
 
 inline Tensor invert_permutation(const Tensor& permutation) {
   if (!permutation.defined()) {
@@ -244,7 +241,7 @@ inline PackedSequence pack_padded_sequence(
 ///     Tuple of Tensor containing the padded sequence, and a Tensor
 ///     containing the list of lengths of each sequence in the batch.
 inline std::tuple<Tensor, Tensor> pad_packed_sequence(
-    PackedSequence sequence,
+    const PackedSequence& sequence,
     bool batch_first = false,
     double padding_value = 0.0,
     std::optional<int64_t> total_length = torch::nullopt) {
@@ -339,7 +336,7 @@ inline PackedSequence pack_sequence(
     bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
   for (const auto i : c10::irange(sequences.size())) {
-    lengths[i] = sequences[i].size(0);
+    lengths[static_cast<int64_t>(i)] = sequences[i].size(0);
   }
   return pack_padded_sequence(
       at::pad_sequence(sequences),
@@ -348,7 +345,4 @@ inline PackedSequence pack_sequence(
       /*enforce_sorted=*/enforce_sorted);
 }
 
-} // namespace rnn
-} // namespace utils
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::utils::rnn

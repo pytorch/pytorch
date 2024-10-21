@@ -1044,7 +1044,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           v->buffer_var()->name_hint());
     }
     buffer_mapping_[b] = buffer->data();
-    internal_buffers_.insert(std::make_pair(b, std::move(buffer)));
+    internal_buffers_.emplace(std::move(b), std::move(buffer));
   }
 
   void visit(const PlacementAllocatePtr& v) override {

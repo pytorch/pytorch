@@ -496,6 +496,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
+  void enable(bool) override {
+    // cannot disable
+  }
+
+  bool isEnabled() const override {
+    return true;
+  }
+
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
     // The only consumer of cacheInfo is getMaxWorkspaceSize in Conv_v7.cpp.
     // Afaict, the role of cacheInfo is to give getMaxWorkspaceSize a reasonable

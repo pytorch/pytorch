@@ -117,7 +117,7 @@ class StageBackwardTests(TestCase):
         )
 
         # backward of loss with respect to weights
-        dweights = stage_backward_weight(mod.parameters(), param_groups)
+        stage_backward_weight(mod.parameters(), param_groups, retain_graph=True)
 
         # Run reference
         ref_out = ref_mod(ref_x)

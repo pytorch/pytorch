@@ -71,6 +71,8 @@ namespace {
     template <typename T>
     class VecConvertTests : public ::testing::Test {};
     template <typename T>
+    class VecConvertTestsReducedFloat : public ::testing::Test {};
+    template <typename T>
     class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
@@ -121,6 +123,7 @@ namespace {
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecConvertTests, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(VecConvertTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecMaskTests, RealFloatIntTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
@@ -992,6 +995,9 @@ namespace {
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
+// NOTE: In this test, blend<mask> is not required to implement SVE Vectorized::set.
+// so, this test is disabled for SVE.
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1005,6 +1011,7 @@ namespace {
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
+#endif
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
@@ -1115,24 +1122,28 @@ namespace {
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float scale = generator_sc.get();
-            float inv_scale = 1.0f / static_cast<float>(scale);
-            auto zero_point_val = generator_zp.get();
-            int index = 0;
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                //generate vals
-                for (auto& v : unit_float_vec) {
-                    v = gen.get();
-                    expected_qint_vals[index] = quantize_val<underlying>(scale, zero_point_val, v);
-                    index++;
-                }
-                float_ret[j] = vfloat::loadu(unit_float_vec);
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float scale = generator_sc.get();
+          float inv_scale = 1.0f / static_cast<float>(scale);
+          auto zero_point_val = generator_zp.get();
+          int index = 0;
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            // generate vals
+            for (auto& v : unit_float_vec) {
+              v = gen.get();
+              expected_qint_vals[index] =
+                  quantize_val<underlying>(scale, zero_point_val, v);
+              index++;
             }
-            auto expected = vec::loadu(expected_qint_vals);
-            auto actual = vec::quantize(float_ret, scale, zero_point_val, inv_scale);
-            if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
-        } //trials;
+            float_ret[j] = vfloat::loadu(unit_float_vec);
+          }
+          auto expected = vec::loadu(expected_qint_vals);
+          auto actual =
+              vec::quantize(float_ret, scale, zero_point_val, inv_scale);
+          if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual)
+                  .check())
+            return;
+        } // trials;
     }
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     // This test case aims to test at::vec::QuantizeAvx512 and
@@ -1161,7 +1172,7 @@ namespace {
       float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
       float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
       ValueGen<float> gen(minv, maxv, seed.add(2));
-      for (C10_UNUSED const auto i : c10::irange(trials)) {
+      for ([[maybe_unused]] const auto i : c10::irange(trials)) {
         float scale = generator_sc.get();
         float inv_scale = 1.0f / static_cast<float>(scale);
         auto zero_point_val = generator_zp.get();
@@ -1220,35 +1231,36 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float scale = generator_sc.get();
-            int32_t zero_point_val = generator.get();
-            float scale_zp_premul = -(scale * zero_point_val);
-            vfloat vf_scale = vfloat{ scale };
-            vfloat vf_zp = vfloat{ static_cast<float>(zero_point_val) };
-            vfloat vf_scale_zp = vfloat{ scale_zp_premul };
-            //generate vals
-            for (auto& x : qint_vals) {
-                x = generator.get();
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float scale = generator_sc.get();
+          int32_t zero_point_val = generator.get();
+          float scale_zp_premul = -(scale * zero_point_val);
+          vfloat vf_scale = vfloat{scale};
+          vfloat vf_zp = vfloat{static_cast<float>(zero_point_val)};
+          vfloat vf_scale_zp = vfloat{scale_zp_premul};
+          // generate vals
+          for (auto& x : qint_vals) {
+            x = generator.get();
+          }
+          // get expected
+          int index = 0;
+          auto qint_vec = vec::loadu(qint_vals);
+          auto actual_float_ret =
+              qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            for (auto& v : unit_exp_vals) {
+              v = dequantize_val(scale, zero_point_val, qint_vals[index]);
+              index++;
             }
-            //get expected
-            int index = 0;
-            auto qint_vec = vec::loadu(qint_vals);
-            auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                for (auto& v : unit_exp_vals) {
-                    v = dequantize_val(scale, zero_point_val, qint_vals[index]);
-                    index++;
-                }
-                vfloat expected = vfloat::loadu(unit_exp_vals);
-                const auto& actual = actual_float_ret[j];
+            vfloat expected = vfloat::loadu(unit_exp_vals);
+            const auto& actual = actual_float_ret[j];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
                 if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check(false, true, 1.e-3f)) return;
 #else
                 if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
 #endif
             }
-        } //trials;
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, ReQuantizeFromInt) {
         using vec = TypeParam;
@@ -1267,25 +1279,29 @@ namespace {
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float multiplier = 1.f / (generator_sc.get());
-            auto zero_point_val = generator.get();
-            int index = 0;
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                //generate vals
-                for (auto& v : unit_int_vec) {
-                    v = c10::qint32(generator.get());
-                    expected_qint_vals[index] = requantize_from_int<underlying>(multiplier, zero_point_val, v.val_);
-                    index++;
-                }
-                int_ret[j] = vqint::loadu(unit_int_vec);
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float multiplier = 1.f / (generator_sc.get());
+          auto zero_point_val = generator.get();
+          int index = 0;
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            // generate vals
+            for (auto& v : unit_int_vec) {
+              v = c10::qint32(generator.get());
+              expected_qint_vals[index] = requantize_from_int<underlying>(
+                  multiplier, zero_point_val, v.val_);
+              index++;
             }
-            auto expected = vec::loadu(expected_qint_vals);
-            auto actual = vec::requantize_from_int(int_ret, multiplier, zero_point_val);
-            if (AssertVectorized<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) {
-                return;
-            }
-        } //trials;
+            int_ret[j] = vqint::loadu(unit_int_vec);
+          }
+          auto expected = vec::loadu(expected_qint_vals);
+          auto actual =
+              vec::requantize_from_int(int_ret, multiplier, zero_point_val);
+          if (AssertVectorized<vec>(
+                  NAME_INFO(ReQuantizeFromInt), seed, expected, actual)
+                  .check()) {
+            return;
+          }
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, WideningSubtract) {
         using vec = TypeParam;
@@ -1304,30 +1320,33 @@ namespace {
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            //generate vals
-            for (int j = 0; j < vec::size(); j++) {
-                qint_vals[j] = generator.get();
-                qint_b[j] = generator.get();
-                if constexpr (std::is_same_v<underlying, int>) {
-                    //filter overflow cases
-                    filter_sub_overflow(qint_vals[j], qint_b[j]);
-                }
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          // generate vals
+          for (int j = 0; j < vec::size(); j++) {
+            qint_vals[j] = generator.get();
+            qint_b[j] = generator.get();
+            if constexpr (std::is_same_v<underlying, int>) {
+              // filter overflow cases
+              filter_sub_overflow(qint_vals[j], qint_b[j]);
             }
-            int index = 0;
-            auto qint_vec = vec::loadu(qint_vals);
-            auto qint_vec_b = vec::loadu(qint_b);
-            auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                for (auto& v : unit_exp_vals) {
-                    v = widening_subtract(qint_vals[index], qint_b[index]);
-                    index++;
-                }
-                auto expected = vqint::loadu(unit_exp_vals);
-                const auto& actual = actual_int_ret[j];
-                if (AssertVectorized<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
+          }
+          int index = 0;
+          auto qint_vec = vec::loadu(qint_vals);
+          auto qint_vec_b = vec::loadu(qint_b);
+          auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            for (auto& v : unit_exp_vals) {
+              v = widening_subtract(qint_vals[index], qint_b[index]);
+              index++;
             }
-        } //trials;
+            auto expected = vqint::loadu(unit_exp_vals);
+            const auto& actual = actual_int_ret[j];
+            if (AssertVectorized<vqint>(
+                    NAME_INFO(WideningSubtract), seed, expected, actual)
+                    .check())
+              return;
+          }
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, Relu) {
         using vec = TypeParam;
@@ -1606,6 +1625,7 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecConvertTests, Convert) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1658,6 +1678,49 @@ namespace {
       TEST_CONVERT_TO(double);
     #undef TEST_CONVERT_TO
     }
+    TYPED_TEST(VecConvertTestsReducedFloat, ConvertReduced) {
+      using vec = TypeParam;
+      using src_t = UholdType<TypeParam>;
+      constexpr auto N = vec::size();
+    #define TEST_CONVERT_TO(dst_t)                                     \
+      do {                                                             \
+        CACHE_ALIGN src_t x[N];                                        \
+        CACHE_ALIGN dst_t y[N];                                        \
+        CACHE_ALIGN dst_t ref[N];                                      \
+        auto seed = TestSeed();                                        \
+        auto low = std::is_signed_v<dst_t> ? src_t(-100.0) : src_t(0); \
+        ValueGen<src_t> generator(low, src_t(100), seed);              \
+        for (const auto i : c10::irange(N)) {                          \
+          x[i] =  generator.get();                                     \
+        }                                                              \
+        for (const auto i : c10::irange(N)) {                          \
+          ref[i] = static_cast<dst_t>(x[i]);                           \
+        }                                                              \
+        auto x_vec = vec::loadu(x);                                    \
+        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
+        constexpr int num_dst_elements =                               \
+            std::min(N, at::vec::Vectorized<dst_t>::size());           \
+        y_vec.store(y, num_dst_elements);                              \
+        for (const auto i : c10::irange(num_dst_elements)) {           \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
+        }                                                              \
+        constexpr int dst_n = N / num_dst_elements;                    \
+        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
+            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
+        y_vec_n.store(y, N);                                           \
+        for (const auto i : c10::irange(N)) {                          \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
+        }                                                              \
+      } while (0)
+      TEST_CONVERT_TO(int8_t);
+      TEST_CONVERT_TO(uint8_t);
+    #undef TEST_CONVERT_TO
+    }
+#endif
     TYPED_TEST(VecMaskTests, MaskedLoad) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1716,6 +1779,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -1739,6 +1803,8 @@ namespace {
 
     #undef TEST_MASK_CHECK_N
     }
+#endif
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -1764,6 +1830,8 @@ namespace {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
+#endif
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1808,6 +1876,7 @@ namespace {
     #undef TEST_MASK_CAST
     #undef TEST_MASK_CAST_N
     }
+#endif
 #else
 #error GTEST does not have TYPED_TEST
 #endif

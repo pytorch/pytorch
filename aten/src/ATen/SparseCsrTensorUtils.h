@@ -144,8 +144,8 @@ class CheckSparseTensorInvariants {
   bool old_state;
 
  public:
-  CheckSparseTensorInvariants(bool state) {
-    old_state = at::globalContext().checkSparseTensorInvariants();
+  CheckSparseTensorInvariants(bool state)
+      : old_state(at::globalContext().checkSparseTensorInvariants()) {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
 

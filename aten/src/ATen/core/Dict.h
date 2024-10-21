@@ -314,7 +314,7 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key) const;
+  [[nodiscard]] size_t erase(const Key& key) const;
 
   /**
    * Returns the mapped value of the element with key equivalent to key.

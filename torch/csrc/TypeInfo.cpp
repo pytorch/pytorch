@@ -286,7 +286,8 @@ static PyMethodDef THPFInfo_methods[] = {
 };
 
 PyTypeObject THPFInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.finfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.finfo", /* tp_name */
     sizeof(THPFInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -339,7 +340,8 @@ static PyMethodDef THPIInfo_methods[] = {
 };
 
 PyTypeObject THPIInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.iinfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.iinfo", /* tp_name */
     sizeof(THPIInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

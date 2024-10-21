@@ -34,7 +34,7 @@ concurrency:
 jobs:
   get-label-type:
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -64,7 +64,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -75,6 +75,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -178,7 +188,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -189,6 +199,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -310,7 +330,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -321,6 +341,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -425,7 +455,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -436,6 +466,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -558,7 +598,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -569,6 +609,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -673,7 +723,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -684,6 +734,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -806,7 +866,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -817,6 +877,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -921,7 +991,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -932,6 +1002,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1053,7 +1133,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1064,6 +1144,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1167,7 +1257,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1178,6 +1268,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1299,7 +1399,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1310,6 +1410,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1414,7 +1524,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1425,6 +1535,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1547,7 +1667,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1558,6 +1678,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1662,7 +1792,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1673,6 +1803,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1795,7 +1935,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1806,6 +1946,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -1910,7 +2060,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -1921,6 +2071,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2042,7 +2202,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2053,6 +2213,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2156,7 +2326,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2167,6 +2337,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2288,7 +2468,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2299,6 +2479,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2403,7 +2593,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2414,6 +2604,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2536,7 +2736,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2547,6 +2747,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2651,7 +2861,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2662,6 +2872,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2784,7 +3004,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2795,6 +3015,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -2899,7 +3129,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -2910,6 +3140,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3031,7 +3271,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3042,6 +3282,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3145,7 +3395,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3156,6 +3406,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3277,7 +3537,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3288,6 +3548,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3392,7 +3662,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3403,6 +3673,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3525,7 +3805,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3536,6 +3816,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3640,7 +3930,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3651,6 +3941,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3773,7 +4073,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3784,6 +4084,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
@@ -3888,7 +4198,7 @@ jobs:
             # Pulled from instance metadata endpoint for EC2
             # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
             category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
           }
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
@@ -3899,6 +4209,16 @@ jobs:
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell

@@ -44,6 +44,19 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [a, b])
 
+    class SimpleWithIntClosure(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num = 3
+
+        def forward(self, p, a, b):
+            return torch.cond(
+                pred=p,
+                true_fn=lambda a, b: [a + b + self.num],
+                false_fn=lambda a, b: [a - b - self.num],
+                operands=(a, b),
+            )
+
     class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
             def true_fn(x0, y0, z0):
@@ -224,6 +237,18 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_simple_with_int_closure(self, device):
+        self._run_test(
+            model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+        )
+
+    @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
             def __init__(
@@ -334,6 +359,98 @@ class CondTests(TestCase):
             device=device,
             dynamic=True,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_outer_to_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                nz = torch.nonzero(a)
+                b = torch.ones([nz.size(0), 8], device=nz.device)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner_to_outer(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                y = torch.cond(p, true_fn, false_fn, [b])
+                return torch.sin(y)
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
 
     @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):

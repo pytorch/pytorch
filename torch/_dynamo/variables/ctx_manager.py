@@ -445,12 +445,21 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        if isinstance(batch_size, variables.SymNodeVariable):
+            batch_size_value = batch_size.sym_num
+            batch_size_node = batch_size.as_proxy().node
+        else:
+            batch_size_value = batch_size.as_python_constant()
+            batch_size_node = batch_size.as_python_constant()
+        randomness = randomness.as_python_constant()
+        vmap_level = torch._C._functorch._vmap_increment_nesting(
+            batch_size_value, randomness
+        )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
+            (batch_size_node, randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)

@@ -75,8 +75,7 @@ std::string getQuantizeForScalar(const std::string& value) {
           )" +
       value + "_tensor : Tensor = aten::scalar_tensor(" + value + ", " + value +
       "_float_scalar_type";
-  for (const auto i : c10::irange(3)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(3)) {
     quantize_pattern += ", " + value + "_none";
   }
   quantize_pattern += ")";
@@ -807,13 +806,6 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
        "%ceil_mode",
        "%count_include_pad",
        "%divisor_override"});
-
-  std::string common_general_value_op = R"(
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
 
   auto avg_pool3d = getInputTensorQParamOpFusionInfo(
       "aten::avg_pool3d",

@@ -749,26 +749,9 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REDISPATCH_SIGNATURE,                                  \
       POLICY)
 
-// KERNEL_MPS registration for AutocastMPS
-#define KERNEL_MPS(OP, POLICY)            \
-  m.impl(                                 \
-      TORCH_SELECTIVE_NAME("aten::" #OP), \
-      &WrapFunction<                      \
-          CastPolicy::POLICY,             \
-          DeviceType::MPS,                \
-          decltype(ATEN_FN(OP)),          \
-          decltype(ATEN_FN(OP)),          \
-          &ATEN_FN(OP)>::type::call);
-
-#define KERNEL_MPS2(OP, OVERLOAD, POLICY)               \
-  m.impl(                                               \
-      TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD), \
-      &WrapFunction<                                    \
-          CastPolicy::POLICY,                           \
-          DeviceType::MPS,                              \
-          decltype(ATEN_FN2(OP, OVERLOAD)),             \
-          decltype(ATEN_FN2(OP, OVERLOAD)),             \
-          &ATEN_FN2(OP, OVERLOAD)>::type::call);
+// KERNEL_MPS
+// registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastMPS
+#define KERNEL_MPS(...) KERNEL(c10::DeviceType::MPS, __VA_ARGS__)
 
 // Op lists for different policies.
 // To make sure other backends can reuse the policy op list.

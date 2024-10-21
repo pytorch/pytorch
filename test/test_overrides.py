@@ -1550,6 +1550,15 @@ class TestTorchFunctionMode(TestCase):
             finally:
                 del g
 
+    def test_disable_enable_torch_function_ctx(self):
+        class A(torch.Tensor):
+            pass
+
+        x = A(torch.randn(5))
+        with torch._C.DisableTorchFunction():
+            with torch.overrides._enable_torch_function():
+                self.assertIsInstance(torch.sum(x), A)
+
     def test_torch_function_all_disabled_api(self):
         from torch._C import _is_torch_function_all_disabled
 
@@ -1566,6 +1575,7 @@ class TestTorchFunctionMode(TestCase):
         with torch._C.DisableTorchFunctionSubclass():
             state = _is_torch_function_all_disabled()
             self.assertFalse(state)
+
 
     def test_subclass_hash(self):
         class DiagTensor(torch.Tensor):

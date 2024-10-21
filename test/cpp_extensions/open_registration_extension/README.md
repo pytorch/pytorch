@@ -23,7 +23,6 @@ The main next step would be to:
 - Split the daemon into a proper user-process driver vs device-process executor. The main goal would be to better mimick which information is held on the user-process side and when we're actually communicating with the device. In particular current device or stream should be user-process informations.
 - Add Stream/Event system. Most likely by having multiple requests queue that go to the device from the driver.
 - Add RNG Generator.
-- Add Pinned memory and HostAllocator.
 
 Longer term:
 - Replace the current `open_registration_extension.cpp` test in PyTorch CI with this.

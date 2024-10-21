@@ -48,6 +48,7 @@ class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
     compile_id: CompileId
+    trace_annotation: str = "Unknown"
 
 
 class DynamoCallbackFn(Protocol):

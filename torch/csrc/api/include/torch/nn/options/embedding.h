@@ -5,8 +5,7 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `Embedding` module.
 ///
@@ -238,5 +237,4 @@ struct TORCH_API EmbeddingBagFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

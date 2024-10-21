@@ -4,7 +4,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
@@ -136,7 +135,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
+  for ([[maybe_unused]] const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   // NB: THIS WAS CHANGED FROM THE ORIGINAL

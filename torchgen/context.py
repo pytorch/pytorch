@@ -95,7 +95,7 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
 
 
 def method_with_nested_native_function(
-    func: Callable[[S, F3], T]
+    func: Callable[[S, F3], T],
 ) -> Callable[[S, F3], T]:
     @functools.wraps(func)
     def wrapper(slf: S, f: F3) -> T:
@@ -108,7 +108,7 @@ def method_with_nested_native_function(
 # Convenience decorator for functions that explicitly take in a BackendIndex,
 # instead of indirectly taking one in as a closure
 def with_native_function_and_index(
-    func: Callable[[F, BackendIndex], T]
+    func: Callable[[F, BackendIndex], T],
 ) -> Callable[[F, BackendIndex], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_index: BackendIndex) -> T:
@@ -120,7 +120,7 @@ def with_native_function_and_index(
 
 # Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
-    func: Callable[[F, dict[DispatchKey, BackendIndex]], T]
+    func: Callable[[F, dict[DispatchKey, BackendIndex]], T],
 ) -> Callable[[F, dict[DispatchKey, BackendIndex]], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_indices: dict[DispatchKey, BackendIndex]) -> T:

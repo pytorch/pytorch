@@ -193,7 +193,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
                 f()
             begin = time.time()
             for _ in range(iters):
-                out = f()
+                f()
             return time.time() - begin
 
         mkl_time = benchmark(lambda: [i.to_dense() for i in submodule(*[i.to_mkldnn() for i in sample_inputs])])
@@ -278,7 +278,7 @@ def optimize_for_inference(
 
     cur_tracer = tracer()
     fx_graph = cur_tracer.trace(copy.deepcopy(model))
-    fx_model = fx.GraphModule(cur_tracer.root, fx_graph)
+    fx.GraphModule(cur_tracer.root, fx_graph)
     modules: Dict[str, nn.Module] = dict(model.named_modules())
 
     class MklSupport(Enum):

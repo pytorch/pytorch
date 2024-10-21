@@ -774,8 +774,8 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
     TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
-    bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
-    bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
+    bool is_half_float = std::is_same_v<scalar_t, at::Half> && mean_st == at::kFloat;
+    bool is_bfloat16_float = std::is_same_v<scalar_t, at::BFloat16> && mean_st == at::kFloat;
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (cuda::detail::canUse32BitIndexMath(self)) {
       if (is_half_float || is_bfloat16_float) {

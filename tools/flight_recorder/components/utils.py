@@ -175,7 +175,7 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
     for e in alltoall_cases:
         input_numel += math.prod(e["input_sizes"][0])
         output_numel += math.prod(e["output_sizes"][0])
-    return input_numel == output_numel, input_numel, output_numel
+    return input_numel != output_numel, input_numel, output_numel
 
 
 def find_coalesced_group(
@@ -239,6 +239,7 @@ def just_print_entries(
                 if (
                     args.pg_filters is None
                     or entry["process_group"][1] in args.pg_filters
+                    or entry["process_group"][0] in args.pg_filters
                 ):
                     row.append(str(Op(entry, _memberships, pg_name)))
                 else:
@@ -277,7 +278,7 @@ def get_version_detail(version: str) -> Tuple[int, int]:
 
 
 def align_trace_from_beginning(
-    entries: Dict[int, List[Dict[str, Any]]]
+    entries: Dict[int, List[Dict[str, Any]]],
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
     Align the trace entries by record ID for entries.
