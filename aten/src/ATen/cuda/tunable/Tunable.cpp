@@ -439,8 +439,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
+  if (env == "1") {
     return true;
   }
   return enable_;
@@ -466,15 +466,15 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
+  if (env == "0") {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
   if (env != nullptr && strcmp(env, "1") == 0) {
     return true;
   }
@@ -483,7 +483,7 @@ bool TuningContext::IsRecordUntunedEnabled() const {
 
 std::ofstream& TuningContext::GetUntunedFile(){
   if (!untuned_file_.is_open()) {
-    const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
+    const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
     std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
 
     std::string device = c10::str(int(c10::cuda::current_device()));
@@ -521,7 +521,7 @@ void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxTuningDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS");
   if (env != nullptr) {
     int val = atoi(env);
     return val < 0 ? 0 : val;
@@ -534,7 +534,7 @@ void TuningContext::SetMaxTuningIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxTuningIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
   if (env != nullptr) {
     int val = atoi(env);
     return val < 0 ? 0 : val;
@@ -547,7 +547,7 @@ void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
 }
 
 int TuningContext::GetMaxWarmupDurationMs() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
   if (env != nullptr) {
     int val = atoi(env);
     return val < 0 ? 0 : val;
@@ -560,7 +560,7 @@ void TuningContext::SetMaxWarmupIterations(int max_iter) {
 }
 
 int TuningContext::GetMaxWarmupIterations() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
   if (env != nullptr) {
     int val = atoi(env);
     return val < 0 ? 0 : val;
@@ -573,7 +573,7 @@ void TuningContext::EnableICacheFlush(bool value) {
 }
 
 bool TuningContext::IsICacheFlushEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ENABLED");
   if (env != nullptr && strcmp(env, "0") == 0) {
     return false;
   }
@@ -585,7 +585,7 @@ void TuningContext::SetRotatingBufferSize(int size) {
 }
 
 int TuningContext::GetRotatingBufferSize() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  static const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
   if (env != nullptr) {
     constexpr int MB = 1024 * 1024;
     int val = atoi(env);
@@ -608,7 +608,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
     manager_initialized_ = true;
     if (GetFilename().empty()) {
       // if SetFilename() was not already called, call it now with the default or env var
-      const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
+      const char *env = c10::utils::get_env("PYTORCH_TUNABLEOP_FILENAME");
       std::string filename = (env == nullptr) ? "tunableop_results.csv" : env;
       SetFilename(filename, true);
     }
