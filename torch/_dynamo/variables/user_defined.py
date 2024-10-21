@@ -1304,7 +1304,6 @@ class WeakRefVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        call_source = None
         referent = self.value()
         source = self.source and WeakRefCallSource(self.source)
         return VariableTracker.build(tx, referent, source)

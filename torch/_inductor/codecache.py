@@ -473,7 +473,7 @@ def write_atomic(
         f.write(content)
     try:
         tmp_path.rename(target=path)
-    except FileExistsError as e_file_exist:
+    except FileExistsError:
         if not _IS_WINDOWS:
             raise
         # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
