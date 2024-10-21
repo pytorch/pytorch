@@ -3,11 +3,12 @@ import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Set, Union
+from typing import Any, Callable, cast, List, Optional, Union
 from unittest.mock import patch
 
 import torch
 import torch.utils
+from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
@@ -871,7 +872,7 @@ class CppPackedGemmTemplate(CppTemplate):
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
         epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: List[ir.Buffer] = []
-        Y_aliases: Set[str] = set()
+        Y_aliases: OrderedSet[str] = OrderedSet()
 
         use_local_acc = (
             self.layout.dtype != torch.float

@@ -7,10 +7,11 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -148,12 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    unmet_deps: Dict[BaseSchedulerNode, OrderedSet[str]] = {
+        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        for snode in snodes
     }
 
     ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -671,7 +673,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet[Any]()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -698,7 +700,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -769,7 +771,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,

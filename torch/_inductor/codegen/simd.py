@@ -1376,7 +1376,7 @@ class SIMDScheduling(BaseScheduling):
 
             # Keep buffers needed by the non-persistent reduction so both
             # kernels have the same arguments
-            kernel.must_keep_buffers = set(kernel2.must_keep_buffers)
+            kernel.must_keep_buffers = OrderedSet(kernel2.must_keep_buffers)
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 

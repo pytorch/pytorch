@@ -25,6 +25,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .autotune_process import (
@@ -409,7 +410,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())  # type: ignore[arg-type]
+            self.cse.invalidate(OrderedSet())  # type: ignore[arg-type]
             return body_val
 
     def store_output(
