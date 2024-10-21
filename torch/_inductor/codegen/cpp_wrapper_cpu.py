@@ -1677,6 +1677,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src}{self.ending}")
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        raise NotImplementedError(
+            "codegen invoke_subgraph is not implemented for cpp wrapper"
+        )
+
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
