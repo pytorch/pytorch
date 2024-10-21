@@ -1223,10 +1223,6 @@ exclude_patterns = [
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
     'torch/_vendor/**',
-    'torch/contrib/__init__.py',
-    'torch/contrib/_tensorboard_vis.py',
-    "torch/cuda/_gpu_trace.py",
-    'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/linalg/__init__.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',

@@ -612,14 +612,12 @@ won't take effect even if it is set explicitly."
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
                     core_list = cores[
-                        i
-                        * args.ncores_per_instance : (i + 1)
+                        i * args.ncores_per_instance : (i + 1)
                         * args.ncores_per_instance
                     ]
                 else:  # assign ncores_per_instance from rank
                     core_list = cores[
-                        args.rank
-                        * args.ncores_per_instance : (args.rank + 1)
+                        args.rank * args.ncores_per_instance : (args.rank + 1)
                         * args.ncores_per_instance
                     ]
 
