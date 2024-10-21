@@ -560,7 +560,7 @@ constexpr auto count_max =
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR > 13)))
 template <typename T>
-constexpr bool _nccl_should_send_recv(C10_UNUSED T _unused_) {
+constexpr bool _nccl_should_send_recv([[maybe_unused]] T _unused_) {
   return true;
 }
 #else
@@ -879,7 +879,7 @@ void all2all_single_unequal_split(
 
   auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
-#ifdef NCCL_ALLTOALLV_SUPPORTED
+#if defined(USE_ROCM) || defined(NCCL_ALLTOALLV_SUPPORTED)
   // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoallv) vs those
   // inside traditional p2p operations.

@@ -17,12 +17,10 @@
 #include <exception>
 #include <memory>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 template <typename Dataset, typename Batch, typename BatchRequest>
 class DataLoaderBase {
  public:
@@ -35,7 +33,7 @@ class DataLoaderBase {
   DataLoaderBase(
       DataLoaderOptions options,
       std::unique_ptr<Dataset> main_thread_dataset = nullptr)
-      : options_(std::move(options)),
+      : options_(options),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
 
@@ -82,7 +80,7 @@ class DataLoaderBase {
     // Send one 'quit' message per worker. Since a worker dies (exits its
     // thread) after receiving this message, each `QuitWorker()` message will be
     // read by exactly one worker.
-    for (C10_UNUSED const auto w : c10::irange(options_.workers)) {
+    for ([[maybe_unused]] const auto w : c10::irange(options_.workers)) {
       push_job(QuitWorker());
     }
     for (auto& worker : workers_) {
@@ -145,7 +143,7 @@ class DataLoaderBase {
   /// Schedules `requested_jobs` many new batches to be fetched. The actual
   /// number of jobs scheduled may be less if the DataLoader exhausts.
   void prefetch(size_t requested_jobs) {
-    for (C10_UNUSED const auto r : c10::irange(requested_jobs)) {
+    for ([[maybe_unused]] const auto r : c10::irange(requested_jobs)) {
       if (auto batch_request = get_batch_request()) {
         this->push_job(std::move(*batch_request));
       } else {
@@ -218,7 +216,7 @@ class DataLoaderBase {
   }
 
   /// The options the DataLoader was configured with.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FullDataLoaderOptions options_;
 
   /// The dataset for the main thread, only has a value if the number of
@@ -249,5 +247,4 @@ class DataLoaderBase {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool joined_ = false;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data
