@@ -117,7 +117,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 
 
 def _get_observer_kwargs(
-    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec]
+    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec],
 ):
     kwargs_dict = asdict(quant_spec)
     return copy.deepcopy(kwargs_dict)
@@ -937,8 +937,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
-                    and maybe_obs_mod.dtype
-                    == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
+                    and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
@@ -1942,9 +1941,7 @@ def _run_prepare_fx_on_standalone_modules(
         )
 
         standalone_module = named_modules[root_node.target]
-        prepare = (
-            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx
-        )  # type: ignore[attr-defined]
+        prepare = torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = prepare(
             standalone_module,
             sm_qconfig_mapping,
@@ -2178,9 +2175,9 @@ def prepare(
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
         input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-        output_quantized_idxs: List[
-            int
-        ] = prepare_custom_config.output_quantized_indexes
+        output_quantized_idxs: List[int] = (
+            prepare_custom_config.output_quantized_indexes
+        )
         observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
         # inplace modification
         observed_graph_module_attrs.is_observed_standalone_module = True

@@ -338,9 +338,8 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_filtered_tables(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
-            ... ) # generates table with per_channel_min info for all modules in block 1 of the model
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
+            ... )  # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(
@@ -427,8 +426,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_table_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # prints out neatly formatted table with per_channel_min info
             >>> # for all modules in block 1 of the model
@@ -589,8 +587,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
             >>> # modules in block1 of model each channel gets it's own line,
@@ -663,8 +660,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP
             >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             # outputs histogram of per_channel_min information for all modules in block1 of model
                 information is gathered across all channels for all modules in block 1 for the

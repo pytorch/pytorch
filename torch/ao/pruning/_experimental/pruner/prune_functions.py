@@ -3,6 +3,7 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
+
 from typing import Callable, cast, List, Optional, Tuple
 
 import torch

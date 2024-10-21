@@ -163,7 +163,7 @@ def _union_input_edge_with(
 
 
 def _get_edge_or_node_to_group_id(
-    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase]
+    edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
 ) -> Dict[EdgeOrNode, int]:
     """Map from edge/node to the group ID, generated from quantization annotations,
     edge/node with the same group ID should use the same observer/fake_quant instance

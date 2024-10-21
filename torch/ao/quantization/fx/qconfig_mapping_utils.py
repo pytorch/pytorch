@@ -251,8 +251,9 @@ def _compare_prepare_convert_qconfig_mappings(
                 name in convert_dicts[i]
             ), f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
                 when it was present in prepare"
-            assert convert_dicts[i][name] is None or qconfig_equals(
-                prepare_dicts[i][name], convert_dicts[i][name]
+            assert (
+                convert_dicts[i][name] is None
+                or qconfig_equals(prepare_dicts[i][name], convert_dicts[i][name])
             ), f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
                 prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
 
