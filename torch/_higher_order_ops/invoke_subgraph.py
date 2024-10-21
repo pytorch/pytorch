@@ -2,6 +2,8 @@
 # mypy: allow-untyped-defs
 
 
+from typing import List, Optional, Tuple, Union
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -37,23 +39,27 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     def __call__(
         self,
         subgraph: GraphModule,
-        identifier: str,
-        operands,
+        identifier: Optional[str],
+        operands: Union[
+            List[Union[torch.Tensor, torch.SymInt]],
+            Tuple[Union[torch.Tensor, torch.SymInt]],
+        ],
     ):
+        assert identifier is None or isinstance(
+            identifier, str
+        ), "identifier must be a None or a string"
+
+        assert isinstance(
+            operands, (list, tuple)
+        ), f"invoke_subgraph operands must be a list or tuple of tensors and SymInts {operands}"
+        assert all(
+            isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
+        ), f"invoke_subgraph operands must be a list of tensors and SymInts {operands}"
+
         return super().__call__(subgraph, identifier, operands)
 
 
 invoke_subgraph = InvokeSubgraphHOP()
-
-
-def create_invoke_subgraph_op(subgraph, operands):
-    # Helper to set the identifier for the invoke_subgraph op. We ensure that
-    # each identifier is different here. Its torch.compile responsibility to
-    # replace identifiers for subgraphs that are identical.
-    global invoke_subgraph_counter
-    identifier = f"invoke_subgraph_{invoke_subgraph_counter}"
-    invoke_subgraph_counter += 1
-    return invoke_subgraph(subgraph, identifier, operands)
 
 
 def trace_joint_graph(fn, fw_inputs, fw_outputs):
@@ -161,7 +167,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
-def invoke_subgraph_composite_explicit_autograd(subgraph, identifier, operands):
+def _(subgraph, identifier, operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
@@ -170,7 +176,7 @@ def invoke_subgraph_composite_explicit_autograd(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_impl(DispatchKey.Autograd)
-def invoke_subgraph_autograd(subgraph, identifier, operands):
+def _(subgraph, identifier, operands):
     if not torch.is_grad_enabled():
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, operands)
@@ -193,7 +199,7 @@ def invoke_subgraph_autograd(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_functionalize_impl
-def invoke_subgraph_func(ctx, subgraph, identifier, operands):
+def _(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
     with ctx.redispatch_to_next() as m:
         # NB: There is an assumption that subgraph does not mutate inputs and
@@ -205,15 +211,13 @@ def invoke_subgraph_func(ctx, subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_impl(FakeTensorMode)
-def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
+def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
     return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
-def invoke_subgraph_proxy_torch_dispatch_mode(
-    proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands
-):
+def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement proxy tensor caching.
     example_out = invoke_subgraph(subgraph, identifier, operands)
     graph = reenter_make_fx(subgraph)(*operands)
