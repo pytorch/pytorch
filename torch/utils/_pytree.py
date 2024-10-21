@@ -486,7 +486,10 @@ def is_structseq_class(cls: type) -> bool:
     ):
         # Check the type does not allow subclassing
         try:
-            types.new_class("subclass", bases=(cls,))
+
+            class _(cls):
+                pass
+
         except TypeError:
             return True
         return False
