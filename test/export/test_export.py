@@ -935,6 +935,137 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    def test_real_tensor_size_mismatch(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    return torch.ops.mylib.foo(a, b)
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a + b
+
+            @torch.library.register_fake("mylib::foo")
+            def foo_fake_impl(a, b):
+                m, n = a.shape
+                return torch.empty(n, m)  # incorrectly permute
+
+            error_type = (
+                AssertionError
+                if is_non_strict_test(self._testMethodName)
+                else torch._dynamo.exc.TorchRuntimeError
+            )
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                # won't catch anything if dims are equal
+                export(
+                    M(),
+                    (torch.randn(4, 4), torch.randn(4, 4)),
+                )
+                # catch concrete inequality
+                with self.assertRaisesRegex(
+                    error_type,
+                    "Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                    "at output index 0, dimension 0 for func: mylib.foo.default",
+                ):
+                    export(
+                        M(),
+                        (torch.randn(4, 8), torch.randn(4, 8)),
+                    )
+                # same test with dynamic shapes
+                d0 = Dim("d0")
+                d1 = Dim("d1")
+                export(
+                    M(),
+                    (torch.randn(4, 4), torch.randn(4, 4)),
+                    dynamic_shapes={
+                        "a": (d0, d1),
+                        "b": (d0, d1),
+                    },
+                )
+                with self.assertRaisesRegex(
+                    error_type,
+                    "Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                    "at output index 0, dimension 0 for func: mylib.foo.default",
+                ):
+                    export(
+                        M(),
+                        (torch.randn(4, 8), torch.randn(4, 8)),
+                        dynamic_shapes={
+                            "a": (d0, d1),
+                            "b": (d0, d1),
+                        },
+                    )
+
+    def test_real_tensor_alias_dtype_mismatch(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo_alias",
+                "(Tensor a) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "mylib::foo_dtype",
+                "(Tensor a) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            error_type = (
+                AssertionError
+                if is_non_strict_test(self._testMethodName)
+                else torch._dynamo.exc.TorchRuntimeError
+            )
+
+            # test alias case
+            class M(torch.nn.Module):
+                def forward(self, a):
+                    return torch.ops.mylib.foo_alias(a)
+
+            @torch.library.impl("mylib::foo_alias", "cpu", lib=lib)
+            def foo_impl(a):
+                return a * 2
+
+            @torch.library.register_fake("mylib::foo_alias")
+            def foo_fake_impl(a):
+                return a
+
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                with self.assertRaisesRegex(
+                    error_type,
+                    "Real tensor propagation found an aliasing mismatch between fake output "
+                    "and real output for func: mylib.foo_alias.default",
+                ):
+                    ep = export(M(), (torch.randn(4, 4),))
+
+            # test dtype case
+            class N(torch.nn.Module):
+                def forward(self, a):
+                    return torch.ops.mylib.foo_dtype(a)
+
+            @torch.library.impl("mylib::foo_dtype", "cpu", lib=lib)
+            def foo_impl(a):
+                return a * 2
+
+            @torch.library.register_fake("mylib::foo_dtype")
+            def foo_fake_impl(a):
+                m, n = a.shape
+                return torch.empty([m, n], dtype=torch.int32)
+
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                with self.assertRaisesRegex(
+                    error_type,
+                    "Real tensor propagation found an output tensor metadata mismatch, between fake output "
+                    r"(.*\n)*.* and real output (.*\n)*.* at output index 0, for func: mylib.foo_dtype.default",
+                ):
+                    ep = export(N(), (torch.randn(4, 4),))
+
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):

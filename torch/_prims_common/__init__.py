@@ -20,6 +20,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
 from typing_extensions import deprecated, TypeAlias
 
 
@@ -136,6 +137,7 @@ def _maybe_get_pytype(t):
 def compare_tensor_meta(
     a: TensorLikeType,
     b: TensorLikeType,
+    check_sizes=True,
     check_strides=False,
     *,
     allow_rhs_unbacked=False,
@@ -151,7 +153,9 @@ def compare_tensor_meta(
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
+    if check_sizes and not same_shape(
+        a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked
+    ):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 

@@ -763,6 +763,8 @@ class FakeTensorTest(TestCase):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    # FakeTensor device vs. cuda implementations have mismatched size in 2nd output of _embedding_bag op
+    @expectedFailurePropagateRealTensors
     def test_embedding_bag_meta(self):
         def f():
             # This behavior was originally unintentional but we see people
@@ -1373,6 +1375,15 @@ class FakeTensorOperatorInvariants(TestCase):
                 self.assertTrue("output[0]" not in str(e))
                 self.assertTrue(
                     "found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!"
+                    in str(e)
+                )
+            except AssertionError as e:
+                self.assertTrue(
+                    self.__class__.__name__.startswith("PropagateRealTensors")
+                )
+                self.assertTrue("output[0]" not in str(e))
+                self.assertTrue(
+                    "Real tensor propagation found an output tensor metadata mismatch, between fake output"
                     in str(e)
                 )
 
