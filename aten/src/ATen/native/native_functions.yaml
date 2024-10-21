@@ -11193,6 +11193,14 @@
     CUDA: foreach_tensor_norm_cuda
   autogen: _foreach_norm.Scalar_out
 
+- func: _foreach_global_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_global_norm_slow
+    CUDA: foreach_tensor_global_norm_cuda
+  autogen: _foreach_global_norm.Scalar_out
+
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
