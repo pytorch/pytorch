@@ -1082,6 +1082,7 @@ def matmul_default(func, *args, **kwargs):
     if inp.is_nested and not other.is_nested:
         # (B, j1, D) x (B, D, E) => (B, j1, E)
         if inp.dim() >= 3 and inp.dim() == other.dim():
+            print("123232")
             # convert to padded for this
             return _padded_impl(inp, other)
         # Support broadcasting the dense:
