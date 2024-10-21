@@ -2537,7 +2537,7 @@ def maybe_positional_arg_names(func):
 
 
 def canonicalize(gmod, root_gmod):
-    # autograd_cache_key is sensitive to the name of the placeholder nodes.
+    # autograd_cache_key is sensitive to the name of the placeholder and intermediate nodes.
     # So, we first canonicalize it.
     new_graph = torch.fx.Graph()
     env = {}
