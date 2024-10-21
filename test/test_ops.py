@@ -123,8 +123,6 @@ aten = torch.ops.aten
 meta_consistency_out_dtype_mismatch_xfails = {
     xfail("abs"),
     xfail("addbmm"),
-    xfail("addmm"),
-    xfail("addmm", "decomposed"),
     xfail("addmv"),
     xfail("alias_copy"),
     xfail("all"),
