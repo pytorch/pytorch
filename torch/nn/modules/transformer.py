@@ -655,7 +655,9 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> encoder_layer = nn.TransformerEncoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
 
@@ -960,7 +962,9 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> decoder_layer = nn.TransformerDecoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> memory = torch.rand(32, 10, 512)
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)

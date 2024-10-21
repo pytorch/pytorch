@@ -1627,7 +1627,11 @@ def _std_var(
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(
-                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask  # type: ignore[possibly-undefined]
+                x * x.conj(),
+                dim,
+                keepdim=keepdim,
+                dtype=compute_dtype,
+                mask=inmask,  # type: ignore[possibly-undefined]
             )
         if not keepdim:
             count = count.reshape(total.shape)
