@@ -11,8 +11,7 @@ from ._utils import _device_t, _get_device_index
 
 
 def current_accelerator() -> torch.device:
-    r"""Return the device of the current :ref:`accelerator<accelerators>`. And use
-    :func:`torch.accelerator.is_available` to check if it is available.
+    r"""Return the device of the current :ref:`accelerator<accelerators>`.
     Note that the index of the returned :class:`torch.device` will be ``None``, use
     :func:`torch.accelerator.current_device_idx` to know the current index being used.
     This function doesn't gaurantee that the current accelerator is available, use
@@ -20,7 +19,7 @@ def current_accelerator() -> torch.device:
 
     Returns:
         torch.device: return the current accelerator as :class:`torch.device`.
-            If no available accelerators, return cpu device.
+            If there is no current accelerator, return cpu device.
 
     Example::
 
@@ -40,7 +39,7 @@ def device_count() -> int:
 
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
-            If no available accelerators, return 0.
+            If there is no available accelerators, return 0.
     """
     return torch._C._accelerator_deviceCount()
 
