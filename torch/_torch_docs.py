@@ -191,6 +191,38 @@ sparse_support_notes = {
 }
 
 add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns a floating-point positive infinity.
+Alias for :attr:`math.inf`.
+
+Example::
+
+    >>> torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
+    torch.nan,
+    r"""
+nan -> float
+
+Returns a floating-point nan (Not a Number) value. This value is not a legal number.
+Alias for :attr:`math.nan`.
+
+Example::
+
+    >>> torch.nan
+    nan
+
+""",
+)
+
+add_docstr(
     torch.abs,
     r"""
 abs(input: Tensor, *, out: Optional[Tensor]) -> Tensor
