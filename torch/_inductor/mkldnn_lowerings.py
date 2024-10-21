@@ -431,7 +431,7 @@ def register_onednn_fusion_ops():
             unary_algorithmm,
         ):
             if (
-                binary_attr == "sum"
+                (binary_attr == "sum" or binary_attr == "add")
                 and output_dtype in [torch.float32, torch.bfloat16]
                 and accum.get_dtype() in [torch.float32, torch.bfloat16]
                 and accum.get_dtype() != output_dtype
