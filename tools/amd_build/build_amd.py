@@ -66,9 +66,7 @@ if args.output_directory:
 includes = [
     "caffe2/operators/*",
     "caffe2/sgd/*",
-    "caffe2/image/*",
     "caffe2/transforms/*",
-    "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
     "caffe2/contrib/aten/*",
