@@ -720,6 +720,9 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -821,27 +824,32 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 // This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
+  // register the deleter as a callback when the WorkNCCL object is destroyed.
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
     std::lock_guard<std::mutex> lock(this->cacheMutex_);
+    // We put the event back to the cache deque once the WorkNCCL object is
+    // destroyed.
     this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     auto& events = eventsArray_[timing ? 1 : 0];
+    // If we still have events in the cache, we reuse it. Otherwise, we create a
+    // new one.
     if (!events.empty()) {
-      event = events.back();
-      events.pop_back();
+      event = events.front();
+      events.pop_front();
+    } else {
+      event = new at::cuda::CUDAEvent(
+          timing ? cudaEventDefault : cudaEventDisableTiming);
     }
-  }
-  if (!event) {
-    event = new at::cuda::CUDAEvent(
-        timing ? cudaEventDefault : cudaEventDisableTiming);
   }
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
 ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
+  // Return a singleton instance of CUDAEventCache.
   static ProcessGroupNCCL::CUDAEventCache cache;
   return cache;
 }
@@ -935,15 +943,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 #endif
 
   if (blockingWait_) {
-    if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
-      LOG(INFO)
-          << logPrefix() << "TORCH_NCCL_BLOCKING_WAIT and "
-          << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
-          << "should not both be enabled. "
-          << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
-      asyncErrorHandling_ = NoHandling;
-      desyncDebug_ = false;
-    }
+    LOG(INFO)
+        << logPrefix()
+        << "TORCH_NCCL_BLOCKING_WAIT is enabled, NO watchdog thread is created.";
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
@@ -956,8 +958,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  ncclCommWatchdogThread_ =
-      std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+  // in blockingWait mode, we don't need to enable the watchdog thread to check
+  // the timeout or nccl error because the main thread would throw an exception
+  // and it is the user's responsibility to handle the exception.
+  if (!blockingWait_) {
+    ncclCommWatchdogThread_ =
+        std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+  }
 #endif
 
   init();
@@ -1035,9 +1042,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
   // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
+  // Init for CUDA is called (and is a no-op if CUDA is already
+  // initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitCUDA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -1164,6 +1172,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     data.integers["pg_id"] = static_cast<int64_t>(local_id_);
     data.integers["rank"] = rank_;
     data.integers["global_rank"] = globalRank();
+    data.integers["world_size"] = getSize();
     data.strings["flight_recorder_version"] = c10d::version_val_str;
   }
 
@@ -1340,14 +1349,16 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Wait for all threads to finish before returning
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (ncclCommWatchdogThread_.joinable()) {
-    ncclCommWatchdogThread_.join();
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-  }
-  if (ncclHeartbeatMonitorThread_.joinable()) {
-    ncclHeartbeatMonitorThread_.join();
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
+  if (!blockingWait_) {
+    if (ncclCommWatchdogThread_.joinable()) {
+      ncclCommWatchdogThread_.join();
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+    }
+    if (ncclHeartbeatMonitorThread_.joinable()) {
+      ncclHeartbeatMonitorThread_.join();
+      LOG(INFO) << logPrefix()
+                << "ProcessGroupNCCL heart beat monitor thread joined.";
+    }
   }
 #endif
   if (onCompletionHookThread_.joinable()) {
@@ -1561,12 +1572,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
   LOG(ERROR) << errorMsg;
 
-  auto& cpp_dumper = get_cpp_trace_dumper();
-  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces:";
-    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
-  }
-
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
@@ -1582,6 +1587,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         true);
   }
 
+  auto& cpp_dumper = get_cpp_trace_dumper();
+  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
+    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
+    cpp_dumper.value()(
+        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
+    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
+  }
+
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
     auto kGilCheckTimeout = std::chrono::milliseconds(300);
@@ -1591,10 +1604,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           futStatus != std::future_status::deferred,
           "Expected the future to have been launched eagerly.");
       LOG(ERROR)
+          << logPrefix()
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
     LOG(INFO)
+        << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
@@ -1852,27 +1867,60 @@ void ProcessGroupNCCL::watchdogHandler() {
       // aborted, So cannot check exception based on them. But watchdog needs to
       // finish the check for the works that have already been enqueued to
       // workMetaList_
+
+      // check NCCL errors first
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
-      bool timedOut = work.checkTimeout();
-
-      // If work hits an exception (either an error or timeout)
       if (work.exception()) {
-        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
-          work.futureWorkResult_->markCompleted(
-              at::IValue(static_cast<uint8_t>(WorkResult::FAILURE)));
-        }
         // log as soon as exception is detected
         LOG(ERROR) << c10::str(
             logPrefix(),
-            "Exception (either an error or timeout) detected by watchdog at work: ",
+            "NCCL error is detected by watchdog at work: ",
             work.seq_,
             ", last enqueued NCCL work: ",
             pgStatus_->lastEnqueuedSeq,
             ", last completed NCCL work: ",
             pgStatus_->lastCompletedSeq,
             ".");
+        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
+        }
+      } else if (work.checkTimeout()) {
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            "Work timeout is detected by watchdog at work: ",
+            work.seq_,
+            ", last enqueued NCCL work: ",
+            pgStatus_->lastEnqueuedSeq,
+            ", last completed NCCL work: ",
+            pgStatus_->lastCompletedSeq,
+            ".");
+        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
+          work.futureWorkResult_->markCompleted(
+              at::IValue(static_cast<uint8_t>(WorkResult::TIMEOUT)));
+        }
+        // Report desync state in case of timeout
+        if (desyncDebug_) {
+          try {
+            collectiveDebugInfoMode_.store(true);
+            auto desyncMsg = getNCCLWatchdogDebugInfo();
+            LOG(ERROR) << logPrefix() << desyncMsg;
+          } catch (const std::exception& e) {
+            LOG(ERROR) << logPrefix()
+                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+                       << " Please file an issue. Error: " << e.what();
+          } catch (...) {
+            LOG(ERROR)
+                << logPrefix()
+                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
+                << " Please file an issue.";
+          }
+        }
+      }
+      // If work hits an exception (either an error or timeout)
+      if (work.exception()) {
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight
         // recorder behavior is independent of desync Debug.
@@ -1911,36 +1959,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           // PG level abort, which would abort all other communicators on this
           // rank
           abortComms();
-        }
-
-        // Report desync state in case of timeout
-        if (timedOut) {
-          LOG(ERROR) << c10::str(
-              logPrefix(),
-              "Timeout at NCCL work: ",
-              work.seq_,
-              ", last enqueued NCCL work: ",
-              pgStatus_->lastEnqueuedSeq,
-              ", last completed NCCL work: ",
-              pgStatus_->lastCompletedSeq,
-              ".");
-          if (desyncDebug_) {
-            try {
-              collectiveDebugInfoMode_.store(true);
-              auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << logPrefix() << desyncMsg;
-            } catch (const std::exception& e) {
-              LOG(ERROR)
-                  << logPrefix()
-                  << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
-                  << " Please file an issue. Error: " << e.what();
-            } catch (...) {
-              LOG(ERROR)
-                  << logPrefix()
-                  << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
-                  << " Please file an issue.";
-            }
-          }
         }
         // Throw exception
         work.handleException(asyncErrorHandling_);
@@ -2308,9 +2326,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
-    TORCH_CHECK(
-        options_->split_color != 0,
-        "Must specify a non-zero color when splitting");
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
@@ -2318,6 +2333,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
+        LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
+                  << parentComm->repr();
         ncclComm = NCCLComm::split(
             parentComm.get(),
             options_->split_color,
@@ -2636,7 +2653,9 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-  if (!terminateProcessGroup_.load()) {
+  // in blockingWait_ mode, we don't need watchdog thread, so no need to enqueue
+  // the work
+  if (!terminateProcessGroup_.load() && !blockingWait_) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
     // View tensors' destruction invokes autograd_meta, which
@@ -2771,6 +2790,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   avoidRecordStreams |= avoidRecordStreams_;
   nanCheck &= enableNanCheck_;
 
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2781,7 +2805,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
   op_id_++;
 
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -2822,8 +2845,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
     for (const auto& input : inputs) {
@@ -2949,6 +2970,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     bool avoidRecordStreams) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
+
+  // Currently, the API permits one scenario where inputs.size() and
+  // outputs.size() are > 0.
+  // 1. If the call was a _coalesced call, all inputs must be on the same
+  // device.
+  //    The group of nccl calls applies the collective separately to each input,
+  //    but the group as a whole should be efficient, and might even execute as
+  //    a single fused kernel.
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2963,14 +2997,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // op_id_ once per indvidual operation within the group
   op_id_++;
 
-  // Currently, the API permits one scenario where inputs.size() and
-  // outputs.size() are > 0.
-  // 1. If the call was a _coalesced call, all inputs must be on the same
-  // device.
-  //    The group of nccl calls applies the collective separately to each input,
-  //    but the group as a whole should be efficient, and might even execute as
-  //    a single fused kernel.
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -3012,8 +3038,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -3169,6 +3193,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
   bool isSendRecvSelf = false;
@@ -3289,9 +3315,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         pgStatus_,
         /*isP2P=*/true);
   }
-
-  // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
