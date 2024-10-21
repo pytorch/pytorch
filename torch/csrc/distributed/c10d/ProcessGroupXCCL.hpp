@@ -1,33 +1,24 @@
 #pragma once
 
-#if defined(__linux__)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 #ifdef USE_C10D_XCCL
-#include <ATen/xpu/XPUEvent.h>
-#include <oneapi/ccl.hpp>
-#include <torch/csrc/distributed/c10d/Store.hpp>
-#include <exception>
-#include <memory>
-#include <vector>
+// We will define those flags in XCCL backend file instead of passing to gcc
+// compiler.
+#define CCL_ENABLE_ZE
+#define CCL_ENABLE_SYCL
 
-#include <atomic>
-#include <chrono>
+#include <oneapi/ccl.hpp>
+#include <exception>
 #include <future>
-#include <iostream>
 #include <list>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
+#include <vector>
 
+#include <ATen/xpu/XPUEvent.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 namespace c10d {
 
 static std::vector<std::string> TORCH_XCCL_BLOCKING_WAIT = {
@@ -45,6 +36,8 @@ class TORCH_API ProcessGroupXCCL : public Backend {
         at::Device& device,
         int rank,
         OpType opType,
+        uint64_t seq,
+        const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt);
     WorkXCCL(const WorkXCCL& w);
     ~WorkXCCL() override;
@@ -63,6 +56,10 @@ class TORCH_API ProcessGroupXCCL : public Backend {
       return future_;
     }
 
+    uint64_t getSequencenumber() const override {
+      return seq_;
+    }
+
     std::vector<at::Tensor> result() override {
       return *outputs_;
     }
@@ -72,6 +69,7 @@ class TORCH_API ProcessGroupXCCL : public Backend {
     std::shared_ptr<at::xpu::XPUEvent> xcclEndEvent_;
     bool blockingWait_ = false;
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
+    uint64_t seq_;
 
    private:
     void synchronizeInternal(std::chrono::milliseconds timeout);
@@ -103,6 +101,7 @@ class TORCH_API ProcessGroupXCCL : public Backend {
       at::Device& device,
       int rank,
       OpType opType,
+      const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {});
 
@@ -111,7 +110,8 @@ class TORCH_API ProcessGroupXCCL : public Backend {
       at::Tensor& input,
       at::Tensor& output,
       Fn fn,
-      OpType opType) {
+      OpType opType,
+      const char* profilingTitle = nullptr) {
     auto inputs = std::vector<at::Tensor>{input};
     auto outputs = std::vector<at::Tensor>{output};
     return collective<Fn>(
@@ -132,13 +132,17 @@ class TORCH_API ProcessGroupXCCL : public Backend {
       Fn fn,
       PreProcess pre,
       PostProcess post,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
   void setSequenceNumberForGroup() override {}
+  uint64_t getSequenceNumberForGroup() override {
+    return seqCollective_;
+  }
 
  protected:
   std::unordered_map<std::string, at::xpu::XPUStream> xcclStreamsMap_;
@@ -147,6 +151,7 @@ class TORCH_API ProcessGroupXCCL : public Backend {
   c10::intrusive_ptr<Store> store_;
   std::mutex mutex_;
   bool blockingWait_ = false;
+  uint64_t seqCollective_{0};
 
  private:
   std::mutex kvs_mutex;

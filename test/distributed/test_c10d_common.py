@@ -31,6 +31,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
+    get_device_count,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -60,17 +61,13 @@ else:
 torch.backends.cuda.matmul.allow_tf32 = False
 
 
-def gpus_for_rank(world_size):
+def gpus_for_rank(world_size, backend):
     """Multigpu tests are designed to simulate the multi nodes with multi
     GPUs on each node. Nccl backend requires equal #GPUs in each process.
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    device_count = (
-        torch.xpu.device_count()
-        if torch.xpu.is_available()
-        else torch.cuda.device_count()
-    )
+    device_count = get_device_count(backend)
     visible_devices = list(range(device_count))
     gpus_per_process = device_count // world_size
     gpus_for_rank = []
@@ -833,7 +830,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size, process_group.name())[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -850,7 +847,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_builtin_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size, process_group.name())[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],

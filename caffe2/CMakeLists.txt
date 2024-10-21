@@ -1376,9 +1376,6 @@ if(USE_DISTRIBUTED)
   endif()
   if(USE_XPU AND USE_C10D_XCCL)
     target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
-    set_source_files_properties(
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupXCCL.cpp
-      PROPERTIES COMPILE_DEFINITIONS  "CCL_ENABLE_ZE;CCL_ENABLE_SYCL")
   endif()
   if(USE_MPI AND USE_C10D_MPI)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

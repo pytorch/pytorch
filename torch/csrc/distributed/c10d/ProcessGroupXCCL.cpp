@@ -1,17 +1,8 @@
 #ifdef USE_C10D_XCCL
 
 #include <comm/XPUGuard.h>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupXCCL.hpp>
-#include <fstream>
-#include <map>
-#include <sstream>
-#include <stdexcept>
-#include <tuple>
-#include <unordered_set>
-#include <utility>
-
-#include <c10/core/DeviceType.h>
-#include <c10/util/Optional.h>
 
 namespace c10d {
 
@@ -89,10 +80,13 @@ ProcessGroupXCCL::WorkXCCL::WorkXCCL(
     at::Device& device,
     int rank,
     OpType opType,
+    uint64_t seq,
+    const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputs)
-    : Work(rank, opType, "profilingTitle", inputs),
+    : Work(rank, opType, profilingTitle, inputs),
       device_(device),
-      workStartTime_(std::chrono::steady_clock::now()) {
+      workStartTime_(std::chrono::steady_clock::now()),
+      seq_(seq) {
   xcclEndEvent_ = std::make_shared<at::xpu::XPUEvent>();
 }
 
@@ -101,7 +95,8 @@ ProcessGroupXCCL::WorkXCCL::WorkXCCL(const WorkXCCL& w)
       device_(w.device_),
       xcclEndEvent_(w.xcclEndEvent_),
       blockingWait_(w.blockingWait_),
-      workStartTime_(w.workStartTime_) {}
+      workStartTime_(w.workStartTime_),
+      seq_(w.seq_) {}
 
 ProcessGroupXCCL::WorkXCCL::~WorkXCCL() = default;
 
@@ -156,10 +151,16 @@ c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL> ProcessGroupXCCL::initWork(
     at::Device& device,
     int rank,
     OpType opType,
+    const char* profilingTitle,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs) {
   auto r = c10::make_intrusive<ProcessGroupXCCL::WorkXCCL>(
-      device, rank, opType, std::optional<std::vector<at::Tensor>>(inputs));
+      device,
+      rank,
+      opType,
+      seqCollective_,
+      profilingTitle,
+      std::optional<std::vector<at::Tensor>>(inputs));
   return r;
 }
 
@@ -212,7 +213,10 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
     Fn fn,
     PreProcess pre,
     PostProcess post,
-    OpType opType) {
+    OpType opType,
+    const char* profilingTitle) {
+  seqCollective_++;
+
   auto device = inputs[0].device();
   const auto key = std::to_string(device.index());
   auto comm = getXCCLComm(key, device);
@@ -221,7 +225,7 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::collective(
   syncStream(device, xcclEventsMap_[key], stream);
 
   c10::intrusive_ptr<ProcessGroupXCCL::WorkXCCL> work;
-  work = initWork(device, rank_, opType);
+  work = initWork(device, rank_, opType, profilingTitle);
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::xpu::OptionalXPUGuard gpuGuard(device);
@@ -273,7 +277,8 @@ c10::intrusive_ptr<Work> ProcessGroupXCCL::allreduce(
             ccl_stream);
         return;
       },
-      OpType::ALLREDUCE);
+      OpType::ALLREDUCE,
+      "xccl:all_reduce");
 }
 
 } // namespace c10d

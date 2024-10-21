@@ -93,8 +93,9 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["xpu"] = {"xccl"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
@@ -462,6 +463,15 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
         ]
     ]
 
+# Returns the number of GPUs, currently only for CUDA and XPU.
+def get_device_count(backend: str):
+    assert c10d.is_backend_available(backend)
+    if backend in DistTestCases.backend_feature.get("cuda", set()):
+        return torch.cuda.device_count()
+    elif backend in DistTestCases.backend_feature.get("xpu", set()):
+        return torch.xpu.device_count()
+    else:
+        raise ValueError(f"Unsupported backend: {backend}")
 
 # HELPER FOR MULTIGPU TESTS
 def init_multigpu_helper(world_size: int, backend: str):
@@ -470,7 +480,7 @@ def init_multigpu_helper(world_size: int, backend: str):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    nGPUs = torch.xpu.device_count() if torch.xpu.is_available() else torch.cuda.device_count()
+    nGPUs = get_device_count(backend)
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
