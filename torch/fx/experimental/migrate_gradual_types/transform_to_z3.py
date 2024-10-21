@@ -125,35 +125,44 @@ try:
                 # if one of the instances is a number
                 elif isinstance(constraint.lhs, int) or isinstance(constraint.rhs, int):
                     if isinstance(constraint.lhs, int):
-                        return z3.Or(
-                            [
-                                rhs.arg(0) == 0,
-                                z3.And([rhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)]),
-                            ]
-                        ), counter
-
-                    elif isinstance(constraint.rhs, int):
-                        return z3.Or(
-                            [
-                                lhs.arg(0) == 0,
-                                z3.And([lhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)]),
-                            ]
-                        ), counter
-
-                else:
-                    return z3.Or(
-                        [
-                            z3.And([lhs.arg(0) == 0, rhs.arg(0) != 0]),
-                            z3.And([lhs.arg(0) != 0, rhs.arg(0) == 0]),
-                            z3.And(
+                        return (
+                            z3.Or(
                                 [
-                                    lhs.arg(0) != 0,
-                                    rhs.arg(0) != 0,
-                                    lhs.arg(1) != rhs.arg(1),
+                                    rhs.arg(0) == 0,
+                                    z3.And([rhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)]),
                                 ]
                             ),
-                        ]
-                    ), counter
+                            counter,
+                        )
+
+                    elif isinstance(constraint.rhs, int):
+                        return (
+                            z3.Or(
+                                [
+                                    lhs.arg(0) == 0,
+                                    z3.And([lhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)]),
+                                ]
+                            ),
+                            counter,
+                        )
+
+                else:
+                    return (
+                        z3.Or(
+                            [
+                                z3.And([lhs.arg(0) == 0, rhs.arg(0) != 0]),
+                                z3.And([lhs.arg(0) != 0, rhs.arg(0) == 0]),
+                                z3.And(
+                                    [
+                                        lhs.arg(0) != 0,
+                                        rhs.arg(0) != 0,
+                                        lhs.arg(1) != rhs.arg(1),
+                                    ]
+                                ),
+                            ]
+                        ),
+                        counter,
+                    )
 
             elif constraint.op == op_leq:
                 # if the dimensions are not dyn, this will come into effect
@@ -242,9 +251,10 @@ try:
             return D(1, dimension), counter
         elif isinstance(dimension, DVar):
             if dimension.c in dimension_dict:
-                return D(
-                    z3.Int(dimension_dict[dimension.c]), z3.Int(dimension.c)
-                ), counter
+                return (
+                    D(z3.Int(dimension_dict[dimension.c]), z3.Int(dimension.c)),
+                    counter,
+                )
             else:
                 counter += 1
                 dimension_dict[dimension.c] = counter
@@ -414,9 +424,10 @@ try:
 
         """
 
-        transformed_positive, transformed_negative = (
-            transform_all_constraints_trace_time(tracer_root, graph, node, counter)
-        )
+        (
+            transformed_positive,
+            transformed_negative,
+        ) = transform_all_constraints_trace_time(tracer_root, graph, node, counter)
 
         s = z3.Solver()
         s.add(transformed_positive)
