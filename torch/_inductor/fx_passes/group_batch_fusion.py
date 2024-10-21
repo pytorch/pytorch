@@ -17,7 +17,7 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters, optimus_scuba_log, realize_inputs
 from torch._utils_internal import upload_graph
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
@@ -299,6 +299,31 @@ class PostGradBatchLinearFusion(BatchFusion):
 
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
+    def get_stride_type(self, node):
+        node_shape = node.meta["tensor_meta"].shape  # type: ignore[union-attr]
+
+        def col_major_stride():
+            return (
+                node.meta["tensor_meta"].stride[0] == 1
+                and node.meta["tensor_meta"].stride[1] > 1
+                and node.meta["tensor_meta"].stride[1] == node_shape[0]
+            )
+
+        def row_major_stride():
+            return (
+                node.meta["tensor_meta"].stride[1] == 1
+                and node.meta["tensor_meta"].stride[0] > 1
+                and node.meta["tensor_meta"].stride[0] == node_shape[1]
+            )
+
+        stride = None
+        if row_major_stride():
+            stride = "row"
+        if col_major_stride():
+            stride = "col"
+
+        return stride
+
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
         input_shape = node.args[1].meta["val"].shape  # type: ignore[union-attr]
         weight_shape = node.args[2].meta["val"].shape  # type: ignore[union-attr]
@@ -331,15 +356,28 @@ class GroupLinearFusion(GroupFusion):
         if CallFunctionVarArgs(aten.mm.default).match(
             node
         ) and self._mm_node_can_be_fused(node):
-            group_key = ("group_linear", True)
+            # don't allow inductor lowering to change the stride for the nodes
+            realize_inputs([node.args[0], node.args[1]])  # type: ignore[list-item, possibly-undefined]
+            input_stride = self.get_stride_type(node.args[0])
+            weight_stride = self.get_stride_type(node.args[1])
+            group_key = ("group_linear", str(input_stride), str(weight_stride))
         elif CallFunctionVarArgs(aten.addmm.default).match(
             node
         ) and self._addmm_node_can_be_fused(node):
+            # don't allow inductor lowering to change the stride for the nodes
+            realize_inputs([node.args[0], node.args[1], node.args[2]])  # type: ignore[list-item, possibly-undefined]
+            input_stride = self.get_stride_type(node.args[1])
+            weight_stride = self.get_stride_type(node.args[2])
             bias = node.args[0]
-            group_key = ("group_linear", bias is None)
+            group_key = (
+                "group_linear",
+                bias is None,
+                str(input_stride),
+                str(weight_stride),
+            )  # type: ignore[assignment]
         else:
             group_key = None
-        return group_key
+        return group_key  # type: ignore[return-value]
 
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
         group_inputs = []
