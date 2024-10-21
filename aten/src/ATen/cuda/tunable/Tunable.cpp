@@ -439,7 +439,7 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
   if (env == "1") {
     return true;
   }
