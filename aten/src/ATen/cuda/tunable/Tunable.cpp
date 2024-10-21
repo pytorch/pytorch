@@ -466,7 +466,7 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
+  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
   if (env == "0") {
     return false;
   }
