@@ -137,7 +137,6 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
-    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
