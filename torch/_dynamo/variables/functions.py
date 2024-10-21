@@ -47,8 +47,10 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
-    from torch._higher_order_ops.triton_kernel_wrap import TritonGridType
-    from torch.utils._triton import TritonKernelType
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        TritonGridType,
+        TritonKernelType,
+    )
 
 
 _F = TypeVar("_F", bound=Callable)
@@ -350,7 +352,7 @@ class UserMethodVariable(UserFunctionVariable):
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
