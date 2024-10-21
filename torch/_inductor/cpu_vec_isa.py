@@ -138,10 +138,13 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
