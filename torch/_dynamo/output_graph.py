@@ -417,6 +417,7 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: Set[str] = set()
+        self.seen_invoke_subgraphs: Dict[str, str] = {}
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
