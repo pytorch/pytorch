@@ -358,6 +358,7 @@ def make_test(
     device="cuda",
     **kwargs,
 ):
+    @config.patch("score_fusion_memory_threshold", 1)
     def test_fn(self):
         stack = ExitStack()
         try:
@@ -442,6 +443,7 @@ def make_test(
 
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
+    @config.patch("score_fusion_memory_threshold", 1)
     @requires_gpu
     def test_fn(self):
         torch._dynamo.reset()
