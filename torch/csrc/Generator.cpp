@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <structmember.h>
 
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
@@ -59,16 +60,30 @@ static PyObject* THPGenerator_pynew(
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
-
-  c10::DeviceType device_type = device.type();
-  if (device_type == at::kCPU) {
+  if (device.type() == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
-  } else {
-    self->cdata = globalContext()
-                      .getAcceleratorHooksInterface(device_type)
-                      .getNewGenerator(device.index());
   }
-
+#ifdef USE_CUDA
+  else if (device.type() == at::kCUDA) {
+    self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
+  }
+#elif USE_MPS
+  else if (device.type() == at::kMPS) {
+    self->cdata = make_generator<MPSGeneratorImpl>();
+  }
+#endif
+  else if (device.type() == at::kXPU) {
+    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+  } else if (device.type() == at::kIPU) {
+    self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
+  } else if (device.type() == at::kPrivateUse1) {
+    self->cdata = at::GetGeneratorForPrivateuse1(device.index());
+  } else {
+    AT_ERROR(
+        "Device type ",
+        c10::DeviceTypeName(device.type()),
+        " is not supported for torch.Generator() api.");
+  }
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }

@@ -19,10 +19,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   bool isOnMacOSorNewer(unsigned major, unsigned minor) const override;
 
   // MPSGeneratorImpl interface
-  const Generator& getDefaultGenerator(
-      DeviceIndex device_index = -1) const override;
-  Generator getNewGenerator(
-      DeviceIndex device_index = -1) const override;
+  const Generator& getDefaultMPSGenerator() const override;
 
   // MPSStream interface
   void deviceSynchronize() const override;
