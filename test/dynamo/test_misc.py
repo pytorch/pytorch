@@ -2239,6 +2239,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 # in numpy, in place matmul does not work single
                 # dimensional arrays
                 continue
+            if op in [operator.countOf, operator.contains]:
+                # skip
+                # second argument as an array doesn't make sense
+                # for these operators
+                continue
             t1 = torch.rand(5)
             if t1_np:
                 t1 = t1.numpy()
