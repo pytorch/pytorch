@@ -1324,6 +1324,7 @@ def export(
     ] = None,
     tracing_mode: str = "symbolic",
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
@@ -1390,12 +1391,14 @@ def export(
 
     # Deal with "local variable referenced before assignment"
     _f = f
+    _specialize_float = specialize_float
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
         combined_args = _combine_args(_f, args, kwargs)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
+        specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
@@ -1502,6 +1505,7 @@ def export(
             assume_static_by_default = True
         with config.patch(
             specialize_int=True,
+            specialize_float=specialize_float,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,

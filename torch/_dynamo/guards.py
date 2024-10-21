@@ -73,6 +73,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils._sympy.functions import OpaqueUnaryFn_sqrt
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -338,6 +339,7 @@ def _get_closure_vars():
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
+            "OpaqueUnaryFn_sqrt": OpaqueUnaryFn_sqrt,
         }
     return _CLOSURE_VARS
 

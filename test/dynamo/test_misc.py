@@ -3668,7 +3668,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertAlmostEqual(cell1 + 1, result1)
         self.assertTrue(torch.allclose(cell2 + 3, result2))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_closure_out_of_scope_cell_with_mutation(self):
         cell1 = torch.rand(1).item()
@@ -3697,8 +3697,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
             self.assertEqual(cnts.frame_count, 1)
-            self.assertEqual(cnts.op_count, 3)
-            cnts.clear()
+            self.assertEqual(cnts.op_count, 6)
 
     def test_closure_with_mutation_and_graph_break(self):
         def fn():

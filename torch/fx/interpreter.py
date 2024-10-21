@@ -7,6 +7,7 @@ from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from . import config
+from sympy import Symbol
 import torch.fx.traceback as fx_traceback
 import torch
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
@@ -270,6 +271,17 @@ class Interpreter:
             Any: The value returned by the function invocation
         """
         assert not isinstance(target, str)
+
+        if not torch._dynamo.config.specialize_float:
+            # Force the specialization of backed symfloats
+            args = tuple(
+                float(a) if isinstance(a, torch.SymFloat) and isinstance(a.node.expr, Symbol) and a.node.hint is not None else a
+                for a in args
+            )
+            kwargs = {
+                k: (float(v) if isinstance(v, torch.SymFloat) and isinstance(v.node.expr, Symbol) and v.node.hint is not None else v)
+                for k, v in kwargs.items()
+            }
 
         # Execute the function and return the result
         return target(*args, **kwargs)

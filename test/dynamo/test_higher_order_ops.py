@@ -1866,8 +1866,7 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: x + global_num, x)
 
         x = torch.zeros([])
-        # Numbers don't get lifted, so args is still 2.
-        self._test_wrap_simple(f, default_args_generator((x,)), 2)
+        self._test_wrap_simple(f, default_args_generator((x,)), 3)
 
     def test_capture_global_num_adds_guard(self):
         @torch.compile(backend="eager", fullgraph=True)
