@@ -160,7 +160,7 @@ def log_torch_jit_trace_exportability(
 
 
 def capture_pre_autograd_graph_using_training_ir() -> bool:
-    return False
+    return True
 
 
 class JustKnobsConfig:
