@@ -442,7 +442,8 @@ class LBFGS(Optimizer):
                         return self._directional_evaluate(closure, x, t, d)
 
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                        obj_func, x_init, t, d, loss, flat_grad, gtd
+                        obj_func, x_init, t, d, loss, flat_grad, gtd,
+                        max_ls=min(25, max_eval - current_evals)
                     )
                 self._add_grad(t, d)
                 opt_cond = flat_grad.abs().max() <= tolerance_grad
