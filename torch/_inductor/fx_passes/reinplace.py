@@ -4,7 +4,7 @@ import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
@@ -21,6 +21,7 @@ from torch._inductor.virtualized import V
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -391,7 +392,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_args_to_copy_nodes = {}
     # maps argument to the first copy_ node that mutates it.
     copy_nodes = {}
-    mutated_inputs = set()
+    mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
@@ -457,7 +458,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
-            unique_storages = {get_node_storage(arg) for arg in mutated_arg}
+            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
             if len(unique_storages) != len(mutated_arg):
                 # at least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
@@ -544,7 +545,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         old_tensors_to_clone, kwargs, node_name, auto_functionalize_v2=False
     ):
         tensors_to_clone: List[str] = []
-        storage_of_reinplaced_args = set()
+        storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []

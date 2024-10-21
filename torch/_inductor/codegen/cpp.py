@@ -9,7 +9,7 @@ import sys
 import warnings
 from copy import copy, deepcopy
 from enum import Enum
-from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import sympy
 
@@ -17,6 +17,7 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype, is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
@@ -3414,10 +3415,10 @@ class TilingSelect:
         for fn, var_sizes in zip(fn_list, var_sizes_list):
             rw = dependencies.extract_read_writes(fn, *var_sizes)
             all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
-        contig_vars = set()
+        contig_vars = OrderedSet[int]()
         contig_vars_list = []
-        non_contig_stride_const = set()
-        non_contig_stride_other = set()
+        non_contig_stride_const = OrderedSet[int]()
+        non_contig_stride_other = OrderedSet[int]()
         for index in all_index:
             for var in index.free_symbols:
                 if not re.search(r"^d\d+$", var.name):
@@ -3942,7 +3943,7 @@ class CppScheduling(BaseScheduling):
                     if isinstance(node, FusedSchedulerNode):
                         assert len(node.snodes) > 0, node.snodes
                         var_ranges = None
-                        indexing_exprs = set()
+                        indexing_exprs = OrderedSet[Any]()
                         for snode in node.snodes:
                             v, exprs = get_indexing_ranges_exprs(snode)
                             if var_ranges is None:
@@ -4027,7 +4028,7 @@ class CppScheduling(BaseScheduling):
         ranges2 = node_to_recomp.node.data.get_size()
         ranges1 = None
         if isinstance(ref_node, FusedSchedulerNode):
-            ranges_set = set()
+            ranges_set = OrderedSet[tuple[Any, ...]]()
             for snode in ref_node.snodes:
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
@@ -4308,7 +4309,7 @@ class CppScheduling(BaseScheduling):
                 # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
-                visited_scheduler_nodes: Set[str] = set()
+                visited_scheduler_nodes: OrderedSet[str] = OrderedSet()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
                     assert isinstance(scheduler_node, SchedulerNode)
