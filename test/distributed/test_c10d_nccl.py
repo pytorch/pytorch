@@ -37,7 +37,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch._C._distributed_c10d import OpType
+from torch._C._distributed_c10d import OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -431,9 +432,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
+        device = torch.device("cuda:%d" % self.rank)
+        if not sm_is_or_higher_than(device, 8, 0):
+            self.skipTest("bf16 requires sm >= 8.0")
+
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
@@ -2648,6 +2652,50 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ] = prev_nccl_async_error_handling
 
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    def test_get_future_result(self):
+        def assert_fut_success(fut):
+            self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
+
+        # test the barrier behavior in the non blocking wait setting
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
+        )
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=2),
+        )
+        barrier_work = process_group.barrier()
+        barrier_work.wait()
+        barrier_result = barrier_work.get_future_result().wait()
+        self.assertEqual(WorkResult(barrier_result), WorkResult.SUCCESS)
+        ar_work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+        ar_work.wait()
+        fut = ar_work.get_future_result()
+        # test adding a callback function
+        fut.then(assert_fut_success)
+        if self.rank == 0:
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            work.wait()
+            result = work.get_future_result().wait()
+            self.assertEqual(WorkResult(result), WorkResult.TIMEOUT)
+        else:
+            # other ranks not exiting before rank 0 timeout, this is to avoid
+            # nccl error happening before rank 0 timeouts
+            time.sleep(4)
+
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
+
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3039,6 +3087,48 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         with self.assertRaisesRegex(TypeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_unwaited(self) -> None:
+        # Verify that the process can terminate gracefully
+        # even with unwaited tensors
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
+        dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        # Running another collective on the same tensor should still work
+        dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_wait_tensor(self) -> None:
+        # Verify that c10d_functional.wait_tensor() can be invoked on
+        # output tensor of non-functional collective
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        torch.ops.c10d_functional.wait_tensor(input1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+        input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        work.wait()
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        self.assertEqual(input1, input2)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

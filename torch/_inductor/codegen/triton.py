@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -66,6 +67,7 @@ from .common import (
     SizeArg,
     TensorArg,
     WorkspaceArg,
+    WorkspaceZeroMode,
 )
 from .simd import (
     constant_repr,
@@ -104,6 +106,8 @@ def gen_attr_descriptor_import():
 
     import triton.compiler.compiler
 
+    # Note: this works because triton.compiler.compiler imports AttrsDescriptor from triton.backends.compiler
+    # When support for the legacy AttrsDescriptor is removed then this import path should be changed.
     if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
         return "from triton.compiler.compiler import AttrsDescriptor"
     else:
@@ -126,7 +130,7 @@ def gen_common_triton_imports():
         """
         from torch._inductor.runtime import triton_helpers, triton_heuristics
         from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, instance_descriptor, DeviceProperties
+        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
         """
     )
     return imports.getvalue()
@@ -365,9 +369,11 @@ class BlockPtrOptions:
                 self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
             ]
         args = [
-            f"{name} + ({f(self.constant_offset)})"
-            if self.constant_offset != 0
-            else name,
+            (
+                f"{name} + ({f(self.constant_offset)})"
+                if self.constant_offset != 0
+                else name
+            ),
             f"shape={f(self.shape)}",
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
@@ -637,60 +643,64 @@ class TritonPrinter(PythonPrinter):
 
 texpr = TritonPrinter().doprint
 
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_triton_type_re = re.compile(r"^.*[.]")
 
-def triton_compute_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int1"
-    elif (
-        triton_type_name in ("float16", "bfloat16")
-        and config.triton.codegen_upcast_to_fp32
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_compute_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
+    return triton_type(upcast_compute_type(dtype))
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype == torch.float16 or dtype == torch.bfloat16
     ):
-        # float16 math is done in float32 inside the kernel
-        triton_type_name = "float32"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2fnuz":
-        triton_type_name = "float8e5b16"
-    return f"tl.{triton_type_name}"
+        return torch.float32
+    return dtype
 
 
-def _get_primitive_bitwidth(dtype):
-    if hasattr(dtype, "is_floating_point"):
-        if dtype.is_floating_point:
-            # triton_compute_type changes the bitwidth
-            if (
-                dtype in [torch.bfloat16, torch.float16]
-                and config.triton.codegen_upcast_to_fp32
-            ):
-                return 32
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
+def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
+    """Number of bits of triton_compute_type()"""
+    dtype = upcast_compute_type(dtype)
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize:
+        return itemsize * 8
     else:
         return -1
 
 
-def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
+def triton_store_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with fix for storing tl.bool"""
+    if dtype == torch.bool:
+        dtype = torch.int8
+    return triton_type(dtype)
 
 
-def triton_acc_type(dtype):
-    if is_integer_dtype(dtype) and dtype.is_signed:
-        nbits = 64 if dtype == torch.int64 else 32
-        return f"tl.int{nbits}"
-    return triton_compute_type(dtype)
+def upcast_acc_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Implicit upcasts used for Triton reduction types"""
+    if is_integer_dtype(dtype) and dtype.is_signed and dtype.itemsize <= 4:
+        return torch.int32
+    return upcast_compute_type(dtype)
+
+
+def triton_acc_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type, with reduction upcasts"""
+    return triton_compute_type(upcast_acc_dtype(dtype))
 
 
 class TritonCSEVariable(CSEVariable):
@@ -2537,10 +2547,10 @@ class TritonKernel(SIMDKernel):
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
-                    device = V.graph.scheduler.get_current_device_or_throw()
-                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    device = V.graph.get_current_device_or_throw()
+                    count = V.graph.sizevars.size_hint(arg_sig.count)
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
@@ -2566,7 +2576,7 @@ class TritonKernel(SIMDKernel):
             grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
         else:
             grid_arg = f"grid={grid}"
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         index = current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -2701,7 +2711,7 @@ class TritonKernel(SIMDKernel):
 
         if name is None:
             code.splice(gen_common_triton_imports())
-            device_type = V.graph.scheduler.get_current_device_or_throw().type
+            device_type = V.graph.get_current_device_or_throw().type
             if device_type == "cpu":
                 code.splice("triton_helpers.set_driver_to_cpu()")
             else:
@@ -2743,9 +2753,13 @@ class TritonKernel(SIMDKernel):
         # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
         # zeros, then, although we still mutate the data, we don't care about those
         # mutations because we don't make any assumptions about the contents of the
-        # workspace buffer.
+        # workspace buffer.  Similarly, ZERO_PER_GRAPH requires the kernel to return
+        # the buffer back to its original state.
         for argname, arg in zip(argdefs, signature):
-            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+            if (
+                isinstance(arg, WorkspaceArg)
+                and arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL
+            ):
                 mutated_args.add(argname)
 
         mutated_args = sorted(mutated_args)
@@ -2755,9 +2769,7 @@ class TritonKernel(SIMDKernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
 
@@ -2933,13 +2945,10 @@ class TritonKernel(SIMDKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
 
-        if self.args.workspace_arg is not None:
-            ws = self.args.workspace_arg
-            wrapper.generate_workspace_allocation(
-                ws.nbytes, current_device, ws.zero_fill
-            )
+        for ws in self.args.workspace_args:
+            wrapper.generate_workspace_allocation(ws)
 
         grid = wrapper.generate_default_grid(
             name, grid, grid_callable=self._get_grid_fn()
@@ -2956,8 +2965,8 @@ class TritonKernel(SIMDKernel):
             triton_meta=self.triton_meta,
         )
 
-        if self.args.workspace_arg is not None:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        for ws in reversed(self.args.workspace_args):
+            wrapper.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -2965,12 +2974,9 @@ class TritonKernel(SIMDKernel):
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
                 if V.graph.cpp_wrapper:
-                    if config.abi_compatible:
-                        wrapper.writeline(
-                            f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
-                        )
-                    else:
-                        wrapper.writeline(f'assert_inf_and_nan("{arg}", {arg});')
+                    wrapper.writeline(
+                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                    )
                 else:
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
@@ -3170,7 +3176,7 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
@@ -3190,7 +3196,7 @@ class TritonScheduling(SIMDScheduling):
 
     def benchmark_fused_nodes(self, nodes):
         with preserve_rng_state(), torch.cuda.device(
-            self.scheduler.get_current_device_or_throw()
+            V.graph.get_current_device_or_throw()
         ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
@@ -3373,14 +3379,16 @@ def debug_triton_code(node: BaseSchedulerNode) -> List[str]:
         assert isinstance(
             backend, (SIMDScheduling, CUDACombinedScheduling)
         ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        V.graph.scheduler.current_device = device
 
-        # Don't increment kernel count when generating debug string.
-        # This will confuse some unit tests that check the number of
-        # generated kernels.
-        old_generated_kernel_count = metrics.generated_kernel_count
-        triton_code = backend.generate_kernel_code_from_nodes(node.get_nodes()).strip()
-        metrics.generated_kernel_count = old_generated_kernel_count
+        with V.graph.set_current_device(device):
+            # Don't increment kernel count when generating debug string.
+            # This will confuse some unit tests that check the number of
+            # generated kernels.
+            old_generated_kernel_count = metrics.generated_kernel_count
+            triton_code = backend.generate_kernel_code_from_nodes(
+                node.get_nodes()
+            ).strip()
+            metrics.generated_kernel_count = old_generated_kernel_count
 
         lines.append(f"{node.get_name()} Triton code:")
         lines.append(textwrap.indent(triton_code, "    "))
