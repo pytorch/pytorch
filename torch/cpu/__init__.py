@@ -181,9 +181,9 @@ def set_device(device: _device_t) -> None:
     """
 
 
-def current_device() -> str:
-    r"""Returns current device for cpu. Always 'cpu'.
+def current_device() -> int:
+    r"""Returns current device for cpu. Always 0.
 
     N.B. This function only exists to facilitate device-agnostic code
     """
-    return "cpu"
+    return 0
