@@ -1,4 +1,4 @@
-# Owner(s): ["module: functorch"]
+# Owner(s): ["module: higher order operators"]
 # flake8: noqa: B950
 
 import torch
@@ -8,7 +8,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch._higher_order_ops import create_invoke_subgraph_op
+from torch._higher_order_ops import invoke_subgraph
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -19,7 +19,7 @@ class TestInvokeSubgraph(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return create_invoke_subgraph_op(gn, (x, y))[0]
+            return invoke_subgraph(gn, None, (x, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -42,7 +42,7 @@ class TestInvokeSubgraph(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return create_invoke_subgraph_op(gn, (x, y))[0]
+            return invoke_subgraph(gn, None, (x, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -71,9 +71,9 @@ class TestInvokeSubgraph(TestCase):
             return (torch.sin(x),)
 
         def fn(x):
-            a = create_invoke_subgraph_op(cos, (x,))[0]
-            b = create_invoke_subgraph_op(sin, (a,))[0]
-            return create_invoke_subgraph_op(cos, (b,))[0]
+            a = invoke_subgraph(cos, None, (x,))[0]
+            b = invoke_subgraph(sin, None, (a,))[0]
+            return invoke_subgraph(cos, None, (b,))[0]
 
         x = torch.randn(8, requires_grad=True)
         ref = fn(x)
@@ -97,7 +97,7 @@ class TestInvokeSubgraph(TestCase):
             return (CustomOp.apply(x),)
 
         def fn(x):
-            a = create_invoke_subgraph_op(gn, (x,))[0]
+            a = invoke_subgraph(gn, None, (x,))[0]
             # Force stride changes so that backward view causes a failure if
             # contiguous not called.
             b = torch.permute(a, (0, 2, 1))
@@ -132,7 +132,7 @@ class TestInvokeSubgraphCompile(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return create_invoke_subgraph_op(gn, (x, y))[0]
+            return invoke_subgraph(gn, None, (x, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -155,8 +155,8 @@ class TestInvokeSubgraphCompile(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            a = create_invoke_subgraph_op(gn, (x, y))[0]
-            return create_invoke_subgraph_op(gn, (a, y))[0]
+            a = invoke_subgraph(gn, None, (x, y))[0]
+            return invoke_subgraph(gn, None, (a, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -192,9 +192,9 @@ class TestInvokeSubgraphCompile(TestCase):
 
         def fn(x, y):
             nonlocal counter
-            a = create_invoke_subgraph_op(gn, (x, y))[0]
+            a = invoke_subgraph(gn, None, (x, y))[0]
             counter = 3
-            return create_invoke_subgraph_op(gn, (a, y))[0]
+            return invoke_subgraph(gn, None, (a, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
