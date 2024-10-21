@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
@@ -45,9 +46,9 @@ static_assert(
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
-  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
-  static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
+  static const auto c_verbosity = c10::utils::get_env("PYTORCH_JIT_TYPE_VERBOSITY");
+  static TypeVerbosity verbosity = c_verbosity.has_value() ?
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity.value())) : TypeVerbosity::Default;
   return verbosity;
 }
 
