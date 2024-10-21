@@ -202,13 +202,13 @@ def stage_backward_input(
             else:
                 inp.grad += dinputs[i]
 
+        # stage_outputs are not used in backwards after this point, so we can safely remove it from the autograd graph
+        # this allows autograd to clear up the graph dedicated for this output and free up significant memory
+        for t in stage_outputs:
+            t.detach_()
+
     else:
         dinputs = None
-
-    # stage_outputs are not used in backwards after this point, so we can safely remove it from the autograd graph
-    # this allows autograd to clear up the graph dedicated for this output and free up significant memory
-    for t in stage_outputs:
-        t.detach_()
 
     return dinputs, param_groups
 
