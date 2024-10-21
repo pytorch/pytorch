@@ -167,9 +167,9 @@ class TestStateDictUtils(DTensorTestBase):
             self.assertEqual(cpu_state_dict["step"], 7)
             self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
 
-        cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True)
+        cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True, device=device)
         _verify(cpu_state_dict)
-        cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
+        cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True, device=device)
         _verify(cpu_state_dict)
         cpu_state_dict = _create_cpu_state_dict(
             state_dict, share_memory=True, pin_memory=True
