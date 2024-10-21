@@ -206,6 +206,8 @@ class CUDAAllocator : public Allocator {
   virtual bool initialized() = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
+  virtual void enable(bool value) = 0;
+  virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
@@ -325,6 +327,14 @@ inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
 
 inline void emptyCache() {
   return get()->emptyCache();
+}
+
+inline void enable(bool value) {
+  return get()->enable(value);
+}
+
+inline bool isEnabled() {
+  return get()->isEnabled();
 }
 
 inline void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) {

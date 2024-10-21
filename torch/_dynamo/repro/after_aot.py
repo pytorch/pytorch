@@ -245,6 +245,8 @@ isolate_fails_code_str = None
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
+        elif arg is None:
+            writer.const(placeholder)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -729,14 +731,16 @@ def repro_run(options, mod, load_args):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False
+
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(list(args))
+
+        compiled(list(args))
+
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
-    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them

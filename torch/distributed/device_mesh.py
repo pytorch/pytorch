@@ -506,7 +506,11 @@ else:
                 default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
-                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
                     if torch.cuda.is_available()
                     and get_backend(default_group) == "gloo"
                     else default_group
@@ -526,20 +530,31 @@ else:
                     pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                         -1, self.mesh.size(dim)
                     )
+
+                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                    # Inherit from the parent group if no options are specified for the group.
+                    if dim in _mesh_resources.mesh_dim_group_options:
+                        (
+                            backend,
+                            pg_options,
+                        ) = _mesh_resources.mesh_dim_group_options[dim]
+                    else:
+                        backend, pg_options = None, None
+
+                    # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+                    # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+                    # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+                    # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
+                    group_desc = (
+                        f"mesh_{self.mesh_dim_names[dim]}"
+                        if self.mesh_dim_names
+                        else f"mesh_dim_{dim}"
+                    )
+
                     # multi-dim mesh, create subgroups by looping over the pg_ranks
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-
-                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                        # Inherit from the parent group if no options are specified for the group.
-                        if dim in _mesh_resources.mesh_dim_group_options:
-                            (
-                                backend,
-                                pg_options,
-                            ) = _mesh_resources.mesh_dim_group_options[dim]
-                        else:
-                            backend, pg_options = None, None
 
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
@@ -548,6 +563,7 @@ else:
                             ranks=subgroup_ranks,
                             backend=backend,
                             pg_options=pg_options,
+                            group_desc=group_desc,
                         )
 
                         # only add to dim_groups if the current rank in the subgroup
@@ -751,7 +767,11 @@ else:
                 group_ranks = get_process_group_ranks(group)
                 if (
                     isinstance(mesh, torch.Tensor) and mesh.tolist() != group_ranks
-                ) or (mesh is not None and mesh != group_ranks):
+                ) or (
+                    mesh is not None
+                    and not isinstance(mesh, torch.Tensor)
+                    and mesh != group_ranks
+                ):
                     raise ValueError(
                         f"Invalid mesh {str(mesh)} for ProcessGroup with ranks {group_ranks}"
                     )
