@@ -153,7 +153,7 @@ _LinalgBackends_str = ", ".join(_LinalgBackends.keys())
 
 
 def preferred_linalg_library(
-    backend: Union[None, str, torch._C._LinalgBackend] = None
+    backend: Union[None, str, torch._C._LinalgBackend] = None,
 ) -> torch._C._LinalgBackend:
     r"""
     Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
@@ -222,7 +222,7 @@ _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
 
 def preferred_blas_library(
-    backend: Union[None, str, torch._C._BlasBackend] = None
+    backend: Union[None, str, torch._C._BlasBackend] = None,
 ) -> torch._C._BlasBackend:
     r"""
     Override the library PyTorch uses for BLAS operations. Choose between cuBLAS, cuBLASLt, and CK [ROCm-only].

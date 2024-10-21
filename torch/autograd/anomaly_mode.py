@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Autograd anomaly mode."""
+
 import warnings
 
 import torch
@@ -31,6 +32,7 @@ class detect_anomaly:
         ...     @staticmethod
         ...     def forward(ctx, inp):
         ...         return inp.clone()
+        ...
         ...     @staticmethod
         ...     def backward(ctx, gO):
         ...         # Error during the backward pass
