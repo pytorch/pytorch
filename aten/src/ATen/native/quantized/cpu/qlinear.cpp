@@ -1138,8 +1138,6 @@ namespace native {
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
   }
 
-
-
 namespace {
 
 template <bool ReluFused>
