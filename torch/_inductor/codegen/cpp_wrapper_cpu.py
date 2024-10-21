@@ -210,6 +210,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.header.splice("typedef at::Half half;")
         self.header.splice("typedef at::BFloat16 bfloat16;")
+        self.header.splice("typedef at::Float8_e4m3fn float8_e4m3fn;")
         self.header.splice("#include <c10/util/generic_math.h>")
 
         if not V.graph.aot_mode:
