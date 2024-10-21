@@ -3567,7 +3567,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         return d
 
     @onlyCUDA
-    @skipIfRocm(msg="test is too slow on ROCm stack")
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3774,7 +3773,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @parametrize("block_size", [16, 32, 64])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3843,7 +3841,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                     self.assertEqual(res_tri, res_tri_grid)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -4024,7 +4021,6 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear', '_int_bsr_dense_addmm'])
     @parametrize("blocksize", [16, '16x32', 32])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
@@ -4182,7 +4178,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @parametrize("op", ['bsr_dense_addmm', '_int_bsr_dense_addmm'])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -4226,7 +4221,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         self.assertEqual(result, expected)
 
     @onlyCUDA
-    @skipIfRocm
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_addmm_meta(self, device):
         from torch.sparse._triton_ops import bsr_dense_addmm_meta
