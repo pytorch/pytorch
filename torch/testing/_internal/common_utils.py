@@ -2411,6 +2411,7 @@ def print_repro_on_failure(repro_parts):
             parameters=json.dumps(
                 {
                     'pull_request_url': pull_request_url,
+                    'commit_hash': os.getenv('GITHUB_SHA'),
                     "repro": " ".join(filter(None, (sample_isolation_prefix, *repro_parts))),
                 }
             ),
