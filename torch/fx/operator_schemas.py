@@ -266,6 +266,7 @@ def create_type_hint(x):
 
                 def ret_type(x):
                     return List[x]  # type: ignore[valid-type]
+
             else:
 
                 def ret_type(x):

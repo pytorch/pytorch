@@ -193,7 +193,7 @@ def split_module(
     orig_nodes: Dict[str, Node] = {}
     symbol_to_node: Dict[sympy.Symbol, Node] = {}
 
-    def record_cross_partition_use(def_node: Node, use_node: Optional[Node]):  # noqa: B950
+    def record_cross_partition_use(def_node: Node, use_node: Optional[Node]):
         from torch.fx.experimental.symbolic_shapes import free_symbols
 
         defined = getattr(def_node, "_fx_partition", None)
