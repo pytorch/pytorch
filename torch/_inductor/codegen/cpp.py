@@ -1487,11 +1487,12 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-        body_code_vec = (
-            body_code
-            if result.is_vec
-            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
-        )
+        if result.is_vec:
+            body_code_vec = body_code
+        else:
+            body_code_vec = f"{V.kernel._get_vec_type(dtype)}({body_code})"
+            if dtype == torch.bool:
+                body_code_vec = f"{V.kernel._get_mask_type()}::from({body_code_vec})"
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
         other_code_vec = (
