@@ -27,7 +27,7 @@ bool show_dispatch_trace() {
     }
     TORCH_WARN(
         "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
-        envar,
+        envar.value(),
         " valid values are 0 or 1.");
   }
 
