@@ -541,6 +541,10 @@ else:
                     else:
                         backend, pg_options = None, None
 
+                    # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+                    # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+                    # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+                    # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
                     group_desc = (
                         f"mesh_{self.mesh_dim_names[dim]}"
                         if self.mesh_dim_names

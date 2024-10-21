@@ -5,7 +5,7 @@
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import partial, wraps
+from functools import wraps
 from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
 
 import torch
@@ -314,11 +314,9 @@ class DTensorTestBase(MultiProcessTestCase):
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
-        device = None
         if "nccl" in self.backend:
             # set device for nccl pg for collectives
             torch.cuda.set_device(self.rank)
-            device = torch.device(f"{self.device_type}:{self.rank}") if eager_init else device
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
@@ -328,7 +326,7 @@ class DTensorTestBase(MultiProcessTestCase):
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
-            device_id=device,
+            device_id=(torch.device(f"{self.device_type}:{self.rank}") if eager_init else None),
         )
 
 
@@ -363,31 +361,34 @@ TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(func: TestFunc = None, eager_init: bool = False) -> TestFunc:
-    if func is None:
-        return partial(with_comms, eager_init=eager_init)
+def with_comms(eager_init: bool = False) -> TestFunc:
 
-    @wraps(func)  # pyre-ignore[6]
-    def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
-    ) -> None:
-        # if enough GPU we can use GPU, otherwise we fallback to CPU
-        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
-            self.device_type = "cpu"
-        else:
-            self.device_type = DEVICE_TYPE
+    def decorator(func):
 
-        self.init_pg(eager_init)
+        @wraps(func)  # pyre-ignore[6]
+        def wrapper(
+            self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
+        ) -> None:
+            # if enough GPU we can use GPU, otherwise we fallback to CPU
+            if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
+                self.device_type = "cpu"
+            else:
+                self.device_type = DEVICE_TYPE
 
-        try:
-            func(self, *args, **kwargs)  # type: ignore[misc]
-        except Exception as e:
-            dist.destroy_process_group()
-            raise e
+            self.init_pg(eager_init)
 
-        self.destroy_pg()
+            try:
+                func(self, *args, **kwargs)  # type: ignore[misc]
+            except Exception as e:
+                dist.destroy_process_group()
+                raise e
 
-    return wrapper
+            self.destroy_pg()
+
+        return wrapper
+
+    return decorator
+
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
