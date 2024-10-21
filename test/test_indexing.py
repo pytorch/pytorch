@@ -1413,6 +1413,13 @@ class TestIndexing(TestCase):
         ):
             torch.unravel_index(torch.tensor(0, device=device), (2, -3))
 
+        with self.assertRaisesRegex(
+            ValueError, r"'indices' must be in range \[0, 3\], but got tensor\(\[5\]\) instead."
+        ):
+            torch.unravel_index(
+                torch.tensor([5], device=device), (2, 2)
+            )
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, "slice indices", lambda: x["0":"1"])
