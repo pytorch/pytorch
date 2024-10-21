@@ -285,7 +285,11 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                None,
+                [
+                    "torch.ops.onednn.qconv2d_pointwise",
+                    "torch.ops.quantized.max_pool2d",
+                    "aoti_torch_cpu__qlinear_pointwise_tensor",
+                ]
             ],
         ),
         *[
