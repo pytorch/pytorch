@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Sequence
+from typing import List, Sequence, Set
 
 
-def resolve_python_files(include: list[str], exclude: list[str]) -> list[Path]:
+def resolve_python_files(include: List[str], exclude: List[str]) -> List[Path]:
     include = [j for i in include for j in i.split(":")]
     exclude = [j for i in exclude or () for j in i.split(":")]
 
@@ -12,11 +12,11 @@ def resolve_python_files(include: list[str], exclude: list[str]) -> list[Path]:
     return sorted(iglobs - eglobs)
 
 
-def python_glob(strings: Sequence[str], *, check_errors: bool) -> set[Path]:
+def python_glob(strings: Sequence[str], *, check_errors: bool) -> Set[Path]:
     result: set[Path] = set()
 
-    nonexistent: list[str] = []
-    not_python: list[str] = []
+    nonexistent: List[str] = []
+    not_python: List[str] = []
 
     for s in strings:
         p = Path(s).expanduser()

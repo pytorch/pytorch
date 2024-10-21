@@ -1,6 +1,7 @@
 import token
 from pathlib import Path
 from tokenize import TokenInfo, tokenize
+from typing import List
 
 from .token_line import TokenLine
 
@@ -17,10 +18,10 @@ really `set` or, say, a method `set`.
 
 class PythonFile:
     path: Path
-    lines: list[str]
-    tokens: list[TokenInfo]
-    token_lines: list[TokenLine]
-    set_tokens: list[TokenInfo]
+    lines: List[str]
+    tokens: List[TokenInfo]
+    token_lines: List[TokenLine]
+    set_tokens: List[TokenInfo]
 
     def __init__(self, path: Path) -> None:
         self.path = path

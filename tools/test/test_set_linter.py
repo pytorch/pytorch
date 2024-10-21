@@ -4,8 +4,7 @@ from tokenize import TokenInfo
 
 import pytest
 from tools.linter.adapters.set_linter.fix_set_tokens import fix_set_tokens
-from tools.linter.adapters.set_linter.omitted_lines import OmittedLines
-from tools.linter.adapters.set_linter.python_file import PythonFile
+from tools.linter.adapters.set_linter.python_file import OmittedLines, PythonFile
 
 
 TESTDATA = Path(__file__).parent / "set_linter_testdata"
