@@ -723,6 +723,20 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           return;
         }
 
+        // Validate the request message
+        if (!requestMessage) {
+          LOG(WARNING) << "Received a null request message from "
+                       << pipe->getRemoteName();
+          return;
+        }
+
+        // Validate the request message type
+        if (requestMessage->type() != MessageType::REQUEST) {
+          LOG(WARNING) << "Received an invalid request message type from "
+                       << pipe->getRemoteName();
+          return;
+        }
+
         // Arm for next read
         respond(pipe);
 
