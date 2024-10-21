@@ -12,17 +12,6 @@ from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfi
 
 log = logging.getLogger(__name__)
 
-if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
-    import shutil
-
-    if not shutil.which("strobeclient"):
-        log.info(
-            "TORCH_COMPILE_STROBELIGHT is true, but seems like you are not on a FB machine."
-        )
-    else:
-        log.info("Strobelight profiler is enabled via environment variable")
-        StrobelightCompileTimeProfiler.enable()
-
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
@@ -73,6 +62,15 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
             f"The operator specified that you may need to import the '{module}' "
             f"Python module to load the fake impl. {context}"
         )
+
+
+def enable_compiletime_strobelight():
+    StrobelightCompileTimeProfiler.enable()
+
+
+if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
+    log.info("Strobelight profiler is enabled via environment variable")
+    enable_compiletime_strobelight()
 
 
 # NB!  This treats "skip" kwarg specially!!
