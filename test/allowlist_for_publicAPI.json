@@ -262,10 +262,9 @@
     "Future"
   ],
   "torch.fx": [
+    "PH",
     "ProxyableClassMeta",
-    "Tracer",
-    "symbolic_trace",
-    "wrap"
+    "CodeGen"
   ],
   "torch.fx.experimental.migrate_gradual_types.z3_types": [
     "D"
