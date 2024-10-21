@@ -911,7 +911,7 @@ def generate_FD_callable(
         ),
         "document_mask": None,
         "prefix_lm": None,
-        "softcap": None,
+        "softcap": partial(flash_attn_with_kvcache_renamed, softcap=softcap_value),
         "transfusion": None,
     }
 
