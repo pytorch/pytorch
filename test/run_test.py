@@ -287,19 +287,20 @@ if dist.is_available():
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            # TODO: retire testing gloo with CUDA
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
     #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-    #         "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+    #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
     #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
     #         "UCX_TLS": "tcp,cuda",
     #         "UCC_TLS": "nccl,ucp,cuda",
