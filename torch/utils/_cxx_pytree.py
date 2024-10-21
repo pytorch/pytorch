@@ -31,7 +31,7 @@ from typing import (
 from typing_extensions import deprecated, Self
 
 import optree
-from optree import (  # direct import for type annotations
+from optree import (  # noqa: F401  # direct import for type annotations
     PyTreeSpec as PyTreeSpec,
     PyTreeSpec as TreeSpec,
 )
