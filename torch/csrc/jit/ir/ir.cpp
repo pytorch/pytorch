@@ -576,7 +576,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          AT_ASSERTM(0, input->unique(), " not in scope");
+          TORCH_INTERNAL_ASSERT(0, input->unique(), " not in scope");
         }
       }
       AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -1511,7 +1511,7 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       n->kind() != prim::Return,
       "Attempting to insert a Node after the Return node or before the Param node. Tried to insert",
       *this,
@@ -1572,7 +1572,8 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
-    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    TORCH_INTERNAL_ASSERT(
+        inputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_inputs.push_back(inputs_.at(new_order[i]));
     auto it = findUseForInput(new_order[i]);
     it->offset = i;
@@ -1587,7 +1588,8 @@ void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
-    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    TORCH_INTERNAL_ASSERT(
+        outputs_.at(new_order[i]) != nullptr, "Repeated index");
     new_outputs.push_back(outputs_.at(new_order[i]));
     outputs_.at(new_order[i])->setOffset(i);
     outputs_.at(new_order[i]) = nullptr;
