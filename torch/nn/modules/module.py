@@ -900,6 +900,9 @@ class Module:
                 module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
+            # Sparse tensors can use set_data only if their devices are same.
+            if ('sparse' in str(tensor.layout) and tensor.layout == tensor_applied.layout and tensor.device != tensor_applied.device):
+                return False
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
