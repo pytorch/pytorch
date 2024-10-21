@@ -295,6 +295,9 @@ def pack_padded_sequence(
     ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
     one. `enforce_sorted = True` is only necessary for ONNX export.
 
+    It is an inverse operation to :func:`pad_packed_sequence`, and hence :func:`pad_packed_sequence`
+    can be used to recover the underlying tensor packed in :class:`PackedSequence`.
+
     Note:
         This function accepts any input that has at least two dimensions. You
         can apply it to pack the labels, and use the output of the RNN with
