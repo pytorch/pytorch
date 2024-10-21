@@ -690,8 +690,9 @@ def _compile(
         hooks: Hooks,
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
-        with CompileTimeInstructionCounter.record():
-            return _compile_inner(code, one_graph, hooks, transform)
+        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
+            with CompileTimeInstructionCounter.record():
+                return _compile_inner(code, one_graph, hooks, transform)
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
@@ -843,10 +844,13 @@ def _compile(
         return guarded_code
 
     chromium_event_log = get_chromium_event_logger()
+
     chromium_event_log.reset()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
-    ), dynamo_timed("_compile", phase_name="entire_frame_compile"):
+    ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
         mutated_closure_cell_contents: Set[str] = set()
@@ -1123,6 +1127,9 @@ def _compile(
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time
+            )
 
 
 class ConvertFrame:

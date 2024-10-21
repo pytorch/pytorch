@@ -826,7 +826,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
     # The following compilation metrics are related to
     # dynamo, so go with the "entire frame compile" event
     event_logger.add_event_data(
-        event_name="entire_frame_compile",
+        event_name="dynamo",
         frame_key=c.frame_key,
         co_name=c.co_name,
         co_filename=c.co_filename,
