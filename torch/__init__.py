@@ -2436,6 +2436,9 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
+            if torch._running_with_deploy():
+                # Skip compile in torch::deploy mode
+                return model
             return compile(
                 model,
                 fullgraph=fullgraph,
