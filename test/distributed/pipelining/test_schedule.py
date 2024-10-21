@@ -270,18 +270,30 @@ class TestSchedulePlan(TestCase):
                 formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
+                # print(formatted_pipeline_order)
+                def stage_to_rank_zbv(stage):
+                    num_stages = group_size * num_local_stages
+                    chunks_per_block = num_local_stages // 2
+                    if stage < num_stages // 2:
+                        return stage // chunks_per_block
+                    return group_size - 1 - ((stage - num_stages//2) // chunks_per_block)
+
 
                 def stage_to_rank(stage):
                     return stage % group_size
 
+                stage_to_rank_func = stage_to_rank_zbv
+                if ScheduleClass is not ScheduleZBVZeroBubble:
+                    stage_to_rank_func = stage_to_rank
+
                 comms_sch = _add_send_recv(
                     schedule.pipeline_order,
-                    stage_to_rank=stage_to_rank,
+                    stage_to_rank=stage_to_rank_func,
                     num_stages=num_stages,
                 )
                 _simulate_comms_compute(
                     comms_sch,
-                    stage_to_rank=stage_to_rank,
+                    stage_to_rank=stage_to_rank_func,
                     num_stages=num_stages,
                 )
 
