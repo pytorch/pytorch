@@ -32,12 +32,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
-  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
+  virtual Generator getXPUGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
   }
 
-  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default XPU generator without ATen_xpu library.");
+  virtual const Generator& getDefaultXPUGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
+    TORCH_CHECK(
+        false, "Cannot get default XPU generator without ATen_xpu library.");
   }
 
   virtual DeviceIndex getNumGPUs() const {
