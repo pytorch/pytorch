@@ -449,6 +449,9 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     if not is_node_meta_valid(reshape_node):
         log.debug("example value absent for node: %s", reshape_node)
         return
+    if free_symbols(reshape_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", reshape_node)
+        return
     reshape_input = get_arg_value(reshape_node, 0)
 
     if free_symbols(reshape_node.meta["example_value"].shape):
