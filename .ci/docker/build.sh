@@ -359,6 +359,8 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
     CONDA_CMAKE=yes
+    CUDA_VERSION=12.4
+    CUDNN_VERSION=9
     VISION=yes
     ;;
   pytorch-linux-jammy-py3.9-gcc11)
@@ -482,7 +484,7 @@ esac
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 #when using cudnn version 8 install it separately from cuda
-if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
+if [[ "$image" == *cuda*  && ${OS} == "ubuntu" || "$image" == *asan* && "${CUDA_VERSION}" != "" ]]; then
   IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
   if [[ ${CUDNN_VERSION} == 9 ]]; then
     IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
