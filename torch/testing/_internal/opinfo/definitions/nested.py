@@ -132,7 +132,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
@@ -340,6 +339,73 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
             )
 
 
+def sample_inputs_bmm(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    for njt_3d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
+    ):
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        B, D = njt_3d.shape[0], njt_3d.shape[-1]
+        E = D + 2
+        other = torch.randn(B, D, E, device=device, dtype=dtype)
+        # used for slicing in unbind_reference()
+        other._batch_dim = 0
+        yield SampleInput(njt_3d.clone().detach(), kwargs={"mat2": other})
+
+        # TODO (need factory functions):
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+
+
+def reference_bmm(op, sample):
+    # unbind reduces a dim and bmm requires 3D, so use matmul as the reference
+    matmul_op = copy(op)
+    matmul_op.op = torch.matmul
+    # change arg name from mat2 -> other
+    modified_sample = copy(sample)
+    other = modified_sample.kwargs["mat2"]
+    del modified_sample.kwargs["mat2"]
+    modified_sample.kwargs["other"] = other
+    return unbind_reference(matmul_op, modified_sample)
+
+
+def sample_inputs_matmul(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    # also run bmm samples through
+    for sample_input in sample_inputs_bmm(op_info, device, dtype, requires_grad):
+        # change arg name from mat2 -> other
+        other = sample_input.kwargs["mat2"]
+        del sample_input.kwargs["mat2"]
+        sample_input.kwargs["other"] = other
+        yield sample_input
+
+    # 3D cases not covered by bmm
+    for njt_3d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
+    ):
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        D = njt_3d.shape[-1]
+        E = D + 2
+        yield SampleInput(
+            njt_3d.clone().detach(),
+            kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
+        )
+
+    # 4D cases
+    for njt_4d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
+    ):
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        E = njt_4d.shape[-1]
+        F = E + 2
+        yield SampleInput(
+            njt_4d.clone().detach(),
+            kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
+        )
+
+        # TODO (need factory functions):
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
+
+
 def sample_inputs_masked_select(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
@@ -480,6 +546,7 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
+    "bmm": sample_inputs_bmm,
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
@@ -489,10 +556,12 @@ njt_sample_inputs = {
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
     "to": sample_inputs_to,
+    "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
 }
 
 njt_references = {
+    "bmm": reference_bmm,
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
 }
 
