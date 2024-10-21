@@ -208,7 +208,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert x.get_device().type in ["cpu", "xpu"] and weight.get_device().type in ["cpu", "xpu"]
+    assert x.get_device().type == weight.get_device().type
     inputs = [x, weight]
 
     output_stride = FlexibleLayout.contiguous_strides(output_size)

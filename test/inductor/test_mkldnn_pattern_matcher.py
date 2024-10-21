@@ -1433,6 +1433,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def _qlinear_cpu_test_helper(
         self,
         inputs,
+        device="cpu",
         int8_mixed_bf16=False,
         do_permute=False,
         matcher_check_fn=None,
@@ -1452,7 +1453,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
                 return self.linear2(self.linear(x))
 
-        mod = M(bias, do_permute=do_permute).eval()
+        mod = M(bias, do_permute=do_permute).eval().to(device=device)
 
         def _default_matcher_check_fn():
             self.assertEqual(
@@ -1475,12 +1476,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qlinear_cpu(self):
+    def test_qlinear_mkldnn(self, device="cpu"):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
+            self._qlinear_cpu_test_helper((torch.randn((2, 4)).to(device=device),), device=device, bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1603,7 +1604,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     def _qlinear_unary_cpu_test_helper(
-        self, inputs, unary_op=torch.nn.ReLU(), int8_mixed_bf16=False
+        self, inputs,  unary_op=torch.nn.ReLU(), device="cpu", int8_mixed_bf16=False
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
@@ -1619,7 +1620,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         bias_list = [True, False]
         for bias in bias_list:
-            mod = M(bias).eval()
+            mod = M(bias).eval().to(device=device)
 
             def matcher_check_fn():
                 # 1. dequant-linear pattern matched in quantization weight prepack
@@ -1639,11 +1640,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qlinear_relu_cpu(self):
+    def test_qlinear_relu_mkldnn(self, device="cpu"):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)).to(device=device),), device=device)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1677,12 +1678,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qlinear_gelu_cpu(self):
+    def test_qlinear_gelu_mkldnn(self, device="cpu"):
         r"""
         This testcase will quantize a Linear->GELU pattern.
         """
         for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
-            self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),), gelu)
+            self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)).to(device=device),), gelu, device=device)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2869,4 +2870,3 @@ instantiate_parametrized_tests(TestPatternMatcher)
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()
-1
