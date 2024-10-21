@@ -212,12 +212,13 @@ def check_branch(subcommand: str, branch: str | None) -> str | None:
         return f"Branch {branch!r} already exists"
     return None
 
-def check_conda_env_exists(name: str | None=None, prefix: str | None=None) -> bool:
+
+def check_conda_env_exists(name: str | None = None, prefix: str | None = None) -> bool:
     """Checks that the conda environment exists."""
     if name is not None and prefix is not None:
-        return "Cannot specify both --name and --prefix"
+        raise ValueError("Cannot specify both --name and --prefix")
     if name is None and prefix is None:
-        return "Must specify either --name or --prefix"
+        raise ValueError("Must specify either --name or --prefix")
 
     try:
         cmd = ["conda", "info", "--envs"]
@@ -229,6 +230,7 @@ def check_conda_env_exists(name: str | None=None, prefix: str | None=None) -> bo
 
     if name is not None:
         return len(re.findall(rf"^{name}\s+", output, flags=re.MULTILINE)) > 0
+    assert prefix is not None
     prefix = Path(prefix).absolute()
     return len(re.findall(rf"\s+{prefix}$", output, flags=re.MULTILINE)) > 0
 
