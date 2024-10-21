@@ -61,7 +61,7 @@
 [submodule "third_party/ideep"]
     ignore = dirty
     path = third_party/ideep
-    url = https://github.com/intel/ideep
+    url = https://github.com/jiayisunx/ideep
 [submodule "third_party/nccl/nccl"]
     ignore = dirty
     path = third_party/nccl/nccl
