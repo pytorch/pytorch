@@ -75,7 +75,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
 namespace {
 
 int get_init_delay() {
-  auto delay_c = c10::utils::get_env("KINETO_DAEMON_INIT_DELAY_S");
+  const auto delay_c = c10::utils::get_env("KINETO_DAEMON_INIT_DELAY_S");
   if (!delay_c.has_value()) {
     return -1;
   }
