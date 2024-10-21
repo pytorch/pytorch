@@ -946,6 +946,7 @@ def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
         return x.device.type in [
             "cpu",
             "cuda",
+            "xpu",
             torch.utils.backend_registration._privateuse1_backend_name,
         ]
     return True
