@@ -1,9 +1,9 @@
-PyTorch 2.0 Performance Dashboard
+``torch.compile`` Performance Dashboard
 =================================
 
 **Author:** `Bin Bao <https://github.com/desertfire>`__ and `Huy Do <https://github.com/huydhn>`__
 
-PyTorch 2.0's performance is tracked nightly on this `dashboard <https://hud.pytorch.org/benchmark/compilers>`__.
+``torch.compile``'s performance is tracked nightly on this `dashboard <https://hud.pytorch.org/benchmark/compilers>`__.
 The performance collection runs on 12 GCP A100 nodes every night. Each node contains a 40GB A100 Nvidia GPU and
 a 6-core 2.2GHz Intel Xeon CPU. The corresponding CI workflow file can be found
 `here <https://github.com/pytorch/pytorch/blob/main/.github/workflows/inductor-perf-test-nightly.yml>`__.
@@ -48,5 +48,5 @@ The `workflow page <https://github.com/pytorch/pytorch/actions/workflows/inducto
 is a good place to look for logs from some of the recent runs.
 In those logs, you can search for lines like
 ``python benchmarks/dynamo/huggingface.py --performance --cold-start-latency --inference --amp --backend inductor --disable-cudagraphs --device cuda``
-and run them locally if you have a GPU working with PyTorch 2.0.
+and run them locally if you have a GPU working with ``torch.compile``.
 ``python benchmarks/dynamo/huggingface.py -h`` will give you a detailed explanation on options of the benchmarking script.

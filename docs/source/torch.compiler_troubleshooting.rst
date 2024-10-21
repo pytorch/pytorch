@@ -1,4 +1,4 @@
-PyTorch 2.0 Troubleshooting
+``torch.compile`` Troubleshooting
 ===========================
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_

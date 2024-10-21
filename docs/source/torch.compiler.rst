@@ -5,12 +5,13 @@ torch.compiler
 
 ``torch.compiler`` is a namespace through which some of the internal compiler
 methods are surfaced for user consumption. The main function and the feature in
-this namespace is ``torch.compile``.
+this namespace is :func:`torch.compile` (colloquially also known as PT2, as it
+was introduced in the release of PyTorch 2.0).
 
-``torch.compile`` is a PyTorch function introduced in PyTorch 2.x that aims to
-solve the problem of accurate graph capturing in PyTorch and ultimately enable
-software engineers to run their PyTorch programs faster. ``torch.compile`` is
-written in Python and it marks the transition of PyTorch from C++ to Python.
+:func:`torch.compile` is a PyTorch function that aims to solve the problem of
+accurate graph capturing in PyTorch and ultimately enable software engineers
+to run their PyTorch programs faster. ``torch.compile`` is written in Python
+and it marks the transition of PyTorch from C++ to Python.
 
 ``torch.compile`` leverages the following underlying technologies:
 
