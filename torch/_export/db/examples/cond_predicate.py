@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
-
 from functorch.experimental.control_flow import cond
+
 
 class CondPredicate(torch.nn.Module):
     """
@@ -16,6 +16,7 @@ class CondPredicate(torch.nn.Module):
         pred = x.dim() > 2 and x.shape[2] > 10
 
         return cond(pred, lambda x: x.cos(), lambda y: y.sin(), [x])
+
 
 example_args = (torch.randn(6, 4, 3),)
 tags = {

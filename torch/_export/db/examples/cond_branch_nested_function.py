@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
-
 from functorch.experimental.control_flow import cond
+
 
 class CondBranchNestedFunction(torch.nn.Module):
     """
@@ -32,6 +32,7 @@ class CondBranchNestedFunction(torch.nn.Module):
             return inner_false_fn(x)
 
         return cond(x.shape[0] < 10, true_fn, false_fn, [x])
+
 
 example_args = (torch.randn(3),)
 tags = {

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 
+
 class NestedFunction(torch.nn.Module):
     """
     Nested functions are traced through. Side effects on global captures
@@ -17,6 +18,7 @@ class NestedFunction(torch.nn.Module):
             return x * y + z
 
         return closure(x)
+
 
 example_args = (torch.randn(3, 2), torch.randn(2))
 tags = {"python.closure"}

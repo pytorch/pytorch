@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import torch
 
+
 class A:
     @classmethod
     def func(cls, x):
         return 1 + x
+
 
 class TypeReflectionMethod(torch.nn.Module):
     """

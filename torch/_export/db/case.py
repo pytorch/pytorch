@@ -4,10 +4,11 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
 from types import ModuleType
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
+
 
 _TAGS: Dict[str, Dict[str, Any]] = {
     "torch": {
@@ -47,18 +48,13 @@ ArgsType = Tuple[Any, ...]
 
 def check_inputs_type(args, kwargs):
     if not isinstance(args, tuple):
-        raise ValueError(
-            f"Expecting args type to be a tuple, got: {type(args)}"
-        )
+        raise ValueError(f"Expecting args type to be a tuple, got: {type(args)}")
     if not isinstance(kwargs, dict):
-        raise ValueError(
-            f"Expecting kwargs type to be a dict, got: {type(kwargs)}"
-        )
+        raise ValueError(f"Expecting kwargs type to be a dict, got: {type(kwargs)}")
     for key in kwargs:
         if not isinstance(key, str):
-            raise ValueError(
-                f"Expecting kwargs keys to be a string, got: {type(key)}"
-            )
+            raise ValueError(f"Expecting kwargs keys to be a string, got: {type(key)}")
+
 
 def _validate_tag(tag: str):
     parts = tag.split(".")

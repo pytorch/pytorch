@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
-
 from functorch.experimental.control_flow import map
+
 
 class DynamicShapeMap(torch.nn.Module):
     """
@@ -13,6 +13,7 @@ class DynamicShapeMap(torch.nn.Module):
             return x + y
 
         return map(body, xs, y)
+
 
 example_args = (torch.randn(3, 2), torch.randn(2))
 tags = {"torch.dynamic-shape", "torch.map"}

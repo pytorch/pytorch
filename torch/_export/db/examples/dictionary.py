@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 
+
 class Dictionary(torch.nn.Module):
     """
     Dictionary structures are inlined and flattened along tracing.
@@ -11,6 +12,7 @@ class Dictionary(torch.nn.Module):
         elements["x2"] = x * x
         y = y * elements["x2"]
         return {"y": y}
+
 
 example_args = (torch.randn(3, 2), torch.tensor(4))
 tags = {"python.data-structure"}

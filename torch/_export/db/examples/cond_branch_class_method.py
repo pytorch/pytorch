@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
-
 from functorch.experimental.control_flow import cond
+
 
 class MySubModule(torch.nn.Module):
     def foo(self, x):
@@ -9,6 +9,7 @@ class MySubModule(torch.nn.Module):
 
     def forward(self, x):
         return self.foo(x)
+
 
 class CondBranchClassMethod(torch.nn.Module):
     """
@@ -35,6 +36,7 @@ class CondBranchClassMethod(torch.nn.Module):
 
     def forward(self, x):
         return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
+
 
 example_args = (torch.randn(3),)
 tags = {

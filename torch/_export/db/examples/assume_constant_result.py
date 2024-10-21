@@ -15,6 +15,7 @@ class AssumeConstantResult(torch.nn.Module):
     def forward(self, x, y):
         return x[: self.get_item(y)]
 
+
 example_args = (torch.randn(3, 2), torch.tensor(4))
 tags = {"torch.escape-hatch"}
 model = AssumeConstantResult()

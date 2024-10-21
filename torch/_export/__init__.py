@@ -15,15 +15,14 @@ import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
-
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
@@ -40,18 +39,20 @@ from torch.export.graph_signature import (
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
 
+
 log = logging.getLogger(__name__)
+
 
 @dataclasses.dataclass
 class ExportDynamoConfig:
     """
     Manage Export-specific configurations of Dynamo.
     """
+
     allow_rnn: bool = True
 
 
@@ -64,14 +65,20 @@ def capture_pre_autograd_graph_warning():
     log.warning("+============================+")
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
-    log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning(
+        "capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward."
+    )
     log.warning("Please switch to use torch.export.export_for_training instead.")
     if config.is_fbcode():
-        log.warning("For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
+        log.warning(
+            "For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training."
+        )  # noqa: B950
+
 
 @lru_cache
 def print_export_warning():
     log.warning("Using torch.export.export_for_training(...,strict=True)")
+
 
 def gm_using_training_ir(graph_module):
     """
@@ -86,7 +93,9 @@ def gm_using_training_ir(graph_module):
     # TODO: clean up this code after training IR migration.
     # T199018392
     has_training_ir_batch_norm = False
-    has_deprecated_ir_tag = getattr(graph_module, "capture_pre_autograd_graph_tag", False)
+    has_deprecated_ir_tag = getattr(
+        graph_module, "capture_pre_autograd_graph_tag", False
+    )
     for node in graph_module.graph.nodes:
         if node.op == "call_function":
             if node.target == torch.ops.aten.batch_norm.default:
@@ -103,6 +112,7 @@ def gm_using_training_ir(graph_module):
     if has_deprecated_ir_tag and has_training_ir_batch_norm:
         raise RuntimeError("Conflicting IR detected.")
     return has_training_ir_batch_norm or not has_deprecated_ir_tag
+
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
@@ -142,10 +152,14 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
-    from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
+    from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
+    from torch.export._trace import (
+        _extract_fake_inputs,
+        _ignore_backend_decomps,
+        DEFAULT_EXPORT_DYNAMO_CONFIG,
+    )
     from torch.export._unlift import _create_stateful_graph_module
     from torch.export.dynamic_shapes import _combine_args
 
@@ -161,9 +175,13 @@ def capture_pre_autograd_graph(
 
     if capture_pre_autograd_graph_using_training_ir():
         print_export_warning()
-        module = torch.export.export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
+        module = torch.export.export_for_training(
+            f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True
+        ).module()
     else:
-        log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+        log_export_usage(
+            event="export.private_api", flags={"capture_pre_autograd_graph"}
+        )
 
         # Do not decompose dropout for exported models, because in eval mode the dropout
         # op disappears from the graph, which makes it difficult to switch to train mode.
@@ -173,7 +191,9 @@ def capture_pre_autograd_graph(
             for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
             if op != torch.ops.aten.dropout.default
         }
-        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
+        with torch._dynamo.config.patch(
+            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+        ), _ignore_backend_decomps():
             m = torch._dynamo.export(
                 f,
                 dynamic_shapes=dynamic_shapes,
@@ -183,10 +203,7 @@ def capture_pre_autograd_graph(
                 pre_dispatch=True,
                 aten_graph=True,
                 _log_export_usage=False,
-            )(
-                *args,
-                **kwargs,
-            )[0]
+            )(*args, **kwargs,)[0]
 
             _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
 
@@ -198,6 +215,7 @@ def capture_pre_autograd_graph(
 
             if isinstance(f, torch.nn.Module):
                 from torch.export._trace import _restore_state_dict
+
                 _restore_state_dict(f, m)
 
             flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
@@ -219,8 +237,7 @@ def capture_pre_autograd_graph(
             for node in module.graph.nodes:
                 node.meta["capture_pre_autograd_graph_tag"] = True
 
-    error_message = \
-        """
+    error_message = """
         Calling train() or eval() is not supported for exported models.
         Alternatively, you may override these methods to do custom user behavior as follows:
 
@@ -245,9 +262,7 @@ def capture_pre_autograd_graph(
 
     # Remove Proxy because they cannot be deepcopied or pickled.
     if hasattr(module, "_buffers"):
-        torch._export.utils.remove_proxy_from_state_dict(
-            module._buffers, in_place=True
-        )
+        torch._export.utils.remove_proxy_from_state_dict(module._buffers, in_place=True)
     return module
 
 
@@ -262,7 +277,8 @@ def aot_compile_warning():
     log.warning("+============================+")
     log.warning(
         "torch._export.aot_compile() is being deprecated, please switch to "
-        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead."
+    )
 
 
 def aot_compile(
@@ -311,14 +327,16 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from torch.export._trace import _export_to_torch_ir
-    from torch._inductor.decomposition import select_decomp_table
     from torch._inductor import config
+    from torch._inductor.decomposition import select_decomp_table
+    from torch.export._trace import _export_to_torch_ir
 
     aot_compile_warning()
 
     if config.is_predispatch:
-        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
+        gm = torch.export._trace._export(
+            f, args, kwargs, dynamic_shapes, pre_dispatch=True
+        ).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -338,6 +356,7 @@ def aot_compile(
         so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
     return so_path
+
 
 def aot_load(so_path: str, device: str) -> Callable:
     """
