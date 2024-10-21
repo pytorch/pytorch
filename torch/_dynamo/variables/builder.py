@@ -951,6 +951,7 @@ class VariableBuilder:
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
                 new_symint,
                 source=new_source,
             )
@@ -1130,6 +1131,7 @@ class VariableBuilder:
             if torch._library.fake_class_registry.tracing_with_real(value):
                 proxy = self.tx.output.root_tracer.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
                     value,
                     source=self.source,
                 )
@@ -1174,6 +1176,7 @@ class VariableBuilder:
 
             proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
                 fake_script_obj,
                 source=self.source,
             )
@@ -1254,7 +1257,10 @@ class VariableBuilder:
             source = self.source
             assert isinstance(value, list)
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), value, source=source
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                value,
+                source=source,
             )
             tensor_list_proxy.node.meta["steal_arg"] = True
 
@@ -1618,7 +1624,10 @@ class VariableBuilder:
             value, tx=self.tx, is_tensor=True, source=source
         )
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), example_value, source=source
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(value),
+            example_value,
+            source=source,
         )
         cache_real_value_when_export(self.tx, tensor_proxy, value)
 
@@ -1718,7 +1727,10 @@ class VariableBuilder:
             source=source,
         )
         proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), example_value, source=source
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(tensor_value),
+            example_value,
+            source=source,
         )
         cache_real_value_when_export(self.tx, proxy, tensor_value)
         options = {"source": source}
@@ -1868,6 +1880,7 @@ class VariableBuilder:
 
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(wrapped_value),
             wrapped_value,
             source=self.get_source(),
         )
@@ -1933,17 +1946,19 @@ class VariableBuilder:
         # Tensor.  However, we never let the UnspecializedPythonVariable escape
         # here, so there should never actually be any guards against this
         # source.
-        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
+        source = FloatTensorSource(self.get_source())
+        options = {"source": source, "raw_value": value}
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
         example_value = wrap_to_fake_tensor_and_record(
-            wrapped_value, tx=self.tx, is_tensor=False, source=self.get_source()
+            wrapped_value, tx=self.tx, is_tensor=False, source=source
         )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(wrapped_value),
             example_value,
-            source=self.get_source(),
+            source=source,
         )
         cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
@@ -2020,6 +2035,7 @@ class VariableBuilder:
         )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(wrapped_value),
             example_value,
             source=self.get_source(),
         )
