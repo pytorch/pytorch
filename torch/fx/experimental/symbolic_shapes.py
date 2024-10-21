@@ -1490,6 +1490,7 @@ class EqualityConstraint(Constraint):
         Tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]
     ]
     phantom_symbols: List[sympy.Symbol]
+    relaxed_sources: Set[Source]
 
     _parents: Dict[Source, Source] = field(init=False)
     _defs: Dict[Source, sympy.Expr] = field(init=False)
@@ -1555,10 +1556,12 @@ class EqualityConstraint(Constraint):
     def is_equal(self, source1: Source, source2: Source) -> bool:
         return (
             # check whether source1 and source2 have the same root
-            self._find(source1) == self._find(source2)
-            or
+            # or are relaxed
+            (src1 := self._find(source1)) in self.relaxed_sources
+            or (src2 := self._find(source2)) in self.relaxed_sources
+            or src1 == src2
             # check whether source1 is derived equal to source2
-            self.is_derived(source1, source2, lambda x: x)
+            or self.is_derived(source1, source2, lambda x: x)
         )
 
     def is_derived(
@@ -2781,7 +2784,10 @@ class DimConstraints:
                 relation_with_digit(right, flip(op), int(left))
             else:
                 assert op == "==", t
-                results[left]["eq"] = sympy.sympify(right)
+                try:
+                    results[left]["eq"] = sympy.sympify(right)
+                except TypeError as e:  # rhs source is not linked to Dim name
+                    pass
 
         # order forced specializations based on name
         forced_specializations = {
