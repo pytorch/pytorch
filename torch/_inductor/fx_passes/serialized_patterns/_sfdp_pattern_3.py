@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 import itertools
 from contextlib import contextmanager, nullcontext

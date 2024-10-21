@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from collections import defaultdict
 from collections.abc import Iterable

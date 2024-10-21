@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 r"""This file is allowed to initialize CUDA context when imported."""
 
