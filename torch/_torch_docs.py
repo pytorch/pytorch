@@ -5329,7 +5329,7 @@ Returns a new tensor with boolean elements representing if each element of
 Closeness is defined as:
 
 .. math::
-    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert \quad \forall i
 """
     + r"""
 
