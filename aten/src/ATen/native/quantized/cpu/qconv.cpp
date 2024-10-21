@@ -1436,7 +1436,7 @@ static at::Tensor _quantized_convolution_onednn(
   bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "sum";
   bool has_binary_postop_add = has_binary_post_op && binary_attr.value() == "add";
 
-  if (has_accum_postop_sum or has_binary_postop_add) {
+  if (has_accum_postop_sum || has_binary_postop_add) {
     TORCH_CHECK(accum.has_value(), "For post op sum, accum tensor should not be empty.");
     TORCH_CHECK(
       accum.value().is_contiguous(
@@ -1948,7 +1948,7 @@ class QConvoneDNN final {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
-      act.dim() == 4 && (binary_attr == "sum" or binary_attr == "add") && (
+      act.dim() == 4 && (binary_attr == "sum" || binary_attr == "add") && (
         !unary_attr.has_value() ||
         (unary_attr.has_value() &&
           (
