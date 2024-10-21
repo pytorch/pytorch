@@ -55,9 +55,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -106,9 +104,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -159,9 +155,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -208,9 +202,7 @@ See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -251,9 +243,7 @@ See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -296,9 +286,7 @@ See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -2326,9 +2314,7 @@ Shape:
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-""".format(
-        **sparse_support_notes
-    ),
+""".format(**sparse_support_notes),
 )
 
 
@@ -5716,9 +5702,7 @@ scaled_dot_product_attention = _add_docstr(
     Note:
 
         {cudnn_reproducibility_note}
-    """.format(
-        **reproducibility_notes
-    )
+    """.format(**reproducibility_notes)
     + r"""
     Args:
         query (Tensor): Query tensor; shape :math:`(N, ..., Hq, L, E)`.
@@ -6213,9 +6197,8 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert key_padding_mask.shape == (
-            bsz,
-            src_len,
+        assert (
+            key_padding_mask.shape == (bsz, src_len)
         ), f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
         key_padding_mask = (
             key_padding_mask.view(bsz, 1, 1, src_len)
