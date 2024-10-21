@@ -995,10 +995,12 @@ class TestIndexing(TestCase):
         target_index_range = [16, 256, 2000]
         for generated_index_range in target_index_range:
             # create CPU tensors
-            a_tensor_size = tuple([max_index_range, 256])
+            a_tensor_size = tuple(max_index_range, 256)
             a = torch.randn(a_tensor_size, dtype=torch.bfloat16)
-            b = generate_indices(num_indices=num_indices, index_range=generated_index_range)
-            c_tensor_size = tuple([num_indices, 256])
+            b = generate_indices(
+                num_indices=num_indices, index_range=generated_index_range
+            )
+            c_tensor_size = tuple(num_indices, 256)
             c = torch.randn(c_tensor_size, dtype=torch.bfloat16)
             # create GPU copies
             a_dev = a.to(device)
