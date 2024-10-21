@@ -1221,8 +1221,14 @@ def use_ck_template(layout):
     return True
 
 
-def use_ck_gemm_template(layout):
-    return use_ck_template(layout) and _use_autotune_backend("CK")
+def use_ck_gemm_template(layout, m, n, k):
+    from .virtualized import V
+
+    return (
+        use_ck_template(layout)
+        and _use_autotune_backend("CK")
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
 
 
 def use_ck_conv_template(layout):
