@@ -120,6 +120,13 @@ class TestInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompile(TestCase):
+    def count_unique_get_attr_nodes(self, gm, args, expected):
+        subgraph_attr_names = set()
+        for node in gm.graph.nodes:
+            if node.op == "get_attr":
+                subgraph_attr_names.add(node.target)
+        self.assertEqual(len(subgraph_attr_names), expected)
+
     def test_simple(self):
         def gn(x, y):
             return (torch.mul(x, y),)
@@ -143,7 +150,7 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-    def test_multiple(self):
+    def test_dedupe(self):
         def gn(x, y):
             return (torch.mul(x, y),)
 
@@ -168,13 +175,13 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
-        # Check that the Dynamo graph has just one subgraph module
+        # Check that the Dynamo and AOT graphs have just one subgraph module
         self.assertEqual(len(backend.graphs), 1)
-        subgraph_attr_names = set()
-        for node in backend.graphs[0].graph.nodes:
-            if node.op == "get_attr":
-                subgraph_attr_names.add(node.target)
-        self.assertEqual(len(subgraph_attr_names), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.count_unique_get_attr_nodes(backend.graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 1)
+        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 1)
 
         self.assertExpectedInline(
             normalize_gm(backend.graphs[0].print_readable(print_output=False)),
