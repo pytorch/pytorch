@@ -762,7 +762,7 @@ class FxGraphHashDetails:
         self.fx_kwargs = {}
         for k in sorted(fx_kwargs):
             if k not in self.EXCLUDED_KWARGS:
-                if type(fx_kwargs[k]) is OrderedSet:
+                if type(fx_kwargs[k]) in (OrderedSet, set):
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
