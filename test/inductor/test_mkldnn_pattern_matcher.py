@@ -710,6 +710,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @parametrize("device", ["cpu", "xpu"])
     def test_qconv2d_mkldnn(self, device):
         r"""
         This testcase will quantize a single Conv2d module.
@@ -775,6 +776,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @parametrize("device", ["cpu", "xpu"])
     def test_qconv2d_relu_mkldnn(self, device):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
@@ -792,7 +794,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6_cpu(self, device):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_relu6(self, device):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
@@ -800,7 +803,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_hardtanh_mkldnn(self, device):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_hardtanh(self, device):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
         """
@@ -824,7 +828,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_hardswish_mkldnn(self, device):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_hardswish(self, device):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
         """
@@ -849,7 +854,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_silu_mkldnn(self, device):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_silu(self, device):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
         """
@@ -1446,7 +1452,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
                 return self.linear2(self.linear(x))
 
-        mod = M(bias, do_permute=do_permute).eval().xpu()
+        mod = M(bias, do_permute=do_permute).eval()
 
         def _default_matcher_check_fn():
             self.assertEqual(
@@ -1474,7 +1480,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 4)).xpu(),), bias=bias)
+            self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2857,9 +2863,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn=matcher_check_fn,
                 quantizer=quantizer,
             )
-
-device_types = ("xpu")
-instantiate_device_type_tests(TestPatternMatcher, globals(), only_for=device_types, allow_xpu=True)
 
 instantiate_parametrized_tests(TestPatternMatcher)
 
