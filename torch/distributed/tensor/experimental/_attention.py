@@ -43,7 +43,6 @@ class _CausalBehavior(Enum):
 class _RotateMethod(Enum):
     ALL_TO_ALL = auto()
     ALL_GATHER = auto()
-    SEND_RECV = auto()
 
 
 aten = torch.ops.aten
@@ -334,6 +333,7 @@ def _create_rotater(
 ) -> _RingRotater:
     if method is None:
         method = _cp_options.rotate_method
+
     if method == _RotateMethod.ALL_TO_ALL:
         return _AllToAllRotater(pg, seq_dim)
     elif method == _RotateMethod.ALL_GATHER:
