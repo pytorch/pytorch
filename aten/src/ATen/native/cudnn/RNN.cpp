@@ -44,7 +44,8 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers,
     bool batch_first,
     bool fn_bidirectional) {
-  AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -64,7 +65,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
     const std::optional<Tensor>& fn_dropout_state_opt) {
-  AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
@@ -90,7 +91,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
-  AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
 Tensor _cudnn_init_dropout_state(
@@ -105,7 +107,8 @@ Tensor _cudnn_init_dropout_state(
   TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
       pin_memory);
 
-  AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
 } // namespace native
@@ -181,7 +184,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        AT_ERROR(oss.str());
+        TORCH_CHECK(false, oss.str());
       }
     }
   }
@@ -583,7 +586,7 @@ int64_t _num_linear_layers(cudnnRNNMode_t mode) {
     case CUDNN_RNN_TANH:
       return 2;
     default:
-      AT_ERROR("unknown cuDNN RNN mode ", mode);
+      TORCH_CHECK(false, "unknown cuDNN RNN mode ", mode);
   }
 }
 
