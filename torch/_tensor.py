@@ -1626,7 +1626,7 @@ class Tensor(torch._C.TensorBase):
                 len(torch_xla.real_devices()) <= 0
                 or "cuda" not in torch_xla.real_devices()[0].lower()
             ):
-                RuntimeError("Can't export XLA tensors not on CUDA.")
+                raise RuntimeError("Can't export XLA tensors not on CUDA.")
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
