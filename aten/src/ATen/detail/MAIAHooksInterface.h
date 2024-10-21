@@ -22,7 +22,7 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual std::string showConfig() const {
+  std::string showConfig() const override {
     TORCH_CHECK(false, "Cannot query detailed MAIA version information.");
   }
 };
