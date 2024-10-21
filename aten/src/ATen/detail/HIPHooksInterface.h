@@ -26,9 +26,8 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   // squelch -Werror=non-virtual-dtor
   ~HIPHooksInterface() override = default;
 
-  // Initialize the HIP library state
-  virtual void initHIP() const {
-    AT_ERROR("Cannot initialize HIP without ATen_hip library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 
   virtual std::unique_ptr<c10::GeneratorImpl> initHIPGenerator(Context*) const {
