@@ -261,7 +261,6 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         if isdesnan and isactnan:
             return  # both nan, so equal
 
-        # handle signed zero specially for floats
         if desired == 0 and actual == 0:
             if not signbit(desired) == signbit(actual):
                 raise AssertionError(msg)

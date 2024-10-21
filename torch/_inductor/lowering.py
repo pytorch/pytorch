@@ -5787,16 +5787,6 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    min_value = (  # noqa: F841
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5815,16 +5805,6 @@ def cummin(x, axis=None):
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
         "argmin", dtype=dtype, arg_break_ties_left=False
-    )
-
-    max_value = (  # noqa: F841
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
     )
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
