@@ -44,6 +44,7 @@ if typing.TYPE_CHECKING:
 
     import numpy.typing as npt
 
+LOCAL_FUNCTION_DOMAIN: str = "local_onnx_dynamo_function"
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
@@ -422,6 +423,7 @@ def _handle_call_function_node_with_lowering(
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
     opset: onnxscript.values.Opset,
+    local_functions: dict[str, torch.fx.Graph],
 ) -> None:
     if node.target == operator.getitem:
         source = node.all_input_nodes[0]
@@ -433,6 +435,42 @@ def _handle_call_function_node_with_lowering(
             # `source_outputs` is a sequence(tensor()) value and we need to
             # use SequenceAt to get the value. This is handled by torchlib
             pass
+
+    if node.target.__class__.__name__ == "CondOp":
+        # TODO: The condition should be replaced by something more relevant.
+        # Controlflow is handled in the exporter and not in torchlib
+        # as subgraph are only available in this code.
+        cond, true_graph, false_graph, graph_args = node.args
+        assert (
+            true_graph.name in local_functions
+        ), f"Unable to find {true_graph.name!r} in local_functions={local_functions}"
+        assert (
+            false_graph.name in local_functions
+        ), f"Unable to find {false_graph.name!r} in local_functions={local_functions}"
+        # builds local functions
+        val_args = tuple(n.meta["val"] for n in graph_args)
+        # Expected `mod` to be an instance of `torch.nn.Module`, got <class 'torch.fx.graph.Graph'>.
+        # But this scenario should be supported.
+        true_program = torch.onnx.export(
+            local_functions[true_graph.name], val_args, dynamo=True, fallback=False
+        )
+        false_program = torch.onnx.export(
+            local_functions[false_graph.name], val_args, dynamo=True, fallback=False
+        )
+        true_function = ir.Function(
+            LOCAL_FUNCTION_DOMAIN, true_graph.name, graph=true_program.model.graph
+        )
+        false_function = ir.Function(
+            LOCAL_FUNCTION_DOMAIN, false_graph.name, graph=false_program.model.graph
+        )
+        model.functions[LOCAL_FUNCTION_DOMAIN, true_graph.name, ""] = true_function
+        model.functions[LOCAL_FUNCTION_DOMAIN, false_graph.name, ""] = false_function
+        source = node.all_input_nodes[0]
+        source_outputs = node_name_to_values[source.name]
+        # TODO: create the onnx node If
+        raise NotImplementedError(
+            f"Not implemented yet with source={source!r}, source_outputs={source_outputs!r}"
+        )
 
     # Find the matching ONNX overload for the node
     # NOTE: Create different registries for different ONNX opset versions
@@ -536,6 +574,7 @@ def _add_nodes(
     node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
+    local_functions: dict[str, torch.fx.Graph] = {}
     for node in exported_program.graph.nodes:
         logger.debug(
             "%s", (node.name, node.args, node.target, node.op, node.type, node.kwargs)
@@ -557,10 +596,14 @@ def _add_nodes(
                         constant_farm,
                         registry=registry,
                         opset=opset,
+                        local_functions=local_functions,
                     )
                 else:
                     # No lowering
-                    _handle_call_function_node(model.graph, node, node_name_to_values)
+                    _handle_call_function_node(model, node, node_name_to_values)
+            elif node.op == "get_attr":
+                if hasattr(node, "graph"):
+                    local_functions[node.target] = node.graph
         except Exception as e:
             raise _errors.ConversionError(
                 f"Error when translating node {node.format_node()}. See the stack trace for more information."
