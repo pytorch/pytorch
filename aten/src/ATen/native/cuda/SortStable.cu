@@ -138,7 +138,7 @@ inline void segmented_sort_pairs_by_full_sort(
     scalar_t* const values_ptr,
     int64_t* const indices_ptr) {
   int64_t segment_bits = std::max<int64_t>(
-      1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
+      1L, static_cast<int64_t>(std::ceil(::log2(nsegments))));
 
   const auto numel = nsort * nsegments;
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
