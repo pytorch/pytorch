@@ -47,8 +47,10 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
-    from torch._higher_order_ops.triton_kernel_wrap import TritonGridType
-    from torch.utils._triton import TritonKernelType
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        TritonGridType,
+        TritonKernelType,
+    )
 
 
 _F = TypeVar("_F", bound=Callable)
