@@ -182,7 +182,7 @@ serialize::InputArchive& operator>>(
 #ifdef __CUDACC__
 #define TORCH_UNUSED_EXCEPT_CUDA
 #else
-#define TORCH_UNUSED_EXCEPT_CUDA C10_UNUSED
+#define TORCH_UNUSED_EXCEPT_CUDA [[maybe_unused]]
 #endif
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
