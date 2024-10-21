@@ -1745,8 +1745,6 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        i_loaders = [i.make_loader() for i in intermediates]
-
         def intermediate_loader_fn(index, reduction_index, loader):
             return loader([*index, *reduction_index])
 
