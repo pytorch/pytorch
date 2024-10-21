@@ -572,6 +572,12 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
+    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+
+    @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable): ...
 
     @abstractmethod
@@ -588,6 +594,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: Dict[str, Callable] = {}
         self.proxy_dispatch_cache: Dict[str, Callable] = {}
+        self.dynamo_identifiers: Dict[str, str] = {}
+
+    def add_dynamo_identifier(self, cache_key: str, identifier: str):
+        self.dynamo_identifiers[cache_key] = identifier
+
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+        return self.dynamo_identifiers.get(cache_key, None)
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
         self.autograd_cache[identifier] = key

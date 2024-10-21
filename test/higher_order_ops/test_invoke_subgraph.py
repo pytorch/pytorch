@@ -207,6 +207,27 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '___forward_invoke_subgraph_0', (primals_1, primals_2));  repeated_subgraph0 = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '___forward_invoke_subgraph_0', (getitem, primals_2));  repeated_subgraph0_1 = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_1, primals_1, primals_2, getitem)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (mul,)
+""",
+        )
+
     def test_nonlocal_update(self):
         counter = 2
 
