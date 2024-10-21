@@ -2849,6 +2849,12 @@ class BenchmarkRunner:
 
             return accuracy_status
 
+        if self.args.export and (
+            name in self.skip_models_due_to_control_flow
+            or name in self.skip_models_due_to_export_unsupported
+        ):
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
