@@ -1932,7 +1932,6 @@ def draw_graph(
     clear_meta: bool = True,
     prog: Optional[Union[str, List[str]]] = None,
     parse_stack_trace: bool = False,
-    dot_graph_shape: Optional[str] = None,
 ) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
@@ -1947,7 +1946,6 @@ def draw_graph(
         traced,
         figname,
         parse_stack_trace=parse_stack_trace,
-        dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
     write_method = getattr(x, "write_" + ext.lstrip("."))
