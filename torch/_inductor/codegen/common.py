@@ -347,8 +347,8 @@ def init_backend_registration():
     )
     if get_scheduling_for_device("cpu") is None or (
         # If config.allow_stack_allocation has changed, we need to re-register the backend
-        device_codegens["cpu"].cpp_wrapper_codegen
-        != cpp_wrapper_codegen
+        device_codegens["cpu"].cpp_wrapper_codegen is not None
+        and device_codegens["cpu"].cpp_wrapper_codegen != cpp_wrapper_codegen
     ):
         cpu_backends = {
             "cpp": CppScheduling,
