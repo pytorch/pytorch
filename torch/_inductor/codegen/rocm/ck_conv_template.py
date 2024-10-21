@@ -4,6 +4,8 @@ import logging
 import random
 from typing import Tuple
 
+from torch._inductor.virtualized import V
+
 
 try:
     import ck4inductor  # type: ignore[import]
@@ -35,11 +37,11 @@ log = logging.getLogger(__name__)
 def torch_layout_to_ck_layouts(torch_layout):
     # logically, torch tensors are always NCHW,
     # and channels-last memory layout is visible in the strides
-    if torch_layout.stride[-1] == 1:
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         # when input or output is NCHW
         # NB: torch.conv2d result is always NCHW
         return ["NGCHW", "GKCYX", "NGKHW"]
-    elif torch_layout.stride[-3] == 1:
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
         # when input or output or weight is channels-last
         return ["NHWGC", "GKYXC", "NHWGK"]
     else:
@@ -47,27 +49,27 @@ def torch_layout_to_ck_layouts(torch_layout):
 
 
 def torch_layout_to_ck_input_layout(torch_layout):
-    if torch_layout.stride[-1] == 1:
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "NGCHW"
-    elif torch_layout.stride[-3] == 1:
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
         return "NHWGC"
     else:
         return None
 
 
 def torch_layout_to_ck_weight_layout(torch_layout):
-    if torch_layout.stride[-1] == 1:
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "GKCYX"
-    elif torch_layout.stride[-3] == 1:
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
         return "GKYXC"
     else:
         return None
 
 
 def torch_layout_to_ck_output_layout(torch_layout):
-    if torch_layout.stride[-1] == 1:
+    if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
         return "NGKHW"
-    elif torch_layout.stride[-3] == 1:
+    elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-3], 1):
         return "NHWGK"
     else:
         return None
