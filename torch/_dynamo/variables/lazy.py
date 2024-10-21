@@ -51,7 +51,9 @@ class LazyVariableTracker(VariableTracker):
 
     @staticmethod
     def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
-        return LazyVariableTracker(LazyCache(value, source), source=source, **options)
+        return LazyVariableTracker(
+            LazyCache(value, source), source=source, **options
+        ).realize()
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
         assert isinstance(_cache, LazyCache)
