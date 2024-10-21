@@ -377,7 +377,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = not is_fbcode()
+inline_inbuilt_nn_modules = True
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
