@@ -2,8 +2,9 @@
 
 
 def exportdb_error_message(case_name: str):
-    from .examples import all_examples
     from torch._utils_internal import log_export_usage
+
+    from .examples import all_examples
 
     ALL_EXAMPLES = all_examples()
     # Detect whether case_name is really registered in exportdb.

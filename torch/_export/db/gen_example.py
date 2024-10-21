@@ -3,6 +3,7 @@ import sys
 
 import torch._export.db.examples as examples
 
+
 TEMPLATE = '''import torch
 
 def {case_name}(x):

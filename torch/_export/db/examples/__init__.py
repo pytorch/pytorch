@@ -9,16 +9,18 @@ from torch._export.db.case import (
     _EXAMPLE_CASES,
     _EXAMPLE_CONFLICT_CASES,
     _EXAMPLE_REWRITE_CASES,
-    SupportLevel,
     export_case,
     ExportCase,
+    SupportLevel,
 )
 
 
 def _collect_examples():
     case_names = glob.glob(join(dirname(__file__), "*.py"))
     case_names = [
-        basename(f)[:-3] for f in case_names if isfile(f) and not f.endswith("__init__.py")
+        basename(f)[:-3]
+        for f in case_names
+        if isfile(f) and not f.endswith("__init__.py")
     ]
 
     case_fields = {f.name for f in dataclasses.fields(ExportCase)}
@@ -27,7 +29,9 @@ def _collect_examples():
         variables = [name for name in dir(case) if name in case_fields]
         export_case(**{v: getattr(case, v) for v in variables})(case.model)
 
+
 _collect_examples()
+
 
 def all_examples():
     return _EXAMPLE_CASES

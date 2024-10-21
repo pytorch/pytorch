@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 from torch._export.serde.union import _Union
 
+
 # NOTE: Please update this value if any modifications are made to the schema
 SCHEMA_VERSION = (7, 4)
 TREESPEC_VERSION = 1
@@ -142,7 +143,7 @@ class OptionalTensorArgument(_Union):
 @dataclass
 class GraphArgument:
     name: str
-    graph: 'Graph'
+    graph: "Graph"
 
 
 @dataclass
@@ -242,7 +243,6 @@ class InputToBufferSpec:
     arg: TensorArgument
     buffer_name: str
     persistent: bool
-
 
 
 @dataclass

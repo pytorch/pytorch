@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
 
+
 class ClassMethod(torch.nn.Module):
     """
     Class methods are inlined during tracing.
@@ -17,6 +18,7 @@ class ClassMethod(torch.nn.Module):
     def forward(self, x):
         x = self.linear(x)
         return self.method(x) * self.__class__.method(x) * type(self).method(x)
+
 
 example_args = (torch.randn(3, 4),)
 model = ClassMethod()
