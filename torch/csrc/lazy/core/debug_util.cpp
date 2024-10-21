@@ -18,7 +18,7 @@ namespace torch::lazy {
 namespace {
 
 std::string GetEnvString(const char* name, const std::string& defval) {
-  auto env = c10::utils::get_env(name);
+  const auto env = c10::utils::get_env(name);
   return env.has_value() ? env.value() : defval;
 }
 
