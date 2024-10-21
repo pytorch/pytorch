@@ -381,8 +381,10 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows.
+option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32)
   set(USE_MIMALLOC ON)
+  set(USE_MIMALLOC_ON_MKL ON)
 endif()
 
 if(USE_CCACHE)
@@ -1235,6 +1237,10 @@ if(USE_MIMALLOC)
   add_definitions(-DUSE_MIMALLOC)
   add_subdirectory(third_party/mimalloc)
   include_directories(third_party/mimalloc/include)
+endif()
+
+if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
+  add_definitions(-DUSE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
