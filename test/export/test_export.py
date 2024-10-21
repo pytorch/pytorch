@@ -1013,6 +1013,18 @@ graph():
 
         TS2EPConverter(foo_script, inp).convert()
 
+    def test_dim_auto_and_dim(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        inputs = (torch.randn(4, 4), torch.randn(4, 4))
+        shapes = {
+            "x": (Dim.AUTO, Dim("d1", min=3)),
+            "y": (Dim("d0", max=8), Dim.DYNAMIC),
+        }
+        ep = torch.export.export(Foo(), inputs, dynamic_shapes=shapes)
+
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -2496,18 +2508,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             re.escape(
                 "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
                 "`inputs[0]['k']` has keys ['k'], but `dynamic_shapes[0]['k']` has keys ['K']"
-            ),
-        ):
-            export(M(), inputs, dynamic_shapes=dynamic_shapes)
-
-        dynamic_shapes = {
-            "x": {"k": {"k": [(dim,), (AUTO,)]}}
-        }  # mixing AUTO and Dims is not well supported.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            re.escape(
-                "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
-                "and can easily lead to constraint violation errors or obscure errors in torch.export."
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
