@@ -513,6 +513,9 @@ class AutogradCompilerInstance:
 # state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
 
+# global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
+compiled_autograd_enabled_force_eager = False
+
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
@@ -524,8 +527,12 @@ def enable(compiler_fn):
     if eval_frame._stance.stance == "force_eager":
         # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
         # to fall back to eager as well.
-        yield
-        return
+        global compiled_autograd_enabled_force_eager
+        compiled_autograd_enabled_force_eager = True
+        try:
+            yield
+        finally:
+            compiled_autograd_enabled_force_eager = False
     else:
         # we need to import this, because user might not have imported it if they directly use this context manager
         # we need to lazily import it, because of circular dependencies
