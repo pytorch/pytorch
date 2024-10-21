@@ -493,7 +493,8 @@ static TraceState call_begin_capture(
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(inputs));
-  return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
+  return check(
+      PyObject_CallMethodObjArgs(self, method_name, pyinput.get(), nullptr));
 }
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
@@ -504,7 +505,7 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
       return;
     }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+    if (PyObject_CallMethodObjArgs(get(), method_name, nullptr) == nullptr) {
       PyErr_WriteUnraisable(get());
       PyErr_Clear();
     }
