@@ -7,7 +7,7 @@ namespace torch::jit {
 
 struct IfView {
   explicit IfView(Node* node) : node_(node) {
-    AT_ASSERT(node->kind() == ::c10::prim::If);
+    TORCH_INTERNAL_ASSERT(node->kind() == ::c10::prim::If);
   }
   Value* cond() const {
     return node_->input(0);
@@ -46,7 +46,7 @@ struct IfView {
 
 struct LoopView {
   explicit LoopView(Node* node) : node_(node) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         node->kind() == ::c10::prim::Loop || node->kind() == ::c10::onnx::Loop);
   }
   Block* bodyBlock() const {

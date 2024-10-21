@@ -16,7 +16,7 @@ void check_all_parameters(
     const torch::jit::Module& module,
     Predicate predicate) {
   for (at::Tensor parameter : module.parameters()) {
-    AT_ASSERT(predicate(parameter));
+    TORCH_INTERNAL_ASSERT(predicate(parameter));
   }
 }
 
@@ -101,7 +101,7 @@ void load_serialized_module_with_custom_op_and_execute(
   inputs.push_back(torch::ones(5));
   auto output = module.forward(inputs).toTensor();
 
-  AT_ASSERT(output.allclose(torch::ones(5) + 1));
+  TORCH_INTERNAL_ASSERT(output.allclose(torch::ones(5) + 1));
 }
 
 void test_argument_checking_for_serialized_modules(
@@ -111,9 +111,9 @@ void test_argument_checking_for_serialized_modules(
 
   try {
     module.forward({torch::jit::IValue(1), torch::jit::IValue(2)});
-    AT_ASSERT(false);
+    TORCH_INTERNAL_ASSERT(false);
   } catch (const c10::Error& error) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         std::string(error.what_without_backtrace())
             .find("Expected at most 2 argument(s) for operator 'forward', "
                   "but received 3 argument(s)") == 0);
@@ -121,9 +121,9 @@ void test_argument_checking_for_serialized_modules(
 
   try {
     module.forward({torch::jit::IValue(5)});
-    AT_ASSERT(false);
+    TORCH_INTERNAL_ASSERT(false);
   } catch (const c10::Error& error) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         std::string(error.what_without_backtrace())
             .find("forward() Expected a value of type 'Tensor' "
                   "for argument 'input' but instead found type 'int'") == 0);
@@ -131,9 +131,9 @@ void test_argument_checking_for_serialized_modules(
 
   try {
     module.forward({});
-    AT_ASSERT(false);
+    TORCH_INTERNAL_ASSERT(false);
   } catch (const c10::Error& error) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         std::string(error.what_without_backtrace())
             .find("forward() is missing value for argument 'input'") == 0);
   }

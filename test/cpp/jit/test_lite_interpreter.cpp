@@ -59,14 +59,14 @@ TEST(LiteInterpreterTest, CheckAttrAccess) {
   mobile::Module bc = _load_for_mobile(ss);
   bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
   m.setattr("mobile_optimized", false);
   ss = std::stringstream();
   m._save_for_mobile(ss);
   bc = _load_for_mobile(ss);
   mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
-  AT_ASSERT(!mobile_optimized);
+  TORCH_INTERNAL_ASSERT(!mobile_optimized);
 }
 
 TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
@@ -110,7 +110,7 @@ TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
 
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
   }
 }
 
@@ -142,8 +142,8 @@ TEST(LiteInterpreterTest, Conv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -164,7 +164,7 @@ TEST(LiteInterpreterTest, Inline) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
 TEST(LiteInterpreterTest, Tuple) {
@@ -182,7 +182,7 @@ TEST(LiteInterpreterTest, Tuple) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
+  TORCH_INTERNAL_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, AtenFormat) {
@@ -201,7 +201,7 @@ TEST(LiteInterpreterTest, AtenFormat) {
   auto output_m = m.get_method("forward")(inputs);
   // std::cout << output_m.toStringRef() << "\n"
   //           << output_bc.toStringRef() << std::endl;
-  AT_ASSERT(output_m.toStringRef() == output_bc.toStringRef());
+  TORCH_INTERNAL_ASSERT(output_m.toStringRef() == output_bc.toStringRef());
 }
 
 TEST(LiteInterpreterTest, PrimDevice) {
@@ -218,7 +218,8 @@ TEST(LiteInterpreterTest, PrimDevice) {
   inputs.emplace_back(minput);
   auto output_bc = bc.get_method("forward")(inputs);
   auto output_m = m.get_method("forward")(inputs);
-  AT_ASSERT(output_bc.toDevice().str() == output_m.toDevice().str());
+  TORCH_INTERNAL_ASSERT(
+      output_bc.toDevice().str() == output_m.toDevice().str());
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -236,7 +237,8 @@ TEST(LiteInterpreterTest, Dict) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+  TORCH_INTERNAL_ASSERT(
+      output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, List) {
@@ -274,7 +276,7 @@ TEST(LiteInterpreterTest, PrimOverload) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toIntList()[2] == 3);
+  TORCH_INTERNAL_ASSERT(output.toIntList()[2] == 3);
   */
 }
 
@@ -302,7 +304,7 @@ TEST(LiteInterpreterTest, Prim) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 }
 
 TEST(LiteInterpreterTest, PrimScalar) {
@@ -329,7 +331,7 @@ TEST(LiteInterpreterTest, PrimScalar) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 }
 
 TEST(LiteInterpreterTest, LoadOrigJit) {
@@ -397,7 +399,7 @@ TEST(LiteInterpreterTest, SetState) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 class TorchBindLiteInterpreterTestStruct
@@ -491,7 +493,7 @@ TEST(LiteInterpreterTest, BuiltinClass) {
       bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   const auto& str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
-  AT_ASSERT(str == expected);
+  TORCH_INTERNAL_ASSERT(str == expected);
 }
 
 TEST(LiteInterpreterTest, BuiltinFunction) {
@@ -512,20 +514,20 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
-  AT_ASSERT(str == expected);
+  TORCH_INTERNAL_ASSERT(str == expected);
 }
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       runtime_bytecode_version ==
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
   auto runtime_operators_version = _get_runtime_operators_min_max_versions();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       runtime_operators_version.first ==
           caffe2::serialize::kMinSupportedFileFormatVersion &&
       runtime_operators_version.second ==
@@ -547,7 +549,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   test_model_file_v4.append("script_module_v4.ptl");
 
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
-  AT_ASSERT(version_v4 == 4);
+  TORCH_INTERNAL_ASSERT(version_v4 == 4);
 }
 
 #endif // !defined(FB_XPLAT_BUILD)
@@ -570,22 +572,22 @@ namespace {
 void compareModelOutput(
     c10::ArrayRef<IValue> actual_result_list,
     const std::vector<IValue>& expect_result_list) {
-  AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(actual_result_list.size() == expect_result_list.size());
+  TORCH_INTERNAL_ASSERT(
       actual_result_list[0].toTensor().equal(expect_result_list[0].toTensor()));
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       actual_result_list[1].toTensor().dim() ==
       expect_result_list[1].toTensor().dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       actual_result_list[2].toTensor().equal(expect_result_list[2].toTensor()));
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       actual_result_list[3].toTensor().equal(expect_result_list[3].toTensor()));
   ASSERT_EQ(
       actual_result_list[4].toStringRef(), expect_result_list[4].toStringRef());
   ASSERT_EQ(actual_result_list[5].toBool(), expect_result_list[5].toBool());
   ASSERT_EQ(actual_result_list[6].toBool(), expect_result_list[6].toBool());
   ASSERT_EQ(actual_result_list[7].toBool(), expect_result_list[7].toBool());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       actual_result_list[8].toTensor().equal(expect_result_list[8].toTensor()));
   ASSERT_EQ(
       actual_result_list[9].toStringRef(), expect_result_list[9].toStringRef());
@@ -599,7 +601,7 @@ void runAndCheckTorchScriptModel(
     const std::vector<IValue>& expect_result_list,
     const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
-  AT_ASSERT(actual_version == expect_version);
+  TORCH_INTERNAL_ASSERT(actual_version == expect_version);
 
   // Load and run the backport model, then compare the result with expect
   // result
@@ -616,7 +618,7 @@ void runAndCheckBytecodeModel(
     const std::vector<IValue>& expect_result_list,
     const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
-  AT_ASSERT(actual_version == expect_version);
+  TORCH_INTERNAL_ASSERT(actual_version == expect_version);
 
   // Load and run the backport model, then compare the result with expect
   // result
@@ -635,7 +637,7 @@ void backportAllVersionCheck(
     const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
   EXPECT_EQ(from_version, expect_from_version);
-  AT_ASSERT(from_version > 0);
+  TORCH_INTERNAL_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
   constexpr int64_t minimum_to_version = 4;
@@ -651,12 +653,12 @@ void backportAllVersionCheck(
     std::stringstream oss;
     bool backPortSuccess =
         _backport_for_mobile(test_model_file_stream, oss, current_to_version);
-    AT_ASSERT(backPortSuccess);
+    TORCH_INTERNAL_ASSERT(backPortSuccess);
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
     backport_version = _get_model_bytecode_version(oss);
-    AT_ASSERT(backport_version == current_to_version);
+    TORCH_INTERNAL_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
@@ -672,7 +674,7 @@ void backportAllVersionCheck(
   std::stringstream oss;
   bool backPortSuccess =
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
-  AT_ASSERT(!backPortSuccess);
+  TORCH_INTERNAL_ASSERT(!backPortSuccess);
 }
 } // namespace
 
@@ -751,7 +753,7 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
   // Ballpark estimate of the minimal number of ops; just used to
   // verify API returns a reasonably large number.
-  AT_ASSERT(runtime_ops.size() > 2900);
+  TORCH_INTERNAL_ASSERT(runtime_ops.size() > 2900);
 }
 
 TEST(LiteInterpreterTest, isCompatibleSuccess) {
@@ -767,7 +769,7 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
       types,
       _get_runtime_bytecode_min_max_versions().first};
 
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       is_compatible(runtime_info, model_info).status ==
       ModelCompatibilityStatus::OK);
 }
@@ -788,8 +790,8 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       _get_mobile_supported_types()};
 
   auto result = is_compatible(runtime_info, model_info);
-  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  TORCH_INTERNAL_ASSERT(
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
@@ -806,7 +808,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
 
   result = is_compatible(runtime_info, model_info);
-  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  TORCH_INTERNAL_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
 
   // test trivial failure due to bytecode less than min supported bytecode
   // version
@@ -821,7 +823,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
-  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  TORCH_INTERNAL_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
 
   // test trivial failure due to type
   runtime_info = RuntimeCompatibilityInfo::get();
@@ -833,7 +835,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       types,
       _get_runtime_bytecode_min_max_versions().first};
 
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       is_compatible(runtime_info, model_info).status ==
       ModelCompatibilityStatus::ERROR);
 
@@ -843,7 +845,7 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   model_info = ModelCompatibilityInfo{
       caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
 
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       is_compatible(runtime_info, model_info).status ==
       ModelCompatibilityStatus::ERROR);
 }
@@ -877,8 +879,8 @@ TEST(LiteInterpreterTest, Eval) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -917,13 +919,13 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != std::nullopt);
+    TORCH_INTERNAL_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterTest, RunMethodVariadic) {
@@ -946,7 +948,7 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterTest, DuplicateSetState) {
@@ -1086,8 +1088,8 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 TEST(RunTimeTest, ParseBytecode) {
@@ -1233,8 +1235,8 @@ void testLiteModuleCompareResultTensors(
     res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 void testDefaultArgsPinv(int num_args) {
@@ -1418,7 +1420,7 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
   m._save_for_mobile(ss, {}, true);
   mobile::Module bc = _load_for_mobile(ss);
   bc.run_method("forward", input_x, input_h);
-  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+  TORCH_INTERNAL_ASSERT(input_x.equal(4 * torch::ones({})));
 
   auto ops = _get_model_ops_and_info(ss);
   auto op = ops.find("aten::add.out");

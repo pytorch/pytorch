@@ -64,7 +64,7 @@ RegisterOperators reg_ops(
            const int64_t ndim = pop(stack).toInt();
            auto self = pop(stack).toTensor();
            c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-           AT_ASSERT(self.dim() == 1);
+           TORCH_INTERNAL_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
            push(stack, self.reshape(sizes));
          },

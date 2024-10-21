@@ -208,7 +208,7 @@ TEST(TestSourceRoundTrip, CheckAttrAccess) {
   m.register_attribute("mobile_optimized", BoolType::get(), true);
   Module m2 = roundtripThroughMobile(m);
   bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
 }
 
 TEST(TestSourceRoundTrip,
@@ -251,7 +251,7 @@ TEST(TestSourceRoundTrip,
 
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
   }
 }
 

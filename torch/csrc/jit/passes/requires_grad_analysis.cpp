@@ -24,7 +24,7 @@ void setRequiresGrad(Value* value, bool req_value) {
 void setRequiresGrad(
     at::ArrayRef<Value*> outputs,
     const std::vector<bool>& values) {
-  AT_ASSERT(outputs.size() == values.size());
+  TORCH_INTERNAL_ASSERT(outputs.size() == values.size());
   for (const auto i : c10::irange(values.size())) {
     setRequiresGrad(outputs[i], values[i]);
   }
@@ -35,7 +35,7 @@ void setRequiresGrad(Node* node, const std::vector<bool>& values) {
 }
 
 std::vector<bool> bitwiseOr(std::vector<bool> a, const std::vector<bool>& b) {
-  AT_ASSERT(a.size() == b.size());
+  TORCH_INTERNAL_ASSERT(a.size() == b.size());
   for (const auto i : c10::irange(a.size())) {
     a[i] = a[i] || b[i];
   }

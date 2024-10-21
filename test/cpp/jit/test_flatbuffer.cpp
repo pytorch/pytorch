@@ -135,17 +135,17 @@ TEST(FlatbufferTest, CheckAttrAccess) {
   mobile::Module bc = jitModuleToMobile(m, options);
   bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
   m.setattr("mobile_optimized", false);
   bc = jitModuleToMobile(m, options);
   mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
-  AT_ASSERT(!mobile_optimized);
+  TORCH_INTERNAL_ASSERT(!mobile_optimized);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   auto mobile_optimized2 = bc2.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(!mobile_optimized2);
+  TORCH_INTERNAL_ASSERT(!mobile_optimized2);
 }
 
 TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
@@ -188,7 +188,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
 
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
 
     auto buff = save_mobile_module_to_bytes(bc);
     mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -198,7 +198,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
       res2 = test_func2({minput});
     }
     auto resd2 = res2.toTensor().item<float>();
-    AT_ASSERT(resd2 == refd);
+    TORCH_INTERNAL_ASSERT(resd2 == refd);
   }
 }
 
@@ -294,8 +294,8 @@ TEST(FlatbufferTest, Conv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
@@ -304,8 +304,8 @@ TEST(FlatbufferTest, Conv) {
     res = bc2.get_method("forward")(inputs);
   }
   output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -336,8 +336,8 @@ TEST(FlatbufferTest, ConvWithCopyTensorMemory) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
@@ -347,8 +347,8 @@ TEST(FlatbufferTest, ConvWithCopyTensorMemory) {
     res = bc2.get_method("forward")(inputs);
   }
   output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -368,13 +368,13 @@ TEST(FlatbufferTest, Inline) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
 TEST(FlatbufferTest, InlineWithCopyTensorMemory) {
@@ -393,13 +393,13 @@ TEST(FlatbufferTest, InlineWithCopyTensorMemory) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size(), true);
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
 TEST(FlatbufferTest, Tuple) {
@@ -416,12 +416,12 @@ TEST(FlatbufferTest, Tuple) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
+  TORCH_INTERNAL_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   output = bc2.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+  TORCH_INTERNAL_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
 TEST(FlatbufferTest, Dict) {
@@ -438,12 +438,14 @@ TEST(FlatbufferTest, Dict) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+  TORCH_INTERNAL_ASSERT(
+      output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   output = bc2.get_method("forward")(inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+  TORCH_INTERNAL_ASSERT(
+      output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
 TEST(FlatbufferTest, Prim) {
@@ -469,7 +471,7 @@ TEST(FlatbufferTest, Prim) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -479,7 +481,7 @@ TEST(FlatbufferTest, Prim) {
     res = bc2.get_method("forward")(bcinputs);
   }
   auto resi2 = res.toInt();
-  AT_ASSERT(resi2 == refi);
+  TORCH_INTERNAL_ASSERT(resi2 == refi);
 }
 
 TEST(FlatbufferTest, PrimScalar) {
@@ -505,7 +507,7 @@ TEST(FlatbufferTest, PrimScalar) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -515,7 +517,7 @@ TEST(FlatbufferTest, PrimScalar) {
     res = bc2.get_method("forward")(bcinputs);
   }
   auto resi2 = res.toInt();
-  AT_ASSERT(resi2 == refi);
+  TORCH_INTERNAL_ASSERT(resi2 == refi);
 }
 
 TEST(FlatbufferTest, WrongMethodName) {
@@ -573,7 +575,7 @@ TEST(FlatbufferTest, SetState) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -584,7 +586,7 @@ TEST(FlatbufferTest, SetState) {
   }
 
   auto resd2 = res.toTensor().item<float>();
-  AT_ASSERT(resd2 == refd);
+  TORCH_INTERNAL_ASSERT(resd2 == refd);
 }
 
 class TorchBindFlatbufferTestStruct : public torch::jit::CustomClassHolder {
@@ -678,7 +680,7 @@ TEST(FlatbufferTest, BuiltinClass) {
   auto res =
       bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   const auto& str2 = res.toStringRef();
-  AT_ASSERT(str2 == expected);
+  TORCH_INTERNAL_ASSERT(str2 == expected);
 }
 
 TEST(FlatbufferTest, BuiltinFunction) {
@@ -697,14 +699,14 @@ TEST(FlatbufferTest, BuiltinFunction) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
-  AT_ASSERT(str == expected);
+  TORCH_INTERNAL_ASSERT(str == expected);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   res = bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   str = res.toStringRef();
-  AT_ASSERT(str == expected);
+  TORCH_INTERNAL_ASSERT(str == expected);
 }
 
 TEST(FlatbufferTest, Eval) {
@@ -735,8 +737,8 @@ TEST(FlatbufferTest, Eval) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 
   auto buff = save_mobile_module_to_bytes(bc);
@@ -746,8 +748,8 @@ TEST(FlatbufferTest, Eval) {
     res = bc2.get_method("forward")(inputs);
   }
   output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -788,13 +790,13 @@ TEST(FlatbufferTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != std::nullopt);
+    TORCH_INTERNAL_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -802,12 +804,12 @@ TEST(FlatbufferTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc2.find_method("add_it");
-    AT_ASSERT(method != std::nullopt);
+    TORCH_INTERNAL_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
   resd = res.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(FlatbufferTest, RunMethodVariadic) {
@@ -829,13 +831,13 @@ TEST(FlatbufferTest, RunMethodVariadic) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
   res = bc.run_method("add_three", inputx, inputy);
   resd = res.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(FlatbufferTest, DuplicateSetState) {
@@ -930,8 +932,8 @@ TEST(FlatbufferTest, DefaultArgsConv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -939,8 +941,8 @@ TEST(FlatbufferTest, DefaultArgsConv) {
     res = bc2.get_method("forward")(inputs);
   }
   output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 namespace {
@@ -957,8 +959,8 @@ void testLiteModuleCompareResultTensors(
     res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -966,8 +968,8 @@ void testLiteModuleCompareResultTensors(
     res = bc2.get_method(method_name)(inputs);
   }
   output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 static void testDefaultArgsPinv(int num_args) {
@@ -1149,7 +1151,7 @@ TEST(FlatbufferTest, DefaultArgsWithOutArg) {
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
   bc.run_method("forward", input_x, input_h);
-  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+  TORCH_INTERNAL_ASSERT(input_x.equal(4 * torch::ones({})));
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff->data(), buff->size());
@@ -1157,7 +1159,7 @@ TEST(FlatbufferTest, DefaultArgsWithOutArg) {
   auto input_h2 = torch::ones({});
   m.run_method("forward", input_x2, input_h2);
   bc2.run_method("forward", input_x2, input_h2);
-  AT_ASSERT(input_x2.equal(4 * torch::ones({})));
+  TORCH_INTERNAL_ASSERT(input_x2.equal(4 * torch::ones({})));
 }
 
 #endif // !defined(FB_XPLAT_BUILD)
@@ -1347,10 +1349,10 @@ TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   auto data = save_jit_module_to_bytes(m);
   Module m2 = jitModuleFromBuffer(data->data(), data->size());
   bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
   mobile::Module m3 = parse_mobile_module(data->data(), data->size());
   mobile_optimized = m3.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
 }
 
 TEST(TestSourceFlatbuffer,
@@ -1393,7 +1395,7 @@ TEST(TestSourceFlatbuffer,
     }
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
 
     mobile::Module m3 = parse_mobile_module(data->data(), data->size());
     const auto& test_func3 = m3.get_method("test_func");
@@ -1402,7 +1404,7 @@ TEST(TestSourceFlatbuffer,
     }
     resd = res.toTensor().item<float>();
     refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
   }
 }
 

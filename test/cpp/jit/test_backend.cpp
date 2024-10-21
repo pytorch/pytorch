@@ -76,8 +76,8 @@ TEST(BackendTest, ToBackend) {
 
    */
   auto res = lm.forward(inputs).toTupleRef().elements().vec();
-  AT_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
-  AT_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
+  TORCH_INTERNAL_ASSERT(res[0].toTensor().equal(ref[0].toTensor()));
+  TORCH_INTERNAL_ASSERT(res[1].toTensor().equal(ref[1].toTensor()));
 }
 
 TEST(BackendTest, ToBackendNotAvailable) {
@@ -134,13 +134,13 @@ TEST(BackendTest, TestCompiler) {
   auto lm = torch::jit::detail::codegen_backend_module(
       "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
   auto res = lm.forward(inputs);
-  AT_ASSERT(res.toTensor().equal(ref.toTensor()));
+  TORCH_INTERNAL_ASSERT(res.toTensor().equal(ref.toTensor()));
 
   std::stringstream ss;
   lm._save_for_mobile(ss);
   auto mlm = _load_for_mobile(ss);
   auto mres = mlm.forward(inputs);
-  AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
+  TORCH_INTERNAL_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
 TEST(BackendTest, TestCompilerWithStringTable) {
@@ -165,14 +165,14 @@ TEST(BackendTest, TestCompilerWithStringTable) {
   auto lm = torch::jit::detail::codegen_backend_module(
       "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
   auto res = lm.forward(inputs);
-  AT_ASSERT(res.toTensor().equal(ref.toTensor()));
+  TORCH_INTERNAL_ASSERT(res.toTensor().equal(ref.toTensor()));
 
   std::stringstream ss;
   lm._save_for_mobile(ss);
   auto mlm = _load_for_mobile(ss);
   auto mres = mlm.forward(inputs);
   setShouldUseFormatWithStringTable(false);
-  AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
+  TORCH_INTERNAL_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
 TEST(BackendTest, TestComposite) {
@@ -216,7 +216,7 @@ TEST(BackendTest, TestComposite) {
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
 
-  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+  TORCH_INTERNAL_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
 TEST(BackendTest, TestPrimDtype) {
@@ -293,7 +293,7 @@ TEST(BackendTest, TestCompositeWithSetStates) {
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
-  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+  TORCH_INTERNAL_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
 TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
@@ -320,7 +320,8 @@ TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
   auto mc_reload = _load_for_mobile(ss_resave);
   auto res_mobile_reload = mc_reload.forward(inputs);
 
-  AT_ASSERT(res_mobile_reload.toTensor().equal(res_mobile.toTensor()));
+  TORCH_INTERNAL_ASSERT(
+      res_mobile_reload.toTensor().equal(res_mobile.toTensor()));
 
   auto mc_methods = mc.get_methods();
   auto mc_reload_methods = mc_reload.get_methods();
@@ -343,7 +344,7 @@ TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
       std::back_inserter(mc_reload_method_qns),
       get_qual_name);
 
-  AT_ASSERT(std::equal(
+  TORCH_INTERNAL_ASSERT(std::equal(
       mc_method_qns.begin(),
       mc_method_qns.end(),
       mc_reload_method_qns.begin()));

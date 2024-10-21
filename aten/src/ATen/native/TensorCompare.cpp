@@ -608,7 +608,7 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
     return std::tie(values, indices);
   }
   else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
-    AT_ASSERT(values.dim() == 0);
+    TORCH_INTERNAL_ASSERT(values.dim() == 0);
     indices.resize_({}).fill_(0);
     return std::forward_as_tuple(values, indices);
   } else {

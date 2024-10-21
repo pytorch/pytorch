@@ -87,7 +87,7 @@ static int find_split_dim(TensorIteratorBase& iter) {
     }
   }
 
-  AT_ASSERT(!iter.is_dim_reduced(best_dim));
+  TORCH_INTERNAL_ASSERT(!iter.is_dim_reduced(best_dim));
   return best_dim;
 }
 
@@ -102,7 +102,7 @@ round_columns(TensorIteratorBase& iter, int dim, int multiple, int64_t begin, in
 }
 
 static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
-  AT_ASSERT(iter.ndim() >= 1);
+  TORCH_INTERNAL_ASSERT(iter.ndim() >= 1);
   int dim = find_split_dim(iter);
   int64_t cols = iter.shape()[dim];
   int element_size = iter.element_size(/*arg=*/1);
@@ -125,8 +125,8 @@ static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
 }
 
 void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) {
-  AT_ASSERT(ninputs() == 1);
-  AT_ASSERT(noutputs() >= 1);
+  TORCH_INTERNAL_ASSERT(ninputs() == 1);
+  TORCH_INTERNAL_ASSERT(noutputs() >= 1);
 
   auto shape = this->shape();
   if (output(0).numel() == 0) {

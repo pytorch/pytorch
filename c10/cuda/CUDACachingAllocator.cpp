@@ -2396,7 +2396,7 @@ class DeviceCachingAllocator {
       return 0;
     }
 
-    AT_ASSERT(dst->is_split() && src->is_split());
+    TORCH_INTERNAL_ASSERT(dst->is_split() && src->is_split());
 
     if (dst->prev == src) { // [src dst]
       dst->ptr = src->ptr;
@@ -2993,7 +2993,7 @@ class DeviceCachingAllocator {
             block_to_cudagraph_stream_uses.find(block) !=
             block_to_cudagraph_stream_uses.end())) {
       stream_set streams(std::move(block->stream_uses));
-      AT_ASSERT(block->stream_uses.empty());
+      TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
       for (auto& stream : streams) {
         if (block_to_cudagraph_stream_uses[block].find(stream) ==
             block_to_cudagraph_stream_uses[block].end()) {
@@ -3009,7 +3009,7 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
-    AT_ASSERT(block->stream_uses.empty());
+    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 

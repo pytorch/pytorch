@@ -58,7 +58,7 @@ struct TORCH_API TensorDesc {
   static std::vector<bool> findContiguous(
       const at::IntArrayRef& sizes,
       const at::IntArrayRef& strides) {
-    AT_ASSERT(sizes.size() == strides.size());
+    TORCH_INTERNAL_ASSERT(sizes.size() == strides.size());
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {
       const auto expected_stride =

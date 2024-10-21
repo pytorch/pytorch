@@ -237,8 +237,8 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size = 0;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
-    AT_ASSERT(options.device().type() == kCUDA);
-    AT_ASSERT(options.dtype() == kByte);
+    TORCH_INTERNAL_ASSERT(options.device().type() == kCUDA);
+    TORCH_INTERNAL_ASSERT(options.dtype() == kByte);
     state = at::empty({static_cast<int64_t>(state_size)}, options);
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
@@ -381,7 +381,7 @@ struct TORCH_CUDA_CPP_API ActivationDescriptor
           &cudnnCreateActivationDescriptor,
           &cudnnDestroyActivationDescriptor> {
   void set(cudnnActivationMode_t mode) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         mode == CUDNN_ACTIVATION_RELU,
         "TODO: support more cuDNN activation modes");
     AT_CUDNN_CHECK(cudnnSetActivationDescriptor(

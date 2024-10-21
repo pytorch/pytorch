@@ -72,7 +72,7 @@ class BatchDataBuffer {
           this->total_example_count_in_queue_ >= batch_size_ || this->stop_);
     });
     if (batch_queue_.empty()) {
-      AT_ASSERT(stop_);
+      TORCH_INTERNAL_ASSERT(stop_);
       // All batches have been retrieved. Return an empty batch.
       return nullopt;
     }
@@ -111,7 +111,7 @@ class BatchDataBuffer {
 
     auto fill_batch = [&](size_t example_count, UnwrappedBatchType& batch) {
       auto batch_example_indices = this->example_sampler_.next(example_count);
-      AT_ASSERT(
+      TORCH_INTERNAL_ASSERT(
           batch_example_indices &&
           batch_example_indices.value().size() == example_count);
       BatchRequestType& indices = batch_example_indices.value();
@@ -395,7 +395,7 @@ class ChunkDataset final
     // create new workers for this new epoch.
     quit_worker_ = false;
 
-    AT_ASSERT(running_preloaders_ == 0);
+    TORCH_INTERNAL_ASSERT(running_preloaders_ == 0);
     running_preloaders_ = options_.preloader_count();
     for (const auto i : c10::irange(options_.preloader_count())) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
@@ -455,7 +455,7 @@ class ChunkDataset final
         batch_buffer_->add_chunk_data(std::current_exception());
       }
     }
-    AT_ASSERT(running_preloaders_.load() > 0);
+    TORCH_INTERNAL_ASSERT(running_preloaders_.load() > 0);
     --running_preloaders_;
     if (running_preloaders_.load() == 0) {
       // all preloaders are completed, so we can notify the batch_buffer.

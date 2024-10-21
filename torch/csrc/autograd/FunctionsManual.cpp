@@ -2186,7 +2186,7 @@ Tensor max_pool_double_backward(
     const Tensor& grad,
     const Tensor& indices,
     int dim) {
-  AT_ASSERT(indices.dim() >= dim);
+  TORCH_INTERNAL_ASSERT(indices.dim() >= dim);
   // handle non-empty inputs
   if (indices.sym_numel() != 0) {
     auto size = indices.sym_sizes().slice(0, indices.dim() - dim).vec();
