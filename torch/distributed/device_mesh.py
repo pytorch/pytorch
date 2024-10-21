@@ -49,6 +49,7 @@ else:
         is_initialized,
         new_group,
         ProcessGroup,
+        split_group,
     )
 
     logger = logging.getLogger(__name__)
@@ -499,11 +500,11 @@ else:
             # functional collectives. See details in:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
             dim_group_infos: List[Tuple[str, List[int], str]] = []
+            default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
                 # Otherwise, create new pg.
-                default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
@@ -551,20 +552,45 @@ else:
                         else f"mesh_dim_{dim}"
                     )
 
-                    # multi-dim mesh, create subgroups by looping over the pg_ranks
-                    # for each dim and append the groups
+                    # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+                    # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+                    # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+                    # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+                    # all the subgroups.
+                    # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+                    # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+                    # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
+                    dim_group = None
+                    if (
+                        bound_device_id := getattr(
+                            default_group, "bound_device_id", None
+                        )
+                    ) is not None:
+                        dim_group = split_group(
+                            parent_pg=default_group,
+                            pg_options=pg_options,
+                            split_ranks=pg_ranks_by_dim.tolist(),
+                            group_desc=group_desc,
+                        )
+
+                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+                    # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
+                    # the current rank is in the subgroup.
+                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+                    # along with appending information to the `dim_group_infos` list whenever necessary.
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(
-                            ranks=subgroup_ranks,
-                            backend=backend,
-                            pg_options=pg_options,
-                            group_desc=group_desc,
-                        )
+                        if bound_device_id is None:
+                            dim_group = new_group(
+                                ranks=subgroup_ranks,
+                                backend=backend,
+                                pg_options=pg_options,
+                                group_desc=group_desc,
+                            )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
