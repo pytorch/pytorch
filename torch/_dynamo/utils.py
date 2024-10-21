@@ -356,6 +356,7 @@ def dynamo_timed(
                                 fail_reason,
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
+                                False,  # is_forward
                             )
                             record_compilation_metrics(metrics)
 
@@ -800,6 +801,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
     dynamo_config: Optional[str]
+    is_forward: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -811,6 +813,7 @@ class BwdCompilationMetrics:
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    is_forward: Optional[bool]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
