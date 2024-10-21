@@ -28,7 +28,15 @@ This file contains TorchDynamo backends intended for debugging uses.
 def eager(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
-    return gm.forward
+
+    forward = gm.forward
+
+    def fn(*args, **kwargs):
+        # Modes are already disabled when entering dynamo
+        with torch._C.DisableTorchFunctionSubclass():
+            return forward(*args, **kwargs)
+
+    return fn
 
 
 def make_eager_backend_with_torch_function_mode(mode):
@@ -42,13 +50,14 @@ def make_eager_backend_with_torch_function_modes(modes):
     from contextlib import ExitStack
 
     def fn(gm, fake_tensor_inputs, **kwargs):
-        stack = ExitStack()
-        for mode in modes:
-            stack.enter_context(mode)
+        with torch._C.DisableTorchFunctionSubclass():
+            stack = ExitStack()
+            for mode in modes:
+                stack.enter_context(mode)
 
-        result = gm.forward
-        stack.close()
-        return result
+            result = gm.forward
+            stack.close()
+            return result
 
     return fn
 
@@ -61,12 +70,13 @@ def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
     # This backend is intended to check that dynamo-generated GraphModules
     # do not cause errors.
     def inner(*args):
-        try:
-            return gm(*args)
-        except Exception as e:
-            raise torch._dynamo.exc.TorchDynamoException(
-                "Unexpected exception when running generated GraphModule"
-            ) from e
+        with torch._C.DisableTorchFunctionSubclass():
+            try:
+                return gm(*args)
+            except Exception as e:
+                raise torch._dynamo.exc.TorchDynamoException(
+                    "Unexpected exception when running generated GraphModule"
+                ) from e
 
     return inner
 
