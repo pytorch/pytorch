@@ -63,6 +63,20 @@ struct Foo : torch::CustomClassHolder {
   __obj_flatten__() {
     return std::tuple(std::tuple("x", this->x), std::tuple("y", this->y));
   }
+
+  static c10::intrusive_ptr<Foo> __obj_unflatten__(
+      std::tuple<
+          std::tuple<std::string, int64_t>,
+          std::tuple<std::string, int64_t>> flattened) {
+    TORCH_CHECK(std::tuple_size<decltype(flattened)>::value == 2);
+
+    auto x = std::get<0>(flattened);
+    TORCH_CHECK(std::get<0>(x) == std::string("x"));
+    auto y = std::get<1>(flattened);
+    TORCH_CHECK(std::get<0>(y) == std::string("y"));
+
+    return c10::make_intrusive<Foo>(std::get<1>(x), std::get<1>(y));
+  }
 };
 
 struct _StaticMethod : torch::CustomClassHolder {
@@ -212,8 +226,37 @@ struct TensorQueue : torch::CustomClassHolder {
     return raw_queue;
   }
 
-  std::tuple<std::tuple<std::string, std::vector<at::Tensor>>> __obj_flatten__() {
-    return std::tuple(std::tuple("queue", this->get_raw_queue()));
+  std::tuple<
+      std::tuple<std::string, at::Tensor>,
+      std::tuple<std::string, std::vector<at::Tensor>>>
+  __obj_flatten__() {
+    return std::tuple(
+        std::tuple("init_tensor", this->init_tensor_.clone()),
+        std::tuple("queue", this->clone_queue()));
+  }
+
+  static c10::intrusive_ptr<TensorQueue> __obj_unflatten__(
+      std::tuple<
+          std::tuple<std::string, at::Tensor>,
+          std::tuple<std::string, std::vector<at::Tensor>>> flattened) {
+    TORCH_CHECK(std::tuple_size<decltype(flattened)>::value == 2);
+
+    auto init_tensor_tuple = std::get<0>(flattened);
+    TORCH_CHECK(std::tuple_size<decltype(init_tensor_tuple)>::value == 2);
+    TORCH_CHECK(std::get<0>(init_tensor_tuple) == std::string("init_tensor"));
+
+    c10::intrusive_ptr<TensorQueue> queue =
+        c10::make_intrusive<TensorQueue>(std::get<1>(init_tensor_tuple));
+
+    auto queue_tuple = std::get<1>(flattened);
+    TORCH_CHECK(std::tuple_size<decltype(queue_tuple)>::value == 2);
+    TORCH_CHECK(std::get<0>(queue_tuple) == std::string("queue"));
+
+    for (auto& value : std::get<1>(queue_tuple)) {
+      queue->push(value);
+    }
+
+    return queue;
   }
 
  private:
@@ -406,6 +449,16 @@ struct FlattenWithTensorOp : public torch::CustomClassHolder {
     return std::tuple(std::tuple("t", this->t_.sin()));
   }
 
+  static c10::intrusive_ptr<FlattenWithTensorOp> __obj_unflatten__(
+      std::tuple<std::tuple<std::string, at::Tensor>> flattened) {
+    TORCH_CHECK(std::tuple_size<decltype(flattened)>::value == 1);
+
+    auto t = std::get<0>(flattened);
+    TORCH_CHECK(std::get<0>(t) == std::string("t"));
+
+    return c10::make_intrusive<FlattenWithTensorOp>(std::get<1>(t));
+  }
+
  private:
   at::Tensor t_;
   ;
@@ -420,6 +473,16 @@ struct ContainsTensor : public torch::CustomClassHolder {
 
   std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
     return std::tuple(std::tuple("t", this->t_));
+  }
+
+  static c10::intrusive_ptr<ContainsTensor> __obj_unflatten__(
+      std::tuple<std::tuple<std::string, at::Tensor>> flattened) {
+    TORCH_CHECK(std::tuple_size<decltype(flattened)>::value == 1);
+
+    auto t = std::get<0>(flattened);
+    TORCH_CHECK(std::get<0>(t) == std::string("t"));
+
+    return c10::make_intrusive<ContainsTensor>(std::get<1>(t));
   }
 
   at::Tensor t_;
@@ -470,6 +533,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("__eq__", &Foo::eq)
       .def("combine", &Foo::combine)
       .def("__obj_flatten__", &Foo::__obj_flatten__)
+      .def_static("__obj_unflatten__", &Foo::__obj_unflatten__)
       .def_pickle(
           [](c10::intrusive_ptr<Foo> self) { // __getstate__
             return std::vector<int64_t>{self->x, self->y};
@@ -481,7 +545,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<FlattenWithTensorOp>("_FlattenWithTensorOp")
       .def(torch::init<at::Tensor>())
       .def("get", &FlattenWithTensorOp::get)
-      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
+      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__)
+      .def_static("__obj_unflatten__", &FlattenWithTensorOp::__obj_unflatten__);
 
   m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
       .def(torch::init<at::Tensor>())
@@ -616,6 +681,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<at::Tensor>())
       .def("get", &ContainsTensor::get)
       .def("__obj_flatten__", &ContainsTensor::__obj_flatten__)
+      .def_static("__obj_unflatten__", &ContainsTensor::__obj_unflatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
@@ -636,6 +702,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("clone_queue", &TensorQueue::clone_queue)
       .def("get_raw_queue", &TensorQueue::get_raw_queue)
       .def("__obj_flatten__", &TensorQueue::__obj_flatten__)
+      .def_static("__obj_unflatten__", &TensorQueue::__obj_unflatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<TensorQueue>& self)

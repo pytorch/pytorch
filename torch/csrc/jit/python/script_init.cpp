@@ -866,6 +866,40 @@ void initJitScriptBindings(PyObject* module) {
                 // Similar to Tensor's `__hash__`, which is `id()`.
                 return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
               })
+          .def(
+              "__deepcopy__",
+              [](const Object& self, const py::dict& memo) {
+                std::cout << "moo deepcopy" << std::endl;
+                if (auto objflatten_method =
+                        self.find_method("__obj_flatten__")) {
+                  if (auto qualname = self.type()->name()) {
+                    auto class_type = getCustomClass(qualname->qualifiedName());
+
+                    if (auto objunflatten_method =
+                            class_type->findStaticMethod("__obj_unflatten__")) {
+                      auto flattened = (*objflatten_method)(Stack{});
+                      auto unflattened =
+                          (*objunflatten_method)(Stack{flattened});
+                      return Object(unflattened.toObject());
+                    }
+                  }
+
+                  std::stringstream err;
+                  err << "Tried to deepcopy object ";
+                  if (auto qualname = self.type()->name()) {
+                    err << qualname->qualifiedName() << " ";
+                  }
+                  err << "which does not have a __obj_unflatten__ method defined!";
+                  throw std::runtime_error(err.str());
+                }
+                std::stringstream err;
+                err << "Tried to deepcopy object ";
+                if (auto qualname = self.type()->name()) {
+                  err << qualname->qualifiedName() << " ";
+                }
+                err << "which does not have a __obj_flatten__ method defined!";
+                throw std::runtime_error(err.str());
+              })
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__
