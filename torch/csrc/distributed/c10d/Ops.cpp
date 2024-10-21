@@ -444,7 +444,7 @@ IMPL_BARRIER(PrivateUse1)
 // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 
 void monitored_barrier_CPU(
-    at::Tensor /* unused */,
+    const at::Tensor& /* unused */,
     const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
     int64_t timeout,
