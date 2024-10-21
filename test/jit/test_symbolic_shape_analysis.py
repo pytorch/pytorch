@@ -483,8 +483,38 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         for inp, graph_in in zip(given_ins, graph_ins):
             graph_in.setType(graph_in.type().with_sizes(inp.size()))
 
-        out_sizes = [out.size() for out in expected_res]
+        if isinstance(expected_res, torch.Tensor):
+            out_sizes = expected_res.size()
+        else:
+            out_sizes = [out.size() for out in expected_res]
         self.checkShapeAnalysis(out_sizes, g, assert_propagation=True)
+
+    def test_argmax(self):
+        input = torch.randn((4, 4), dtype=torch.float32, device="cpu")
+
+        @torch.jit.script
+        def argmax_1(input):
+            return torch.ops.aten.argmax(input)
+
+        self.assert_shape_equal_scripted(argmax_1, (input,))
+
+        @torch.jit.script
+        def argmax_2(input):
+            return torch.ops.aten.argmax(input, keepdim=True)
+
+        self.assert_shape_equal_scripted(argmax_2, (input,))
+
+        @torch.jit.script
+        def argmax_3(input):
+            return torch.ops.aten.argmax(input, dim=1)
+
+        self.assert_shape_equal_scripted(argmax_3, (input,))
+
+        @torch.jit.script
+        def argmax_4(input):
+            return torch.ops.aten.argmax(input, dim=1, keepdim=True)
+
+        self.assert_shape_equal_scripted(argmax_4, (input,))
 
     def test_convolution_backward(self):
         # No opinfos for ops that are not part of the Python API
