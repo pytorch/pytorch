@@ -1,10 +1,9 @@
-import torch
-from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
+from torch._C import (  # type: ignore[attr-defined]
+    _add_docstr,
+    _linalg,
+    _LinAlgError as LinAlgError,
+)
 
-
-LinAlgError = torch._C._LinAlgError  # type: ignore[attr-defined]
-
-Tensor = torch.Tensor
 
 common_notes = {
     "experimental_warning": """This function is "experimental" and it may change in a future PyTorch release.""",

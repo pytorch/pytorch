@@ -10,3 +10,20 @@ from torch._functorch.eager_transforms import (
     vjp,
 )
 from torch._functorch.functional_call import functional_call, stack_module_state
+
+
+__all__ = [
+    "grad",
+    "grad_and_value",
+    "vmap",
+    "replace_all_batch_norm_modules_",
+    "functionalize",
+    "hessian",
+    "jacfwd",
+    "jacrev",
+    "jvp",
+    "linearize",
+    "vjp",
+    "functional_call",
+    "stack_module_state",
+]
