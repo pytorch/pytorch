@@ -84,14 +84,12 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey =
-      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY"));
-  const auto cert =
-      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT"));
+  const auto pkey = c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
+  const auto cert = c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
   const auto caFile =
-      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE"));
+      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE");
   const auto caPath =
-      cstr_to_std_string(std::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH"));
+      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH");
   return ::gloo::transport::tcp::tls::CreateDevice(
       attr, pkey, cert, caFile, caPath);
 }
@@ -129,9 +127,10 @@ namespace {
 std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
     const std::string& interfaceName,
     const std::string& hostName) {
-  static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
-  if (transportName) {
-    return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);
+  static auto transportName = c10::utils::get_env("GLOO_DEVICE_TRANSPORT");
+  if (transportName.has_value()) {
+    return GlooDeviceRegistry()->Create(
+        transportName.value().c_str(), interfaceName, hostName);
   }
 
 #ifdef __linux__
