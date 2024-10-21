@@ -467,6 +467,12 @@ def register_hop_fake(op, fn=None):
     assert op not in registered_hop_fake_fns
 
     def register(func):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @op.py_impl(FakeTensorMode)
+        def _(mode, *args, **kwargs):
+            return mode.__torch_dispatch__(op, [], args, kwargs)
+
         registered_hop_fake_fns[op] = func
         return func
 
