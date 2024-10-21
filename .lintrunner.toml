@@ -1227,6 +1227,9 @@ exclude_patterns = [
     'torch/contrib/_tensorboard_vis.py',
     "torch/cuda/_gpu_trace.py",
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
+    'torch/fft/__init__.py',
+    'torch/func/__init__.py',
+    'torch/futures/__init__.py',
     'torch/linalg/__init__.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',
