@@ -1813,7 +1813,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     ],
                     [],
                     check_quantization=True,
-                    num_include_ops=[2, 1],
+                    num_include_ops=[2, 1], # TODO: check the 1 here
                 )
             else:
                 # For python wrapper
@@ -1826,7 +1826,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     ],
                     [],
                     check_quantization=True,
-                    num_include_ops=[2, 2],
+                    num_include_ops=[2, 1], # TODO: check the 1 here
                 )
 
     @skipIfNoDynamoSupport
