@@ -670,7 +670,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
-    def _qconv2d_cpu_test_helper(self, int8_mixed_bf16=False):
+    def _qconv2d_cpu_test_helper(self, device="cpu", int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -683,8 +683,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x):
                 return self.conv2(self.conv(x))
 
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        mod = M().eval().to(device=device)
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).to(device=device)
 
         def matcher_check_fn():
             # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
@@ -710,11 +710,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_mkldnn(self, device):
         r"""
         This testcase will quantize a single Conv2d module.
         """
-        self._qconv2d_cpu_test_helper()
+        self._qconv2d_cpu_test_helper(device)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -727,6 +728,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def _qconv2d_unary_cpu_test_helper(
         self,
+        device="cpu",
         int8_mixed_bf16=False,
         unary_op=torch.nn.ReLU(),
         qconv2d_unary_matcher_nodes=None,
@@ -748,8 +750,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 tmp = self.unary_fn(self.conv(x))
                 return self.unary_fn2(self.conv2(tmp))
 
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        mod = M().eval().to(device=device)
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).to(device=device)
 
         def matcher_check_fn():
             # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
@@ -774,11 +776,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_relu_mkldnn(self, device):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
         """
-        self._qconv2d_unary_cpu_test_helper()
+        self._qconv2d_unary_cpu_test_helper(device=device)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -791,19 +794,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_relu6(self, device):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.ReLU6())
+        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.ReLU6())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_hardtanh_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_hardtanh(self, device):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
+        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.Hardtanh())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -823,11 +828,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_hardswish_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_hardswish(self, device):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardswish())
+        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.Hardswish())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -848,11 +854,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_silu_cpu(self):
+    @parametrize("device", ["cpu", "xpu"])
+    def test_qconv2d_silu(self, device):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.SiLU())
+        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.SiLU())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2157,8 +2164,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 temp2 = self.conv2(torch.pow(x, 2))
                 return torch.cat((temp1, temp2), 1)
 
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        mod = M().eval().xpu()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).xpu()
 
         def matcher_check_fn():
             self.assertEqual(counters["inductor"]["qcat_matcher_count"], 1)
@@ -2857,9 +2864,9 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 quantizer=quantizer,
             )
 
-
 instantiate_parametrized_tests(TestPatternMatcher)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()
+1
