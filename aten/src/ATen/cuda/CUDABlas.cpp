@@ -34,7 +34,7 @@ static rocblas_operation hipOperationToRocOperation(hipblasOperation_t op)
     case HIPBLAS_OP_C:
         return rocblas_operation_conjugate_transpose;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 {
@@ -57,7 +57,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
     case rocblas_status_internal_error:
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 // hipblas does not have hipblasSetMathMode
 #define hipblasSetMathMode(handle, flags) HIPBLAS_STATUS_SUCCESS
@@ -116,7 +116,7 @@ static cublasOperation_t _cublasOpFromChar(char op) {
     case 'C':
       return CUBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
