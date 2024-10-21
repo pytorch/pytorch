@@ -135,16 +135,14 @@ class UnpackedDualTensor(NamedTuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
 
     See :func:`unpack_dual` for more details.
-
     """
 
     primal: torch.Tensor
     tangent: Optional[torch.Tensor]
 
 
-del (
-    UnpackedDualTensor._asdict
-)  # remove this method to make it a opaque leaf (pytree checks _fields, _make， _asdict)
+# remove `_asdict` method to make it a opaque leaf (pytree checks `_fields`, `_make`, `_asdict`)
+del UnpackedDualTensor._asdict
 
 
 def unpack_dual(tensor, *, level=None):
