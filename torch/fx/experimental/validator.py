@@ -184,9 +184,7 @@ try:
             return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(
-                self.floor(number) < number, self.floor(number + 1), number
-            )  # type: ignore[return-value]
+            return z3.If(self.floor(number) < number, self.floor(number + 1), number)  # type: ignore[return-value]
 
         def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a > b, a, b)  # type: ignore[return-value]
