@@ -37,6 +37,7 @@ def upload_to_s3_artifacts() -> None:
         print(
             "GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading"
         )
+        return
 
     test_reports_zip_path = f"{REPO_ROOT}/test-reports-{file_suffix}.zip"
     zip_artifact(
