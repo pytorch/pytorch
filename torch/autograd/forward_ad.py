@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Any, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 
@@ -125,41 +125,26 @@ def make_dual(tensor, tangent, *, level=None):
             f"Expected tangent to be floating point or complex, but got: {tangent.dtype}"
         )
 
-    return torch._VF._make_dual(tensor, tangent, level=level)  # type: ignore[attr-defined]
+    return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-class UnpackedDualTensor(tuple):
+# NOTE: It is considered a opaque leaf in pytree utilities.
+#       We need to make this a quasi-namedtuple type that is not a pytree node while still keep
+#       Dynamo trace this type as a namedtuple type.
+class UnpackedDualTensor(NamedTuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
 
     See :func:`unpack_dual` for more details.
+
     """
 
-    __slots__ = ()
-    __match_args__ = ("primal", "tangent")
+    primal: torch.Tensor
+    tangent: Optional[torch.Tensor]
 
-    def __new__(
-        cls,
-        primal: torch.Tensor,
-        tangent: Optional[torch.Tensor],  # type: ignore[arg-type]
-    ) -> "UnpackedDualTensor":
-        return super().__new__(cls, (primal, tangent))  # type: ignore[arg-type]
 
-    @property
-    def primal(self) -> torch.Tensor:
-        return self[0]
-
-    @property
-    def tangent(self) -> Optional[torch.Tensor]:
-        return self[1]
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}(primal={self.primal}, tangent={self.tangent})"
-        )
-
-    def __getnewargs__(self) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """Return self as a plain tuple. Used by copy and pickle."""
-        return tuple(self)  # type: ignore[return-value]
+del (
+    UnpackedDualTensor._asdict
+)  # remove this method to make it a opaque leaf (pytree checks _fields, _make， _asdict)
 
 
 def unpack_dual(tensor, *, level=None):
@@ -189,7 +174,7 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return UnpackedDualTensor(tensor, None)
 
-    primal, dual = torch._VF._unpack_dual(tensor, level=level)  # type: ignore[attr-defined]
+    primal, dual = torch._VF._unpack_dual(tensor, level=level)
 
     return UnpackedDualTensor(primal, dual)
 
