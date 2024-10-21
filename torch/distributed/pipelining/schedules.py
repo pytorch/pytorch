@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import defaultdict, deque
 from enum import Enum
 from typing import (
     Any,
@@ -43,6 +43,7 @@ __all__ = [
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
+    "ScheduleZBVZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -1951,6 +1952,73 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         )
 
 
+def _add_bubbles_to_actions(num_stages_global, pipeline_order, pp_group_size):
+    actions = pipeline_order
+
+    def need_bubble(stage, op, microbatch, num_stages_global, seen_ops):
+        if op == _ComputationType.FORWARD:
+            if stage != 0 and (stage - 1, op, microbatch) not in seen_ops:
+                return True
+        elif op == _ComputationType.BACKWARD:
+            if stage == num_stages_global - 1:
+                return (stage, _ComputationType.FORWARD, microbatch) not in seen_ops
+            return (stage + 1, op, microbatch) not in seen_ops
+        return False
+
+    seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+    result: Dict[int, List[Optional[_Action]]] = {}
+    next_pointer: Dict[int, int] = {}
+    bubbles_added: Dict[int, int] = {}
+    total_bubbles_added = 0
+
+    for rank in range(pp_group_size):
+        result[rank] = []
+        next_pointer[rank] = 0
+        bubbles_added[rank] = 0
+
+    while True:
+        should_stop = True
+
+        temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+
+        for rank in range(pp_group_size):
+            timestamp = next_pointer[rank]
+            if timestamp >= len(actions[rank]):
+                continue
+
+            should_stop = False
+
+            if actions[rank][timestamp] is not None:
+                temp_action = actions[rank][timestamp]
+                assert temp_action is not None
+                stage_index, op, microbatch = temp_action
+                if not need_bubble(
+                    stage_index, op, microbatch, num_stages_global, seen_ops
+                ):
+                    result[rank].append(actions[rank][timestamp])
+                    if microbatch is not None:
+                        temp_seen_ops.add((stage_index, op, microbatch))
+                    next_pointer[rank] += 1
+                else:
+                    result[rank].append(None)
+                    bubbles_added[rank] += 1
+            else:
+                next_pointer[rank] += 1
+                result[rank].append(None)
+
+        seen_ops.update(temp_seen_ops)
+        if should_stop:
+            break
+
+    if total_bubbles_added > 0:
+        logger.warning(
+            "Non zero bubbles added: total_bubbles_added=%s bubbles_added=%s",
+            total_bubbles_added,
+            bubbles_added,
+        )
+    return result
+
+
 class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
     """
     The Interleaved Zero Bubble schedule.
@@ -2002,8 +2070,8 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         # This function add bubbles to the generated schedule based on dependencies of actions
         # Note that the ZB1P schedule will not require bubbles to be manually added and it is
         # only useful when n_microbatches <= microbatches_per_round
-        self.pipeline_order = self._add_bubbles_to_actions(
-            self.n_local_stages * self.pp_group_size,
+        self.pipeline_order = _add_bubbles_to_actions(
+            self.n_local_stages * self.pp_group_size, self.pipeline_order, self.pp_group_size
         )
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
@@ -2069,6 +2137,280 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             num_1f1b_microbatches,
             enable_zero_bubble=True,
         )
+
+
+class ScheduleZBVZeroBubble(PipelineScheduleMulti):
+    """
+    The ZBV Zero Bubble schedule.
+    See https://arxiv.org/pdf/2401.10241 for details.
+    """
+
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    ):
+        self.pp_group_size = stages[0].group_size
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            use_full_backward=False,
+        )
+        self.n_local_stages = len(stages)
+        self.rank = stages[0].group_rank
+        if self.n_local_stages % 2 != 0:
+            raise ValueError(
+                "ZBV schedule requires the number of local chunks to be "
+                f"divisible by 2, but got {len(stages)}."
+            )
+
+        # 1. Create the pipeline_order (all ranks do this calculation)
+        # This will be used to keep track of the current state of the entire pipeline
+        # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
+        self.pipeline_order: Dict[int, List[Optional[_Action]]] = self.get_zbv_schedule(
+            len(stages), self.pp_group_size, n_microbatches,
+        )
+        self.pipeline_order = _add_bubbles_to_actions(
+            self.n_local_stages * self.pp_group_size, self.pipeline_order, self.pp_group_size
+        )
+
+    def get_zbv_schedule(
+        self,
+        num_model_chunks,
+        pipeline_parallel_size,
+        num_microbatches,
+    ):
+        pp_group_size = pipeline_parallel_size
+        mb_size = num_microbatches
+        num_local_stages = num_model_chunks
+        compute_schedules = {}
+        def get_compute_schedule(pipeline_parallel_size, num_microbatches):
+            n_node = 6 * pipeline_parallel_size * num_microbatches
+            def get_id(cat, chunk, rank, micro):
+                return (
+                    cat * 2 * pipeline_parallel_size * num_microbatches
+                    + chunk * pipeline_parallel_size * num_microbatches
+                    + rank * num_microbatches
+                    + micro
+                )
+            count = []
+            for i in range(pipeline_parallel_size):
+                count.append([0] * 6)
+            fbw_mem = [39, -7, -32]
+            max_mem = 39 * (pipeline_parallel_size * 2)
+            end_time = [-1] * n_node
+            cur_time = [0] * pipeline_parallel_size
+            mem = [0] * pipeline_parallel_size
+            rank_bubble = [0] * pipeline_parallel_size
+            pending_w = [deque() for _ in range(pipeline_parallel_size)]
+            schedule = {}
+            for i in range(pipeline_parallel_size):
+                schedule[i] = []
+            stage_str = ["    " * i for i in range(pipeline_parallel_size)]
+            approved_bubble = [-1] * pipeline_parallel_size
+            max_approved_bubble = max(approved_bubble)
+            def get_max_rank_bubble(rank=-1):
+                max_rank_bubble = 0
+                for bb in rank_bubble:
+                    max_rank_bubble = max(max_rank_bubble, bb)
+                if rank >= 0:
+                    max_rank_bubble = max(
+                        max_rank_bubble, max_approved_bubble - approved_bubble[rank]
+                    )
+                return max_rank_bubble
+            def put_w(rank):
+                assert len(pending_w[rank]) > 0
+                _, chunk_, _ = pending_w[rank].popleft()
+                put(2, chunk_, rank)
+            def put(cat, chunk, rank, assert_cnt=True):
+                _tmp = _no_bubble = cur_time[rank] + 1
+                _cnt = count[rank][cat * 2 + chunk]
+                stage_str[rank] += (
+                    "FfBbWw"[cat * 2 + chunk]
+                    + str(_cnt + 1)
+                    + " " * (3 - len(str(_cnt + 1)))
+                )
+                if chunk == 1 and cat < 2:
+                    if rank < pipeline_parallel_size - 1:
+                        _fa_id = get_id(cat, chunk, rank + 1, _cnt)
+                        assert end_time[_fa_id] >= 0
+                        _tmp = max(_tmp, end_time[_fa_id] + 1)
+                if chunk == 0 and cat < 2:
+                    if rank > 0:
+                        _fa_id = get_id(cat, chunk, rank - 1, _cnt)
+                        assert end_time[_fa_id] >= 0, f"{cat}, {chunk}, {rank}, {_cnt}"
+                        _tmp = max(_tmp, end_time[_fa_id] + 1)
+                _id = get_id(cat, chunk, rank, _cnt)
+                if count[rank][0] > 0:
+                    rank_bubble[rank] += _tmp - _no_bubble
+                end_time[_id] = _tmp
+                cur_time[rank] = _tmp
+                mem[rank] += fbw_mem[cat]
+                # noinspection PyTypeChecker
+                op = _ComputationType.FORWARD
+                temp_chunk = chunk
+                if cat == 1:
+                    op = _ComputationType.BACKWARD
+                    temp_chunk = 1 - chunk
+                elif cat == 2:
+                    op = _ComputationType.WEIGHT
+                    temp_chunk = 1 - chunk
+                schedule[rank].append((_cnt, op, temp_chunk))
+                if cat == 1:
+                    pending_w[rank].append((2, chunk, _cnt))
+                count[rank][cat * 2 + chunk] += 1
+            for i in range(pipeline_parallel_size):
+                put(0, 0, i)
+            for i in range(pipeline_parallel_size - 1, -1, -1):
+                if i == pipeline_parallel_size - 1:
+                    put(0, 1, i)
+                    continue
+                tmp = end_time[get_id(0, 1, i + 1, 0)]
+                while (
+                    mem[i] + fbw_mem[0] * (2 + i * 2) <= max_mem
+                    and cur_time[i] + 1 <= tmp
+                    and count[i][0] < num_microbatches
+                ):
+                    for j in range(i + 1):
+                        put(0, 0, j)
+                put(0, 1, i)
+            iter_chunk_ = 0
+            end_tmp = 0
+            for i in range(pipeline_parallel_size):
+                if i == 0:
+                    end_tmp = cur_time[0] + 1
+                    continue
+                tmp = end_tmp
+                while (
+                    count[i][0] + count[i][1] < count[i - 1][0] + count[i - 1][1]
+                    or count[i][1] <= count[i - 1][1] < num_microbatches
+                ):
+                    for j in range(pipeline_parallel_size - 1, i - 1, -1):
+                        if count[j][iter_chunk_] < num_microbatches:
+                            put(0, iter_chunk_, j)
+                    iter_chunk_ = 1 - iter_chunk_
+            for _ in range(2 * num_microbatches):
+                for i in range(pipeline_parallel_size):
+                    while mem[i] + fbw_mem[1] > max_mem:
+                        put_w(i)
+                b0_ranks, b1_ranks = [], []
+                for i in range(pipeline_parallel_size):
+                    if count[i][3] >= count[i][2]:
+                        b0_ranks.append(i)
+                    elif i == pipeline_parallel_size - 1:
+                        b1_ranks.append(i)
+                    else:
+                        fa_id = get_id(1, 1, i + 1, count[i][3])
+                        if end_time[fa_id] >= 0 or count[i][2] >= num_microbatches:
+                            b1_ranks.append(i)
+                        else:
+                            b0_ranks.append(i)
+                b_ranks = []
+                # put b1
+                for i in reversed(b1_ranks):
+                    b_ranks.append((i, 1))
+                # put b0
+                for i in b0_ranks:
+                    b_ranks.append((i, 0))
+                for i, _chunk_ in b_ranks:
+                    fa_id = -1
+                    if _chunk_ == 1 and i < pipeline_parallel_size - 1:
+                        fa_id = get_id(1, 1, i + 1, count[i][3])
+                    if _chunk_ == 0 and i > 0:
+                        fa_id = get_id(1, 0, i - 1, count[i][2])
+                    while (
+                        len(pending_w[i]) > 0
+                        and fa_id >= 0
+                        and end_time[fa_id] >= cur_time[i] + 1
+                    ):
+                        # fill the bubble
+                        put_w(i)
+                    if (
+                        len(pending_w[i]) > 0
+                        and end_time[fa_id] - cur_time[i]
+                        > get_max_rank_bubble(i) - rank_bubble[i]
+                    ):
+                        put_w(i)
+                    put(1, _chunk_, i)
+                # put f
+                for i in range(pipeline_parallel_size):
+                    if count[i][1] >= num_microbatches:
+                        continue
+                    put_item = None
+                    if count[i][1] >= count[i][0]:
+                        put_item = 0
+                    elif i == pipeline_parallel_size - 1:
+                        put_item = 1
+                    else:
+                        if end_time[get_id(0, 1, i + 1, count[i][1])] >= 0:
+                            put_item = 1
+                        elif count[i][0] < num_microbatches:
+                            if i == 0:
+                                put_item = 0
+                            elif end_time[get_id(0, 0, i - 1, count[i][0])] >= 0:
+                                put_item = 0
+                    if put_item is None:
+                        continue
+                    while mem[i] + fbw_mem[0] > max_mem:
+                        put_w(i)
+                    fa_id = -1
+                    if put_item == 0 and i > 0:
+                        fa_id = get_id(0, 0, i - 1, count[i][0])
+                    if put_item == 1 and i < pipeline_parallel_size - 1:
+                        fa_id = get_id(0, 1, i + 1, count[i][1])
+                    while (
+                        len(pending_w[i]) > 0
+                        and fa_id >= 0
+                        and end_time[fa_id] >= cur_time[i] + 1
+                    ):
+                        # fill the bubble
+                        put_w(i)
+                    if (
+                        len(pending_w[i]) > 0
+                        and end_time[fa_id] - cur_time[i]
+                        > get_max_rank_bubble(i) - rank_bubble[i]
+                    ):
+                        put_w(i)
+                    put(0, put_item, i)
+            for i in range(pipeline_parallel_size):
+                while len(pending_w[i]) > 0:
+                    put_w(i)
+            result = {}
+            for rank, schedule_current_rank in schedule.items():
+                expanded_results = []
+                total_stages = num_local_stages * pp_group_size
+                logical_stage_to_stages = {}
+                stage_0 = []
+                stage_1 = []
+                initial_bubbles = rank * int(num_local_stages / 2)
+                for i in range(int(num_local_stages / 2)):
+                    temp = int(i + rank * num_local_stages / 2)
+                    stage_0.append(temp)
+                    stage_1.append(total_stages - temp - 1)
+                logical_stage_to_stages[0] = stage_0
+                logical_stage_to_stages[1] = stage_1
+                for (mb_id, op, stage_id) in schedule_current_rank:
+                    if mb_id >= num_microbatches:
+                        continue
+                    stages = logical_stage_to_stages[stage_id]
+                    if op == _ComputationType.BACKWARD or op == _ComputationType.WEIGHT:
+                        stages = sorted(stages, reverse=True)
+                    else:
+                        stages = sorted(stages)
+                    for physical_stage in stages:
+                        expanded_results.append(_Action(physical_stage, op, mb_id))
+                result[rank] = expanded_results
+            return result
+        compute_schedules = get_compute_schedule(pp_group_size, mb_size)
+        return compute_schedules
 
     def _add_bubbles_to_actions(self, num_stages_global):
         actions = self.pipeline_order
@@ -2136,7 +2478,6 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             )
         return result
 
-
 def get_schedule_class(schedule_name: str):
     """
     Maps a schedule name (case insensitive) to its corresponding class object.
@@ -2152,6 +2493,7 @@ def get_schedule_class(schedule_name: str):
         "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
+        "ZBVZeroBubble": ScheduleZBVZeroBubble,
     }
     lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
     lowercase_schedule_name = schedule_name.lower()
