@@ -10,7 +10,7 @@ TensorBase empty_cuda(
     ScalarType dtype,
     std::optional<Device> device_opt,
     std::optional<c10::MemoryFormat> memory_format_opt) {
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_cuda());
   const DeviceGuard device_guard(device);
@@ -50,7 +50,7 @@ TensorBase empty_strided_cuda(
     IntArrayRef stride,
     ScalarType dtype,
     std::optional<Device> device_opt) {
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_cuda());
   const DeviceGuard device_guard(device);

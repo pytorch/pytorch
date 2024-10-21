@@ -600,28 +600,32 @@ def enable(compiler_fn):
     if eval_frame._stance.stance == "force_eager":
         # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
         # to fall back to eager as well.
-        yield
-        return
-
-    # we need to import this to ensure cudagraphs TLS is initialized
-    # it needs to be lazily imported because of circular dependencies
-    import torch._inductor.cudagraph_trees
-
-    exit_ctx = local.enter_ctx()
-    revert_tls = local.set_tls(
-        compiler=functools.partial(AutogradCompilerInstance, compiler_fn),
-        vlogger=verbose_log
-        if torch._logging._internal.log_state.is_artifact_enabled(
-            "compiled_autograd_verbose"
-        )
-        else None,
-    )
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
+        global compiled_autograd_enabled_force_eager
+        compiled_autograd_enabled_force_eager = True
+        try:
             yield
-    finally:
-        revert_tls()
-        exit_ctx()
+        finally:
+            compiled_autograd_enabled_force_eager = False
+    else:
+        # we need to import this, because user might not have imported it if they directly use this context manager
+        # we need to lazily import it, because of circular dependencies
+        import torch._inductor.cudagraph_trees
+
+        exit_ctx = local.enter_ctx()
+        revert_tls = local.set_tls(
+            compiler=functools.partial(AutogradCompilerInstance, compiler_fn),
+            vlogger=verbose_log
+            if torch._logging._internal.log_state.is_artifact_enabled(
+                "compiled_autograd_verbose"
+            )
+            else None,
+        )
+        try:
+            with torch.autograd.set_multithreading_enabled(False):
+                yield
+        finally:
+            revert_tls()
+            exit_ctx()
 
 
 @contextlib.contextmanager
