@@ -14,22 +14,23 @@ DTYPE_MAP = {
 }
 
 SM = [80]  # Sm80 kernels support up to
-HEAD_DIMENSIONS = [32, 64, 96, 128, 160, 192, 224, 256]
+HEAD_DIMENSIONS = [32, 64, 96, 128, 160, 192, 256]
+IS_CAUSAL = ["false", "true"]
 KERNEL_IMPL_TEMPLATE_FWD = """
 template<>
-void run_mha_fwd_<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t stream) {{
-    run_mha_fwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream);
+void run_mha_fwd_<{DTYPE}, {HEAD_DIM}, {IS_CAUSAL}>(Flash_fwd_params &params, cudaStream_t stream) {{
+    run_mha_fwd_hdim{HEAD_DIM}<{DTYPE}, {IS_CAUSAL}>(params, stream);
 }}
 """
 KERNEL_IMPL_TEMPLATE_FWD_SPLIT = """
 
-template void run_mha_fwd_splitkv_dispatch<{DTYPE}, {HEAD_DIM}>(Flash_fwd_params &params, cudaStream_t stream);
+template void run_mha_fwd_splitkv_dispatch<{DTYPE}, {HEAD_DIM}, {IS_CAUSAL}>(Flash_fwd_params &params, cudaStream_t stream);
 """
 
 KERNEL_IMPL_TEMPLATE_BWD = """
 template<>
-void run_mha_bwd_<{DTYPE}, {HEAD_DIM}>(Flash_bwd_params &params, cudaStream_t stream) {{
-    run_mha_bwd_hdim{HEAD_DIM}<{DTYPE}>(params, stream);
+void run_mha_bwd_<{DTYPE}, {HEAD_DIM}, {IS_CAUSAL}>(Flash_bwd_params &params, cudaStream_t stream) {{
+    run_mha_bwd_hdim{HEAD_DIM}<{DTYPE}, {IS_CAUSAL}>(params, stream);
 }}
 """
 
@@ -39,37 +40,51 @@ class Kernel:
     sm: int
     dtype: str
     head_dim: int
+    is_causal: bool
     direction: str
 
     @property
     def template(self) -> str:
-        if self.direction == "fwd":
-            return KERNEL_IMPL_TEMPLATE_FWD.format(
-                DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
-            )
-        elif self.direction == "bwd":
-            return KERNEL_IMPL_TEMPLATE_BWD.format(
-                DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
-            )
-        else:
-            return KERNEL_IMPL_TEMPLATE_FWD_SPLIT.format(
-                DTYPE=DTYPE_MAP[self.dtype], HEAD_DIM=self.head_dim
-            )
+        template_map = {
+            "fwd": KERNEL_IMPL_TEMPLATE_FWD,
+            "bwd": KERNEL_IMPL_TEMPLATE_BWD,
+            "fwd_split": KERNEL_IMPL_TEMPLATE_FWD_SPLIT,  # Assuming 'split' for the default case
+        }
+
+        template = template_map[self.direction]
+
+        return template.format(
+            DTYPE=DTYPE_MAP[self.dtype],
+            HEAD_DIM=self.head_dim,
+            IS_CAUSAL=self.is_causal,
+        )
 
     @property
     def filename(self) -> str:
-        return f"flash_{self.direction}_hdim{self.head_dim}_{self.dtype}_sm{self.sm}.cu"
+        return (
+            f"flash_{self.direction}_hdim{self.head_dim}_{self.dtype}_"
+            f"{'causal_' if self.is_causal == 'true' else ''}"
+            f"sm{self.sm}.cu"
+        )
 
 
 def get_all_kernels() -> List[Kernel]:
-    for dtype, head_dim, sm in itertools.product(DTYPE_MAP.keys(), HEAD_DIMENSIONS, SM):
-        for direction in ["fwd", "bwd", "fwd_split"]:
-            yield Kernel(sm=sm, dtype=dtype, head_dim=head_dim, direction=direction)
+    for direction in ["fwd", "fwd_split", "bwd"]:
+        for dtype, head_dim, is_causal, sm in itertools.product(
+            DTYPE_MAP.keys(), HEAD_DIMENSIONS, IS_CAUSAL, SM
+        ):
+            yield Kernel(
+                sm=sm,
+                dtype=dtype,
+                head_dim=head_dim,
+                is_causal=is_causal,
+                direction=direction,
+            )
 
 
 def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:
     prelude = """
-// Copyright (c) 2023, Tri Dao.
+// Copyright (c) 2024, Tri Dao.
 
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"\n
