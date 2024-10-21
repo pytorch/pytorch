@@ -17,14 +17,14 @@ __all__ = ["NegativeBinomial"]
 class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
-    of the number of successful independent and identical Bernoulli trials
-    before :attr:`total_count` failures are achieved. The probability
+    of the number of failures in a sequence of independent and identical Bernoulli trials
+    before :attr:`total_count` successes are achieved. The probability
     of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
-        total_count (float or Tensor): non-negative number of negative Bernoulli
-            trials to stop, although the distribution is still valid for real
-            valued count
+        total_count (float or Tensor): non-negative number of successes
+            until the experiment is stopped, although
+            the distribution is still valid for real valued count
         probs (Tensor): Event probabilities of success in the half open interval [0, 1)
         logits (Tensor): Event log-odds for probabilities of success
     """
@@ -76,15 +76,15 @@ class NegativeBinomial(Distribution):
 
     @property
     def mean(self):
-        return self.total_count * torch.exp(self.logits)
+        return self.total_count * torch.exp(-self.logits)
 
     @property
     def mode(self):
-        return ((self.total_count - 1) * self.logits.exp()).floor().clamp(min=0.0)
+        return ((self.total_count - 1) * (-self.logits).exp()).floor().clamp(min=0.0)
 
     @property
     def variance(self):
-        return self.mean / torch.sigmoid(-self.logits)
+        return self.mean / torch.sigmoid(self.logits)
 
     @lazy_property
     def logits(self):
@@ -103,7 +103,7 @@ class NegativeBinomial(Distribution):
         # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(
             concentration=self.total_count,
-            rate=torch.exp(-self.logits),
+            rate=torch.exp(self.logits),
             validate_args=False,
         )
 
@@ -117,8 +117,8 @@ class NegativeBinomial(Distribution):
             self._validate_sample(value)
 
         log_unnormalized_prob = self.total_count * F.logsigmoid(
-            -self.logits
-        ) + value * F.logsigmoid(self.logits)
+            self.logits
+        ) + value * F.logsigmoid(-self.logits)
 
         log_normalization = (
             -torch.lgamma(self.total_count + value)
