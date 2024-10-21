@@ -59,7 +59,7 @@ Shape Shape::with_symbolic_dims(
 }
 
 bool symbolicShapeEnabled() {
-  static bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
+  static const bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
