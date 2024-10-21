@@ -198,6 +198,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
@@ -221,8 +222,9 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
+            # Fetch aws credential from IMDs
+            eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           fi
-
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
           # shellcheck disable=SC2086
@@ -230,10 +232,14 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
