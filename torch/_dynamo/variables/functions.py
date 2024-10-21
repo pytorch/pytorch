@@ -5,7 +5,18 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Never
 
 import torch
 
@@ -36,6 +47,10 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._guards import Source
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        TritonGridType,
+        TritonKernelType,
+    )
 
 
 _F = TypeVar("_F", bound=Callable)
@@ -1028,18 +1043,18 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
-    def raise_unsupported(self, msg):
+    def raise_unsupported(self, msg: str) -> Never:
         raise Unsupported(msg)
 
-    def is_callable(self, maybe_callable):
+    def is_callable(self, maybe_callable: Any) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
         )
 
-    def get_value(self, val):
+    def get_value(self, val: Any) -> Any:
         return val.value
 
-    def check_grid(self, grid):
+    def check_grid(self, grid) -> Tuple[torch.fx.proxy.Proxy, ...]:
         from .lists import BaseListVariable
 
         if isinstance(grid, BaseListVariable):
@@ -1052,7 +1067,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
-    def call_HOP(self, variable, grids, combined_args_raw, tx):
+    def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
@@ -1123,6 +1138,10 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
+    grid: "TritonGridType"
+    kernel: "TritonKernelType"
+    kernel_idx: Optional[int]
+
     def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
