@@ -49,7 +49,52 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
+if not torch._running_with_deploy():
+    # torch.library.custom_op does not work with torch.deploy/multipy
+
+    @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    def zeros_and_scatter(
+        shape: List[int],
+        indices: List[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+        grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+        return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
+
+    @zeros_and_scatter.register_fake  # type: ignore[misc]
+    def _(
+        shape: List[int],
+        indices: List[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        return vals.new_empty(shape)
+
+    @zeros_and_scatter.register_vmap  # type: ignore[misc]
+    def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
+        """The batching rule is special in that it returns a tensor that is not batched"""
+        indices_indims = indims[1]
+        expanded_indices = []
+        for idx, idx_indim in zip(indices, indices_indims):
+            # The index is not a being batched, we should unsqueeze and expand to val
+            if idx_indim is None:
+                expanded_indices.append(idx.expand(value.shape))
+            else:
+                # the index is being part of the vmap batch, it should be the same size as val
+                assert idx.shape == value.shape
+                expanded_indices.append(idx)
+
+        out = torch.ops.FlexAttentionLib.zeros_and_scatter(
+            shape,
+            expanded_indices,
+            value,
+        )
+        return out, None
+
+
 class ModIndex(torch.autograd.Function):
+    generate_vmap_rule = True
+
     @staticmethod
     def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
@@ -60,13 +105,11 @@ class ModIndex(torch.autograd.Function):
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
 
-    generate_vmap_rule = True
-
     @staticmethod
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
-            torch.ops.mylib.zeros_and_scatter(
+            torch.ops.FlexAttentionLib.zeros_and_scatter(
                 ctx.input_shape,
                 indices,
                 gradOut,

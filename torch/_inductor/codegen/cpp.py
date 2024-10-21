@@ -2147,10 +2147,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
+        return "AOTI_TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
@@ -4164,8 +4161,9 @@ class CppScheduling(BaseScheduling):
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
             2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
-               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
-               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
+               where the divisor is an integer and not too small (the divisor > 8), the dividend is
+               one of the iter_vars, and this var, i.e. the dimension that needs to be split, is
+               contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4397,8 +4395,8 @@ class CppScheduling(BaseScheduling):
                         if not local_buffer_used:
                             # Create new local buffer
                             local_buffer_used = ir.Buffer(
-                                f"{local_buf_prefix}_{len(local_buffers)}",
-                                local_buffer_layout,
+                                name=f"{local_buf_prefix}_{len(local_buffers)}",
+                                layout=local_buffer_layout,
                             )
                             local_buffers.append(local_buffer_used)
                             local_to_global_buffers[local_buffer_used.name] = []

@@ -343,7 +343,7 @@ inline bool array_has_torch_function(PyObject* const* args, Py_ssize_t nargs) {
 }
 
 PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
-  bool result; // NOLINT(cppcoreguidelines-init-variables)
+  bool result = false;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and
