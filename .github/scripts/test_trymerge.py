@@ -599,7 +599,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(
             checks[
-                "pull / linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 2, linux.2xlarge)"
+                "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
             ].classification
             == "BROKEN_TRUNK"
         )
