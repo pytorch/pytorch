@@ -192,11 +192,16 @@ def export_compat(
                 export_params=export_params,
                 input_names=input_names,
                 output_names=output_names,
-                opset_version=17,  # TODO(justinchuby): Hard coded to 17 for now
+                opset_version=opset_version,
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
             onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
+
+            # NOTE: It it's falling back to the legacy exporter, we don't need to
+            # optimize the model, so we return it here. Users can still optimize
+            # the model using the optimize() if they want.
+            return onnx_program
         else:
             raise
 
