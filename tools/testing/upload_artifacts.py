@@ -86,6 +86,7 @@ def zip_and_upload_artifacts(failed: bool) -> None:
             print(f"Failed to upload artifacts: {e}")
         print(f"Uploading artifacts took {time.time() - start:.2f} seconds")
 
+
 def trigger_upload_test_stats_intermediate_workflow() -> None:
     import requests
 
