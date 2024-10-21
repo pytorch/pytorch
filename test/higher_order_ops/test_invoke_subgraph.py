@@ -7,7 +7,7 @@ import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
-from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch._higher_order_ops import invoke_subgraph
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -157,7 +157,7 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        backend = EagerAndRecordGraphs()
+        backend = AotEagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
 
         # Run backward
@@ -176,6 +176,30 @@ class TestInvokeSubgraphCompile(TestCase):
                 subgraph_attr_names.add(node.target)
         self.assertEqual(len(subgraph_attr_names), 1)
 
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_, l_y_));  invoke_subgraph_0 = l_x_ = None
+        a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        invoke_subgraph_1 = self.invoke_subgraph_0
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_1, 'invoke_subgraph_0', (a, l_y_));  invoke_subgraph_1 = a = l_y_ = None
+        getitem_1: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        return (getitem_1,)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
+            child: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
+            return (child,)
+""",
+        )
+
     def test_nonlocal_update(self):
         counter = 2
 
@@ -185,6 +209,7 @@ class TestInvokeSubgraphCompile(TestCase):
 
         def fn(x, y):
             nonlocal counter
+            counter = 2
             a = invoke_subgraph(gn, None, (x, y))[0]
             counter = 3
             return invoke_subgraph(gn, None, (a, y))[0]
@@ -193,11 +218,9 @@ class TestInvokeSubgraphCompile(TestCase):
         y = torch.randn(8, requires_grad=True)
         ref = fn(x, y)
 
-        counter = 2
-
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, backend="inductor")(x_clone, y_clone)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
 
         # Run backward
         ref.sum().backward()
@@ -206,6 +229,97 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+        torch._dynamo.reset()
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_, l_y_));  invoke_subgraph_0 = l_x_ = None
+        a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        invoke_subgraph_1 = self.invoke_subgraph_1
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_1, 'invoke_subgraph_1', (a, l_y_));  invoke_subgraph_1 = a = l_y_ = None
+        getitem_1: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        return (getitem_1,)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
+            mul: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
+            child: "f32[8]" = mul * 2;  mul = None
+            return (child,)
+
+    class invoke_subgraph_1(torch.nn.Module):
+        def forward(self, a: "f32[8]", l_y_: "f32[8]"):
+            mul: "f32[8]" = torch.mul(a, l_y_);  a = l_y_ = None
+            child: "f32[8]" = mul * 3;  mul = None
+            return (child,)
+""",
+        )
+
+    def test_normalize_gm(self):
+        def gn(x, y):
+            # Different graph give different names to intermediate nodes
+            for _ in range(5):
+                x = x * y
+            return x
+
+        def fn(x, y):
+            for _ in range(5):
+                x = invoke_subgraph(gn, None, (x, y))
+            return x
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        opt_fn(x, y)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        invoke_subgraph_0 = self.invoke_subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_, l_y_));  invoke_subgraph_0 = l_x_ = None
+        x: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        invoke_subgraph_1 = self.invoke_subgraph_0
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_1, 'invoke_subgraph_0', (x, l_y_));  invoke_subgraph_1 = x = None
+        x_1: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        invoke_subgraph_3 = self.invoke_subgraph_0
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_3, 'invoke_subgraph_0', (x_1, l_y_));  invoke_subgraph_3 = x_1 = None
+        x_2: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        invoke_subgraph_5 = self.invoke_subgraph_0
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_5, 'invoke_subgraph_0', (x_2, l_y_));  invoke_subgraph_5 = x_2 = None
+        x_3: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
+        invoke_subgraph_7 = self.invoke_subgraph_0
+        invoke_subgraph_8 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_7, 'invoke_subgraph_0', (x_3, l_y_));  invoke_subgraph_7 = x_3 = l_y_ = None
+        x_4: "f32[8]" = invoke_subgraph_8[0];  invoke_subgraph_8 = None
+        return (x_4,)
+
+    class invoke_subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
+            x: "f32[8]" = l_x_ * l_y_;  l_x_ = None
+            x_1: "f32[8]" = x * l_y_;  x = None
+            x_2: "f32[8]" = x_1 * l_y_;  x_1 = None
+            x_3: "f32[8]" = x_2 * l_y_;  x_2 = None
+            x_4: "f32[8]" = x_3 * l_y_;  x_3 = l_y_ = None
+            return (x_4,)
+""",
+        )
 
 
 if __name__ == "__main__":
