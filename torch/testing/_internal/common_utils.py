@@ -2886,7 +2886,6 @@ class TestCase(expecttest.TestCase):
                     test_run_cmd = f"python {test_filename} {class_name}.{method_name}"
                     env_var_prefix = TestEnvironment.repro_env_var_prefix()
                     repro_parts = [env_var_prefix, test_run_cmd]
-
                     self.wrap_with_policy(
                         method_name,
                         lambda repro_parts=repro_parts: print_repro_on_failure(repro_parts))
