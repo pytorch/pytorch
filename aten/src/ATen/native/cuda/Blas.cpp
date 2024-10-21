@@ -180,19 +180,10 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
-    // When DISABLE_ADDMM_CUDA_LT is unset the default is TRUE on
-    // AMD architectures otherwise it is FALSE.
-#ifdef USE_ROCM
-    if (env_value != nullptr && strcmp(env_value, "0") == 0) {
-      return false;
-    }
-    return true;
-#else
     if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
     return false;
-#endif
 }
 
 #ifdef USE_ROCM
