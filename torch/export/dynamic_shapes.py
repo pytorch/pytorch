@@ -390,6 +390,7 @@ class _RelaxedConstraint(_ConstraintTarget):
             "dim": self.dim,
         }
 
+
 Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
@@ -681,7 +682,6 @@ def _check_dynamic_shapes(
     using combined args + kwargs as reference for inputs structure.
     """
     from torch._dynamo.exc import UserError, UserErrorType
-    from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return
