@@ -1436,7 +1436,11 @@ class FakeTensorMode(TorchDispatchMode):
         # the inputs.
 
         if isinstance(func, torch._ops.HigherOrderOperator):
-            return
+            # For invoke_subgraph op, if the identifier is set then its safe to
+            # cache the fake tensor result.
+            if func is torch._higher_order_ops.invoke_subgraph:
+                if isinstance(args[1], str):
+                    return
 
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")
