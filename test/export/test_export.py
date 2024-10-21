@@ -2554,7 +2554,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             unbacked_bindings = foo.meta["unbacked_bindings"]
             self.assertEqual(len(unbacked_bindings), 1)  # check binding is {u: path}
             u = next(iter(unbacked_bindings.keys()))
-            self.assertEqual(type(u).__name__, "Symbol")  # check binding is symbol, not expr
+            self.assertEqual(
+                type(u).__name__, "Symbol"
+            )  # check binding is symbol, not expr
             path = unbacked_bindings[u]
             self.assertEqual(len(path), 3)  # check path is [size, 0, DivideByKey(10)]
             self.assertEqual(type(path[2]).__name__, "DivideByKey")
