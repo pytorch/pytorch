@@ -1475,7 +1475,15 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Basic)):
+        if not isinstance(
+            x,
+            (
+                Number,
+                TensorLike,
+                sympy.Basic,
+                torch._inductor.codegen.common.CSEVariable,
+            ),
+        ):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
