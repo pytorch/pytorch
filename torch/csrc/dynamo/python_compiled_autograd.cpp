@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
-#include <torch/csrc/dynamo/python_logger.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -92,6 +91,49 @@ static void check(bool result) {
 
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
+
+struct PythonLogger {
+  PythonLogger() = delete;
+  explicit PythonLogger(PyObject* logger) : logger_(logger) {
+    TORCH_INTERNAL_ASSERT(logger_ != nullptr);
+  }
+
+  enum Level : unsigned int {
+    DEBUG = 0,
+    INFO = 1,
+    WARNING = 2,
+    ERROR = 3,
+    CRITICAL = 4,
+    COUNT // Keep this as the last enum
+  };
+
+  // must be called while GIL is held
+  void log(Level level, std::string_view msg) const {
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
+    TORCH_INTERNAL_ASSERT(pymethod != nullptr);
+    THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
+    if (pyfunc == nullptr) {
+      throw_python_error();
+    }
+    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
+    if (result == nullptr) {
+      throw_python_error();
+    }
+  }
+
+ private:
+  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
+      "debug", // Level::DEBUG
+      "info", // Level::INFO
+      "warning", // Level::WARNING
+      "error", // Level::ERROR
+      "critical" // Level::CRITICAL
+  };
+
+  // Note: logger_ must stay valid for the lifetime of this object
+  PyObject* logger_;
+};
+
 struct VerboseLogger : public PythonLogger {
   static std::optional<VerboseLogger> maybe_create() {
     if (python_verbose_logger == nullptr) {
