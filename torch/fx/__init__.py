@@ -7,6 +7,8 @@ demonstration of these components in action:
 ::
 
     import torch
+
+
     # Simple module for demonstration
     class MyModule(torch.nn.Module):
         def __init__(self) -> None:
@@ -17,11 +19,13 @@ demonstration of these components in action:
         def forward(self, x):
             return self.linear(x + self.param).clamp(min=0.0, max=1.0)
 
+
     module = MyModule()
 
     from torch.fx import symbolic_trace
+
     # Symbolic tracing frontend - captures the semantics of the module
-    symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
+    symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
 
     # High-level intermediate representation (IR) - Graph representation
     print(symbolic_traced.graph)
@@ -80,10 +84,10 @@ Several example transformations can be found at the
 repository.
 '''
 
+from ._symbolic_trace import PH, ProxyableClassMeta, symbolic_trace, Tracer, wrap
+from .graph import CodeGen, Graph
 from .graph_module import GraphModule
-from ._symbolic_trace import symbolic_trace, Tracer, wrap, PH, ProxyableClassMeta
-from .graph import Graph, CodeGen
-from .node import Node, map_arg, has_side_effect
-from .proxy import Proxy
 from .interpreter import Interpreter as Interpreter, Transformer as Transformer
+from .node import has_side_effect, map_arg, Node
+from .proxy import Proxy
 from .subgraph_rewriter import replace_pattern
