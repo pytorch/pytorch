@@ -4577,10 +4577,6 @@ def split_group(
     global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
-    if not device_id:
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
     _default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -4613,6 +4609,11 @@ def split_group(
     ):
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
+        )
+
+    if not parent_backend.is_initialized():
+        raise RuntimeError(
+            "parent pg is not fully initialized, not safe to split a child pg from it"
         )
 
     # set the group_desc before the color or no_cloor split
@@ -4661,6 +4662,8 @@ def split_group(
             break
     # if my rank does not belong to any sub group,
     # no_color split should be called
+    # split cannot be performed without device_id
+    assert device_id is not None
     if my_group is None or group_rank == -1:
         parent_backend.perform_nocolor_split(device_id)
         return None

@@ -1079,6 +1079,21 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #endif
 }
 
+bool ProcessGroupNCCL::isInitialized() {
+  if (devNCCLCommMap_.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  bool initialized = true;
+  for (const auto& [_, comm] : devNCCLCommMap_) {
+    if (!comm->isInitialized()) {
+      initialized = false;
+      break;
+    }
+  }
+  return initialized;
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;

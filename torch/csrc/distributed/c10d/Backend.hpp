@@ -386,6 +386,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
+  // whether the backend is fully initialized, e.g., for NCCL, if the NCCL comms
+  // are fully initialized and ready to use.
+  virtual bool isInitialized() {
+    return false;
+  }
+
   void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");

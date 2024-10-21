@@ -771,6 +771,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.is_initialized(), True)
 
         tensor = torch.full((1,), self.rank).cuda(device)
         # Create subgroup between ranks 0, 1
@@ -4560,6 +4561,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend.is_initialized(), True)
         # dist.broadcast take Source rank on global process group
         if self.rank < 2:
             dist.broadcast(tensor, 0, group=ng1)
@@ -4590,6 +4592,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.is_initialized(), True)
 
         # split the default PG into 2 subgroups, each subgroup (ng1) has 4 ranks.
         tensor1 = torch.full((1,), self.rank).cuda(device)
