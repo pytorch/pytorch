@@ -633,6 +633,15 @@ static PyObject* THModule_rename_privateuse1_backend(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THModule_unregister_privateuse1_backend(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  c10::unregister_privateuse1_backend();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THModule_get_privateuse1_backend_name(
     PyObject* _unused,
     PyObject* arg) {
@@ -1510,6 +1519,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
      METH_O,
+     nullptr},
+    {"_unregister_privateuse1_backend",
+     THModule_unregister_privateuse1_backend,
+     METH_NOARGS,
      nullptr},
     {"_get_privateuse1_backend_name",
      THModule_get_privateuse1_backend_name,
