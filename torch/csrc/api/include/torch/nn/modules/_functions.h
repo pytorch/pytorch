@@ -5,9 +5,7 @@
 #include <torch/nn/options/normalization.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functions {
+namespace torch::nn::functions {
 
 class CrossMapLRN2d : public torch::autograd::Function<CrossMapLRN2d> {
  public:
@@ -21,6 +19,4 @@ class CrossMapLRN2d : public torch::autograd::Function<CrossMapLRN2d> {
       torch::autograd::variable_list grad_output);
 };
 
-} // namespace functions
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functions

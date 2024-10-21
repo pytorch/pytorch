@@ -11,20 +11,14 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 template <typename S, typename T>
 class MapDataset;
 template <typename D, typename T>
 MapDataset<D, T> map(D, T); // NOLINT
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 namespace detail {
 template <typename T>
 struct is_optional : std::false_type {};
@@ -99,6 +93,4 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
 /// yields that many elements from the stream.
 template <typename Self, typename Batch = std::vector<Example<>>>
 using StreamDataset = BatchDataset<Self, Batch, /*BatchRequest=*/size_t>;
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets
