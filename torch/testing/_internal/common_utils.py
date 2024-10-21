@@ -74,6 +74,7 @@ from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
+from torch._logging.scribe import open_source_signpost
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -2396,6 +2397,25 @@ def print_repro_on_failure(repro_parts):
             sample_isolation_prefix = f"PYTORCH_OPINFO_SAMPLE_INPUT_INDEX={tracked_input.index}"
 
         repro_str = " ".join(filter(None, (sample_isolation_prefix, *repro_parts)))
+
+        event_path = os.getenv('GITHUB_EVENT_PATH')
+        pull_request_url = None
+        if event_path and os.path.exists(event_path):
+            with open(event_path) as event_file:
+                event_data = json.load(event_file)
+                pull_request_url = event_data.get('pull_request', {}).get('html_url')
+
+        open_source_signpost(
+            subsystem="test_repros",
+            name="test_failure",
+            parameters=json.dumps(
+                {
+                    'pull_request_url': pull_request_url,
+                    "repro": " ".join(filter(None, (sample_isolation_prefix, *repro_parts))),
+                }
+            ),
+        )
+
         repro_msg = f"""
 To execute this test, run the following from the base repo dir:
     {repro_str}
