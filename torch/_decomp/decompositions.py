@@ -2327,6 +2327,7 @@ def native_batch_norm_backward(
         grad_input = grad_out_cast * grad_scale
 
     if output_mask[1]:
+        assert invstd is not None
         grad_weight = dot_p * invstd
     else:
         grad_weight = None  # "None" doesn't work with vjp, should use zeros for vjp
