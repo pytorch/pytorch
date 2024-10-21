@@ -781,20 +781,21 @@ class _PyTreeCodeGen(CodeGen):
                 def __repr__(self) -> str:
                     return self
 
+            in_spec = self.pytree_info.in_spec
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type is tuple
-                and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type is tuple
-                and self.pytree_info.in_spec.children_specs[1].type is dict
+                in_spec.type is tuple
+                and in_spec.num_children == 2
+                and in_spec.child(0).type is tuple
+                and in_spec.child(1).type is dict
             )
             if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
+                count_args = in_spec.child(0).num_children
                 sig_args = repr(tuple(map(StrReprNoQuotes, fn_args[:count_args])))
                 sig_kwargs = repr(
                     dict(
                         zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
+                            in_spec.child(1).context,
                             map(StrReprNoQuotes, fn_args[count_args:]),
                         )
                     )

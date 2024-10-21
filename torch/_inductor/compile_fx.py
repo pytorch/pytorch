@@ -252,7 +252,7 @@ def _unlift_graph(mod, gm, graph_signature):
         gm,
         lifted_inputs,
         mutated_outputs,
-        pytree.LeafSpec(),
+        pytree.treespec_leaf(),
         None,
         state_dict,
         {},
