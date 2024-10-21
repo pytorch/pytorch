@@ -134,6 +134,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
+
     _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d  # type: ignore[assignment,misc]
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
 
@@ -195,6 +196,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
+
     _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d  # type: ignore[assignment,misc]
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
 
@@ -259,6 +261,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
+
     _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d  # type: ignore[assignment,misc]
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
 

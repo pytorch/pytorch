@@ -521,6 +521,7 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -805,6 +806,7 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -1210,6 +1212,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ["input_size", "hidden_size", "bias", "nonlinearity"]
 
     def __init__(

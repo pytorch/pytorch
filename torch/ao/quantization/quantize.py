@@ -365,10 +365,8 @@ def prepare(
            # user will manually define the corresponding observed
            # module class which has a from_float class method that converts
            # float custom module to observed custom module
-           "float_to_observed_custom_module_class": {
-               CustomModule: ObservedCustomModule
-           }
-        }
+           "float_to_observed_custom_module_class": {CustomModule: ObservedCustomModule}
+       }
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -804,9 +802,9 @@ def _get_observer_dict(mod, target_dict, prefix=""):
         return prefix if prefix == "" else prefix + "."
 
     if hasattr(mod, "activation_post_process"):
-        target_dict[
-            get_prefix(prefix) + "activation_post_process"
-        ] = mod.activation_post_process
+        target_dict[get_prefix(prefix) + "activation_post_process"] = (
+            mod.activation_post_process
+        )
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
         _get_observer_dict(child, target_dict, module_prefix)

@@ -96,7 +96,12 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
+        self.out_proj = nn.Linear(  # type: ignore[assignment]
+            self.embed_dim,
+            self.embed_dim,
+            bias=bias,
+            **factory_kwargs,
+        )
 
         # Functionals
         self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()

@@ -118,8 +118,9 @@ class AdaroundFakeQuantizer(FakeQuantize):
             X_detached = X.detach()
             self.activation_post_process(X_detached)
             _scale, _zero_point = self.activation_post_process.calculate_qparams()
-            _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(
-                self.zero_point.device
+            _scale, _zero_point = (
+                _scale.to(self.scale.device),
+                _zero_point.to(self.zero_point.device),
             )
             dims = list(range(X.dim()))
             if not self.is_per_tensor:

@@ -2,6 +2,7 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
+
 import functools
 import warnings
 from collections import OrderedDict

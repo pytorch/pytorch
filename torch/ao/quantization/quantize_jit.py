@@ -280,19 +280,22 @@ def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=Fal
     from torch.ao.quantization import get_default_qconfig
     from torch.ao.quantization import quantize_jit
 
-    ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
-    qconfig = get_default_qconfig('fbgemm')
+    ts_model = torch.jit.script(
+        float_model.eval()
+    )  # or torch.jit.trace(float_model, input)
+    qconfig = get_default_qconfig("fbgemm")
+
+
     def calibrate(model, data_loader):
         model.eval()
         with torch.no_grad():
             for image, target in data_loader:
                 model(image)
 
+
     quantized_model = quantize_jit(
-        ts_model,
-        {'': qconfig},
-        calibrate,
-        [data_loader_test])
+        ts_model, {"": qconfig}, calibrate, [data_loader_test]
+    )
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_jit.quantize_jit")
@@ -330,19 +333,22 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
     from torch.ao.quantization import per_channel_dynamic_qconfig
     from torch.ao.quantization import quantize_dynamic_jit
 
-    ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
-    qconfig = get_default_qconfig('fbgemm')
+    ts_model = torch.jit.script(
+        float_model.eval()
+    )  # or torch.jit.trace(float_model, input)
+    qconfig = get_default_qconfig("fbgemm")
+
+
     def calibrate(model, data_loader):
         model.eval()
         with torch.no_grad():
             for image, target in data_loader:
                 model(image)
 
+
     quantized_model = quantize_dynamic_jit(
-        ts_model,
-        {'': qconfig},
-        calibrate,
-        [data_loader_test])
+        ts_model, {"": qconfig}, calibrate, [data_loader_test]
+    )
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_jit.quantize_dynamic_jit")
@@ -401,13 +407,13 @@ def _quantize_ondevice_dynamic_jit(
     from torch.ao.quantization import per_channel_dynamic_qconfig
     from torch.ao.quantization.quantize_jit import _quantize_ondevice_dynamic_jit
 
-    ts_model = torch.jit.script(float_model.eval())  # or torch.jit.trace(float_model, input)
-    qconfig = get_default_qconfig('fbgemm')
+    ts_model = torch.jit.script(
+        float_model.eval()
+    )  # or torch.jit.trace(float_model, input)
+    qconfig = get_default_qconfig("fbgemm")
     quant_ready_model = _quantize_ondevice_dynamic_jit(
-        ts_model,
-        {'': qconfig},
-        'forward',
-        True)
+        ts_model, {"": qconfig}, "forward", True
+    )
     ```
     """
     return _quantize_ondevice_dynamic_jit_impl(

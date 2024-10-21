@@ -75,13 +75,15 @@ class ActivationSparsifier:
         >>>     return torch.eye(data.shape).to(data.device)
         >>>
         >>>
-        >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
+        >>> act_sparsifier.register_layer(
+        ...     model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn
+        ... )
         >>>
         >>> # start training process
         >>> for _ in [...]:
-        >>>     # epoch starts
-        >>>         # model.forward(), compute_loss() and model.backwards()
-        >>>     # epoch ends
+        >>> # epoch starts
+        >>> # model.forward(), compute_loss() and model.backwards()
+        >>> # epoch ends
         >>>     act_sparsifier.step()
         >>> # end training process
         >>> sparsifier.squash_mask()
@@ -231,9 +233,9 @@ class ActivationSparsifier:
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self._aggregate_hook(name=name))
 
-        self.state[name][
-            "mask"
-        ] = None  # mask will be created when model forward is called.
+        self.state[name]["mask"] = (
+            None  # mask will be created when model forward is called.
+        )
 
         # attach agg hook
         self.data_groups[name]["hook"] = agg_hook
@@ -360,9 +362,9 @@ class ActivationSparsifier:
                 configs["hook"] = configs["layer"].register_forward_pre_hook(
                     self._sparsify_hook(name)
                 )
-            configs[
-                "hook_state"
-            ] = "sparsify"  # signals that sparsify hook is now attached
+            configs["hook_state"] = (
+                "sparsify"  # signals that sparsify hook is now attached
+            )
 
     def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing

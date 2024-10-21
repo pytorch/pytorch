@@ -76,7 +76,8 @@ def get_node_first_input_and_output_type(
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
         is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32_OR_INT8
         )
         if (
             isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase))  # type: ignore[arg-type]
@@ -94,10 +95,12 @@ def get_node_first_input_and_output_type(
             )
             return (prev_node_output_type, prev_node_output_type)
         is_known_fp32_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32
         )
         is_known_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_INT8
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
@@ -230,7 +233,8 @@ def get_node_input_qparams(
             return (module_obj.scale, module_obj.zero_point)  # type: ignore[return-value]
 
         is_known_fp32_or_int8_input_module = any(
-            isinstance(module_obj, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+            isinstance(module_obj, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32_OR_INT8
         )
         if is_known_fp32_or_int8_input_module:
             return get_node_input_qparams(prev_node, gm, node_type_to_io_type_map)

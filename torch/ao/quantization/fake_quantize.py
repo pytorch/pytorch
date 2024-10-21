@@ -133,7 +133,7 @@ class FakeQuantize(FakeQuantizeBase):
     The output of this module is given by::
 
         x_out = (
-          clamp(round(x/scale + zero_point), quant_min, quant_max) - zero_point
+            clamp(round(x / scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
 
     * :attr:`is_dynamic` indicates whether the fake quantie is a placeholder for dynamic quantization
@@ -225,8 +225,9 @@ class FakeQuantize(FakeQuantizeBase):
         if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
-            _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(
-                self.zero_point.device
+            _scale, _zero_point = (
+                _scale.to(self.scale.device),
+                _zero_point.to(self.zero_point.device),
             )
             if self.scale.shape != _scale.shape:
                 self.scale.resize_(_scale.shape)

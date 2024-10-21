@@ -182,9 +182,8 @@ class RNNCell(RNNCellBase):
     # TODO: refactor nn.RNNCell to have a _forward that takes weight_ih and weight_hh as input
     # and remove duplicated code, same for the other two Cell modules
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (
-            1,
-            2,
+        assert (
+            input.dim() in (1, 2)
         ), f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
@@ -271,9 +270,8 @@ class LSTMCell(RNNCellBase):
     def forward(
         self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
     ) -> Tuple[Tensor, Tensor]:
-        assert input.dim() in (
-            1,
-            2,
+        assert (
+            input.dim() in (1, 2)
         ), f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
@@ -344,9 +342,8 @@ class GRUCell(RNNCellBase):
         return "QuantizedGRUCell(Reference)"
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (
-            1,
-            2,
+        assert (
+            input.dim() in (1, 2)
         ), f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
@@ -747,9 +744,8 @@ class GRU(RNNBase):
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
-            assert input.dim() in (
-                2,
-                3,
+            assert (
+                input.dim() in (2, 3)
             ), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1

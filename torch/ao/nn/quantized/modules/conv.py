@@ -518,6 +518,7 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU2d
@@ -647,6 +648,7 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU3d

@@ -18,6 +18,7 @@ class Linear(torch.nn.Module):
     r"""
     A dynamically quantized sparse linear module with float tensor as inputs and outputs.
     """
+
     _version = 1
     _op_type = "sparse_dynamic"
     _FLOAT_MODULE = torch.nn.Linear

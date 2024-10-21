@@ -817,9 +817,13 @@ def reference_representation_rewrite(model: GraphModule) -> GraphModule:
         replacement = rewrite_info.replacement
         pattern_post_trans = rewrite_info.pattern_post_trans
         replacement_post_trans = rewrite_info.replacement_post_trans
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, using_training_ir=using_training_ir)  # type: ignore[arg-type, assignment]
+        pattern = _get_aten_graph_module_for_pattern(
+            pattern, example_inputs, using_training_ir=using_training_ir
+        )  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(pattern)  # type: ignore[arg-type]
-        replacement = _get_aten_graph_module_for_pattern(replacement, example_inputs, using_training_ir=using_training_ir)  # type: ignore[arg-type, assignment]
+        replacement = _get_aten_graph_module_for_pattern(
+            replacement, example_inputs, using_training_ir=using_training_ir
+        )  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(replacement)  # type: ignore[arg-type]
         if pattern_post_trans:
             pattern = pattern_post_trans(pattern)

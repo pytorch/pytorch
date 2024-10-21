@@ -98,7 +98,8 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
 
       my_qconfig = QConfig(
           activation=MinMaxObserver.with_args(dtype=torch.qint8),
-          weight=default_observer.with_args(dtype=torch.qint8))
+          weight=default_observer.with_args(dtype=torch.qint8),
+      )
 
     """
 

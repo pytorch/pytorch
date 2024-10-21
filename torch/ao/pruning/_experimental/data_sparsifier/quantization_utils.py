@@ -118,9 +118,9 @@ def post_training_sparse_quantize(
 
             quantized_weight = quantized_emb.weight()  # type: ignore[operator]
             quantize_params["scales"][name] = quantized_weight.q_per_channel_scales()
-            quantize_params["zero_points"][
-                name
-            ] = quantized_weight.q_per_channel_zero_points()
+            quantize_params["zero_points"][name] = (
+                quantized_weight.q_per_channel_zero_points()
+            )
             quantize_params["dequant_weights"][name] = torch.dequantize(
                 quantized_weight
             )

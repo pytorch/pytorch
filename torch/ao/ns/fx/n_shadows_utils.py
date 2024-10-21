@@ -1078,9 +1078,7 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
         if shadow_wrapper_node is None:
             continue
 
-        shadow_wrapper = getattr_from_fqn(
-            m, shadow_wrapper_node.target
-        )  # type: ignore[arg-type]
+        shadow_wrapper = getattr_from_fqn(m, shadow_wrapper_node.target)  # type: ignore[arg-type]
         weight_info = _get_weight_info_from_shadow_wrapper(shadow_wrapper)
         if weight_info is None:
             continue
@@ -1231,9 +1229,9 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
             "comparison_fn_name": subgraph_candidate_results[0]["comparison_fn_name"],
         }
 
-        subgraph_name_to_subgraph_results[subgraph_name][
-            subgraph_candidate_idx
-        ] = subgraph_results
+        subgraph_name_to_subgraph_results[subgraph_name][subgraph_candidate_idx] = (
+            subgraph_results
+        )
 
     return dict(subgraph_name_to_subgraph_results)
 
