@@ -156,14 +156,13 @@ class CapabilityBasedPartitioner:
 
         def merge_single_node(node: Node, id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
-                # Iterate through all the downstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of this node to the target
-                # partition id.
-                downstream_nodes = self.dependency_viewer.downstreams_of(node)
-                for curr_node in downstream_nodes:
-                    target_id = assignment.get(curr_node, None)
+                # Iterate through all the users of this node and update the partition map to indicate
+                # that there is a path from the partition id of this node to the target partition id.
+                for user_node in node.users:
+                    target_id = assignment.get(user_node, None)
                     if target_id is not None:
                         partition_map[id].add(target_id)
+                        partition_map[id].update(partition_map[target_id])
 
                 # Iterate through all the upstream nodes of this node and update the partition map
                 # to indicate that there is a path from the partition id of the upstream node to the
