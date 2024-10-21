@@ -293,12 +293,15 @@ def generate_binconstraint_t(constraint, counter):
             BinConstraintD(d3, Dyn, op_eq),
             BinConstraintD(d4, Dyn, op_eq),
         ]
-        return Disj(
-            [
-                Conj(conj),
-                BinConstraintT(constraint.lhs, TensorType([d1, d2, d3, d4]), op_eq),
-            ]
-        ), counter
+        return (
+            Disj(
+                [
+                    Conj(conj),
+                    BinConstraintT(constraint.lhs, TensorType([d1, d2, d3, d4]), op_eq),
+                ]
+            ),
+            counter,
+        )
 
     elif constraint.op == op_consistency:
         c_dyn = Disj(
@@ -307,9 +310,15 @@ def generate_binconstraint_t(constraint, counter):
                 BinConstraintT(constraint.rhs, Dyn, op_eq),
             ]
         )
-        [c_tensor_1, c_tensor_2, c_tensor_3, c_tensor_4], counter = (
-            gen_consistency_constraints(constraint, counter)
-        )
+        (
+            (
+                c_tensor_1,
+                c_tensor_2,
+                c_tensor_3,
+                c_tensor_4,
+            ),
+            counter,
+        ) = gen_consistency_constraints(constraint, counter)
 
         return Disj([c_dyn, c_tensor_1, c_tensor_2, c_tensor_3, c_tensor_4]), counter
 
@@ -339,13 +348,16 @@ def generate_binconstraint_d(constraint, counter):
             return T(), counter
 
     elif constraint.op == op_consistency:
-        return Disj(
-            [
-                BinConstraintD(constraint.lhs, constraint.rhs, op_eq),
-                BinConstraintD(constraint.rhs, Dyn, op_eq),
-                BinConstraintD(constraint.lhs, Dyn, op_eq),
-            ]
-        ), counter
+        return (
+            Disj(
+                [
+                    BinConstraintD(constraint.lhs, constraint.rhs, op_eq),
+                    BinConstraintD(constraint.rhs, Dyn, op_eq),
+                    BinConstraintD(constraint.lhs, Dyn, op_eq),
+                ]
+            ),
+            counter,
+        )
 
     else:
         return constraint, counter
@@ -619,15 +631,20 @@ def generate_reshape(constraint, counter):
             [c2_tensor4, gen_all_reshape_possibilities([d1, d2, d3, d4], target)]
         )
 
-        return Conj(
-            [
-                Disj([c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]),
-                nat_d1,
-                nat_d2,
-                nat_d3,
-                nat_d4,
-            ]
-        ), counter
+        return (
+            Conj(
+                [
+                    Disj(
+                        [c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]
+                    ),
+                    nat_d1,
+                    nat_d2,
+                    nat_d3,
+                    nat_d4,
+                ]
+            ),
+            counter,
+        )
 
     # then there must be exactly one occurrence of dyn
     else:
@@ -675,15 +692,20 @@ def generate_reshape(constraint, counter):
         )
         all_tensor_4 = Conj([c2_tensor4, Disj([c41, c42])])
 
-        return Conj(
-            [
-                Disj([c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]),
-                nat_d1,
-                nat_d2,
-                nat_d3,
-                nat_d4,
-            ]
-        ), counter
+        return (
+            Conj(
+                [
+                    Disj(
+                        [c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]
+                    ),
+                    nat_d1,
+                    nat_d2,
+                    nat_d3,
+                    nat_d4,
+                ]
+            ),
+            counter,
+        )
 
 
 @register_transformation_rule(ApplyBroadcasting)
@@ -755,9 +777,10 @@ def generate_broadcasting(constraint, counter):
         ]
     )
 
-    return Conj(
-        [final_result, *nat_dims_1, *nat_dims_2, *nat_dims_3, *nat_dims_4]
-    ), counter
+    return (
+        Conj([final_result, *nat_dims_1, *nat_dims_2, *nat_dims_3, *nat_dims_4]),
+        counter,
+    )
 
 
 def transform_constraint(constraint: Constraint, counter: int):
