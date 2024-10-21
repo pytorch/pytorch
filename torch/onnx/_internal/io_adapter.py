@@ -490,7 +490,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
         """Convert float tensors to complex tensors.
 
         Args:
-            model_output: The model output.
+            model_outputs: The model output.
             model: The PyTorch model.
 
         Returns:
