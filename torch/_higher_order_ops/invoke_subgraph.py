@@ -15,9 +15,9 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    register_hop_fake,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -33,6 +33,8 @@ invoke_subgraph_counter = 0
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("invoke_subgraph")
+        self.tags = ()
+        self.is_view = False
 
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
@@ -60,6 +62,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+def get_invoke_subgraph_cache():
+    cache = None
+    if tracing_ctx := torch._guards.TracingContext.try_get():
+        cache = tracing_ctx.hop_dispatch_set_cache.get_cache(invoke_subgraph)
+    return cache
 
 
 def trace_joint_graph(fn, fw_inputs, fw_outputs):
@@ -191,11 +200,26 @@ def _(subgraph, identifier, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, operands)
 
+    # Check if we have already traced the subgraph.
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    if invoke_subgraph_cache:
+        if saved_autograd_fn := invoke_subgraph_cache.get_autograd_key_entry(
+            identifier
+        ):
+            return saved_autograd_fn(*operands)
+
     fw_graph, bw_graph, num_fw_outs = create_fw_bw_graph(subgraph, operands)
-    # TODO(anijain2305) - Implement caching of autograd function op.
-    return InvokeSubgraphAutogradOp.apply(
-        fw_graph, bw_graph, identifier, num_fw_outs, *operands
-    )
+
+    def autograd_fn_callable(*args):
+        return InvokeSubgraphAutogradOp.apply(
+            fw_graph, bw_graph, identifier, num_fw_outs, *args
+        )
+
+    # Save the autograd_fn_callable in the dispatch set cache.
+    if invoke_subgraph_cache:
+        invoke_subgraph_cache.add_autograd_key_entry(identifier, autograd_fn_callable)
+
+    return autograd_fn_callable(*operands)
 
 
 @invoke_subgraph.py_functionalize_impl
@@ -210,26 +234,34 @@ def _(ctx, subgraph, identifier, operands):
     return ctx.wrap_tensors(out)
 
 
-@invoke_subgraph.py_impl(FakeTensorMode)
-def _(mode, subgraph, identifier, operands):
-    # TODO(anijain2305) - Implement fake tensor caching.
+@register_hop_fake(invoke_subgraph)
+def _(subgraph, identifier, operands):
     return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
-    # TODO(anijain2305) - Implement proxy tensor caching.
-    example_out = invoke_subgraph(subgraph, identifier, operands)
-    graph = reenter_make_fx(subgraph)(*operands)
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
-    qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
-    proxy_mode.tracer.root.register_module(qualname, graph)
+    # Check if we have already traced the subgraph.
+    graph = None
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    if invoke_subgraph_cache:
+        graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
+
+    if graph is None:
+        graph = reenter_make_fx(subgraph)(*operands)
+        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
+        proxy_mode.tracer.root.register_module(qualname, graph)
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
     node_args = (graph, identifier, operands)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
+
+    example_out = invoke_subgraph(graph, identifier, operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
