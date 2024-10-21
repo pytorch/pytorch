@@ -807,6 +807,18 @@ class LoweringTest(MultiProcessTestCase):
 
         self.assertNotIn("one_shot_all_reduce", code_2)
 
+        # All-reduce on matmul output
+        def func_3(x):
+            x = x @ x
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_3 = torch.compile(func_3, fullgraph=True)
+        code_3 = run_and_get_triton_code(compiled_3, arg)
+
+        self.assertIn("one_shot_all_reduce", code_3)
+        self.assertNotIn("return (buf0", code_3)
+
 
 if __name__ == "__main__":
     run_tests()

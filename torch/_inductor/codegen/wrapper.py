@@ -54,7 +54,6 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
@@ -182,13 +181,16 @@ def user_defined_kernel_grid_fn_code(
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
-                tuple(
-                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+            (
+                wrapper.codegen_shape_tuple(
+                    tuple(
+                        wrapper.generate_example_arg_value(g, type(g))
+                        for g in sympy_grid
+                    )
                 )
-            )
-            if config.triton.autotune_at_compile_time
-            else None,
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
 
     def writeline(line: str, example_grid: Optional[str] = None):
@@ -301,17 +303,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
                 if self.last_seen_device_guard_index is None:
-                    if config.abi_compatible:
-                        code.writeline(
-                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                        )
-                    else:
-                        code.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
-                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
-                            )
-                        )
+                    code.writeline(
+                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                    )
                 else:
                     assert (
                         self.last_seen_device_guard_index == self.device_idx
@@ -320,10 +314,6 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
                         f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                        if config.abi_compatible
-                        else maybe_hipify_code_wrapper(
-                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
-                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -446,28 +436,37 @@ class NullLine(MemoryPlanningLine):
 
 
 @dataclasses.dataclass
-class CommBufferAllocateLine(WrapperLine):
+class CommBufferLine(WrapperLine):
     wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
     node: ir.Buffer
 
     @property
-    def size(self):
+    def size(self) -> int:
+        from torch._inductor.utils import is_symbolic
+
         numel = self.node.get_numel()
         dtype = self.node.get_dtype()
-        return numel * dtype.itemsize
+        if is_symbolic(numel):
+            raise AssertionError(
+                f"The size of a comm buffer can't be symbolic: {self.node}"
+            )
+        return int(numel) * dtype.itemsize
 
     @property
-    def comm_buffer_type(self):
+    def comm_buffer_type(self) -> ir.CommBufferType:
         layout = self.node.get_layout()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.comm_buffer_type
 
     @property
-    def group_name(self):
+    def group_name(self) -> str:
         layout = self.node.get_layout()
         assert isinstance(layout, ir.CommBufferLayout)
         return layout.group_name
 
+
+@dataclasses.dataclass
+class CommBufferAllocateLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         name = self.node.get_name()
@@ -475,34 +474,41 @@ class CommBufferAllocateLine(WrapperLine):
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
         stride = tuple(self.node.get_stride())
+        code.writeline(
+            self.make_allocation_line(
+                self.comm_buffer_type,
+                self.group_name,
+                self.wrapper,
+                name,
+                device,
+                dtype,
+                shape,
+                stride,
+            )
+        )
 
-        if self.comm_buffer_type == "symm_mem":
-            code.writeline(
+    @staticmethod
+    def make_allocation_line(
+        comm_buffer_type, group_name, wrapper, name, device, dtype, shape, stride
+    ):
+        if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
+            return (
                 f"{name} = empty_strided_p2p("
-                f"{self.wrapper.codegen_shape_tuple(shape)}, "
-                f"{self.wrapper.codegen_shape_tuple(stride)}, "
+                f"{wrapper.codegen_shape_tuple(shape)}, "
+                f"{wrapper.codegen_shape_tuple(stride)}, "
                 f"{dtype}, "
                 f'torch.device("cuda:{device.index}"), '
-                f'group_name="{self.group_name}", '
+                f'group_name="{group_name}", '
                 f"alloc_id={random.randint(0, 2**64 - 1)})"
             )
         else:
             raise NotImplementedError(
-                f"Unsupported comm buffer type: {self.comm_buffer_type}"
+                f"Unsupported comm buffer type: {comm_buffer_type}"
             )
 
 
 @dataclasses.dataclass
-class CommBufferFreeLine(WrapperLine):
-    wrapper: PythonWrapperCodeGen  # type: ignore[name-defined] # noqa: F821
-    node: ir.Buffer
-
-    @property
-    def comm_buffer_type(self):
-        layout = self.node.get_layout()
-        assert isinstance(layout, ir.CommBufferLayout)
-        return layout.comm_buffer_type
-
+class CommBufferFreeLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
         code.writeline(f"{line} # {self.comm_buffer_type} buffer free")

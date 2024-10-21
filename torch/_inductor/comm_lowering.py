@@ -53,7 +53,9 @@ log = logging.getLogger(__name__)
 # ops for different cases). Later, the codegen will perform "persistent
 # allocation" to satisfy the aforementioned constraints, and optionally,
 # perform buffer planning to optimize overall memory usage.
-def can_convert_to_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> bool:
+def can_convert_to_comm_buffer(
+    buffer: ir.Buffer, comm_buffer_type: ir.CommBufferType
+) -> bool:
     """
     Check if a buffer can be converted to a comm buffer of the specified
     `comm_buffer_type`.
@@ -76,7 +78,7 @@ def can_convert_to_comm_buffer(buffer: ir.Buffer, comm_buffer_type: str) -> bool
 
 
 def convert_to_comm_buffer(
-    buffer: ir.Buffer, comm_buffer_type: str, group_name: str
+    buffer: ir.Buffer, comm_buffer_type: ir.CommBufferType, group_name: str
 ) -> None:
     """
     Convert a buffer to a comm buffer of the specified `comm_buffer_type`.
@@ -152,7 +154,7 @@ def _should_lower_as_one_shot_all_reduce(
     return (
         config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
-        and can_convert_to_comm_buffer(buffer, "symm_mem")
+        and can_convert_to_comm_buffer(buffer, ir.CommBufferType.SYMM_MEM)
         and reduce_op in ("sum",)
         and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
     )
@@ -160,7 +162,7 @@ def _should_lower_as_one_shot_all_reduce(
 
 def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     buffer = _get_buffer(inp)
-    convert_to_comm_buffer(buffer, "symm_mem", group_name)
+    convert_to_comm_buffer(buffer, ir.CommBufferType.SYMM_MEM, group_name)
     return pytree.tree_map(
         ir.TensorBox.create,
         ir.FallbackKernel.create(
