@@ -359,7 +359,6 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 def log_chromium_event_internal(
     event: Dict[str, Any],
     stack: List[str],
-    compile_id: Optional[str],
     logger_uuid: str,
     start_time_ns: int,
 ):
