@@ -2629,13 +2629,22 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 
-        if key in tx.output.seen_invoke_subgraphs:
-            return tx.output.seen_invoke_subgraphs[key]
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+
+        if invoke_subgraph_cache:
+            if identifier := invoke_subgraph_cache.get_dynamo_identifier(key):
+                return identifier
 
         body_name = super().install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
         )
-        tx.output.seen_invoke_subgraphs[key] = body_name
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_dynamo_identifier(key, body_name)
+
         return body_name
 
     def call_function(
