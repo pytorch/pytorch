@@ -318,7 +318,7 @@ static std::string dladdr_lookup(void* addr) {
 
 struct Symbolizer {
   Symbolizer() {
-    auto envar = c10::utils::get_env("TORCH_ADDR2LINE_BINARY");
+    const auto envar = c10::utils::get_env("TORCH_ADDR2LINE_BINARY");
     if (envar.has_value()) {
       // currently we take user's input as is without checking
       addr2line_binary_ = std::move(envar.value());
