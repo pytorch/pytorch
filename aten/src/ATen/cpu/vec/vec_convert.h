@@ -13,7 +13,11 @@ template <
     int src_n,
     typename Enabled = void>
 struct VecConvert {
+#if __GNUC__ <= 10 && defined(__ARM_FEATURE_SVE)
+  static inline VectorizedN<dst_t, dst_n> __attribute__ ((optimize("-fno-tree-vectorize"))) apply(
+#else
   static inline VectorizedN<dst_t, dst_n> apply(
+#endif
       const VectorizedN<src_t, src_n>& src) {
     constexpr int count = std::min(
         VectorizedN<src_t, src_n>::size(), VectorizedN<dst_t, dst_n>::size());
