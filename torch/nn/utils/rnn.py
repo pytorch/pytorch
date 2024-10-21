@@ -115,8 +115,7 @@ class PackedSequence(PackedSequence_):
         dtype: torch.dtype,
         non_blocking: bool = ...,
         copy: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
     def to(
@@ -125,8 +124,7 @@ class PackedSequence(PackedSequence_):
         dtype: Optional[torch.dtype] = ...,
         non_blocking: bool = ...,
         copy: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
     def to(
@@ -134,8 +132,7 @@ class PackedSequence(PackedSequence_):
         other: Tensor,
         non_blocking: bool = ...,
         copy: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
@@ -476,7 +473,10 @@ def pad_sequence(
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     return torch._C._nn.pad_sequence(
-        sequences, batch_first, padding_value, padding_side  # type: ignore[arg-type]
+        sequences,  # type: ignore[arg-type]
+        batch_first,
+        padding_value,
+        padding_side,
     )
 
 

@@ -25,7 +25,7 @@ def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
 
         >>> # xdoctest: +SKIP
         >>> from torch.masked import MaskedTensor
-        >>> data = torch.arange(6).reshape(2,3)
+        >>> data = torch.arange(6).reshape(2, 3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = MaskedTensor(data, mask)
         >>> is_masked_tensor(mt)

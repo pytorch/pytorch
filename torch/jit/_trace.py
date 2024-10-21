@@ -960,6 +960,7 @@ def trace(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -967,6 +968,7 @@ def trace(
 
             def forward(self, x):
                 return self.conv(x)
+
 
         n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
@@ -1176,6 +1178,7 @@ def trace_module(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1202,7 +1205,7 @@ def trace_module(
 
         # Trace specific methods on a module (specified in `inputs`), constructs
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        inputs = {"forward": example_forward_input, "weighted_kernel_sum": example_weight}
         module = torch.jit.trace_module(n, inputs)
 
     """

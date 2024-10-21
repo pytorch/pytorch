@@ -316,7 +316,7 @@ def unfold3d(
     Example:
         >>> # xdoctest: +SKIP
         >>> B, C, D, H, W = 3, 4, 5, 6, 7
-        >>> tensor = torch.arange(1, B * C * D * H * W + 1.).view(B, C, D, H, W)
+        >>> tensor = torch.arange(1, B * C * D * H * W + 1.0).view(B, C, D, H, W)
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """

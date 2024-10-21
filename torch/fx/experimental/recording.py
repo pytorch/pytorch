@@ -443,7 +443,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # Here, we allow the value of each field to be mapped, so that we appropriately
     # compare the two values.
     def compare_vars(
-        map_value: Callable[[str, Any], Any]
+        map_value: Callable[[str, Any], Any],
     ) -> List[Tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 

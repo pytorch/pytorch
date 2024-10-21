@@ -74,9 +74,7 @@ def clip_grad_norm_(
     first_device = grads[0].device
     grouped_grads: Dict[
         Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
-    ] = _group_tensors_by_device_and_dtype(
-        [grads]
-    )  # type: ignore[assignment]
+    ] = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
     norms: List[Tensor] = []
     for (device, _), ([device_grads], _) in grouped_grads.items():  # type: ignore[assignment]

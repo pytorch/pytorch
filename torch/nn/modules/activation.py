@@ -1266,8 +1266,10 @@ class MultiheadAttention(Module):
         elif query.is_nested and (
             key_padding_mask is not None or attn_mask is not None
         ):
-            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
-                                 is not supported with NestedTensor input"
+            why_not_fast_path = (
+                "supplying both src_key_padding_mask and src_mask at the same time "
+                "is not supported with NestedTensor input"
+            )
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 

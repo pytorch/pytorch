@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-""" This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
+"""This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention"""
+
 import contextlib
 from typing import Iterable, List, Union
 from warnings import warn
@@ -102,6 +103,7 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
 
         from torch.nn.functional import scaled_dot_product_attention
         from torch.nn.attention import SDPBackend, sdpa_kernel
+
         # Only enable flash attention backend
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             scaled_dot_product_attention(...)

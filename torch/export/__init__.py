@@ -410,22 +410,24 @@ def save(
         import torch
         import io
 
+
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x + 10
 
+
         ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
-        torch.export.save(ep, 'exported_program.pt2')
+        torch.export.save(ep, "exported_program.pt2")
 
         # Save to io.BytesIO buffer
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
-        torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+        extra_files = {"foo.txt": b"bar".decode("utf-8")}
+        torch.export.save(ep, "exported_program.pt2", extra_files=extra_files)
 
     """
     if not isinstance(ep, ExportedProgram):
@@ -495,18 +497,18 @@ def load(
         import io
 
         # Load ExportedProgram from file
-        ep = torch.export.load('exported_program.pt2')
+        ep = torch.export.load("exported_program.pt2")
 
         # Load ExportedProgram from io.BytesIO object
-        with open('exported_program.pt2', 'rb') as f:
+        with open("exported_program.pt2", "rb") as f:
             buffer = io.BytesIO(f.read())
         buffer.seek(0)
         ep = torch.export.load(buffer)
 
         # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
-        print(extra_files['foo.txt'])
+        extra_files = {"foo.txt": ""}  # values will be replaced with data
+        ep = torch.export.load("exported_program.pt2", extra_files=extra_files)
+        print(extra_files["foo.txt"])
         print(ep(torch.randn(5)))
     """
     if isinstance(f, (str, os.PathLike)):
@@ -594,17 +596,21 @@ def register_dataclass(
             feature: torch.Tensor
             bias: int
 
+
         class OutputDataClass:
             res: torch.Tensor
+
 
         torch.export.register_dataclass(InputDataClass)
         torch.export.register_dataclass(OutputDataClass)
 
+
         def fn(o: InputDataClass) -> torch.Tensor:
-            res = res=o.feature + o.bias
+            res = res = o.feature + o.bias
             return OutputDataClass(res=res)
 
-        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1), ))
+
+        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1),))
         print(ep)
 
     """

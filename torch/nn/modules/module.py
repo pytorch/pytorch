@@ -407,6 +407,7 @@ class Module:
         import torch.nn as nn
         import torch.nn.functional as F
 
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1199,16 +1200,13 @@ class Module:
         device: Optional[DeviceLikeType] = ...,
         dtype: Optional[dtype] = ...,
         non_blocking: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self: ...
 
     @overload
-    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
@@ -1717,7 +1715,11 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
+            name = (
+                torch.jit._trace._trace_module_map[self]  # type: ignore[index]
+                if self in torch.jit._trace._trace_module_map  # type: ignore[operator]
+                else None
+            )
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -2133,12 +2135,12 @@ class Module:
     @overload
     def state_dict(
         self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...
-    ) -> T_destination:
-        ...
+    ) -> T_destination: ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
-        ...
+    def state_dict(
+        self, *, prefix: str = ..., keep_vars: bool = ...
+    ) -> Dict[str, Any]: ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.

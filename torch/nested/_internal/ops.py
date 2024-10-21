@@ -1456,8 +1456,8 @@ def native_layer_norm_default(func, *args, **kwargs):
         )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
 
         padded_normalized = (
-            padded_input - mean
-        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+            (padded_input - mean) * padded_mask
+        )  # mask elements outside of the ragged dimension size for correct variance calculation
 
         variance = (
             torch.sum(

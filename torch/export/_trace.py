@@ -1081,9 +1081,9 @@ def _get_module_call_graph(
     """
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
-    module_call_specs: Dict[
-        str, Dict[str, TreeSpec]
-    ] = export_artifact.module_call_specs
+    module_call_specs: Dict[str, Dict[str, TreeSpec]] = (
+        export_artifact.module_call_specs
+    )
     out_spec: TreeSpec = export_artifact.out_spec
 
     # Make module signatures.
@@ -1201,7 +1201,8 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
             ).module()
 
         elif isinstance(traced_callable, torch.ScriptMethod) and isinstance(
-            traced_callable.owner(), (torch._C.ScriptModule, torch.nn.Module)  # type: ignore[operator]
+            traced_callable.owner(),  # type: ignore[operator]
+            (torch._C.ScriptModule, torch.nn.Module),
         ):
             with patch_forward(traced_callable.owner(), traced_callable):  # type: ignore[operator]
                 return _export(

@@ -746,7 +746,7 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 def _call_name(base: str, n: int) -> str:
     # Given n >= 0, generate call names to a submodule `base` of the form
     # `base`, `base@1`, `base@2`, etc.
-    return base if n == 1 else f"{base}@{n-1}"
+    return base if n == 1 else f"{base}@{n - 1}"
 
 
 def _is_call_name(call_name: str, base: str) -> bool:
@@ -844,10 +844,9 @@ class _ModuleFrame:
                         continue
 
                     if arg.name in self.seen_nodes:
-                        flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        seen_node = self.seen_nodes[arg.name]
+                        flat_arg_node.meta = copy.copy(seen_node.meta)
+                        self.node_to_placeholder[seen_node] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: List[Optional[torch.fx.Node]] = []
@@ -921,8 +920,7 @@ class _ModuleFrame:
         if x in self.node_to_placeholder:
             return self.node_to_placeholder[x]
         elif (
-            x.op == "placeholder"
-            or self.module_call_graph.get(self.fqn) is None
+            x.op == "placeholder" or self.module_call_graph.get(self.fqn) is None
             # allow placeholder creation if we are not preserving module call signature
         ):
             self.add_placeholder(x)

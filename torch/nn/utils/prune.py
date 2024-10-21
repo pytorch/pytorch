@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Pruning methods."""
+
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -110,9 +111,7 @@ class BasePruningMethod(ABC):
                     old_method = hook
                     hooks_to_remove.append(k)
                     found += 1
-            assert (
-                found <= 1
-            ), f"Avoid adding multiple pruning hooks to the\
+            assert found <= 1, f"Avoid adding multiple pruning hooks to the\
                 same tensor {name} of module {module}. Use a PruningContainer."
 
             for k in hooks_to_remove:
@@ -244,7 +243,9 @@ class BasePruningMethod(ABC):
         # before removing pruning from a tensor, it has to have been applied
         assert (
             self._tensor_name is not None
-        ), f"Module {module} has to be pruned            before pruning can be removed"  # this gets set in apply()
+        ), (
+            f"Module {module} has to be pruned before pruning can be removed"
+        )  # this gets set in apply()
 
         # to update module[name] to latest trained weights
         weight = self.apply_mask(module)  # masked weights
@@ -843,7 +844,7 @@ def identity(module, name):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.identity(nn.Linear(2, 3), 'bias')
+        >>> m = prune.identity(nn.Linear(2, 3), "bias")
         >>> print(m.bias_mask)
         tensor([1., 1., 1.])
     """
@@ -879,7 +880,7 @@ def random_unstructured(module, name, amount):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.random_unstructured(nn.Linear(2, 3), 'weight', amount=1)
+        >>> m = prune.random_unstructured(nn.Linear(2, 3), "weight", amount=1)
         >>> torch.sum(m.weight_mask == 0)
         tensor(1)
 
@@ -922,7 +923,7 @@ def l1_unstructured(module, name, amount, importance_scores=None):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.l1_unstructured(nn.Linear(2, 3), 'weight', amount=0.2)
+        >>> m = prune.l1_unstructured(nn.Linear(2, 3), "weight", amount=0.2)
         >>> m.state_dict().keys()
         odict_keys(['bias', 'weight_orig', 'weight_mask'])
     """
@@ -962,9 +963,7 @@ def random_structured(module, name, amount, dim):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.random_structured(
-        ...     nn.Linear(5, 3), 'weight', amount=3, dim=1
-        ... )
+        >>> m = prune.random_structured(nn.Linear(5, 3), "weight", amount=3, dim=1)
         >>> columns_pruned = int(sum(torch.sum(m.weight, dim=0) == 0))
         >>> print(columns_pruned)
         3
@@ -1011,7 +1010,7 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
     Examples:
         >>> from torch.nn.utils import prune
         >>> m = prune.ln_structured(
-        ...     nn.Conv2d(5, 3, 2), 'weight', amount=0.3, dim=1, n=float('-inf')
+        ...     nn.Conv2d(5, 3, 2), "weight", amount=0.3, dim=1, n=float("-inf")
         ... )
     """
     LnStructured.apply(
@@ -1064,13 +1063,17 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
     Examples:
         >>> from torch.nn.utils import prune
         >>> from collections import OrderedDict
-        >>> net = nn.Sequential(OrderedDict([
-        ...     ('first', nn.Linear(10, 4)),
-        ...     ('second', nn.Linear(4, 1)),
-        ... ]))
+        >>> net = nn.Sequential(
+        ...     OrderedDict(
+        ...         [
+        ...             ("first", nn.Linear(10, 4)),
+        ...             ("second", nn.Linear(4, 1)),
+        ...         ]
+        ...     )
+        ... )
         >>> parameters_to_prune = (
-        ...     (net.first, 'weight'),
-        ...     (net.second, 'weight'),
+        ...     (net.first, "weight"),
+        ...     (net.second, "weight"),
         ... )
         >>> prune.global_unstructured(
         ...     parameters_to_prune,
@@ -1162,7 +1165,7 @@ def custom_from_mask(module, name, mask):
     Examples:
         >>> from torch.nn.utils import prune
         >>> m = prune.custom_from_mask(
-        ...     nn.Linear(5, 3), name='bias', mask=torch.tensor([0, 1, 0])
+        ...     nn.Linear(5, 3), name="bias", mask=torch.tensor([0, 1, 0])
         ... )
         >>> print(m.bias_mask)
         tensor([0., 1., 0.])
@@ -1188,8 +1191,8 @@ def remove(module, name):
             will act.
 
     Examples:
-        >>> m = random_unstructured(nn.Linear(5, 7), name='weight', amount=0.2)
-        >>> m = remove(m, name='weight')
+        >>> m = random_unstructured(nn.Linear(5, 7), name="weight", amount=0.2)
+        >>> m = remove(m, name="weight")
     """
     for k, hook in module._forward_pre_hooks.items():
         if isinstance(hook, BasePruningMethod) and hook._tensor_name == name:
@@ -1220,7 +1223,7 @@ def is_pruned(module):
         >>> m = nn.Linear(5, 7)
         >>> print(prune.is_pruned(m))
         False
-        >>> prune.random_unstructured(m, name='weight', amount=0.2)
+        >>> prune.random_unstructured(m, name="weight", amount=0.2)
         >>> print(prune.is_pruned(m))
         True
     """
