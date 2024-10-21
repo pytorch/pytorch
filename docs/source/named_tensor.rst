@@ -57,7 +57,7 @@ Use :attr:`~Tensor.names` to access the dimension names of a tensor and
 
     >>> renamed_imgs = imgs.rename(H='height', W='width')
     >>> renamed_imgs.names
-    ('N', 'C', 'height', 'width)
+    ('N', 'C', 'height', 'width')
 
 
 Named tensors can coexist with unnamed tensors; named tensors are instances of
