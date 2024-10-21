@@ -9,7 +9,12 @@ import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch._higher_order_ops import invoke_subgraph
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
+    TestCase,
+)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -176,9 +181,10 @@ class TestInvokeSubgraphCompile(TestCase):
                 subgraph_attr_names.add(node.target)
         self.assertEqual(len(subgraph_attr_names), 1)
 
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
         l_x_ = L_x_
@@ -198,7 +204,7 @@ class GraphModule(torch.nn.Module):
             child: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
             return (child,)
 """,
-        )
+            )
 
     def test_nonlocal_update(self):
         counter = 2
@@ -234,9 +240,10 @@ class GraphModule(torch.nn.Module):
         backend = AotEagerAndRecordGraphs()
         torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
 
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
         l_x_ = L_x_
@@ -263,7 +270,7 @@ class GraphModule(torch.nn.Module):
             child: "f32[8]" = mul * 3;  mul = None
             return (child,)
 """,
-        )
+            )
 
     def test_normalize_gm(self):
         def gn(x, y):
@@ -285,9 +292,10 @@ class GraphModule(torch.nn.Module):
 
         opt_fn(x, y)
 
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8]", L_y_: "f32[8]"):
         l_x_ = L_x_
@@ -319,7 +327,7 @@ class GraphModule(torch.nn.Module):
             x_4: "f32[8]" = x_3 * l_y_;  x_3 = l_y_ = None
             return (x_4,)
 """,
-        )
+            )
 
     def test_input_mutation(self):
         def gn(x, y):
