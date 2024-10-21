@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <future>
 #include <iostream>
 #include <list>
@@ -326,6 +327,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+    // Get a Future result of each work (e.g. success, different error types).
+    // instead of the tensor output.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -441,6 +446,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    // the future result (e.g., success or failure) of the work
+    c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
+
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
@@ -460,7 +468,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::vector<at::cuda::CUDAEvent*>
+    std::deque<at::cuda::CUDAEvent*>
         eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
@@ -486,7 +494,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
-    int64_t split_color{0};
+    // Color to use for `ncclCommSplit`, values:
+    // * Non-negative value: in group;
+    // * NCCL_SPLIT_NOCOLOR (-1): not in group;
+    // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
+    // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
+    // accepts int. Otherwise, an imlicit conversion may happen at the API call
+    // and the value may become negative.
+    // [Note 2]: this member is pybinded to Python, the value passed from Python
+    // must be within the numerical range of C++ int. Otherwise, Python will
+    // raise a RuntimeError saying type is incompatible. See also
+    // `_process_group_color` in `distributed_c10d.py`.
+    int split_color{NCCL_SPLIT_NOCOLOR - 1};
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };

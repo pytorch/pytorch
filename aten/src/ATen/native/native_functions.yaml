@@ -9581,7 +9581,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: i0_out
+    CPU, CUDA, MPS: i0_out
   tags: pointwise
 
 - func: sign(Tensor self) -> Tensor
