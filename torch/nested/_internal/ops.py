@@ -293,17 +293,11 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+        from .nested_tensor import nested_from_padded
 
         # handle broadcasting via padded dense -> jagged conversion
-        min_seqlen = None
-        if nt._min_seqlen_tensor is not None:
-            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
-
-        max_seqlen = None
-        if nt._max_seqlen_tensor is not None:
-            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
-
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
         padded_max_S = max_seqlen
         total_L = nt._values.shape[nt._ragged_idx - 1]
         if padded_max_S is None:
@@ -670,7 +664,7 @@ def _softmax_default(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         (new_kwargs["dim"],),
@@ -991,19 +985,12 @@ def matmul_default(func, *args, **kwargs):
 
     def _padded_impl(a, b):
         assert a.is_nested and not b.is_nested
-        nt, t = a, b
+        nt = a
 
-        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+        from .nested_tensor import nested_from_padded
 
-        # convert NT -> padded dense
-        min_seqlen = None
-        if nt._min_seqlen_tensor is not None:
-            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
-
-        max_seqlen = None
-        if nt._max_seqlen_tensor is not None:
-            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
-
+        min_seqlen = nt._maybe_min_seqlen
+        max_seqlen = nt._maybe_max_seqlen
         padded_max_S = max_seqlen
         total_L = nt._values.shape[nt._ragged_idx - 1]
         if padded_max_S is None:
@@ -1601,7 +1588,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],

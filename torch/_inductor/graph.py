@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import itertools
 import logging
@@ -15,6 +16,7 @@ from typing import (
     DefaultDict,
     Dict,
     Iterable,
+    Iterator,
     List,
     NoReturn,
     Optional,
@@ -313,7 +315,7 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Optional[List[torch.Tensor]] = None,
+        example_inputs: Optional[Sequence[object]] = None,
         shape_env: Optional[ShapeEnv] = None,
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
@@ -429,6 +431,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
+
+        # current_device is set only during codegen of a device-specific kernel
+        # a graph can have many devices
+        self.current_device: Optional[torch.device] = None
+
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
@@ -466,11 +473,30 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
+        # state used by wrapper.generate_workspace_allocation()
+        self.allocated_workspaces: Dict[str, Any] = {}
+        self.workspace_id = itertools.count()
+
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_current_device_or_throw(self) -> torch.device:
+        if device := self.current_device:
+            return device
+        else:
+            raise RuntimeError("No current device")
+
+    @contextlib.contextmanager
+    def set_current_device(self, device: torch.device) -> Iterator[None]:
+        prior = self.current_device
+        self.current_device = device
+        try:
+            yield
+        finally:
+            self.current_device = prior
 
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
@@ -1563,20 +1589,20 @@ class GraphLowering(torch.fx.Interpreter):
         # the origin_node here.
         if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
             if isinstance(result.data.data, ir.Loops):
-                result.data.data.origin_node = n
+                result.data.data._post_init_setattr("origin_node", n)
             elif isinstance(result.data.data, ir.Buffer):
-                result.data.data.origin_node = n
+                result.data.data._post_init_setattr("origin_node", n)
                 if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
                     result.data.data.data, ir.Loops
                 ):
-                    result.data.data.data.origin_node = n
+                    result.data.data.data._post_init_setattr("origin_node", n)
                 # Not really multi-output, can straightforwardly recurse in
                 elif (
                     isinstance(result.data.data, ir.MultiOutput)
                     and not result.data.data.indices
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0].origin_node = n
+                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
 
         self.register_users_of(result)
 
@@ -2000,6 +2026,7 @@ class GraphLowering(torch.fx.Interpreter):
         return (
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
+            and len(self.graph_inputs[name].get_size()) == 0
             and self.graph_inputs[name].get_device().type == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
