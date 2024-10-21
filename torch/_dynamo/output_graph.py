@@ -184,7 +184,7 @@ class FakeRootModule(torch.nn.Module):
         for k, v in nn_modules.items():
             setattr(self, k, v)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "FakeRootModule(...)"
 
 
@@ -417,6 +417,7 @@ class OutputGraph:
         )
 
         self.guard_on_key_order: Set[str] = set()
+        self.seen_invoke_subgraphs: Dict[str, str] = {}
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
