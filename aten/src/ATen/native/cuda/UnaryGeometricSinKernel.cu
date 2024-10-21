@@ -13,7 +13,7 @@
 namespace at::native {
 
 #if AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char sin_name[] = "sin_impl";
+constexpr char sin_name[] = "sin_impl";
 #endif
 
 void sin_kernel_cuda(TensorIteratorBase& iter) {
