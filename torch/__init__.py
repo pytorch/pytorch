@@ -2227,7 +2227,7 @@ class _TorchCompileInductorWrapper:
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: _Dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
