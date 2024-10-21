@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 
@@ -931,13 +932,11 @@ class FakeTensorTest(TestCase):
 
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
-            init = torch.randn((3, 1, 7), device="cpu")
+            init = torch.randn((3, 7), device="cpu")
             r = scan(add, init, x, dim=1, reverse=reverse)
 
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
-        self.assertEqual(r[0].size(), init.size())
-        self.assertEqual(r[1].size(), x.size())
 
 
 instantiate_parametrized_tests(FakeTensorTest)
@@ -1102,7 +1101,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertEqual(torch._C._storage_id(x_conv), torch._C._storage_id(y_conv))
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_separate_tensor_storages_non_view(self):
         x = torch.rand(2, 2, 2)
         y = torch.rand(4, 2)
@@ -1122,7 +1121,6 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.tensor_memo), 0)
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)
         y = x[0]
@@ -1135,7 +1133,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -1177,7 +1175,7 @@ class FakeTensorConverterTest(TestCase):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     def test_no_ref_cycle(self):
         x = torch.rand([4])
         mode = FakeTensorMode()

@@ -83,6 +83,7 @@ Tensor dirac_(Tensor tensor) {
 
   tensor.zero_();
   for (const auto d : c10::irange(min_dim)) {
+    // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -158,7 +159,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
 
   const auto rows = tensor.size(0);
   const auto columns = tensor.size(1);
-  const int64_t num_zeros = std::ceil(sparsity * rows);
+  const int64_t num_zeros = std::ceil(sparsity * static_cast<double>(rows));
   tensor.normal_(0, std);
   for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
@@ -243,7 +244,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
   } else {
     const auto num_input_fmaps = tensor.size(1);
     const auto num_output_fmaps = tensor.size(0);
-    auto receptive_field_size = 1;
+    int64_t receptive_field_size = 1;
     if (tensor.dim() > 2) {
       receptive_field_size = tensor[0][0].numel();
     }
