@@ -35,7 +35,7 @@ jobs:
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        cuda_version: ["11.8", "12.1", "12.4", "cpu"]
+        cuda_version: ["11.8", "12.1", "12.4", "12.6", "cpu"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
