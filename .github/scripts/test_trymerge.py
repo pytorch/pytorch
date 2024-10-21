@@ -599,7 +599,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(
             checks[
-                "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
+                "pull / linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 2, linux.2xlarge)"
             ].classification
             == "BROKEN_TRUNK"
         )
@@ -812,9 +812,7 @@ class TestBypassFailures(TestCase):
         # or broken trunk. Only actual new failures should be kept in the list of
         # ignore current checks to use to record force merge with actual failures
         flaky = "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
-        broken_trunk = (
-            "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
-        )
+        broken_trunk = "pull / linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 2, linux.2xlarge)"
 
         pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
