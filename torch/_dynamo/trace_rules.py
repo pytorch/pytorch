@@ -266,10 +266,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.safe_unpack_dual": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_list_of_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_output_is_tensor_or_tensors": UserFunctionVariable,
-    "torch.autograd.forward_ad.enter_dual_level": UserFunctionVariable,
-    "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
-    "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
-    "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/linearize
     "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
@@ -3261,6 +3257,7 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.autograd.forward_ad",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
