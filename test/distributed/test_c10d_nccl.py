@@ -2685,7 +2685,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
             work.wait()
             result = work.get_future_result().wait()
-            self.assertEqual(WorkResult(result), WorkResult.COMM_ERROR)
+            self.assertEqual(WorkResult(result), WorkResult.TIMEOUT)
+        else:
+            # other ranks not exiting before rank 0 timeout, this is to avoid
+            # nccl error happening before rank 0 timeouts
+            time.sleep(4)
 
         if prev_nccl_async_error_handling is not None:
             os.environ[
