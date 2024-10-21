@@ -75,6 +75,7 @@ from tools.testing.test_selections import (
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
+# Use this PR for parity data
 
 HAVE_TEST_SELECTION_TOOLS = True
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
