@@ -1014,6 +1014,7 @@ graph():
         TS2EPConverter(foo_script, inp).convert()
 
     def test_dim_auto_and_dim(self):
+        # test basic Dims
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 return x - y
@@ -1023,7 +1024,45 @@ graph():
             "x": (Dim.AUTO, Dim("d1", min=3)),
             "y": (Dim("d0", max=8), Dim.DYNAMIC),
         }
-        ep = torch.export.export(Foo(), inputs, dynamic_shapes=shapes)
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        x, y = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        self.assertEqual((s0 := x.meta["val"].shape[0]), y.meta["val"].shape[0])
+        self.assertEqual((s1 := x.meta["val"].shape[1]), y.meta["val"].shape[1])
+        vr0 = ep.range_constraints[s0.node.expr]
+        vr1 = ep.range_constraints[s1.node.expr]
+        self.assertEqual([vr0.upper, vr1.lower], [8, 3])
+
+        # test derived Dims
+        class Bar(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[1::3] + z
+
+        inputs = (torch.randn(4), torch.randn(13), torch.randn(4))
+        dx = Dim("dx", min=2, max=10)
+        shapes = {
+            "x": (dx,),
+            "y": (3 * dx + 1,),
+            "z": (Dim.AUTO,),
+        }
+        ep = export(Bar(), inputs, dynamic_shapes=shapes)
+        x, y, z = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        self.assertEqual((s0 := x.meta["val"].shape[0]), z.meta["val"].shape[0])
+        expr = y.meta["val"].shape[0]
+        free_symbols = expr.node.expr.free_symbols
+        self.assertEqual(len(free_symbols), 1)
+        self.assertEqual(next(iter(free_symbols)), s0.node.expr)
+
+        # test specialization still complains
+        inputs = (torch.randn(4), torch.randn(4))
+        shapes = {
+            "x": (Dim.STATIC,),
+            "y": (Dim("dy"),),
+        }
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant"
+        ):
+            export(Foo(), inputs, dynamic_shapes=shapes)
 
     def test_torch_fn(self):
         class M1(torch.nn.Module):
