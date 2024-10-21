@@ -9,7 +9,12 @@ namespace {
 std::mutex all_forward_levels_mutex_;
 std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
 
-const static at::Tensor singleton_undefined_tensor;
+
+at::Tensor& getSingletonUndefinedTensor() {
+  static at::Tensor singleton_undefined_tensor;
+  return singleton_undefined_tensor;
+}
+
 } // namespace
 
 uint64_t ForwardADLevel::get_next_idx() {
@@ -68,11 +73,11 @@ ForwardADLevel::~ForwardADLevel() {
 const at::Tensor& ForwardGrad::value(uint64_t level) const {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto& it = content_.find(level);
-  return it == content_.end() ? singleton_undefined_tensor : (*it).second;
+  return it == content_.end() ? getSingletonUndefinedTensor() : (*it).second;
 }
 
 const at::Tensor& ForwardGrad::undef_grad() {
-  return singleton_undefined_tensor;
+  return getSingletonUndefinedTensor();
 }
 
 } // namespace torch::autograd
