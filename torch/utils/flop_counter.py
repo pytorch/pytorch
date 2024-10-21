@@ -632,6 +632,7 @@ class FlopCounterMode(TorchDispatchMode):
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
         self.mod_tracker = ModuleTracker()
+        self.decomposed_counter = _DecomposedCounterMode(self)
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
@@ -722,8 +723,12 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-        out = func(*args, **kwargs)
-        return self._count_flops(func._overloadpacket, out, args, kwargs)
+        if func._can_decompose():
+            with self.decomposed_counter:
+                return func.decompose(*args, **kwargs)
+        else:
+            out = func(*args, **kwargs)
+            return self._count_flops(func._overloadpacket, out, args, kwargs)
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
@@ -733,3 +738,12 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _DecomposedCounterMode(TorchDispatchMode):
+    def __init__(self, counter):
+        self.counter = counter
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        out = func(*args, **kwargs)
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)
