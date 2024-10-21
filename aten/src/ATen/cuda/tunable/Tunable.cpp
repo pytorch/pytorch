@@ -13,6 +13,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
@@ -588,7 +589,7 @@ int TuningContext::GetRotatingBufferSize() const {
   static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
   if (env.has_value()) {
     constexpr int MB = 1024 * 1024;
-    int val = stoi(env);
+    int val = stoi(env.value());
     return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
   }
   else {
