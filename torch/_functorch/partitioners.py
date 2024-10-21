@@ -1771,7 +1771,9 @@ def choose_saved_values_set(
     # tensors we actually banned from recompute, but there may be other
     # tensors that we choose to save.
 
-    return get_saved_values_knapsack(memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph)[0]
+    return get_saved_values_knapsack(
+        memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
+    )[0]
 
 
 def min_cut_rematerialization_partition(
