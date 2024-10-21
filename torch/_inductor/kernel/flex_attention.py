@@ -1004,7 +1004,7 @@ flex_attention_backward_template = TritonTemplate(
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0)
-    NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
+    NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1) if K_REQUIRES_GRAD and V_REQUIRES_GRAD else 0
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
     off_hz = tl.program_id(2)
@@ -1785,6 +1785,10 @@ def flex_attention_backward(*args, **kwargs):
             ]
         )
 
+    q_requires_grad = kernel_options["Q_REQUIRES_GRAD"]
+    k_requires_grad = kernel_options["K_REQUIRES_GRAD"]
+    v_requires_grad = kernel_options["V_REQUIRES_GRAD"]
+
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
@@ -1802,6 +1806,11 @@ def flex_attention_backward(*args, **kwargs):
         # Blocksparse options
         kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if k_requires_grad and v_requires_grad:
+            call_sizes = query.get_size() + key.get_size()[1:3]
+        else:
+            call_sizes = query.get_size() + [key.get_size()[1], 0]
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1826,7 +1835,7 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
             mutated_inputs=[grad_query, broadcasted_grad_value],
-            call_sizes=query.get_size() + key.get_size()[1:3],
+            call_sizes=call_sizes,
             num_stages=num_stages,
             num_warps=num_warps,
             **kernel_options,
@@ -1872,15 +1881,21 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
-    if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
-        grad_key = broadcasted_grad_key
-        grad_value = broadcasted_grad_value
+    if k_requires_grad or v_requires_grad:
+        if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
+            grad_key = broadcasted_grad_key
+            grad_value = broadcasted_grad_value
+        else:
+            assert V.graph.sizevars.evaluate_expr(
+                sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
+            ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
+            grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
+            grad_value = lowerings[aten.sum](
+                broadcasted_grad_value, axis=0, keepdims=True
+            )
     else:
-        assert V.graph.sizevars.evaluate_expr(
-            sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
-        ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
-        grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
-        grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
+        grad_key = None
+        grad_value = None
 
     return (
         grad_query,
