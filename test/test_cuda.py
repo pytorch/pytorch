@@ -3642,6 +3642,31 @@ class TestCudaMallocAsync(TestCase):
         # force release_cached_blocks to run with some expandable segments in the free list
         alloc(120)
 
+    def test_comms_pool_overflow_to_comms_pool(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("comms:True") 
+        a = alloc(80) 
+        torch.cuda.memory._set_allocator_settings("comms:False") 
+        comms_ptr = a.data_ptr() 
+        del a 
+        b = alloc(40) 
+        # now out of memory in the default pool, use the comms pool 
+        c = alloc(40) 
+        self.assertEqual(c.data_ptr(), comms_ptr) 
+        d = alloc(40) 
+        del b, c, d
+
     def test_garbage_collect_expandable(self):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
