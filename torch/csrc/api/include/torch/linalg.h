@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Tensor.h>
 
 namespace torch {
 namespace linalg {
-
+using at::Tensor;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
