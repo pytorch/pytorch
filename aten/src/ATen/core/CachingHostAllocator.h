@@ -111,17 +111,6 @@ template <
     typename E,
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
-  CachingHostAllocatorImpl() {
-    // Launch the background thread and process events in a loop.
-    if (pinned_use_background_threads()) {
-      getBackgroundThreadPool()->run([&]() {
-        while (true) {
-          process_events();
-          std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-      });
-    }
-  }
   virtual ~CachingHostAllocatorImpl() = default;
 
  public:
@@ -155,6 +144,17 @@ struct CachingHostAllocatorImpl {
       if (block) {
         return {block->ptr_, reinterpret_cast<void*>(block)};
       }
+
+      // Launch the background thread and process events in a loop.
+      static c10::once_flag background_thread_flag;
+      c10::call_once(background_thread_flag, [this] {
+        getBackgroundThreadPool()->run([&]() {
+          while (true) {
+            process_events();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+          }
+        });
+      });
     }
 
     // Slow path: if we can't allocate from the cached free list, we need

@@ -6,11 +6,10 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 size_t device_count() {
-  return at::detail::getCUDAHooks().getNumGPUs();
+  return at::detail::getCUDAHooks().deviceCount();
 }
 
 bool is_available() {
@@ -28,7 +27,7 @@ bool cudnn_is_available() {
 /// Sets the seed for the current GPU.
 void manual_seed(uint64_t seed) {
   if (is_available()) {
-    auto index = at::detail::getCUDAHooks().current_device();
+    auto index = at::detail::getCUDAHooks().getCurrentDevice();
     auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(index);
     {
       // See Note [Acquire lock when using random generators]
@@ -42,7 +41,8 @@ void manual_seed(uint64_t seed) {
 void manual_seed_all(uint64_t seed) {
   auto num_gpu = device_count();
   for (const auto i : c10::irange(num_gpu)) {
-    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
+    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(
+        static_cast<c10::DeviceIndex>(i));
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());
@@ -53,13 +53,13 @@ void manual_seed_all(uint64_t seed) {
 
 void synchronize(int64_t device_index) {
   TORCH_CHECK(is_available(), "No CUDA GPUs are available");
-  int64_t num_gpus = cuda::device_count();
+  auto num_gpus = cuda::device_count();
   TORCH_CHECK(
-      device_index == -1 || device_index < num_gpus,
+      device_index < 0 || static_cast<size_t>(device_index) < num_gpus,
       "Device index out of range: ",
       device_index);
-  at::detail::getCUDAHooks().deviceSynchronize(device_index);
+  at::detail::getCUDAHooks().deviceSynchronize(
+      static_cast<c10::DeviceIndex>(device_index));
 }
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda

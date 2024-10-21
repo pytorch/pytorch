@@ -29,6 +29,7 @@ from .utils import strict_zip
 
 zip = strict_zip
 
+
 OutputType = Enum(
     "OutputType",
     (
@@ -312,6 +313,14 @@ class ViewAndMutationMeta:
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
+
+    # for each tangent at index i:
+    #   if the tangent is a plain tensor, traced_tangent_memory_formats[i] holds the memory format
+    #     of the tangent that we need to coerce to
+    #   if the tangent is a subclass, traced_tangent_memory_formats[i] holds a list of memory formats,
+    #     containing the expected memory format of the subclass **and** all of its inner tensors
+    TANGENT_MEMORY_FORMAT = Union[torch.memory_format, List["TANGENT_MEMORY_FORMAT"]]
+    traced_tangent_memory_formats: Optional[List[TANGENT_MEMORY_FORMAT]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -797,6 +806,12 @@ class GraphSignature:
 
 
 @dataclass
+class AOTAutogradCacheInfo:
+    cache_key: str
+    start_time_ns: int
+
+
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -818,9 +833,8 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-
     # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
+    cache_info: Optional[AOTAutogradCacheInfo] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
