@@ -1002,6 +1002,7 @@ ANY_DTYPE_ORDER = (
     torch.complex128,
     torch.float16,
     torch.bfloat16,
+    torch.float8_e4m3fn,
     torch.long,
     torch.int32,
     torch.int16,
