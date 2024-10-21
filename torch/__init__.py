@@ -263,7 +263,7 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
+def _preload_cuda_dep(lib_folder: str, lib_name: str) -> None:
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
@@ -285,6 +285,36 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     ctypes.CDLL(lib_path)
 
 
+def _preload_cuda_deps(err: _Union[ImportError, OSError]) -> builtins.bool:
+    """Preloads cuda deps if they could not be found otherwise."""
+    # Can only happen for wheel with cuda libs as PYPI deps
+    # As PyTorch is not purelib, but nvidia-*-cu12 is
+    cuda_libs: _Dict[str, str] = {
+        "nvjitlink": "libnvJitLink.so.*[0-9]",
+        "cusparse": "libcusparse.so.*[0-9]",
+        "cublas": "libcublas.so.*[0-9]",
+        "cudnn": "libcudnn.so.*[0-9]",
+        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
+        "cuda_runtime": "libcudart.so.*[0-9]",
+        "cuda_cupti": "libcupti.so.*[0-9]",
+        "cufft": "libcufft.so.*[0-9]",
+        "curand": "libcurand.so.*[0-9]",
+        "nvjitlink": "libnvJitLink.so.*[0-9]",
+        "cusparse": "libcusparse.so.*[0-9]",
+        "cusolver": "libcusolver.so.*[0-9]",
+        "nccl": "libnccl.so.*[0-9]",
+        "nvtx": "libnvToolsExt.so.*[0-9]",
+    }
+    is_cuda_lib_err = [
+        lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
+    ]
+    if not is_cuda_lib_err:
+        return False
+    for lib_folder, lib_name in cuda_libs.items():
+        _preload_cuda_dep(lib_folder, lib_name)
+    return True
+
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if _running_with_deploy() or platform.system() == "Windows":
@@ -299,30 +329,8 @@ def _load_global_deps() -> None:
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
-        # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu12 is
-        cuda_libs: _Dict[str, str] = {
-            "cublas": "libcublas.so.*[0-9]",
-            "cudnn": "libcudnn.so.*[0-9]",
-            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
-            "cuda_cupti": "libcupti.so.*[0-9]",
-            "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
-            "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
-            "cusparse": "libcusparse.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
-            "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
-        }
-        is_cuda_lib_err = [
-            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
-        ]
-        if not is_cuda_lib_err:
+        if not _preload_cuda_deps(err):
             raise err
-        for lib_folder, lib_name in cuda_libs.items():
-            _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -365,7 +373,14 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
-    from torch._C import *  # noqa: F403
+
+    try:
+        from torch._C import *  # noqa: F403
+    except ImportError as err:
+        if not _preload_cuda_deps(err):
+            raise err
+
+        from torch._C import *  # noqa: F403
 
 
 class SymInt:
