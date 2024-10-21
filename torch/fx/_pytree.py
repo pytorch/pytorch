@@ -33,11 +33,6 @@ def register_pytree_flatten_spec(
         )
 
 
-# TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
-class _DummyLeaf:  # use a class instead.
-    pass
-
-
 # The pytree may be wrapped with torch.fx.Proxy, so we cannot use `treespec.flatten_up_to(pytree)`.
 # Use the key path API to index into the pytree instead.
 def tree_flatten_spec(
@@ -53,7 +48,9 @@ def tree_flatten_spec(
         assert isinstance(spec, PyTreeSpec), "Expected a PyTreeSpec"
         return [accessor(pytree) for accessor in spec.accessors()]
 
-    dummy_leaf = _DummyLeaf
+    # FX `tracer.create_arg(x)` and Dynamo does not support `dummy_leaf = object()`
+    # as a sentinel value. Use None here.
+    dummy_leaf = None
     dummy_tree = python_pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
     return [
         python_pytree.key_get(pytree, key_path)
