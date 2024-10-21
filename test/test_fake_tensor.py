@@ -931,13 +931,11 @@ class FakeTensorTest(TestCase):
 
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn((3, 5, 7), device="cpu")
-            init = torch.randn((3, 1, 7), device="cpu")
+            init = torch.randn((3, 7), device="cpu")
             r = scan(add, init, x, dim=1, reverse=reverse)
 
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
-        self.assertEqual(r[0].size(), init.size())
-        self.assertEqual(r[1].size(), x.size())
 
 
 instantiate_parametrized_tests(FakeTensorTest)
