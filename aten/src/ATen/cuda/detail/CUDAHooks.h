@@ -19,7 +19,7 @@ TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
-  void initCUDA() const override;
+  void init() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(const void* data) const override;
   const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;

@@ -200,6 +200,15 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
+        # Check when `mesh` is passed as well
+        global_mesh = DeviceMesh.from_group(
+            mesh_pg, self.device_type, mesh=torch.arange(self.world_size)
+        )
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
 
     @with_comms
     def test_from_group_with_invalid_mesh(self):
