@@ -3863,7 +3863,7 @@ CUDA_TEST_FAILURES = {
 }
 
 
-if IS_FBCODE:
+if not IS_FBCODE:
     # The following test passes internally but fails in OSS CI. To be investigated.
     CUDA_TEST_FAILURES.update(
         {
@@ -3915,7 +3915,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
 # and terminal output say pass), but the process will segfault.  This only
 # happens in OSS CI and is fine internally.
 # See https://github.com/pytorch/pytorch/issues/123691
-if not IS_FBCODE:
+if IS_FBCODE:
     copy_tests(
         AOTInductorTestsTemplate,
         AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
