@@ -162,7 +162,7 @@ constexpr const char* _cusolver_backend_suggestion =            \
     CUresult __err = EXPR;                                                                                       \
     if (__err != CUDA_SUCCESS) {                                                                                 \
       const char* err_str;                                                                                       \
-      CUresult get_error_str_err C10_UNUSED = at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str);  \
+      C10_UNUSED CUresult get_error_str_err = at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str);  \
       if (get_error_str_err != CUDA_SUCCESS) {                                                                   \
         AT_ERROR("CUDA driver error: unknown error");                                                            \
       } else {                                                                                                   \
