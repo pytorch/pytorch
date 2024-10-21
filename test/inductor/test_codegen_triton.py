@@ -41,7 +41,7 @@ class TestCodegenTriton(InductorTestCase):
 
         def _check_divisibility(config):
             try:
-                from triton.backends.compiler import AttrsDescriptor
+                from triton.backends.compiler import AttrsDescriptor  # noqa: F401
 
                 return config.divisibility_16
             except ImportError:

@@ -219,7 +219,7 @@ def generate_ttir(
 
     def _get_specialization(args):
         try:
-            from triton.backends.compiler import AttrsDescriptor
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
 
             target = triton.runtime.driver.active.get_current_target()
             backend = triton.compiler.compiler.make_backend(target)
