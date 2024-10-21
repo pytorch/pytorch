@@ -560,7 +560,7 @@ constexpr auto count_max =
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR > 13)))
 template <typename T>
-constexpr bool _nccl_should_send_recv(C10_UNUSED T _unused_) {
+constexpr bool _nccl_should_send_recv([[maybe_unused]] T _unused_) {
   return true;
 }
 #else

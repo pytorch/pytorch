@@ -503,8 +503,8 @@ class PadMMTest(TestCase):
             return x @ y
 
         args = [
-            torch.randn(2**14, 2**16 - 1, device="cuda", dtype=torch.float16),
-            torch.randn(2**16 - 1, 2**14, device="cuda", dtype=torch.float16),
+            torch.randn(2**4, 2**14 - 1, device="cuda", dtype=torch.float16),
+            torch.randn(2**14 - 1, 2**4, device="cuda", dtype=torch.float16),
         ]
 
         counters.clear()
