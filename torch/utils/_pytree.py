@@ -691,9 +691,16 @@ class TreeSpec:
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
-        num_leaves = sum(spec.num_leaves for spec in self._children)
-        num_children = len(self._children)
+        if self.type is None:
+            assert self._context is None
+            assert len(self._children) == 0
+            num_nodes = 1
+            num_leaves = 1
+            num_children = 0
+        else:
+            num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
+            num_leaves = sum(spec.num_leaves for spec in self._children)
+            num_children = len(self._children)
         object.__setattr__(self, "num_nodes", num_nodes)
         object.__setattr__(self, "num_leaves", num_leaves)
         object.__setattr__(self, "num_children", num_children)
@@ -851,11 +858,6 @@ class TreeSpec:
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "num_nodes", 1)
-        object.__setattr__(self, "num_leaves", 1)
-        object.__setattr__(self, "num_children", 0)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
