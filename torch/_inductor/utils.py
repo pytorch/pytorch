@@ -40,7 +40,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
@@ -477,7 +477,8 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
             try:
                 return self.{key}
             except AttributeError:
-                self.{key} = rv = fn(self)
+                rv = fn(self)
+                object.__setattr__(self, "{key}", rv)
                 return rv
         """.lstrip(),
         ctx,
@@ -1823,7 +1824,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 def is_gpu(device: str):
     assert isinstance(device, str) or device is None, device
-    return device in ["cuda", "xpu"]
+    return device in GPU_TYPES
 
 
 def device_need_guard(device: str):
@@ -2100,3 +2101,40 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        not data.is_mkldnn
+        and data.size() == value.size()
+        and data.stride() == value.stride()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
+        and data.storage_offset() == value.storage_offset()
+    )
+
+
+def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        data.is_mkldnn
+        and data.size() == value.size()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+    )
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)

@@ -4,9 +4,7 @@
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/loss.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -47,8 +45,7 @@ inline Tensor kl_div(
     const Tensor& target,
     KLDivFuncOptions::reduction_t reduction,
     bool log_target = false) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  torch::Reduction::Reduction reduction_enum;
+  torch::Reduction::Reduction reduction_enum{};
 
   if (std::holds_alternative<enumtype::kMean>(reduction)) {
     TORCH_WARN(
@@ -1039,6 +1036,4 @@ inline Tensor binary_cross_entropy_with_logits(
       options.pos_weight());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional
