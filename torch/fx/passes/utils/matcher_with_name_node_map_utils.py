@@ -55,11 +55,13 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             relu = F.relu(conv)
             return relu, {"conv": conv, "relu": relu}
 
+
         def target_graph(x, weight):
             conv = F.conv2d(x, weight)
             relu = F.relu(conv)
             relu *= 2
             return relu
+
 
         pattern_gm = export_for_training(pattern, example_inputs).module()
         target_gm = export_for_training(target_graph, example_inputs).module()
