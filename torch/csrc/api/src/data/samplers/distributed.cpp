@@ -36,7 +36,8 @@ std::optional<std::vector<size_t>> DistributedRandomSampler::next(
 
   auto iter = all_indices_.begin();
   std::vector<size_t> res(
-      iter + static_cast<std::ptrdiff_t>(sample_index_), iter + end);
+      iter + static_cast<std::ptrdiff_t>(sample_index_),
+      iter + static_cast<std::ptrdiff_t>(end));
   sample_index_ = end;
   return res;
 }
