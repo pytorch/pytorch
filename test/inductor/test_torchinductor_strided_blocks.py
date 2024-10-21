@@ -558,6 +558,46 @@ class TritonBlockPointerTest(InductorTestCase):
         for block in expected_blocks:
             self.assertIn(block, code)
 
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels",
+        [
+            ((5, 5), 1, 1),
+            ((129, 129), 3, 2),
+        ],
+    )
+    def test_pointwise_and_reduction_tiling(
+        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+    ):
+        """
+        Tests tiling both pointwise and reduction dims.
+        """
+
+        device = torch.device(GPU_TYPE)
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+
+        def foo(x):
+            # Perform a reduction, and write the result into a padded output.
+            result = torch.empty_strided(view_size, full.stride())
+            result[:] = torch.sum(x)
+            return result
+
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
+        result, (code,) = self.run_and_compare(
+            foo,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        expected_blocks = ["XBLOCK", "YBLOCK", "R0_BLOCK", "R1_BLOCK"]
+        for block in expected_blocks:
+            self.assertIn(block, code)
+
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
