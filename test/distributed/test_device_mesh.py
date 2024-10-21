@@ -98,8 +98,8 @@ class DeviceMeshTest(DTensorTestBase):
 
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
-    @with_comms(eager_init=True)
     @skip_if_lt_x_gpu(4)
+    @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
