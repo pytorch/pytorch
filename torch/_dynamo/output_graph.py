@@ -184,7 +184,7 @@ class FakeRootModule(torch.nn.Module):
         for k, v in nn_modules.items():
             setattr(self, k, v)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "FakeRootModule(...)"
 
 
