@@ -184,27 +184,7 @@ def tensorify_python_scalars(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Look for tensor.item() calls on placeholders
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s in unbacked_bindings.keys():
-                    if (
-                        node is not None
-                        and node.op == "call_function"
-                        and node.target is torch.ops.aten._local_scalar_dense.default
-                    ):
-                        dtype = node.args[0].meta["val"].dtype
-                        if dtype != torch.float64:
-                            continue
-
-                        assert isinstance(node.args[0], fx.Node), node.args[0]
-
-                        expr_to_tensor_proxy[s] = MetaProxy(
-                            node.args[0], tracer=tracer, fake_mode=fake_mode
-                        )
-                        expr_to_sym_proxy[s] = MetaProxy(
-                            node, tracer=tracer, fake_mode=fake_mode
-                        )
-
-            elif (
+            if (
                 node is not None
                 and node.op == "call_function"
                 and node.target is torch.ops.aten._local_scalar_dense.default
@@ -215,7 +195,7 @@ def tensorify_python_scalars(
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                s = node.meta['val']
+                s = node.meta['val'].node.expr
                 expr_to_tensor_proxy[s] = MetaProxy(
                     node.args[0], tracer=tracer, fake_mode=fake_mode
                 )
