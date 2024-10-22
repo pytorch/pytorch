@@ -272,6 +272,16 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        x, y = self.args
+        _x, _y = printer._print(x), printer._print(y)
+        return f"({_x}/{_y})"
+
+    def _cxxcode(self, printer):
+        x, y = self.args
+        _x, _y = printer._print(x), printer._print(y)
+        return f"({_x}/{_y})"
+
 
 class ModularIndexing(sympy.Function):
     """
