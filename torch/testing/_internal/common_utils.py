@@ -5391,7 +5391,7 @@ def remove_cpp_extensions_build_root():
 def scoped_load_inline(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        temp_dir = tempfile.TemporaryDirectory()
+        temp_dir = tempfile.TemporaryDirectory(delete=False)
 
         def load_inline(*args, **kwargs):
             if kwargs.get("verbose", False):
