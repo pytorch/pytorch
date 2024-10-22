@@ -69,11 +69,21 @@ inline _PyFrameEvalFunction _debug_set_eval_frame(
   return prev;
 }
 
-// e.g. INSPECT(obj1, obj2)
-// in order to inspect obj1, obj2 at the Python level, in pdb.
-// Alias for torch._dynamo.utils._breakpoint_for_c_dynamo(...)
-// WARNING: makes a Python function call! Make sure eval frame callback is
-// unset!
+// Inspect PyObject*'s from C/C++ at the Python level, in pdb.
+// e.g.
+//
+// PyObject* obj1 = PyList_New(...);
+// PyObject* obj2 = PyObject_CallFunction(...);
+// INSPECT(obj1, obj2);
+// (pdb) p args[0]
+// # list
+// (pdb) p args[1]
+// # some object
+// (pdb) p args[1].some_attr
+// # etc.
+//
+// Implementation: set eval frame callback to default, call torch._dynamo.utils._breakpoint_for_c_dynamo,
+// reset eval frame callback.
 #define INSPECT(...)                                                  \
   {                                                                   \
     PyThreadState* cur_tstate = PyThreadState_Get();                  \
