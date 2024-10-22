@@ -3,6 +3,7 @@ import collections
 import importlib.machinery
 import io
 import linecache
+import os
 import pickletools
 import platform
 import types
@@ -229,10 +230,15 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (Path, str)):
-            f = str(f)
+            f = os.fspath(f)
             self.buffer: Optional[BinaryIO] = None
-        else:  # is a byte buffer
+        elif isinstance(f, io.IOBase):  # is a byte buffer
             self.buffer = f
+        else:
+            raise TypeError(
+                "expected 'f' to be string, path, or a binary I/O object "
+                f"but got {type(f)}"
+            )
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
