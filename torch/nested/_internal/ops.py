@@ -209,6 +209,14 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     if torch.Tag.pointwise in func.tags:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
+        num_schema_tensor_args = sum(
+            isinstance(a.type, torch.TensorType) for a in func._schema.arguments
+        )
+        if num_tensor_args != num_schema_tensor_args:
+            raise RuntimeError(
+                f"{func}: expected {num_schema_tensor_args} tensor args but found {num_tensor_args}"
+            )
+
         if num_tensor_args == 1:
             # Build up the check schema string. The first tensor arg is assumed to be
             # an NJT and other args are sent through as-is.
