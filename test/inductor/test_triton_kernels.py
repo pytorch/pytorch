@@ -2150,7 +2150,7 @@ def forward(self, arg0_1, arg1_1):
             n_elements = out.numel()
             sin_kernel[(n_elements,)](x, out, n_elements)
 
-        x = torch.randn(65, device="cuda")
+        x = torch.randn(65, device=GPU_TYPE)
         out = torch.empty_like(x)
         out_compiled = torch.empty_like(x)
         sin_triton_compiled = torch.compile(fullgraph=True)(sin_triton)
