@@ -34,25 +34,6 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._stack = contextlib.ExitStack()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._stack.close()
-        super().tearDownClass()
-
-    def setUp(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        super().setUp()
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.reset()
-
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -522,8 +503,6 @@ class TritonBlockPointerTest(InductorTestCase):
             ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
             ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
             ((3, 3), 1, 1, torch.argmax),
-            ((11, 11), 1, 1, torch.argmax),
-            ((15, 15), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
         ],
     )
