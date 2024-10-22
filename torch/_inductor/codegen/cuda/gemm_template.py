@@ -17,6 +17,7 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
+from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
@@ -571,9 +572,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
-        if torch_layout.stride[-1] == 1:
+        if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
             return cutlass_lib.LayoutType.RowMajor
-        elif torch_layout.stride[-2] == 1:
+        elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-2], 1):
             return cutlass_lib.LayoutType.ColumnMajor
         else:
             return None
@@ -837,6 +838,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
+        print("Got cutlass configs: total number of ops: %d, ", len(res))
         log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
         return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
@@ -1076,8 +1078,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = [int(i) for i in A_layout.size]
-        B_size = [int(i) for i in B_layout.size]
+        A_size = V.graph.sizevars.size_hints(A_layout.size)
+        B_size = V.graph.sizevars.size_hints(B_layout.size)
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
