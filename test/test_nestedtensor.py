@@ -3897,10 +3897,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             layout=torch.jagged,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "expected 2 tensor args but found 1"):
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
             nt * nt.size(1)
 
-        with self.assertRaisesRegex(RuntimeError, "expected 2 tensor args but found 1"):
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
             nt + nt.size(1)
 
     def test_split(self, device):
