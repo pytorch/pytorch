@@ -2,6 +2,7 @@
 
 import sys
 import time
+import unittest
 from statistics import mean
 from unittest.mock import patch
 
@@ -10,11 +11,13 @@ import torch.nn as nn
 from torch import distributed as dist
 from torch.cuda import Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -241,6 +244,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
             both = e4["gpu_total"]
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
+    @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()
@@ -252,5 +256,9 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
         return 2
 
 
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(
+    TestForwardOverlapWorldSizeOne, globals(), only_for=devices
+)
 if __name__ == "__main__":
     run_tests()
