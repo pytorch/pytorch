@@ -1906,6 +1906,8 @@ class DeviceCachingAllocator {
     }
 
     if (mempool_id.first != 0 || mempool_id.second != 0) {
+      // If there is an active mempool, we find the corresponding PrivatePool
+      // in graph_pools and only return the blocks from it.
       auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
         pool_to_id[pool->second.get()] = pool->first;
@@ -1914,12 +1916,11 @@ class DeviceCachingAllocator {
       auto pool_freeable = graph_pools_freeable.find(mempool_id);
       if (pool_freeable != graph_pools_freeable.end()) {
         pool_to_id[pool_freeable->second] = pool_freeable->first;
-        auto blocks_freeable =
-            get_private_pool_head_blocks(pool_freeable->second);
-        all_blocks.insert(
-            all_blocks.end(), blocks_freeable.begin(), blocks_freeable.end());
       }
     } else {
+      // When snapshot is called outside a MemPoolContext, we return
+      // all the blocks in the CUDACachingAllocator (as returned by
+      // get_all_blocks).
       for (const auto& pair : graph_pools) {
         pool_to_id[pair.second.get()] = pair.first;
       }
