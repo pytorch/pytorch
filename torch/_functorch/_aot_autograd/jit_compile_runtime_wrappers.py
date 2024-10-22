@@ -607,6 +607,8 @@ def aot_dispatch_autograd(
                 payload_fn=lambda: bw_module_str,
             )
 
+        # AMP already traced out in joint graph. we do not wish to re-apply it accidentally
+        # in the compiler.
         with track_graph_compiling(aot_config, "forward"), torch._C._DisableAutocast():
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
