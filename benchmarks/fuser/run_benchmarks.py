@@ -284,7 +284,6 @@ def run_benchmarks(operators, shapes):
         shapes = [globals()[k] for k in shapes.split(",")]
 
     print("fuser,device,operator,shape,time")
-    results = []
     for shape, operator in itertools.product(shapes, operators):
         nargs = len(inspect.signature(operator).parameters)
         args = shape()
