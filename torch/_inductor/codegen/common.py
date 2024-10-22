@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
@@ -38,6 +39,7 @@ from ..utils import (
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
+    ir_dataclass,
     sympy_dot,
     sympy_subs,
     unique,
@@ -53,7 +55,27 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-@dataclasses.dataclass
+class WorkspaceZeroMode(enum.Enum):
+    UNINITIALIZED = 0
+    ZERO_ON_CALL = 1  # kernel may leave workspace dirty
+    ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
+
+    @staticmethod
+    def combine(a, b):
+        if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
+            return a
+        if a == WorkspaceZeroMode.UNINITIALIZED:
+            return b
+        raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
+
+    @staticmethod
+    def from_bool(zero_fill):
+        if zero_fill:
+            return WorkspaceZeroMode.ZERO_ON_CALL
+        return WorkspaceZeroMode.UNINITIALIZED
+
+
+@ir_dataclass(frozen=True)
 class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
@@ -61,8 +83,84 @@ class WorkspaceArg:
     so it would be dead code eliminated.
     """
 
-    nbytes: sympy.Expr
-    zero_fill: bool
+    count: sympy.Expr
+    zero_mode: WorkspaceZeroMode
+    device: torch.device
+    outer_name: str
+    inner_name: str = "ws_ptr"
+    dtype: torch.dtype = torch.uint8
+
+    @staticmethod
+    def unique_name(prefix="workspace_"):
+        return f"{prefix}{next(V.graph.workspace_id)}"
+
+    @staticmethod
+    def can_join(a, b) -> bool:
+        return (
+            a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
+        )
+
+    @staticmethod
+    def join(a, b):
+        return WorkspaceArg(
+            count=a.count + b.count,
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    @staticmethod
+    def maximum(a, b):
+        assert (
+            a.zero_mode == b.zero_mode
+            and a.dtype == b.dtype
+            and a.device == b.device
+            and a.inner_name == b.inner_name
+            and a.outer_name == b.outer_name
+        )
+        return WorkspaceArg(
+            count=sympy.Max(a.count, b.count),
+            zero_mode=a.zero_mode,
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    # These methods let WorkspaceArg pretend it is a buffer to reuse allocation code
+    def get_device(self):
+        return self.device
+
+    def get_dtype(self):
+        return self.dtype
+
+    def get_layout(self):
+        from ..ir import FixedLayout
+
+        return FixedLayout(
+            device=self.device,
+            dtype=self.dtype,
+            size=[self.count],
+            stride=[1],
+        )
+
+    @property
+    def layout(self):
+        return self.get_layout()
+
+    def get_size(self):
+        return [self.count]
+
+    def get_stride(self):
+        return [1]
+
+    def get_name(self):
+        return self.outer_name
+
+    def get_inputs_that_alias_output(self):
+        return []
 
 
 @dataclasses.dataclass
@@ -85,13 +183,18 @@ class SizeArg:
 
 
 @dataclasses.dataclass
+class TMADescriptorArg:
+    name: str
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: Any
     wrapper_codegen: type
     cpp_wrapper_codegen: type = type(None)
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
 
 device_codegens: Dict[str, DeviceCodegen] = {}
 
@@ -1255,7 +1358,7 @@ class KernelArgs:
         self.output_buffers = {}
         self.inplace_buffers = {}
         self.sizevars = sizevars or {}
-        self.workspace_arg = None
+        self.workspace_args = []
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -1310,14 +1413,62 @@ class KernelArgs:
             self.inplace_buffers[output_name] = buf
 
     def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
-        if self.workspace_arg is None:
-            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
-            return "ws_ptr", 0
+        """
+        Allocate a new uint32 scratch space for use within this kernel.  Multiple calls to this function will
+        extend the buffer returning a new region on each call.
 
-        offset = self.workspace_arg.nbytes
-        zero_fill = zero_fill or self.workspace_arg.zero_fill
-        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
-        return "ws_ptr", offset
+        Args:
+            nbytes: size to add to the workspace.
+            zero_fill: True if the workspace should be zero-filled.
+
+        Returns:
+            (buffer_name: str, offset: sympy.Expr)
+        """
+        arg = WorkspaceArg(
+            count=nbytes,
+            zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
+            device=V.graph.get_current_device_or_throw(),
+            outer_name=WorkspaceArg.unique_name(),
+        )
+        for i, existing_arg in enumerate(self.workspace_args):
+            if WorkspaceArg.can_join(existing_arg, arg):
+                offset = existing_arg.count
+                self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
+                return existing_arg.inner_name, offset
+            assert (
+                existing_arg.inner_name != arg.inner_name
+                and existing_arg.outer_name != arg.outer_name
+            )
+        self.workspace_args.append(arg)
+        return arg.inner_name, 0
+
+    def semaphores(self, min_size: sympy.Expr):
+        """
+        Lazily allocate a graph-wide semaphores buffer with at least min_size.  This is a single buffer shared by
+        all kernels and zero initialized once at graph start.  Each kernel must leave the buffer zeroed on exit.
+
+        Warning: multiple calls to this function will return the same buffer.
+
+        Args:
+            min_size: the number of int32 semaphores required
+
+        Returns:
+            name of the semaphores buffer
+        """
+        current_device = V.graph.get_current_device_or_throw()
+        arg = WorkspaceArg(
+            count=min_size,
+            zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
+            dtype=torch.int32,
+            inner_name="sem_ptr",
+            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            device=current_device,
+        )
+        for existing_arg in self.workspace_args:
+            if existing_arg.inner_name == arg.inner_name:
+                assert arg == existing_arg
+        self.workspace_args.append(arg)
+        return arg.inner_name
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -1384,7 +1535,7 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        assert self.workspace_arg is None, "Workspace not supported on CPU "
+        assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
@@ -1427,11 +1578,11 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        if self.workspace_arg is not None:
-            arg_defs.append("ws_ptr")
-            call_args.append("workspace")
-            precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
+        for arg in self.workspace_args:
+            arg_defs.append(arg.inner_name)
+            call_args.append(arg.outer_name)
+            precompile_args.append(arg)
+            arg_types.append(arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1503,16 +1654,6 @@ class CSEVariable:
 
 
 class CppWrapperKernelArgs(KernelArgs):
-    def wrap_ptr_arg(self, buf, dtype):
-        from .cpp_utils import DTYPE_TO_CPP
-
-        if config.abi_compatible:
-            # In the abi_compatible model, we just return the buf here.
-            # We will form correct call args later in wrapper.generate_kernel_all.
-            return buf
-        else:
-            return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
-
     def wrap_size_arg(self, size):
         return f"{size}"
 

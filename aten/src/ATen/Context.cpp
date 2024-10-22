@@ -321,6 +321,8 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
+  TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
+      "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
   if (b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
