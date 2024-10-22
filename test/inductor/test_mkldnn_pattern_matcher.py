@@ -971,6 +971,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self,
                 add_fn,
                 use_relu,
+                swap_inputs,
                 **kwargs,
             ):
                 super().__init__()
@@ -981,20 +982,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.add_fn2 = add_fn
                 self.relu2 = torch.nn.ReLU()
                 self.use_relu = use_relu
+                self.swap_inputs = swap_inputs
 
             def forward(self, x, x2, x3):
                 x1 = self.conv1(x)
-                tmp = self.add_fn(x1, x2)
+                if self.swap_inputs:
+                    tmp = self.add_fn(x2, x1)
+                else:
+                    tmp = self.add_fn(x1, x2)
                 if self.use_relu:
                     tmp = self.relu(tmp)
                 tmp1 = self.conv2(tmp)
-                res = self.add_fn2(x3, tmp1)
+                if self.swap_inputs:
+                    res = self.add_fn2(x3, tmp1)
+                else:
+                    res = self.add_fn2(tmp1, x3)
                 if self.use_relu:
                     res = self.relu2(res)
                 return res
 
-        for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
-            mod = M(add_fn, use_relu).eval()
+        for add_fn, swap_inputs in itertools.product(
+            quantization_add_fn_list + quantization_inplace_add_fn_list, [False, True]
+        ):
+            mod = M(add_fn, use_relu, swap_inputs).eval()
             x = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False)
             x2 = torch.randn((1, 6, 6, 6), dtype=torch.float32, requires_grad=False)
             x3 = torch.randn((1, 6, 4, 4), dtype=torch.float32, requires_grad=False)
