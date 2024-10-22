@@ -2003,12 +2003,7 @@ class TritonKernel(SIMDKernel):
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
 
-        # rmask = r0_mask & ... & rn_mask
         masks = self.get_active_masks()
-        reduction_masks = [mask for mask in masks if mask[0] == "r"]
-        if len(reduction_masks) > 0:
-            self.indexing_code.splice(f"rmask = {' & '.join(reduction_masks)}")
-
         if self._load_mask:
             masks.add(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
