@@ -1,0 +1,15 @@
+# This file is to cache other dependencies not specified elsewhere in:
+#   requirement.txt
+#   docs/requirements.txt
+#   docs/cpp/requirements.txt
+#   functorch/docs/requirements.txt
+#   .ci/docker/requirements-ci.txt
+boto3==1.19.12
+jinja2==3.1.4
+lintrunner==0.10.7
+ninja==1.10.0.post1
+nvidia-ml-py==11.525.84
+pyyaml==6.0
+requests==2.32.2
+rich==10.9.0
+rockset==1.0.3

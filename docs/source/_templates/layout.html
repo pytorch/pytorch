@@ -1,0 +1,56 @@
+{% extends "!layout.html" %}
+<link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
+
+{% block extrahead %}
+{% if release == "main" %}
+<!--
+  Search engines should not index the main version of documentation.
+  Stable documentation are built without release == 'main'.
+-->
+<meta name="robots" content="noindex">
+{% endif %}
+{{ super() }}
+{% endblock %}
+
+{% block menu %}
+{% if release == "main" %}
+<div>
+  <a style="color:#F05732" href="{{ theme_canonical_url }}{{ pagename }}.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+{% endif %}
+{{ super() }}
+{% endblock %}
+
+{% block sidebartitle %}
+    <div class="version">
+      <a href='https://pytorch.org/docs/versions.html'>{{ version }} &#x25BC</a>
+    </div>
+    {% include "searchbox.html" %}
+{% endblock %}
+
+{%- block content %}
+{{ super() }}
+<script>
+
+var match = window.location.href.match(/\/_[a-zA-Z0-9_]*.html|_dynamo/gi);
+var url = window.location.href.lastIndexOf(match[match.length-1]);
+
+if (url)
+  {
+    var div = '<div class="admonition note"><p class="admonition-title">Note</p><p><i class="fa fa-exclamation-circle" aria-hidden="true">&nbsp</i> This page describes an internal API which is not intended to be used outside of the PyTorch codebase and can be modified or removed without notice.</p></div>'
+    document.getElementById("pytorch-article").insertAdjacentHTML('afterBegin', div)
+  }
+</script>
+{%- endblock %}
+
+{% block footer %}
+{{ super() }}
+<script script type="text/javascript">
+  var collapsedSections = ['Developer Notes', 'Language Bindings', 'Libraries', 'Community'];
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+{% endblock %}
