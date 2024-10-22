@@ -15,7 +15,7 @@ class AutoChunkerTest(TestCase):
 
         if USE_LARGE_INPUT:
             M = 1024 * 32
-            K = 256
+            K = 32
             N = 1024 * 32
 
         dtype = torch.float32
@@ -57,7 +57,11 @@ class AutoChunkerTest(TestCase):
 
     def test_matmul_trivial(self):
         self.common_matmul_test(has_softmax=False)
-
+   
+    # Due to not able to generate an inplace version of a softmax like
+    # kernel, having 2 chunks does not have large enough savings.
+    # Use at least 4 chunks here.
+    @config.patch("AutoChunker.num_chunk", 4)
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
 

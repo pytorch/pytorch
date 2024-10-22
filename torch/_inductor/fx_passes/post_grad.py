@@ -334,6 +334,42 @@ def scatter_upon_const_tensor(
         ranges=shape,
     )
 
+"""
+def mul_alleq_tensor_extra_check(m):
+    return False
+    scalar_tensor = m.kwargs["scalar_tensor"]
+    return scalar_tensor.meta["val"].numel() == 1
+
+# TODO do this in jointgraph as a graph pattern?
+@register_lowering_pattern(
+    CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.expand.default,
+            KeywordArg("scalar_tensor"),
+            KeywordArg("shape"),
+        ),
+        KeywordArg("other_tensor"),
+    ),
+    extra_check=mul_alleq_tensor_extra_check,
+    # pass_dict=patterns,
+)
+def mul_alleq_tensor_lhs(match: Match, scalar_tensor, shape, other_tensor):
+    scalar_loader = scalar_tensor.make_loader()
+    other_loader = other_tensor.make_loader()
+
+    def inner_fn(idx):
+        other_val = other_loader(idx)
+        scalar_val = scalar_loader([0])
+        return ops.mul(other_val, scalar_val)
+
+    return ir.Pointwise.create(
+        device=other_tensor.get_device(),
+        dtype=other_tensor.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=other_tensor.get_size(),
+    )
+"""
 
 @register_lowering_pattern(
     CallFunction(

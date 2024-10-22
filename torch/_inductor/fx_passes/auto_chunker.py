@@ -117,6 +117,7 @@ class AutoChunkerTransform:
 
         self.gm = analyzer.gm
 
+        self.pretend_identity_tangent()
         source_node_chunks = self._chunk_source_node(source_node)
 
         self.num_chunk = len(source_node_chunks)
@@ -133,16 +134,43 @@ class AutoChunkerTransform:
             for node_id, orig_nd in enumerate(nodes_to_chunk[1:], start=1):
                 self._chunk_non_source_node(chunk_id, node_id, orig_nd, chunk_replacement, final_replacement)
 
+        self.cat_replacement_chunks(final_replacement)
+        self.apply_original_tangent(final_replacement)
+
         for orig_nd, replace_nd in final_replacement.items():
-            if isinstance(replace_nd, list):
-                # a list to concat
-                replace_nd = self.gm.graph.call_function(aten.cat.default, (replace_nd, 0))
             orig_nd.replace_all_uses_with(replace_nd)
 
         self.gm.graph.eliminate_dead_code()
         print("graph after chunking")
         self.gm.print_readable()
         self._fake_tensor_prop()
+
+    def pretend_identity_tangent(self):
+        tangent = self.analyzer.gradient_output
+        fake_tensor = _get_fake_tensor_from_node(tangent)
+
+        with self.gm.graph.inserting_before():
+            one = self.gm.graph.call_function(aten.full.default, (fake_tensor.shape, 1), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+        one._rename(f"tangent_overriden_as_one")
+
+        tangent.replace_all_uses_with(one)
+
+    def cat_replacement_chunks(self, replacement):
+        for orig_nd, replace_nd in replacement.items():
+            if isinstance(replace_nd, list):
+                # a list to concat
+                replace_nd = self.gm.graph.call_function(aten.cat.default, (replace_nd, 0))
+                replacement[orig_nd] = replace_nd
+
+    def apply_original_tangent(self, replacement):
+        # TODO: find a more reliable way to reapply the original tangent?
+        scalar_tangent = self.analyzer.gradient_output
+        for orig_nd, replace_nd in replacement.items():
+            fake_tensor = _get_fake_tensor_from_node(orig_nd)
+            if fake_tensor.numel() > 1:
+                # multiply the gradients with the scalar tangent
+                replace_nd = self.gm.graph.call_function(aten.mul, (replace_nd, scalar_tangent))
+                replacement[orig_nd] = replace_nd
 
     def _fake_tensor_prop(self):
         inputs = []
@@ -208,7 +236,8 @@ class AutoChunkerTransform:
             chunk_replacement[orig_nd] = replace_nd
 
             # do the accumulation
-            self.gm.graph.call_function(aten.add_.Tensor, (accum, replace_nd))
+            # TODO avoid inplace update since joint graph assumes no side effect?
+            final_replacement[orig_nd] = self.gm.graph.call_function(aten.add.Tensor, (accum, replace_nd))
             return
 
         # Special handling for sum
@@ -225,6 +254,7 @@ class AutoChunkerTransform:
             chunk_replacement[orig_nd] = replace_nd
 
             # do the accumulation
+            # TODO avoid inplace update since joint graph assumes no side effect?
             self.gm.graph.call_function(aten.add_.Tensor, (accum, replace_nd))
             return
 
@@ -252,7 +282,7 @@ class AutoChunkerTransform:
                 if isinstance(arg, torch.fx.Node) and "chunk_dim" in arg.meta:
                     seen_chunk_dim.add(arg.meta["chunk_dim"])
     
-            assert len(seen_chunk_dim) == 1, orig_nd.format_node()
+            assert len(seen_chunk_dim) == 1, f"{orig_nd.format_node()}, {seen_chunk_dim}"
             orig_nd.meta["chunk_dim"] = next(iter(seen_chunk_dim))
 
             # permute is different
@@ -269,7 +299,7 @@ class AutoChunkerTransform:
     def _chunk_source_node(self, source_node):
         bs = _get_fake_tensor_from_node(source_node).shape[0]
         print(f"{bs=}")
-        self.num_chunk = 2 # TODO don't hardcode
+        self.num_chunk = config.AutoChunker.num_chunk or 2
         self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
         out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
         chunks = []
@@ -383,11 +413,19 @@ class AutoChunker:
 
     @property
     @cache_on_self
-    def gradient_output(self):
+    def gradient_outputs(self):
+        tangents = []
         for nd in self.gm.graph.nodes:
             if nd.op == "placeholder" and "tangent" in nd.name:
-                return nd
-        assert False, "Can not reach here."
+                tangents.append(nd)
+        return tangents
+
+    @property
+    @cache_on_self
+    def gradient_output(self):
+        tangents = self.gradient_outputs
+        assert len(tangents) == 1
+        return tangents[0]
 
     def has_single_scalar_gradient(self):
         gradient_inputs = []
@@ -437,7 +475,7 @@ class AutoChunker:
         )
         print(f"{reachable_nodes=}")
 
-        print(f"{self.gradient_output=}")
+        print(f"{self.gradient_outputs=}")
         print(f"{self.last_fwd_node_index=}")
 
         print(f"{self.matmul_input=}")
@@ -445,6 +483,13 @@ class AutoChunker:
         print(f"{self.gradient_matmul_input=}")
         print(f"{self.gradient_matmul_weight=}")
 
+        if len(self.gradient_outputs) != 1:
+            return
+
+        tangent = self.gradient_outputs[0]
+        if tangent.meta["val"].numel() != 1:
+            return
+        
         extra_reachable_nodes = []
         if self.last_fwd_node in reachable_nodes:
             # the last fwd node is affected by chunking.

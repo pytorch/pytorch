@@ -24,6 +24,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_lowering_pattern,
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes

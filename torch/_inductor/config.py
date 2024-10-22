@@ -786,6 +786,8 @@ class AutoChunker:
     # times.
     amplify_threshold = 16
 
+    num_chunk = None  # If not None, use this to force number of chunks
+
 
 # config specific to codegen/cpp.py
 class cpp:
