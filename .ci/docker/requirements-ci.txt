@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -257,7 +257,7 @@ tb-nightly==2.13.0a20230426
 #test that import:
 
 # needed by torchgen utils
-typing-extensions>=4.10.0
+typing-extensions
 #Description: type hints for python
 #Pinned versions:
 #test that import:

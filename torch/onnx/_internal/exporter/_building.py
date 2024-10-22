@@ -207,6 +207,8 @@ def _determine_input_dtype(
         return ir.DataType.STRING
     if isinstance(arg, (ir.Tensor, ir.TensorProtocol)):
         return arg.dtype
+    if isinstance(arg, complex):
+        return ir.DataType.FLOAT
     if arg is None:
         return ir.DataType.UNDEFINED
 
@@ -261,9 +263,15 @@ def _get_or_create_constant(
     dtype: ir.DataType,
     opset: onnxscript.values.Opset,
 ) -> ir.Value:
+    # float representation of complex numbers
+    if isinstance(arg, complex):
+        # Convert the complex number to a float
+        arg = (arg.real, arg.imag)
+
     if isinstance(arg, list):
         # Make the arg hashable
         arg = tuple(arg)  # type: ignore[assignment]
+
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
         constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
