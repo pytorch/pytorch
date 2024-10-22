@@ -354,7 +354,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # not implemented for 'Half'
     "nn.functional.multilabel_margin_loss": {f16},
     "nn.functional.multi_margin_loss": {f16},
-    "nn.functional.avg_pool3d": {f16},
 }
 
 
