@@ -6,7 +6,11 @@ import unittest
 from typing import Callable, List, Optional
 from unittest import mock
 
-from test_aot_inductor_utils import AOTIRunnerUtil
+
+try:
+    from test_aot_inductor_utils import AOTIRunnerUtil
+except ImportError:
+    from .test_aot_inductor_utils import AOTIRunnerUtil
 
 import torch
 from torch._dynamo.utils import counters

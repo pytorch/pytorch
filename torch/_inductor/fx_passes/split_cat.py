@@ -7,6 +7,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from ..pattern_matcher import (
     Arg,
@@ -450,8 +451,6 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
         return
     reshape_input = get_arg_value(reshape_node, 0)
 
-    from torch.fx.experimental.symbolic_shapes import free_symbols
-
     if free_symbols(reshape_node.meta["example_value"].shape):
         log.debug("dynamic shape not supported: %s", reshape_node)
         return
@@ -464,6 +463,55 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     reshape_node.replace_all_uses_with(new_reshape_node)
     new_reshape_node.meta.update(reshape_node.meta)
     match.graph.erase_node(reshape_node)
+
+
+@register_graph_pattern(
+    CallMethodVarArgs("clamp", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
+def normalize_clamp_default(match: Match, *args, **kwargs):
+    clamp_node = match.nodes[0]
+    if not is_node_meta_valid(clamp_node):
+        log.debug("example value absent for node: %s", clamp_node)
+        return
+
+    if free_symbols(clamp_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", clamp_node)
+        return
+
+    with match.graph.inserting_after(clamp_node):
+        new_clamp_node = match.graph.call_function(
+            torch.clamp,
+            args=clamp_node.args,
+            kwargs=clamp_node.kwargs,
+        )
+    clamp_node.replace_all_uses_with(new_clamp_node)
+    new_clamp_node.meta.update(clamp_node.meta)
+    match.graph.erase_node(clamp_node)
+
+
+@register_graph_pattern(
+    CallMethodVarArgs("detach", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
+def normalize_detach_default(match: Match, *args, **kwargs):
+    detach_node = match.nodes[0]
+    if not is_node_meta_valid(detach_node):
+        log.debug("example value absent for node: %s", detach_node)
+        return
+
+    if free_symbols(detach_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", detach_node)
+        return
+
+    with match.graph.inserting_after(detach_node):
+        new_detach_node = match.graph.call_function(
+            torch.detach,
+            args=detach_node.args,
+        )
+    detach_node.replace_all_uses_with(new_detach_node)
+    new_detach_node.meta.update(detach_node.meta)
+    match.graph.erase_node(detach_node)
 
 
 class TorchSplit(CallFunction):

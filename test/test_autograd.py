@@ -7456,20 +7456,20 @@ for shape in [(1,), ()]:
     def test_reentrant_with_callbacks_depth_0(self):
         # Verify callback is called only once.
         ret = self._test_reentrant_with_callbacks([0])
-        self.assertEqual(1, ret["outer"])
-        self.assertEqual(0, ret["inner"])
+        self.assertEqual(ret["outer"], 1)
+        self.assertEqual(ret["inner"], 0)
 
     def test_reentrant_with_callbacks_depth_1(self):
         # Verify callback is called only once.
         ret = self._test_reentrant_with_callbacks([1])
-        self.assertEqual(0, ret["outer"])
-        self.assertEqual(1, ret["inner"])
+        self.assertEqual(ret["outer"], 0)
+        self.assertEqual(ret["inner"], 1)
 
     def test_reentrant_with_callbacks_both_depths(self):
         # Verify callback is called twice.
         ret = self._test_reentrant_with_callbacks([0, 1])
-        self.assertEqual(1, ret["outer"])
-        self.assertEqual(1, ret["inner"])
+        self.assertEqual(ret["outer"], 1)
+        self.assertEqual(ret["inner"], 1)
 
     def test_reentrant_with_leaf_variable_hook(self):
         handle = None
