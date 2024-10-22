@@ -1135,11 +1135,11 @@ def bmm_default(func, *args, **kwargs):
     if has_triton:
         a = inp
         b = other
-        from torch.nested._internal.triton_kernels.bmm import matmul
+        from torch.nested._internal.triton_kernels.bmm import group_gemm_fn
         # TODO: Start inlining this into the kernel
-        c = []
-        for (ai, bi) in zip(a.unbind(), b.unbind()):
-            c.append(matmul(ai, bi))
+        a_list = list(a.unbind())
+        b_list = list(b.unbind())
+        c = group_gemm_fn(a_list, b_list)
         return NestedTensor(torch.cat(c), **extract_kwargs(inp))
 
     return matmul_default(torch.ops.aten.matmul.default, inp, other)
