@@ -934,10 +934,10 @@ def compute_unbacked_bindings(
             and rhs in pending
         ):
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[s] = path + (DivideByKey(int(lhs)),)
+            r[rhs] = path + (DivideByKey(int(lhs)),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(s, real // int(lhs))
+                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
             pending.remove(rhs)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
@@ -1794,6 +1794,15 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
 
 @lru_cache(256)
 def safe_expand(r: _SympyT) -> _SympyT:
+    """
+    Expand the given symbolic expression by recursively rewriting product of
+    sums into sum of products (with the product being either a multiplication or
+    exponentiation).
+
+    NOTE: using this on an intermediate expression may prevent simplification
+    down the line, e.g., if we eagerly expand `(a + b)^2` into `a^2 + 2ab + b^2`,
+    we won't be able to simplify `(a^2 + 2ab + b^2) / (a + b)` as easily.
+    """
     if hasattr(r, "expand"):
         try:
             return _fast_expand(r)
@@ -5395,6 +5404,7 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: _SympyT) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
+        expr = safe_expand(expr)
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
