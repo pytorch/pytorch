@@ -13,7 +13,6 @@ import torch.fx
 import torch.nn
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
-from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -31,6 +30,7 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
+from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
@@ -623,6 +623,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "wrap_with_autocast":
+            return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
         elif (
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
@@ -1038,7 +1040,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1060,7 +1062,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    SourcelessBuilder.create(
+                    VariableTracker.build(
                         tx,
                         leaf.size
                         if leaf.size is not None
@@ -1070,8 +1072,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
-                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                    "dtype": VariableTracker.build(tx, leaf.dtype),
+                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(xs.items, xs.items)
@@ -1476,10 +1478,20 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def install_subgraph_in_output_graph(
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+    ):
+        return add_subgraph(
+            tx,
+            f"{attr_name}",
+            body_gmod,
+        )
+
     def create_wrapped_node(
         self,
         tx: "InstructionTranslator",
-        args,
+        fn_vt,
+        fn_args_vt,
         kwargs,
         description,
         under_activation_checkpoint=False,
@@ -1492,8 +1504,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[0],  # function
-            [*args[1:]],
+            fn_vt,
+            fn_args_vt,
             kwargs,
             description,
             source_target=self.value,
@@ -1502,12 +1514,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
-            "wrap_body",
-            body_gmod,
+        body_name = self.install_subgraph_in_output_graph(
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod
         )
-
         body_node = make_attr(tx, body_name)
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
@@ -1521,7 +1530,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod, body_name
 
     def call_function(
         self,
@@ -1530,9 +1539,15 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
-            tx, args, kwargs, "wrap"
-        )
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            _,
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "wrap")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -1616,6 +1631,88 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
+        return _call_function_and_unflatten_output(
+            tx, self.value, proxy_args, {}, example_value, treespec
+        )
+
+
+class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    """
+    This hop is not exposed to users but is inserted into the graph
+    after export as a post-processing step.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        if kwargs:
+            unimplemented(
+                f"wrap_with_autocast: Got unexpected kwargs: {list(kwargs.keys())}"
+            )
+
+        device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
+
+        for arg in [device_type, dtype, enabled, cache_enabled]:
+            if not isinstance(arg, ConstantVariable):
+                unimplemented(
+                    "device_type, dtype, enabled, cache_enabled must be constants"
+                )
+
+        _check_supported_callable_arg(tx, fn_var, "autocast")
+
+        python_constants = [
+            arg.as_python_constant()
+            for arg in [device_type, dtype, enabled, cache_enabled]
+        ]
+
+        with torch.autocast(*python_constants):
+            (
+                (body_r, treespec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                fn_var,
+                [*rest_args],
+                {},
+                "torch.ops.higher_order.wrap_with_autocast",
+                source_target=self.value,
+                set_subgraph_inputs="manual",
+                should_flatten_outputs=True,
+            )
+
+        if len(body_lifted_freevars) > 0:
+            unimplemented(
+                f"wrap_with_autocast: Got unexpected freevars {body_lifted_freevars}"
+            )
+
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        body_name = add_subgraph(
+            tx,
+            "wrap_body",
+            body_gmod,
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        proxy_args = tuple(
+            [
+                *python_constants,
+                body_node,
+            ]
+            + [operand.as_proxy() for operand in rest_args]
+        )
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
             tx, self.value, proxy_args, {}, example_value, treespec
         )
@@ -1834,9 +1931,11 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             body_r,
             treespec,
             checkpointed_gmod,
+            _,
         ) = self.create_wrapped_node(
             tx,
-            args,
+            args[0],
+            args[1:],
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
             under_activation_checkpoint=True,
@@ -1973,7 +2072,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
-        from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
 
@@ -1981,9 +2079,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return query.call_method(
                 tx,
                 "new_empty",
-                (SourcelessBuilder.create(tx, []),),
+                (VariableTracker.build(tx, []),),
                 {
-                    "dtype": SourcelessBuilder.create(tx, torch.int32),
+                    "dtype": VariableTracker.build(tx, torch.int32),
                 },
             )
 
@@ -1993,8 +2091,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             score = query.call_method(
                 tx,
                 "new_empty",
-                (SourcelessBuilder.create(tx, []),),
-                {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
+                (VariableTracker.build(tx, []),),
+                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
             )
             new_args = [score, *bhmn]
         else:
@@ -2195,10 +2293,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tracer=fwd_tracer,
         )
 
-        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+        if ctx in tx.output.side_effects.store_attr_mutations:
             if (
                 "_materialize_non_diff_grads"
-                in tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+                in tx.output.side_effects.store_attr_mutations[ctx]
             ):
                 unimplemented("NYI")
 
