@@ -82,6 +82,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         *,
         check_strides=True,
         check_aliasing=True,
+        only_check_ops_with_meta=True,
     ):
         super().__init__()
         self.ignore_op_fn = (
@@ -89,11 +90,13 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         self.check_strides = check_strides
         self.check_aliasing = check_aliasing
+        self.only_check_ops_with_meta = only_check_ops_with_meta
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
         fake_r = None
+        breakpoint()
 
         # empty_like excluded for now due to sparse complex
         # aten._to_dense.default this one is getting called with csc
@@ -105,6 +108,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
+            and (
+                not self.only_check_ops_with_meta
+                or torch._subclasses.fake_impls.has_meta(func)
+            )
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags
