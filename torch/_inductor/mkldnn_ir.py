@@ -257,7 +257,7 @@ def _prepare_linear_fusion_create(
         inputs.append(bias)
     else:
         constant_args.insert(0, bias)
-    return inputs, constant_args, kernel_layout, req_stride_order
+    return inputs, constant_args, kernel_layout, req_stride_order, other
 
 
 def _create_output_node(packed):
@@ -1103,7 +1103,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         post_op_args,
         post_op_algorithm,
     ):
-        (inputs, constant_args, kernel_layout, _) = _prepare_linear_fusion_create(
+        (inputs, constant_args, kernel_layout, _, _) = _prepare_linear_fusion_create(
             cls,
             qx,
             qw,
@@ -1193,7 +1193,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
-            return [self.inputs[-1].get_name()]
+            return [self.inputs[self.idx_for_inplace_sum].get_name()]
         else:
             return []
 
@@ -1224,6 +1224,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             kernel_layout,
             req_stride_order,
+            other,
         ) = _prepare_linear_fusion_create(
             cls,
             qx,
