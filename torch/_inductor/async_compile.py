@@ -167,7 +167,9 @@ class AsyncCompile:
         else:
             pre_fork_setup()
             ctx = multiprocessing.get_context(get_worker_start_method())
-            log.info("Creating forked subprocess pool with %d workers", get_compile_threads())
+            log.info(
+                "Creating forked subprocess pool with %d workers", get_compile_threads()
+            )
             pool = ProcessPoolExecutor(
                 get_compile_threads(),
                 mp_context=ctx,
