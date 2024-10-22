@@ -2,5 +2,45 @@
 
 set -e -u
 
+# first import docker image
+if [ -f ./manywheel-s390x.tar ] ; then
+        docker image load --input manywheel-s390x.tar
+        docker image tag docker.io/pytorch/manylinuxs390x-builder:cpu-s390x docker.io/pytorch/manylinuxs390x-builder:cpu-s390x-main
+        rm -f manywheel-s390x.tar
+fi
+
+token_file=registration-token.json
+
+# Generate registration token
+curl \
+        -X POST \
+        -H "Accept: application/vnd.github.v3+json" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        "https://api.github.com/orgs/${ORG}/actions/runners/registration-token" \
+        -o "$token_file"
+
+unset ACCESS_TOKEN
+
+# register runner as ephemeral runner
+# it does one job, stops and unregisters
+registration_token=$(jq --raw-output .token "$token_file")
+
+./config.sh \
+        --unattended \
+        --ephemeral \
+        --url "https://github.com/${ORG}" \
+        --token "${registration_token}" \
+        --name "${NAME}" \
+        --no-default-labels \
+        --labels self-hosted,linux.s390x
+
+unset registration_token
+rm -f "$token_file"
+
+# enter into python virtual environment.
+# build workflows use "python -m pip install ...",
+# and it doesn't work for non-root user
+source venv/bin/activate
+
 # Run one job.
-./run.sh --once
+./run.sh

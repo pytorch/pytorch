@@ -265,6 +265,33 @@ class TensorParallelAPITests(DTensorTestBase):
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
+    @with_comms
+    def test_under_devicemesh_context(self):
+        # test ColwiseParallel
+        inp_size = [8, 10]
+        colwise = ColwiseParallel(output_layouts=Replicate())
+
+        torch.manual_seed(5)
+        model = torch.nn.Linear(10, 16, device=self.device_type)
+        model_tp = deepcopy(model)
+
+        # Call parallelize_module under DeviceMesh context.
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        with device_mesh:
+            model_tp = parallelize_module(model_tp, parallelize_plan=colwise)
+
+        self._compare_module(model, model_tp, inp_size)
+
+    @with_comms
+    def test_empty_plan(self):
+        torch.manual_seed(5)
+        model = torch.nn.Linear(10, 16, device=self.device_type)
+
+        # Call parallelize_module with empty plan.
+        # Goal is not to crash.
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(model, device_mesh)
+
 
 if __name__ == "__main__":
     run_tests()

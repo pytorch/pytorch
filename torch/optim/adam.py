@@ -17,6 +17,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _params_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -255,7 +256,7 @@ Adam.__doc__ = (
             &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
                 \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)}          \\
             &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
-                \:\textit{maximize}                                                              \\
+                \:\textit{maximize},  \: \epsilon \text{ (epsilon)}                              \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
@@ -288,8 +289,7 @@ Adam.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.

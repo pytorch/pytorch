@@ -1,5 +1,6 @@
 import dataclasses
 import itertools
+import platform
 import time
 from typing import Optional, Tuple
 
@@ -39,6 +40,14 @@ def device_sync(device):
         pass
     else:
         print(f"device={device} is not yet suppported")
+
+
+def get_arch_name() -> str:
+    if torch.cuda.is_available():
+        return torch.cuda.get_device_name()
+    else:
+        # This returns x86_64 or arm64 (for aarch64)
+        return platform.machine()
 
 
 def multinomial_sample_one_no_sync(
@@ -198,7 +207,7 @@ def run_experiment(
 ) -> None:
     print(f"Loading model {x.name}")
     t0 = time.time()
-    model = _load_model(x)
+    model = _load_model(x, device=device)
     device_sync(device=device)  # MKG
     print(f"Time to load model: {time.time() - t0:.02f} seconds")
 
@@ -255,9 +264,11 @@ def run_llama2_7b_bf16(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         94,
         1253,
-        162,
+        133,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
@@ -266,6 +277,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -275,6 +287,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -284,6 +297,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
     ]
@@ -300,9 +314,11 @@ def run_llama2_7b_int8(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         144,
         957,
-        172,
+        136,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
@@ -311,6 +327,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -320,6 +337,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -329,6 +347,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
     ]
@@ -346,9 +365,11 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
         1130,
-        162,
+        133,
     )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(model)
+    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
+        model, device=device
+    )
     return [
         Experiment(
             model.name,
@@ -357,6 +378,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{token_per_sec:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -366,6 +388,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{memory_bandwidth:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
         Experiment(
@@ -375,6 +398,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             f"{compilation_time:.02f}",
             model.mode,
             device,
+            get_arch_name(),
             True,
         ),
     ]

@@ -80,7 +80,6 @@ struct FunctionalGraphSlicer {
         graph_->createWithSubgraph(prim::FunctionalGraph)
             ->insertBefore(block->return_node());
     auto reverse_iter = block->nodes().reverse();
-    std::vector<Value*> graph_outputs;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it++;
 

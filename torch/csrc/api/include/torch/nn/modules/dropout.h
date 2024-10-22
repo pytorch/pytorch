@@ -7,11 +7,7 @@
 
 #include <torch/csrc/Export.h>
 
-#include <cstddef>
-#include <vector>
-
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace detail {
 
@@ -186,5 +182,4 @@ class TORCH_API FeatureAlphaDropoutImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(FeatureAlphaDropout);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

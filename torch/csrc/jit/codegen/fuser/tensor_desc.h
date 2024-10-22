@@ -10,20 +10,15 @@
 #include <ostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
 // contiguity.back() == true means strides.back() == 1.
 struct TORCH_API TensorDesc {
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::ScalarType scalar_type;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> contiguity;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
       : scalar_type{type}, contiguity{contiguity} {
     if (contiguity.empty()) {
@@ -35,7 +30,6 @@ struct TORCH_API TensorDesc {
   }
 
   // Delegating constructors
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(
       const at::ScalarType& type,
       const at::IntArrayRef& sizes,
@@ -45,7 +39,6 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.scalar_type(), t.sizes(), t.strides()) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(const c10::TensorTypePtr& type)
       : TensorDesc(
             type->scalarType().value(),
@@ -66,7 +59,6 @@ struct TORCH_API TensorDesc {
       const at::IntArrayRef& sizes,
       const at::IntArrayRef& strides) {
     AT_ASSERT(sizes.size() == strides.size());
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<bool> cont(sizes.size());
     for (size_t i = 0; i < sizes.size(); ++i) {
       const auto expected_stride =
@@ -103,6 +95,4 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
   return out;
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

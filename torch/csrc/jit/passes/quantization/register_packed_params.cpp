@@ -59,7 +59,6 @@ std::unordered_set<std::string> RegisterPrePackParams(
   int64_t uid = 0; // int + method name gives unique identifier
   auto graph = m.get_method(method_name).graph();
   std::stack<Block*> blocks_to_visit;
-  std::unordered_set<Node*> nodes_to_delete;
   blocks_to_visit.push(graph->block());
   std::string attr_name_base =
       attr_prefix + "_" + method_name + "_ondevice_ptq_packed_weight_";

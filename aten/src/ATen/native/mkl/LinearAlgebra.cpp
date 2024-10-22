@@ -154,4 +154,4 @@ void mkl_gemm_f16f16f32(
 }} // namespace at::native
 
 #endif
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()

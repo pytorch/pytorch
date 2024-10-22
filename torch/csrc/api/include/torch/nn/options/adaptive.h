@@ -4,8 +4,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `AdaptiveLogSoftmaxWithLoss` module.
 ///
@@ -37,5 +36,4 @@ struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
   TORCH_ARG(bool, head_bias) = false;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

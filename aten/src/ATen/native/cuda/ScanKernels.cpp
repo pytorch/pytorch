@@ -12,8 +12,11 @@
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper_native.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/where.h>
 #endif
 
 namespace at::native {
@@ -88,14 +91,44 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  if (self.is_floating_point() || self.is_complex()) {
-    // See Note [Writing Nondeterministic Operations]
-    // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
-    globalContext().alertNotDeterministic("cumsum_cuda_kernel");
+int64_t canonicalize_dim(int64_t rank, int64_t idx) {
+  TORCH_INTERNAL_ASSERT(rank >= 0);
+  if (rank == 0) {
+    rank = 1;
   }
+  if (idx >= 0 && idx < rank) {
+    return idx;
+  }
+  int64_t _idx = (idx < 0) ? (idx + rank) : idx;
+  TORCH_INTERNAL_ASSERT(!(_idx < 0 || _idx >= rank));
+  return _idx;
+}
+
+// This function is ported from the cumsum decomp in `torch/_refs`.
+Tensor& cumsum_deterministic(Tensor& result, Tensor& self, int64_t dim) {
+  int64_t ndim = self.dim();
+  dim = canonicalize_dim(ndim, dim);
+  if (ndim == 0) {
+    return at::sum_out(result, self.unsqueeze(0), /*dim=*/IntArrayRef{0});
+  }
+  self = self.unsqueeze(dim + 1);
+  Tensor rg = at::arange(self.size(dim), c10::TensorOptions().device(self.device()));
+  Tensor mask = rg.unsqueeze(1).le(rg);
+  for (int idx = 0; idx < (ndim - dim - 1); idx++) {
+    mask = mask.unsqueeze(-1);
+  }
+  Tensor masked_self = at::where(mask, self, 0);
+  return at::sum_out(result, masked_self, /*dim=*/IntArrayRef{dim});
+}
+
+void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto result_ = contiguous_out_arg(result);
-  launch_cumsum_cuda_kernel(*result_, self, dim);
+  if ((self.is_floating_point() || self.is_complex()) && globalContext().deterministicAlgorithms()) {
+    // See Note [Enabling Deterministic Operations]
+    cumsum_deterministic(const_cast<Tensor&>(*result_), const_cast<Tensor&>(self), dim);
+  } else {
+    launch_cumsum_cuda_kernel(*result_, self, dim);
+  }
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }

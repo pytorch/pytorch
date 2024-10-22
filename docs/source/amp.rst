@@ -98,6 +98,11 @@ updates the parameters, so the scale factor does not interfere with the learning
 .. autoclass:: GradScaler
     :members:
 
+.. currentmodule:: torch.cpu.amp
+
+.. autoclass:: GradScaler
+    :members:
+
 .. _autocast-op-reference:
 
 Autocast Op Reference
@@ -365,7 +370,7 @@ in which unlisted ops run if they're downstream from autocasted ops.
 
 If an op is unlisted, we assume it's numerically stable in ``bfloat16``.
 If you believe an unlisted op is numerically unstable in ``bfloat16``,
-please file an issue.
+please file an issue. ``float16`` shares the lists of ``bfloat16``.
 
 CPU Ops that can autocast to ``bfloat16``
 """""""""""""""""""""""""""""""""""""""""
@@ -375,19 +380,25 @@ CPU Ops that can autocast to ``bfloat16``
 ``conv3d``,
 ``bmm``,
 ``mm``,
+``linalg_vecdot``,
 ``baddbmm``,
 ``addmm``,
 ``addbmm``,
 ``linear``,
 ``matmul``,
-``_convolution``
+``_convolution``,
+``conv_tbc``,
+``mkldnn_rnn_layer``,
+``conv_transpose1d``,
+``conv_transpose2d``,
+``conv_transpose3d``,
+``prelu``,
+``scaled_dot_product_attention``,
+``_native_multi_head_attention``
 
 CPU Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""""""
 
-``conv_transpose1d``,
-``conv_transpose2d``,
-``conv_transpose3d``,
 ``avg_pool3d``,
 ``binary_cross_entropy``,
 ``grid_sampler``,
@@ -421,9 +432,22 @@ CPU Ops that can autocast to ``float32``
 ``replication_pad2d``,
 ``replication_pad3d``,
 ``mse_loss``,
+``cosine_embedding_loss``,
+``nll_loss``,
+``nll_loss2d``,
+``hinge_embedding_loss``,
+``poisson_nll_loss``,
+``cross_entropy_loss``,
+``l1_loss``,
+``huber_loss``,
+``margin_ranking_loss``,
+``soft_margin_loss``,
+``triplet_margin_loss``,
+``multi_margin_loss``,
 ``ctc_loss``,
 ``kl_div``,
 ``multilabel_margin_loss``,
+``binary_cross_entropy_with_logits``,
 ``fft_fft``,
 ``fft_ifft``,
 ``fft_fft2``,
@@ -438,7 +462,6 @@ CPU Ops that can autocast to ``float32``
 ``fft_irfftn``,
 ``fft_hfft``,
 ``fft_ihfft``,
-``linalg_matrix_norm``,
 ``linalg_cond``,
 ``linalg_matrix_rank``,
 ``linalg_solve``,
@@ -451,14 +474,10 @@ CPU Ops that can autocast to ``float32``
 ``linalg_tensorinv``,
 ``linalg_tensorsolve``,
 ``fake_quantize_per_tensor_affine``,
-``eig``,
 ``geqrf``,
-``lstsq``,
 ``_lu_with_info``,
 ``qr``,
-``solve``,
 ``svd``,
-``symeig``,
 ``triangular_solve``,
 ``fractional_max_pool2d``,
 ``fractional_max_pool3d``,

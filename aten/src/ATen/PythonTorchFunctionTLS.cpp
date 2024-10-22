@@ -46,4 +46,9 @@ bool torch_function_mode_enabled() {
          PythonTorchFunctionTLS::stack_len() > 0;
 }
 
+// This is needed to disambiguate the ternary torch function disabled states
+bool torch_function_all_disabled() {
+  return PythonTorchFunctionTLS::get_disabled_state() == TorchFunctionDisabledState::ALL_DISABLED;
+}
+
 } // namespace at::impl

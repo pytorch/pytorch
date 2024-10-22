@@ -115,7 +115,8 @@ RESULTS_RE: re.Pattern[str] = re.compile(
 
 def _test_results_re() -> None:
     """
-    >>> def t(s): return RESULTS_RE.search(s).groupdict()
+    >>> def t(s):
+    ...     return RESULTS_RE.search(s).groupdict()
 
     >>> t(r"file.py:80:1: E302 expected 2 blank lines, found 1")
     ... # doctest: +NORMALIZE_WHITESPACE

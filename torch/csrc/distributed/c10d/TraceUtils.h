@@ -8,13 +8,10 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
-#include <chrono>
 
 #include <sys/types.h>
 #include <cstdlib>
-#include <fstream>
 #include <string>
-#include <system_error>
 #include <vector>
 
 namespace c10d {
@@ -27,7 +24,7 @@ struct ProcessGroupStatus {
   int64_t lastEnqueuedSeq{-1};
   // the sequential number of the last collective started as the kernel
   int64_t lastStartedSeq{-1};
-  // the sequential number of the last colletive completed marked by
+  // the sequential number of the last collective completed marked by
   // the watchdog thread
   // initialized to be -1 to indicate no collective has been completed
   int64_t lastCompletedSeq{-1};
@@ -129,7 +126,7 @@ inline std::string analyzeLaggingRanks(const TraceMap& traceMap) {
   std::string report =
       "\n\t - To our best knowledge, the lagging/dead/mismatched ranks "
       "that caused the desync are:";
-  if (startRanks.size()) {
+  if (!startRanks.empty()) {
     report += c10::str(
         "\n\t   - [",
         ranksToString(startRanks),
@@ -137,7 +134,7 @@ inline std::string analyzeLaggingRanks(const TraceMap& traceMap) {
         lagSeq,
         " (count from 1)");
   }
-  if (endRanks.size()) {
+  if (!endRanks.empty()) {
     report += c10::str(
         "\n\t     [",
         ranksToString(endRanks),
@@ -169,7 +166,7 @@ inline std::string dumpSnapshot(TraceMap& traceMap) {
       }
     }
 
-    if (collectivesStart.size()) {
+    if (!collectivesStart.empty()) {
       report += c10::str("\n\t   #", seq, " started ranks:");
       for (auto& mapPair : collectivesStart) {
         report += c10::str(
@@ -179,7 +176,7 @@ inline std::string dumpSnapshot(TraceMap& traceMap) {
             mapPair.first);
       }
     }
-    if (collectivesEnd.size()) {
+    if (!collectivesEnd.empty()) {
       report += c10::str("\n\t   #", seq, " finished ranks:");
       for (auto& mapPair : collectivesEnd) {
         report += c10::str(
@@ -218,7 +215,7 @@ inline std::string retrieveDesyncReport(
     int worldSize) {
   std::string report;
 
-  uint64_t thisSeq;
+  uint64_t thisSeq = 0;
   std::string thisCol;
 
   std::vector<int> missingRanks;
@@ -226,7 +223,7 @@ inline std::string retrieveDesyncReport(
 
   for (const auto rank : c10::irange(worldSize)) {
     // Build traceMapStart.
-    uint64_t seqStart;
+    uint64_t seqStart = 0;
     {
       std::string traceKeyStart = getTraceStartKey(pgName, rank);
       if (!store->check({traceKeyStart})) {
@@ -250,7 +247,7 @@ inline std::string retrieveDesyncReport(
       if (!store->check({traceKeyEnd})) {
         continue;
       }
-      uint64_t seq;
+      uint64_t seq = 0;
       std::string col;
       if (!parseTraceValue(store, traceKeyEnd, seq, col)) {
         return report;
@@ -323,7 +320,7 @@ inline std::string get_python_cpp_trace() {
     auto frame_id = s_tb[idx];
     const auto& frame = s_tbs.all_frames.at(frame_id);
     oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-        << ":" << frame.lineno << std::endl;
+        << ":" << frame.lineno << '\n';
   }
   return oss.str();
 }

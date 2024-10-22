@@ -67,10 +67,10 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <ostream>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
 // from here?
@@ -85,16 +85,11 @@ static std::vector<int64_t> expand_param_if_needed(
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
        << "dimensions, but got " << param_name << "=" << list_param;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   } else {
     return list_param.vec();
   }
 }
-
-// It seems more common to not use parameters than to use them, so disable
-// unused-parameter warning
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 
 TORCH_API std::vector<Shape> compute_shape_arange_out(
     const at::Scalar& start,
@@ -177,6 +172,7 @@ std::vector<Shape> compute_shape_abs(const at::Tensor& self) {
 
 std::vector<Shape> compute_shape_bernoulli(
     const at::Tensor& self,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     ::std::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -185,7 +181,7 @@ std::vector<Shape> compute_shape_bernoulli(
     const at::Tensor& self,
     double p,
     ::std::optional<at::Generator> generator) {
-  return compute_shape_bernoulli(self, generator);
+  return compute_shape_bernoulli(self, std::move(generator));
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy(
@@ -233,6 +229,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
       "dimensions.");
 
   std::vector<int64_t> new_shape;
+  new_shape.reserve((size_t)l_diff);
   for (size_t i = 0; i < (size_t)l_diff; i++) {
     new_shape.emplace_back(input_sizes[i]);
   }
@@ -518,7 +515,7 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
       extended_dim_shape <=
           static_cast<size_t>(std::numeric_limits<int64_t>::max()),
       "Size overflow");
-  out_shape[dim] = extended_dim_shape;
+  out_shape[dim] = static_cast<int64_t>(extended_dim_shape);
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
@@ -692,6 +689,7 @@ std::vector<Shape> compute_shape_native_dropout_backward(
 
 std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     ::std::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -700,7 +698,7 @@ std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     int64_t to,
     ::std::optional<at::Generator> generator) {
-  return compute_shape_random(self, generator);
+  return compute_shape_random(self, std::move(generator));
 }
 
 std::vector<Shape> compute_shape_random(
@@ -708,7 +706,7 @@ std::vector<Shape> compute_shape_random(
     int64_t from,
     ::std::optional<int64_t> to,
     ::std::optional<at::Generator> generator) {
-  return compute_shape_random(self, generator);
+  return compute_shape_random(self, std::move(generator));
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
@@ -1111,7 +1109,8 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
   }
 
   auto result_sizes = tensors[0].sizes().vec();
-  result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+  result_sizes.insert(
+      result_sizes.begin() + wrapped_dim, static_cast<long>(tensors.size()));
   return {Shape(tensors[0].scalar_type(), result_sizes)};
 }
 
@@ -1134,6 +1133,7 @@ std::vector<Shape> compute_shape_narrow_copy_symint(
     const at::Tensor& self,
     int64_t dim,
     int64_t start,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     c10::SymInt length) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -1169,7 +1169,7 @@ std::vector<Shape> compute_shape_view(
     const std::vector<int64_t>& output_sizes) {
   const Shape& input_shape = input.shape();
   const auto complete_output_sizes =
-      at::infer_size(output_sizes, input_shape.numel());
+      at::infer_size(output_sizes, static_cast<int64_t>(input_shape.numel()));
   return {Shape(input_shape.scalar_type(), complete_output_sizes)};
 }
 std::vector<Shape> compute_shape_cast(
@@ -1338,7 +1338,12 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
       /*pin_memory=*/::std::nullopt);
   auto out_meta =
       at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
-          self_meta, src_meta, dim, start, end, step);
+          self_meta,
+          src_meta,
+          dim,
+          std::move(start),
+          std::move(end),
+          std::move(step));
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
@@ -1364,7 +1369,7 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
       /*pin_memory=*/::std::nullopt);
   auto out_meta =
       at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
-          self_meta, src_meta, size, stride, storage_offset);
+          self_meta, src_meta, size, stride, std::move(storage_offset));
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
@@ -1372,6 +1377,7 @@ std::vector<Shape> compute_shape_normal_functional(
     const at::Tensor& self,
     double mean,
     double std,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     ::std::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -1380,12 +1386,9 @@ std::vector<Shape> compute_shape_uniform(
     const at::Tensor& self,
     double from,
     double to,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     ::std::optional<at::Generator> generator) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-// Restore unused-parameters warnings
-#pragma GCC diagnostic pop
-
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

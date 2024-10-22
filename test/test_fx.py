@@ -528,6 +528,56 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
 
+    def test_proxy_deepcopy_without_tracer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return 2 * x
+
+        module = MyModule()
+        traced = symbolic_trace(module)
+        node = list(traced.graph.nodes)[-2]
+        p = torch.fx.Proxy(node, None)
+        node.proxy = p
+        p2 = copy.deepcopy(p)
+        self.assertTrue(isinstance(p2, torch.fx.Proxy))
+        self.assertEqual(p2.node.name, node.name)
+        self.assertEqual(p2.node.target, node.target)
+        self.assertNotEqual(id(p2.node), id(node))
+
+    def test_proxy_deepcopy_with_tracer(self):
+        class TestTracer(Tracer):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            def is_leaf_module(self, module, name):
+                return True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return 2 * x
+
+        module = MyModule()
+        tracer = TestTracer("mytracer")
+        traced = symbolic_trace(module)
+        node = list(traced.graph.nodes)[-2]
+        p = torch.fx.Proxy(node, tracer)
+        node.proxy = p
+        p2 = copy.deepcopy(p)
+        self.assertTrue(isinstance(p2, torch.fx.Proxy))
+        self.assertTrue(isinstance(p2.tracer, torch.fx._symbolic_trace.Tracer))
+        self.assertEqual(p2.tracer.name, "mytracer")
+        self.assertEqual(p2.node.name, node.name)
+        self.assertEqual(p2.node.target, node.target)
+        self.assertNotEqual(id(p2.node), id(node))
+        self.assertNotEqual(id(p2.tracer), id(tracer))
+
     def test_concrete_arg_none_assert(self):
         class Foo(torch.nn.Module):
             def forward(self, x, val=None):

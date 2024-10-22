@@ -876,7 +876,6 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.nn.api
 .. py:module:: torch.distributed.nn.jit
 .. py:module:: torch.distributed.nn.jit.templates
-.. py:module:: torch.distributed.tensor
 .. py:module:: torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
 .. py:module:: torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks
 .. py:module:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks

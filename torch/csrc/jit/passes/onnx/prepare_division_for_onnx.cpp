@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0,
 // so before converting the ints to tensors we need to cast them to floats.
@@ -43,5 +42,4 @@ void PrepareDivisionForONNX(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After PrepareDivisionForONNX: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

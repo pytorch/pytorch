@@ -150,6 +150,9 @@ def _tensor_rebuild_functions():
         # Reasoning is that we don't have control over the numpy functions, but
         # this utility is provided by pytorch
         torch._utils._rebuild_device_tensor_from_numpy,
+        # In 2.6, we should no longer have a dependency on numpy and the above
+        # _rebuild_device_tensor_from_numpy function.
+        torch._utils._rebuild_device_tensor_from_cpu_tensor,
     }
 
 
@@ -261,7 +264,8 @@ class Unpickler:
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
-                        f"Trying to instantiate unsupported class {cls}"
+                        "Can only create new object for nn.Parameter or classes allowlisted "
+                        f"via `add_safe_globals` but got {cls}"
                     )
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
@@ -291,7 +295,8 @@ class Unpickler:
                         inst.__dict__.update(state)
                 else:
                     raise UnpicklingError(
-                        f"Can only build Tensor, parameter or OrderedDict objects, but got {type(inst)}"
+                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
+                        f"via `add_safe_globals`, but got {type(inst)}"
                     )
             # Stack manipulation
             elif key[0] == APPEND[0]:

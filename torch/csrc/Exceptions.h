@@ -338,7 +338,8 @@ namespace detail {
 struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
   // unused-variable warnings at usage sites of this class
-  noop_gil_scoped_release() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  noop_gil_scoped_release(){};
 };
 
 template <bool release_gil>
@@ -352,7 +353,6 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
-    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     std::bool_constant<release_gil>) {

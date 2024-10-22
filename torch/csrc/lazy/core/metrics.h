@@ -15,8 +15,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct TORCH_API Sample {
   Sample() = default;
@@ -282,5 +281,4 @@ class TORCH_API TimedSection {
   TORCH_LAZY_FN_COUNTER(ns);                    \
   TORCH_LAZY_TIMED("LazyTracing")
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

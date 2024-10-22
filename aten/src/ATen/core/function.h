@@ -56,7 +56,7 @@ struct TORCH_API Function {
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& /*stack*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      C10_UNUSED TaskLauncher taskLauncher = at::launch) {
+      [[maybe_unused]] TaskLauncher taskLauncher = at::launch) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return {};
   }

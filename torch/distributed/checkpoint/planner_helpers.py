@@ -7,8 +7,8 @@ import torch.distributed as dist
 from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 from .metadata import (
     BytesStorageMetadata,
@@ -178,7 +178,7 @@ def create_read_items_for_chunk_list(
             dest_offsets = []
             lengths = []
             for (
-                dim,
+                _dim,
                 offset_for_saved_tensor,
                 offset_for_current_tensor,
                 length,

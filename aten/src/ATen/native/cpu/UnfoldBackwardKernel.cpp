@@ -76,7 +76,7 @@ void _unfold_backward_internal_kernel(
     auto* RESTRICT grad_in_ptr = data[1];
     auto* RESTRICT idx_dim_ptr = data[2];
 
-    for (const auto elem C10_UNUSED : c10::irange(nelems)) {
+    for ([[maybe_unused]] const auto elem : c10::irange(nelems)) {
       auto* RESTRICT grad_out_data = reinterpret_cast<scalar_t*>(grad_out_ptr);
       auto* RESTRICT grad_in_data = reinterpret_cast<scalar_t*>(grad_in_ptr);
 

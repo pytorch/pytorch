@@ -97,7 +97,7 @@ RANK_TYPES = Union[
     List[List[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist._tensor.DeviceMesh", int],
+    Tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 
@@ -600,7 +600,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
@@ -653,7 +653,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
-    def numpy(self):
+    def numpy(self):  # type: ignore[override]
         return self.wait().numpy()
 
 

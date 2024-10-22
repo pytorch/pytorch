@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from __future__ import print_function
+from pathlib import Path
 import collections
 import os
 import sys
@@ -91,6 +92,11 @@ SRC_NAMES = {
     # add non-prod microkernel sources here:
 }
 
+# Source files not needed in buck build.
+IGNORED_SOURCES = set((
+    "\"${PROJECT_BINARY_DIR}/build_identifier.c\"", # Not currently used and requires build-time codegen.
+))
+
 def handle_singleline_parse(line):
     start_index = line.find("(")
     end_index = line.find(")")
@@ -99,12 +105,24 @@ def handle_singleline_parse(line):
     return key_val[0], [x[4:] for x in key_val[1:]]
 
 def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
+    print(f"Updating sources from {cmakefile}")
     sources = collections.defaultdict(list)
     with open(os.path.join(xnnpack_path, cmakefile)) as cmake:
         lines = cmake.readlines()
         i = 0
         while i < len(lines):
             line = lines[i]
+            
+            if lines[i].startswith("INCLUDE"):
+                file, _ = handle_singleline_parse(line)
+                if file.startswith("cmake/gen/"):
+                    path = Path(xnnpack_path) / "XNNPACK" / file
+                    local_sources = update_sources(xnnpack_path, path.absolute().as_posix())
+                    for k,v in local_sources.items():
+                        if k in sources:
+                            sources[k] = sources[k] + local_sources[k]
+                        else:
+                            sources[k] = local_sources[k]
 
             if lines[i].startswith("SET") and "src/" in lines[i]:
                 name, val = handle_singleline_parse(line)
@@ -118,12 +136,14 @@ def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
                 while i < len(lines) and len(lines[i]) > 0 and ')' not in lines[i]:
                     # remove "src/" at the beginning, remove whitespaces and newline
                     value = lines[i].strip(' \t\n\r')
-                    sources[name].append(value[4:])
+                    if value not in IGNORED_SOURCES:
+                        sources[name].append(value[4:])
                     i += 1
                 if i < len(lines) and len(lines[i]) > 4:
                     # remove "src/" at the beginning, possibly ')' at the end
                     value = lines[i].strip(' \t\n\r)')
-                    sources[name].append(value[4:])
+                    if value not in IGNORED_SOURCES:
+                        sources[name].append(value[4:])
             else:
                 i += 1
     return sources
@@ -132,7 +152,7 @@ def gen_wrappers(xnnpack_path):
     xnnpack_sources = collections.defaultdict(list)
     sources = update_sources(xnnpack_path)
 
-    microkernels_sources = update_sources(xnnpack_path, "XNNPACK/cmake/microkernels.cmake")
+    microkernels_sources = update_sources(xnnpack_path, "XNNPACK/cmake/gen/microkernels.cmake")
     for key in  microkernels_sources:
         sources[key] = microkernels_sources[key]
 
@@ -186,6 +206,8 @@ def gen_wrappers(xnnpack_path):
 
 
 def main(argv):
+    print("Generating wrappers...")
+
     if argv is None or len(argv) == 0:
         gen_wrappers(".")
     else:

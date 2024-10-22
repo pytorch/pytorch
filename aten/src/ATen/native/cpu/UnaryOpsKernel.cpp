@@ -600,14 +600,16 @@ static void i0e_kernel(TensorIteratorBase& iter) {
 
 static void i1_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kBFloat16, kHalf, iter.common_dtype(), "i1_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
   });
 }
 
 static void i1e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kBFloat16, kHalf, iter.common_dtype(), "i1e_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
   });
 }

@@ -999,9 +999,6 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (device && device->is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
@@ -1081,9 +1078,6 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     device = at::Device(device_type);
   }
   torch::utils::maybe_initialize_device(device);
-  if (device.is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }

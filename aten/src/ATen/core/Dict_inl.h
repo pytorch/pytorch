@@ -142,8 +142,8 @@ void Dict<Key, Value>::erase(iterator iter) const {
   impl_->dict.erase(iter.entryRef_.iterator_);
 }
 
-template<class Key, class Value>
-C10_NODISCARD size_t Dict<Key, Value>::erase(const Key& key) const {
+template <class Key, class Value>
+[[nodiscard]] size_t Dict<Key, Value>::erase(const Key& key) const {
   return impl_->dict.erase(key);
 }
 

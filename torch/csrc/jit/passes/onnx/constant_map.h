@@ -13,8 +13,7 @@ C10_DIAGNOSTIC_POP()
 #include <mutex>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ShapeDataMap =
     std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>;
@@ -112,8 +111,7 @@ class ConstantValueMap {
   // Stores if all graph-level inputs have static shape
   std::optional<bool> allGraphInputsStatic;
   // True if reliable has been computed for all graph inputs
-  bool allGraphInputsReliableComputed;
+  bool allGraphInputsReliableComputed{};
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

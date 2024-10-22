@@ -213,7 +213,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
-static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const std::optional<Generator> generator) {
+static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, std::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -237,7 +237,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
     if (is_2D_case) {
       self_value = reshape_dim_into(0, 0, self_value);
     }
-    auto out = multinomial(self_value, num_samples, replacement, generator);
+    auto out = multinomial(self_value, num_samples, replacement, std::move(generator));
     if (is_2D_case) {
       out = reshape_dim_outof_symint(0, maybe_layer->batchSize(), out);
     }
@@ -249,7 +249,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
   // Must be same randomness with unbatched input
   // 1D case: S -> multinomial(S) -> S
   // 2D case: MS -> multinomial(MS) -> MS
-  return multinomial(self_value, num_samples, replacement, generator);
+  return multinomial(self_value, num_samples, replacement, std::move(generator));
 }
 
 template <typename A, A a, typename C>

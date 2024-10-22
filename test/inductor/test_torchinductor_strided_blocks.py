@@ -105,7 +105,7 @@ class TritonBlockPointerTest(InductorTestCase):
                 foo, *inputs, expected_num_block_pointers=expected_num_block_pointers
             )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "full_size,view_size,stride,offset,require_block_ptr",
         [
@@ -176,7 +176,7 @@ class TritonBlockPointerTest(InductorTestCase):
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "x_size,y_size",
         [
@@ -230,7 +230,59 @@ class TritonBlockPointerTest(InductorTestCase):
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @parametrize("prefer_nd_tiling", [(False, True)])
+    @parametrize("prefer_nd_tiling", [False, True])
+    def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
+        """
+        Test that we emit tl.broadcast_to instead of using strides of 0.
+        """
+
+        full_shape = (8, 8)
+        col_shape = (full_shape[1], 1)
+        device = torch.device(GPU_TYPE)
+        full = torch.randn(full_shape).to(device)
+        col = torch.as_strided(full, col_shape, full.stride())
+
+        # Expect 3 block pointers: 2 inputs one output
+        result, (triton_code,) = self.run_and_compare(
+            torch.add,
+            full,
+            col,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.prefer_nd_tiling": prefer_nd_tiling,
+            },
+        )
+
+        # Check the code for broadcasts.
+        # We shouldn't see any strides of 0.
+        load_lines, store_lines = tuple(
+            [line for line in triton_code.split("\n") if substr in line]
+            for substr in ("tl.load", "tl.store")
+        )
+        if prefer_nd_tiling:
+            self.assertExpectedInline(
+                "\n".join(load_lines),
+                """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), boundary_check=[0, 1])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[None, :]""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                "\n".join(store_lines),
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), tmp2.to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                "\n".join(load_lines),
+                """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
+    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[((7 + XBLOCK) // 8)], order=[0], offsets=[(xoffset // 8)]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [((7 + XBLOCK) // 8), ((1) * ((1) <= (((7 + XBLOCK) // 8))) + (((7 + XBLOCK) // 8)) * ((((7 + XBLOCK) // 8)) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
+            )
+            self.assertExpectedInline(
+                "\n".join(store_lines),
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tmp2.to(tl.float32), boundary_check=[0])""",  # noqa: B950
+            )
+
+    @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
@@ -241,7 +293,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
             (
                 (2, 3 * max_block),
-                3,
+                2,
                 2,
             ),  # Multiple of max block. Uses loops.
             ((128, 128), 3, 2),  # Test a large size, with loops.
@@ -444,6 +496,27 @@ class TritonBlockPointerTest(InductorTestCase):
                     self.assertIn(tile_name, program)
                 else:
                     self.assertNotIn(tile_name, program)
+
+    def test_complex_reshape_block_ptr(self):
+        def func(x, y):
+            add_ = x + y
+            reshape_0 = add_.reshape([8, 16, 128])
+            permute_0 = reshape_0.permute([0, 2, 1])
+            reshape_1 = permute_0.reshape([1024, 16])
+            clone_0 = reshape_1.clone(memory_format=torch.contiguous_format)
+            permute_1 = clone_0.permute([1, 0])
+            clone_1 = permute_1.clone(memory_format=torch.contiguous_format)
+
+            return clone_0, clone_1
+
+        inps = (torch.rand((8, 2048), device=GPU_TYPE, dtype=torch.float32),) * 2
+        result, code = self.run_and_compare(
+            func,
+            *inps,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+        )
+        self.assertTrue("Min" not in code[0])
 
 
 if __name__ == "__main__":

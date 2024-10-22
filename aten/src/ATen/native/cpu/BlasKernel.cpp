@@ -96,7 +96,7 @@ auto sum(int64_t N, Func f) {
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -132,7 +132,7 @@ gemm_notrans_(
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -222,7 +222,7 @@ void gemm_transb_impl(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
     TransposeType transb,
     int64_t m,
@@ -244,7 +244,7 @@ gemm_transb_(
 
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
     TransposeType transb,
     int64_t m,
@@ -341,8 +341,8 @@ void gemm_notrans_(
     at::Half* c,
     int64_t ldc) {
   // c += alpha * (a @ b)
-  if (n == 1 && beta == 0.0) {
-    at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+  if (n == 1 && beta == 0.0 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
   for (const auto i : c10::irange(m)) {
@@ -388,8 +388,8 @@ void gemm_transa_(
     float beta,
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  if (n == 1 && beta == 0.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+  if (n == 1 && beta == 0.0 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {

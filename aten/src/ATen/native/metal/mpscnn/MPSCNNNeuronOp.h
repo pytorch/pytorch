@@ -2,10 +2,10 @@
 
 @interface MPSCNNNeuronOp : NSObject
 
-+ (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13));
-+ (MPSCNNNeuronReLU*)relu;
-+ (MPSCNNNeuronSigmoid*)sigmoid;
-+ (MPSCNNNeuronTanH*)tanh;
++ (MPSCNNNeuron*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13));
++ (MPSCNNNeuron*)relu;
++ (MPSCNNNeuron*)sigmoid;
++ (MPSCNNNeuron*)tanh;
 
 @end
 

@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import asyncio
 import ctypes
 import multiprocessing
 import os
@@ -226,36 +227,65 @@ def start_processes_zombie_test(
         pc.close(e.sigval)
 
 
+class _StartProcessesTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
+        self._start_methods = ["spawn"]
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self.test_dir)
+
+    def log_dir(self):
+        return tempfile.mkdtemp(dir=self.test_dir)
+
+    def assert_in_file(self, expected: List[str], filename: str) -> None:
+        expected = [f"{line.rstrip()}\n" for line in expected]
+        with open(filename) as fp:
+            actual = fp.readlines()
+            for line in expected:
+                self.assertIn(line, actual)
+
+    def assert_pids_noexist(self, pids: Dict[int, int]):
+        for local_rank, pid in pids.items():
+            with self.assertRaises(
+                OSError, msg=f"local_rank: {local_rank} pid: {pid} should not exist"
+            ):
+                os.kill(pid, 0)
+
+    def _test_zombie_workflow(
+        self, entrypoint: Union[str, Callable], signal_to_send: signal.Signals
+    ) -> None:
+        mp_queue = mp.get_context("spawn").Queue()
+        child_nproc = 2
+        ctx = mp.spawn(
+            start_processes_zombie_test,
+            nprocs=1,
+            args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
+            join=False,
+        )
+        total_processes = child_nproc + 1
+        pids = []
+        for _ in range(total_processes):
+            pids.append(mp_queue.get(timeout=120))
+        parent_pid = pids[0]
+        child_pids = pids[1:]
+
+        os.kill(parent_pid, signal.SIGTERM)
+        # Wait to give time for signal handlers to finish work
+        time.sleep(5)
+        for child_pid in child_pids:
+            # Killing parent should kill all children, we expect that each call to
+            # os.kill would raise OSError
+            with self.assertRaises(OSError):
+                os.kill(child_pid, 0)
+
+
 # tests incompatible with tsan or asan
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
-    class StartProcessesTest(TestCase):
-        def setUp(self):
-            super().setUp()
-            self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
-            self._start_methods = ["spawn"]
-
-        def tearDown(self):
-            super().tearDown()
-            shutil.rmtree(self.test_dir)
-
-        def log_dir(self):
-            return tempfile.mkdtemp(dir=self.test_dir)
-
-        def assert_in_file(self, expected: List[str], filename: str) -> None:
-            expected = [f"{line.rstrip()}\n" for line in expected]
-            with open(filename) as fp:
-                actual = fp.readlines()
-                for line in expected:
-                    self.assertIn(line, actual)
-
-        def assert_pids_noexist(self, pids: Dict[int, int]):
-            for local_rank, pid in pids.items():
-                with self.assertRaises(
-                    OSError, msg=f"local_rank: {local_rank} pid: {pid} should not exist"
-                ):
-                    os.kill(pid, 0)
-
+    class StartProcessesAsFuncTest(_StartProcessesTest):
         def test_to_map(self):
             local_world_size = 2
             self.assertEqual(
@@ -333,6 +363,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
 
+        def test_pcontext_wait_on_a_child_thread(self):
+            asyncio.run(asyncio.to_thread(self.test_pcontext_wait))
+
         def test_multiprocess_context_close(self):
             pc = start_processes(
                 name="sleep",
@@ -349,26 +382,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
 
-        def test_subprocess_context_close(self):
-            pc = start_processes(
-                name="sleep",
-                entrypoint=bin("zombie_test.py"),
-                args={0: (1,)},
-                envs={0: {}},
-                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
-            )
-
-            pids = pc.pids()
-            pc.close()
-            self.assert_pids_noexist(pids)
-
         def test_function_with_tensor(self):
             for start_method in self._start_methods:
                 pc = start_processes(
                     name="dummy_compute",
                     entrypoint=dummy_compute,
-                    args={},
-                    envs={},
+                    args={0: ()},
+                    envs={0: {}},
                     logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                     start_method=start_method,
                 )
@@ -489,9 +509,54 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 mpc._poll()
                 self.assertEqual(4, mock_join.call_count)
 
+        @skip_but_pass_in_sandcastle_if(
+            NO_MULTIPROCESSING_SPAWN,
+            "Disabled for environments that \
+                        don't support multiprocessing with spawn start method",
+        )
+        def test_multiprocessing_context_poll_raises_exception(self):
+            mp_context = MultiprocessContext(
+                name="test_mp",
+                entrypoint=echo0,
+                args={0: (0, 1)},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(), redirects=Std.ALL, tee=Std.ALL
+                ),
+                start_method="spawn",
+            )
+            mp_context._pc = mock.Mock()
+            # Using mock since we cannot just set exitcode on process
+            mock_process = mock.Mock()
+            mock_process.exitcode = -1
+            mp_context._pc.processes = [mock_process]
+            e = mp.ProcessRaisedException(msg="test msg", error_index=0, error_pid=123)
+            mp_context._pc.join.side_effect = e
+            with mock.patch.object(mp_context, "close"):
+                run_result = mp_context._poll()
+                self.assertEqual(1, len(run_result.failures))
+                failure = run_result.failures[0]
+                self.assertEqual(
+                    "Signal 1 (SIGHUP) received by PID 123", failure.message
+                )
+
+    class StartProcessesAsBinaryTest(_StartProcessesTest):
         ########################################
         # start_processes as binary tests
         ########################################
+
+        def test_subprocess_context_close(self):
+            pc = start_processes(
+                name="sleep",
+                entrypoint=bin("zombie_test.py"),
+                args={0: (1,)},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
+            )
+
+            pids = pc.pids()
+            pc.close()
+            self.assert_pids_noexist(pids)
 
         def test_binary_exit(self):
             FAIL = 138
@@ -556,45 +621,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             with self.assertRaises(RuntimeError):
                 _validate_full_rank({}, 10, "")
 
-        @skip_but_pass_in_sandcastle_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                        don't support multiprocessing with spawn start method",
-        )
-        def test_multiprocessing_context_poll_raises_exception(self):
-            mp_context = MultiprocessContext(
-                name="test_mp",
-                entrypoint=echo0,
-                args={0: (0, 1)},
-                envs={0: {}},
-                logs_specs=DefaultLogsSpecs(
-                    log_dir=self.log_dir(), redirects=Std.ALL, tee=Std.ALL
-                ),
-                start_method="spawn",
-            )
-            mp_context._pc = mock.Mock()
-            # Using mock since we cannot just set exitcode on process
-            mock_process = mock.Mock()
-            mock_process.exitcode = -1
-            mp_context._pc.processes = [mock_process]
-            e = mp.ProcessRaisedException(msg="test msg", error_index=0, error_pid=123)
-            mp_context._pc.join.side_effect = e
-            with mock.patch.object(mp_context, "close"):
-                run_result = mp_context._poll()
-                self.assertEqual(1, len(run_result.failures))
-                failure = run_result.failures[0]
-                self.assertEqual(
-                    "Signal 1 (SIGHUP) received by PID 123", failure.message
-                )
-
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
-    class StartProcessesListTest(StartProcessesTest):
-        ########################################
-        # start_processes as binary tests
-        ########################################
+    class StartProcessesListAsFuncTest(_StartProcessesTest):
         def test_function(self):
             for start_method, redirs in product(
                 self._start_methods, redirects_oss_test()
@@ -634,6 +665,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                                 [f"hello stderr from {i}"], results.stderrs[i]
                             )
 
+    class StartProcessesListAsBinaryTest(_StartProcessesTest):
+        ########################################
+        # start_processes as binary tests
+        ########################################
         def test_binary(self):
             for redirs in redirects_oss_test():
                 with self.subTest(redirs=redirs):
@@ -700,7 +735,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
-    class StartProcessesNotCITest(StartProcessesTest):
+    class StartProcessesNotCIAsFuncTest(_StartProcessesTest):
         @skip_if_pytest
         def test_wrap_bad(self):
             none = ""
@@ -732,32 +767,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 if stderr_redir:
                     self.assert_in_file(["hello stderr from 0"], stderr_log)
                 worker_finished_event_mock.wait.assert_called_once()
-
-        def test_binary_signal(self):
-            pc = start_processes(
-                name="echo",
-                entrypoint=bin("echo3.py"),
-                args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
-                envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                logs_specs=DefaultLogsSpecs(
-                    log_dir=self.log_dir(),
-                ),
-            )
-
-            results = pc.wait(period=0.1)
-
-            self.assert_pids_noexist(pc.pids())
-            self.assertTrue(results.is_failed())
-            self.assertEqual(1, len(results.failures))
-
-            failure = results.failures[0]
-            self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
-            if TEST_WITH_ASAN or TEST_WITH_TSAN:
-                # ASAN/TSAN exit code is 1.
-                self.assertEqual("<N/A>", failure.signal_name())
-            else:
-                self.assertEqual("SIGSEGV", failure.signal_name())
-            self.assertEqual("<NONE>", failure.error_file_data["message"])
 
         def test_function_redirect_and_tee(self):
             for start_method in self._start_methods:
@@ -871,42 +880,60 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     self.assertTrue(pc._stderr_tail.stopped())
                     self.assertTrue(pc._stdout_tail.stopped())
 
-        def test_no_zombie_process_binary(self):
-            signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
-            for s in signals:
-                self._test_zombie_workflow(bin("zombie_test.py"), s)
-
         def test_no_zombie_process_function(self):
             signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
             for s in signals:
                 self._test_zombie_workflow(wait_fn, s)
 
-        def _test_zombie_workflow(
-            self, entrypoint: Union[str, Callable], signal_to_send: signal.Signals
-        ) -> None:
-            mp_queue = mp.get_context("spawn").Queue()
-            child_nproc = 2
-            ctx = mp.spawn(
-                start_processes_zombie_test,
-                nprocs=1,
-                args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
-                join=False,
+    class StartProcessesNotCIAsBinaryTest(_StartProcessesTest):
+        def test_binary_signal(self):
+            pc = start_processes(
+                name="echo",
+                entrypoint=bin("echo3.py"),
+                args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
+                envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(),
+                ),
             )
-            total_processes = child_nproc + 1
-            pids = []
-            for _ in range(total_processes):
-                pids.append(mp_queue.get(timeout=120))
-            parent_pid = pids[0]
-            child_pids = pids[1:]
 
-            os.kill(parent_pid, signal.SIGTERM)
-            # Wait to give time for signal handlers to finish work
-            time.sleep(5)
-            for child_pid in child_pids:
-                # Killing parent should kill all children, we expect that each call to
-                # os.kill would raise OSError
-                with self.assertRaises(OSError):
-                    os.kill(child_pid, 0)
+            results = pc.wait(period=0.1)
+
+            self.assert_pids_noexist(pc.pids())
+            self.assertTrue(results.is_failed())
+            self.assertEqual(1, len(results.failures))
+
+            failure = results.failures[0]
+            self.assertNotEqual(signal.SIGSEGV, failure.exitcode)
+            if TEST_WITH_ASAN or TEST_WITH_TSAN:
+                # ASAN/TSAN exit code is 1.
+                self.assertEqual("<N/A>", failure.signal_name())
+            else:
+                self.assertEqual("SIGSEGV", failure.signal_name())
+            self.assertEqual("<NONE>", failure.error_file_data["message"])
+
+        def test_no_zombie_process_binary(self):
+            signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
+            for s in signals:
+                self._test_zombie_workflow(bin("zombie_test.py"), s)
+
+    class ForkServerTest(
+        StartProcessesAsFuncTest,
+        StartProcessesListAsFuncTest,
+        StartProcessesNotCIAsFuncTest,
+    ):
+        def setUp(self):
+            super().setUp()
+            self._start_methods = ["forkserver"]
+            self.orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
+            os.environ[mp.ENV_VAR_PARALLEL_START] = "1"
+
+        def tearDown(self):
+            super().tearDown()
+            if self.orig_paralell_env_val is None:
+                del os.environ[mp.ENV_VAR_PARALLEL_START]
+            else:
+                os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
 
 
 if __name__ == "__main__":

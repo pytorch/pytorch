@@ -20,7 +20,7 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.infer_schema import tuple_to_list
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -465,6 +465,44 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
+
+    def test_deploy_interaction(self):
+        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
+        script = """
+import torch
+torch._running_with_deploy = lambda: True
+
+# creating the library is a no-op, so you can DEF multiple times
+m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+
+m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
+
+# define is a no-op
+m.define("foobarbaz9996(Tensor x) -> Tensor")
+assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
+
+def sin_override(x):
+    raise AssertionError("m.impl should have been a noop")
+
+# impl is a no-op
+m.impl("sin", sin_override, "CompositeImplicitAutograd")
+x = torch.randn(3)
+y = torch.sin(x)
+        """
+        script = script.strip()
+        env = os.environ.copy()
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=env,
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
 
     @requires_compile
     def test_functionalize_error(self):
@@ -1565,7 +1603,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
+        with self.assertRaisesRegex(RuntimeError, "data-dependent shape"):
             numpy_nonzero(x)
 
     def test_basic_make_fx(self):
@@ -3428,6 +3466,26 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertTrue(called)
             self.assertEqual(result, w * 2 * 3 * 42)
 
+    def test_layout_constraint_tags(self):
+        needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
+        flexible_layout = torch._C.Tag.flexible_layout
+        # (tags, the result of the tag inference)
+        tests = [
+            ({needs_fixed_stride_order}, needs_fixed_stride_order),
+            ({flexible_layout}, flexible_layout),
+            # If no tags are provided, then the following is the default
+            (set(), needs_fixed_stride_order),
+            # If multiple tags are provided, then we use the most constrained tag.
+            ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
+        ]
+        from torch._inductor.lowering import get_layout_constraint_tag
+
+        for tags, expected in tests:
+            with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+                m.define("foobar(Tensor x) -> Tensor", tags=tags)
+                result = get_layout_constraint_tag(torch.ops.mylib.foobar.default)
+                self.assertEqual(result, expected)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap(self):
         for mode in ["function", "qualname", "opoverload", "c_opdef"]:
@@ -3500,6 +3558,11 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x * y)
 
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3525,6 +3588,11 @@ Please use `add.register_fake` to add an fake impl.""",
         result = torch.vmap(f)(x, y)
         self.assertTrue(called)
         self.assertEqual(result, x * y)
+
+        x = torch.randn(3)
+        y = torch.randn(2)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):

@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -132,8 +133,8 @@ def forward(self, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = _sink_tokens_default = None
-    return (add,)""",  # noqa: B950
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
+    return [add]""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
@@ -429,14 +430,17 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_effectful_custom_op_with_subclasses(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
             lib.define("zoo(Tensor x) -> Tensor")
+            lib.define("zoo2(Tensor x) -> Tensor")
 
-            d = {"fw": 0}
+            d = {"fw": 0, "bw": 0}
 
             def reset_counter():
                 d["fw"] = 0
+                d["bw"] = 0
 
-            def assert_counter(fw):
+            def assert_counter(fw, bw):
                 self.assertEqual(d["fw"], fw)
+                self.assertEqual(d["bw"], bw)
 
             def foo_impl(a):
                 d["fw"] = d["fw"] + 1
@@ -445,22 +449,24 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def foo_meta(a):
                 return a.clone()
 
-            def foo_bwd(ctx, grad):
-                return grad.clone()
+            def foo2_impl(x):
+                d["bw"] = d["bw"] + 1
+                return x.clone()
+
+            def foo2_meta(a):
+                return a.clone()
 
             for backend in ["CPU", "CUDA"]:
                 lib.impl("zoo", foo_impl, backend)
-
+                lib.impl("zoo2", foo2_impl, backend)
             lib.impl("zoo", foo_meta, "Meta")
+            lib.impl("zoo2", foo2_meta, "Meta")
 
-            if torch._C._dispatch_has_kernel_for_dispatch_key(
-                "_mylib::zoo", "Autograd"
-            ):
-                self.skipTest(
-                    "Double registration of Autograd kernel for test custom op"
-                )
+            def foo_bwd(ctx, grad):
+                torch.ops._mylib.zoo2(grad)
+                return grad.clone()
 
-            torch.library.register_autograd("_mylib::zoo", foo_bwd)
+            torch.library.register_autograd("_mylib::zoo", foo_bwd, lib=lib)
 
             from torch._higher_order_ops.effects import (
                 _EffectType,
@@ -468,6 +474,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
             _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
+            _register_effectful_op(torch.ops._mylib.zoo2.default, _EffectType.ORDERED)
 
             def fn(x, y):
                 return torch.ops._mylib.zoo(x) + y
@@ -488,13 +495,13 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             ):
                 reset_counter()
                 ref_out = fn(*ins_fn())
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
 
                 compiled_fn = torch.compile(fn, backend="aot_eager")
                 out = compiled_fn(*ins_fn())
                 reset_counter()
                 out = compiled_fn(*ins_fn())
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
 
                 self.assertEqual(ref_out, out)
 
@@ -521,16 +528,17 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 (
                     expected_fw_count,
                     expected_fw_count_after_bw,
+                    expected_bw_count_after_bw,
                 ),
             ) in enumerate(
-                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1), (2, 2)])
+                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)])
             ):
                 ref_ins = ins_fn_req_grad()
                 reset_counter()
                 ref_out = fn(*ref_ins)
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
                 ref_out.sum().backward()
-                assert_counter(expected_fw_count_after_bw)
+                assert_counter(expected_fw_count_after_bw, expected_bw_count_after_bw)
 
                 compiled_fn = torch.compile(fn, fullgraph=True)
 
@@ -538,10 +546,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 out = compiled_fn(*ins)
                 reset_counter()
                 out = compiled_fn(*ins)
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
                 self.assertEqual(ref_out, out)
                 out.sum().backward()
-                assert_counter(expected_fw_count_after_bw)
+                assert_counter(expected_fw_count_after_bw, expected_bw_count_after_bw)
                 self.assertEqual(ref_ins[1].grad, ins[1].grad)
                 self.assertEqual(ref_ins[0].grad, ins[0].grad)
 
@@ -563,10 +571,14 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5):
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, tangents_1, tangents_2):
+def forward(self, tangents_1, tangents_2, tangents_token):
+    with_effects_2 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.zoo2.default, tangents_1);  tangents_token = None
+    getitem_4 = with_effects_2[0];  with_effects_2 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._mylib.zoo2.default, tangents_2);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
     clone = torch.ops.aten.clone.default(tangents_1)
     clone_1 = torch.ops.aten.clone.default(tangents_2)
-    return (clone, clone_1, tangents_1, tangents_2)""",
+    return (clone, clone_1, tangents_1, tangents_2, getitem_6)""",
             )
 
     def test_effects_and_input_mutation_return(self):
@@ -661,6 +673,234 @@ def forward(self, arg0_1, arg1_1):
     getitem = with_effects[0];  with_effects = None
     return (getitem, mul, mul)""",
         )
+
+    @skipIfTorchDynamo()
+    def test_effectful_op_in_backward(self):
+        with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+
+            def foo_impl(a):
+                return a.clone()
+
+            def foo_bwd(ctx, grad):
+                return torch.ops._mylib.foo(grad)
+
+            for backend in ["CPU", "CUDA", "Meta"]:
+                lib.impl("foo", foo_impl, backend)
+
+            torch.library.register_autograd("_mylib::foo", foo_bwd, lib=lib)
+
+            from torch._higher_order_ops.effects import (
+                _deregister_effectful_op,
+                _EffectType,
+                _register_effectful_op,
+            )
+
+            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+            try:
+
+                def fn(x, y):
+                    return torch.ops._mylib.foo(x) + y
+
+                def ins_dense_req_grad():
+                    return (
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    )
+
+                def ins_sc_req_grad():
+                    return (
+                        TwoTensor(
+                            torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                            torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                        ),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    )
+
+                for i, ins_fn in enumerate([ins_dense_req_grad, ins_sc_req_grad]):
+                    ref_ins = ins_fn()
+
+                    ref_out = fn(*ref_ins)
+                    ref_out.sum().backward()
+
+                    compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+                    ins = ins_fn()
+                    out = compiled_fn(*ins)
+                    self.assertEqual(ref_out, out)
+                    out.sum().backward()
+                    self.assertEqual(ref_ins[1].grad, ins[1].grad)
+                    self.assertEqual(ref_ins[0].grad, ins[0].grad)
+
+                    fw_graph, bw_graph = get_fw_bw_graph(fn, ins)
+                    if i == 0:
+                        self.assertExpectedInline(
+                            fw_graph.code.strip(),
+                            """\
+def forward(self, primals_1, primals_2, primals_3):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops._mylib.foo.default, primals_2);  primals_1 = primals_2 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    add = torch.ops.aten.add.Tensor(getitem_1, primals_3);  getitem_1 = primals_3 = None
+    return (getitem, add)""",
+                        )
+                        self.assertExpectedInline(
+                            bw_graph.code.strip(),
+                            """\
+def forward(self, tangents_1, tangents_token):
+    with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.foo.default, tangents_1);  tangents_token = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    return (getitem_3, tangents_1, getitem_2)""",
+                        )
+                    elif i == 1:
+                        self.assertExpectedInline(
+                            fw_graph.code.strip(),
+                            """\
+def forward(self, primals_1, primals_2, primals_3, primals_4):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops._mylib.foo.default, primals_2);  primals_1 = primals_2 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._mylib.foo.default, primals_3);  getitem = primals_3 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_1, primals_4);  getitem_1 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem_3, primals_4);  getitem_3 = primals_4 = None
+    return (getitem_2, add, add_1)""",
+                        )
+                        self.assertExpectedInline(
+                            bw_graph.code.strip(),
+                            """\
+def forward(self, tangents_1, tangents_2, tangents_token):
+    with_effects_2 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.foo.default, tangents_1);  tangents_token = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._mylib.foo.default, tangents_2);  getitem_4 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    return (getitem_5, getitem_7, tangents_1, tangents_2, getitem_6)""",
+                        )
+                    else:
+                        raise NotImplementedError
+            finally:
+                _deregister_effectful_op(torch.ops._mylib.foo.default)
+
+    @skipIfNoDynamoSupport
+    def test_regular_effectful_op_only_in_backward(self):
+        from torch._higher_order_ops.effects import (
+            _deregister_effectful_op,
+            _EffectType,
+            _register_effectful_op,
+        )
+
+        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        try:
+
+            def fn(x):
+                return x.sin()
+
+            def inps_fn():
+                return (torch.tensor([1.0, 2.0, 3.0], requires_grad=True),)
+
+            torch.compile(fn, backend="inductor", fullgraph=True)(*inps_fn())
+
+            fw_graph, bw_graph = get_fw_bw_graph(fn, inps_fn())
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, primals_1):
+    sin = torch.ops.aten.sin.default(primals_1)
+    return (sin, primals_1)""",
+            )
+            self.assertExpectedInline(
+                bw_graph.code.strip(),
+                """\
+def forward(self, primals_1, tangents_1, tangents_token):
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, primals_1);  tangents_token = primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
+    return (mul, getitem)""",
+            )
+
+            def inps_fn_sc():
+                return (
+                    TwoTensor(
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    ),
+                )
+
+            torch.compile(fn, backend="inductor", fullgraph=True)(*inps_fn_sc())
+            fw_graph, bw_graph = get_fw_bw_graph(fn, inps_fn_sc())
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, primals_1, primals_2):
+    sin = torch.ops.aten.sin.default(primals_1)
+    sin_1 = torch.ops.aten.sin.default(primals_2)
+    return (sin, sin_1, primals_1, primals_2)""",
+            )
+            self.assertExpectedInline(
+                bw_graph.code.strip(),
+                """\
+def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, primals_1);  tangents_token = primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten.cos.default, primals_2);  getitem = primals_2 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_2, getitem_3);  tangents_2 = getitem_3 = None
+    return (mul, mul_1, getitem_2)""",
+            )
+        finally:
+            _deregister_effectful_op(torch.ops.aten.cos.default)
+
+    @skipIfNoDynamoSupport
+    def test_regular_effectful_op_in_forward_and_backward(self):
+        from torch._higher_order_ops.effects import (
+            _deregister_effectful_op,
+            _EffectType,
+            _register_effectful_op,
+        )
+
+        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        try:
+
+            def fn(x):
+                x = x.cos()
+                return x.sin()
+
+            inps = (torch.tensor([1.0, 2.0, 3.0], requires_grad=True),)
+            torch.compile(fn, backend="inductor", fullgraph=True)(*inps)
+
+            fw_graph, bw_graph = get_fw_bw_graph(fn, inps)
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, primals_1, primals_2):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.aten.cos.default, primals_2);  primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    sin = torch.ops.aten.sin.default(getitem_1)
+    return (getitem, sin, primals_2, getitem_1)""",
+            )
+            self.assertExpectedInline(
+                bw_graph.code.strip(),
+                """\
+def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
+    with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, getitem_1);  tangents_token = getitem_1 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_3);  tangents_1 = getitem_3 = None
+    sin_1 = torch.ops.aten.sin.default(primals_2);  primals_2 = None
+    neg = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(mul, neg);  mul = neg = None
+    return (mul_1, getitem_2)""",
+            )
+        finally:
+            _deregister_effectful_op(torch.ops.aten.cos.default)
 
 
 if __name__ == "__main__":

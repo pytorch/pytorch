@@ -33,7 +33,7 @@ class TORCH_API TypeParser {
   std::string next();
   c10::string_view nextView();
   void advance();
-  C10_NODISCARD c10::string_view cur() const;
+  [[nodiscard]] c10::string_view cur() const;
 
   std::string pythonStr_;
   size_t start_;

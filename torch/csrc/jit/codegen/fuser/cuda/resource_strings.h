@@ -3,10 +3,7 @@
 #include <ATen/code_template.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 /*with type_as not checking type of its input, a fusion group can have non-fp32
 tensor as input. Correct code for this case is generated, however, nvrtc does
@@ -405,7 +402,4 @@ __device__ float __bfloat162float(const __nv_bfloat16 a) {
 )";
 #endif
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

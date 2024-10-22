@@ -304,7 +304,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
       (self.numel() >= nonZeroMaxSize || self.is_complex())) {
-  https: // github.com/pytorch/pytorch/issues/122916
     TORCH_WARN_ONCE("MPS: nonzero op is not natively supported for the provided input on MacOS14",
                     "Falling back on CPU. This may have performance implications.",
                     "See github.com/pytorch/pytorch/issues/122916 for further info");

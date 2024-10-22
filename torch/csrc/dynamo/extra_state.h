@@ -12,10 +12,16 @@ namespace py = pybind11;
 
 extern "C" {
 
+#else
+
+#include <stdbool.h>
+
 #endif
 
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
+// Flag to run a frame and any recursive calls normally
+#define SKIP_CODE_RECURSIVE ((void*)0x2)
 
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
@@ -38,6 +44,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
+  bool cache_limit_hit{false};
 
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
@@ -65,6 +72,18 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state);
 // return
 //  - extra_state->frame_state: Borrowed.
 FrameState* extract_frame_state(ExtraState* extra_state);
+
+// Returns if this extra_state is marked as cache limit hit.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+bool extra_state_cache_limit_hit(ExtraState* extra_state);
+
+// Mark that extra_state has hit its cache limit hit.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value);
 
 // Ownership contract
 // args
@@ -97,7 +116,7 @@ void destroy_extra_state(void* obj);
 //  - there is no return, but the extra_state is stolen, so it becomes
 //  set_extra_state responsibility to clean it up. It will be deleted during
 //  the reset_code/skip, when the set_extra_state is called with
-//  NULL/SKIP_CODE.
+//  NULL/SKIP_CODE/SKIP_CODE_RECURSIVE.
 
 // Invariant - Dont set the extra state for the extra state that is already on
 // the code object. Otherwise, we will first free up the old extra state
@@ -124,10 +143,13 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 //  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
-PyObject* lookup(
+//   - Py_None or PyObject: Trace id of the compiled code.
+void lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    const PyObject* backend);
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

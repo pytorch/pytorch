@@ -38,6 +38,9 @@
 #   USE_CUSPARSELT=0
 #     disables the cuSPARSELt build
 #
+#   USE_CUDSS=0
+#     disables the cuDSS build
+#
 #   USE_CUFILE=0
 #     disables the cuFile build
 #
@@ -116,6 +119,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   TORCH_XPU_ARCH_LIST
+#     specify which XPU architectures to build for.
+#     ie `TORCH_XPU_ARCH_LIST="ats-m150,lnl-m"`
+#
 #   PYTORCH_ROCM_ARCH
 #     specify which AMD GPU targets to build for.
 #     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
@@ -164,9 +171,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
-#
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
 #
@@ -183,7 +187,21 @@
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
-#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_CPUINFO=ON
+#        USE_SYSTEM_SLEEF=ON
+#        USE_SYSTEM_GLOO=ON
+#        BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_EIGEN_INSTALL=ON
+#        USE_SYSTEM_FP16=ON
+#        USE_SYSTEM_PTHREADPOOL=ON
+#        USE_SYSTEM_PSIMD=ON
+#        USE_SYSTEM_FXDIV=ON
+#        USE_SYSTEM_BENCHMARK=ON
+#        USE_SYSTEM_ONNX=ON
+#        USE_SYSTEM_XNNPACK=ON
+#        USE_SYSTEM_PYBIND11=ON
+#        USE_SYSTEM_NCCL=ON
+#        USE_SYSTEM_NVTX=ON
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
@@ -1103,6 +1121,12 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1137,7 +1161,6 @@ def main():
         "filelock",
         "typing-extensions>=4.8.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.12.1 ; python_version == "3.8"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
@@ -1197,7 +1220,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.12.0"],
+        "optree": ["optree>=0.13.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1234,6 +1257,7 @@ def main():
         "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
+        "include/ATen/cpu/vec/sve/*.h",
         "include/ATen/core/*.h",
         "include/ATen/cuda/*.cuh",
         "include/ATen/cuda/*.h",
@@ -1318,6 +1342,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
@@ -1501,7 +1526,7 @@ def main():
             f"Programming Language :: Python :: 3.{i}"
             for i in range(python_min_version[1], version_range_max)
         ],
-        license="BSD-3",
+        license="BSD-3-Clause",
         keywords="pytorch, machine learning",
     )
     if EMIT_BUILD_WARNING:

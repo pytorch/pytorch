@@ -165,6 +165,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     was_storage_changed_ = true;
   }
 
+  // A FunctionalTensor is considered a base if its not a view of another
+  // tensor.
+  bool isBaseTensor() const {
+    return view_metas_.empty();
+  }
+
   c10::SymInt get_storage_size(bool before) {
     return functional_storage_impl()->get_storage_size(before);
   }
@@ -289,6 +295,8 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
   return functional_impl;
 }
+
+TORCH_API bool isBaseTensor(const at::Tensor& tensor);
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const std::optional<Tensor>& t);

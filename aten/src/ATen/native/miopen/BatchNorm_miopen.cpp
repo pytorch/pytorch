@@ -24,13 +24,13 @@ namespace at { namespace native {
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
-  AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
+  TORCH_CHECK(false, "miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     double epsilon) {
-  AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
+  TORCH_CHECK(false, "miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
 }}  // namespace at::native

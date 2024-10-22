@@ -51,6 +51,8 @@ def main() -> None:
 
     for platform_image in platform_images:  # type: ignore[attr-defined]
         for arch in platform_image.keys():  # type: ignore[attr-defined]
+            if arch == "cpu-s390x":
+                continue
             tag_image(
                 platform_image[arch],  # type: ignore[index]
                 default_tag,

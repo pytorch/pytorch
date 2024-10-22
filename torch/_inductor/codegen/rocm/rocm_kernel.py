@@ -2,9 +2,11 @@
 import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
-from ..common import Kernel, OpOverrides
+from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
@@ -59,6 +61,9 @@ class ROCmTemplateKernel(ROCmKernel):
             node.get_name(), None
         )
 
+    def get_signature(self):
+        return self.signature
+
     def def_kernel(
         self,
         inputs: List[IRNode],
@@ -106,7 +111,9 @@ class ROCmTemplateKernel(ROCmKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
+        signature = f"int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
+        self.signature = signature
+        return signature
 
     def call_kernel(
         self,
@@ -115,54 +122,82 @@ class ROCmTemplateKernel(ROCmKernel):
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
-        used from within torch._inductor.wrapper.WrapperCodeGen
+        used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
         node: The ROCmTemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+
+        if V.graph.cpp_wrapper:
+            # Make sure we initialize these kernels since they're exported as
+            # C-style symbol names.
+            assert isinstance(wrapper, CppWrapperCpu)
+            wrapper.initialized_kernels[name] = self
+            # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
+            # So, we replace with the real kernel name passed as an arg to this function.
+            self.signature = self.signature.replace("KERNEL_NAME", name)
+            _, call_args, arg_types = self.args.cpp_argdefs()
+        else:
+            _, call_args, _, arg_types = self.args.python_argdefs()
         kernel_args = []
         for arg in call_args:
             # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
             if V.graph.is_unspec_arg(arg):
                 arg = arg + ".item()"
             else:
-                arg = f"c_void_p({arg}.data_ptr())"
+                if not V.graph.cpp_wrapper:
+                    arg = f"c_void_p({arg}.data_ptr())"
             kernel_args.append(arg)
 
         # add size args
-        kernel_args.extend(
-            [
-                f"c_int({V.graph.sizevars.simplify(sarg)})"
-                for sarg in node.template.size_args()
-            ]
-        )
+        size_args = [
+            f"{V.graph.sizevars.simplify(sarg)}" for sarg in node.template.size_args()
+        ]
+        if V.graph.cpp_wrapper:
+            kernel_args.extend(size_args)
+        else:
+            kernel_args.extend(f"c_int({sarg})" for sarg in size_args)
+
+        if V.graph.cpp_wrapper:
+            arg_types.extend(["int"] * len(node.template.size_args()))
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        kernel_args.append("None")
+        kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            ws = WorkspaceArg(
+                count=node.get_workspace_size(),
+                device=V.graph.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
             )
-            kernel_args.append("c_void_p(workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(ws)
+            data_ptr = f"{ws.outer_name}.data_ptr()"
+            kernel_args.append(
+                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+            )
         else:
-            kernel_args.append("None")
+            ws = None
+            kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("uint8_t*")
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             kernel_args,
             device_index=current_device.index,
-            cuda=True,
+            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
-        if node.get_workspace_size() > 0:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if ws:
+            wrapper.generate_workspace_deallocation(ws)
 
 
 class ROCmTemplateCaller(ChoiceCaller):
@@ -188,7 +223,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq

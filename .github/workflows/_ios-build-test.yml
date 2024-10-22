@@ -92,7 +92,7 @@ jobs:
           fi
 
       - name: Install brew dependencies
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -109,7 +109,7 @@ jobs:
           pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -292,7 +292,7 @@ jobs:
           bundler-cache: true
 
       - name: Download arm64 artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           name: pytorch-ios-build-artifacts-arm64
 

@@ -159,6 +159,15 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
   CONVERT_EXCEPTION_TO_ERROR_CODE({ *from_folded = container->constant_from_folded(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetConstantType(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    int32_t* type) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({ *type = container->constant_type(idx); })
+}
+
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,

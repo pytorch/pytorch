@@ -78,7 +78,7 @@ struct VecReduceAllSIMD<float, Op> {
 #endif // defined(CPU_CAPABILITY_AVX512)
 #endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
   static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
@@ -106,6 +106,30 @@ struct VecReduceAllSIMD<float, Op> {
   }
 };
 #endif // defined(__aarch64__)
+
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && defined(CPU_CAPABILITY_SVE256)
+template <typename Op>
+struct VecReduceAllSIMD<float, Op> {
+  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+    using Vec = Vectorized<float>;
+    Vec v = acc_vec;
+    // 128-bit shuffle
+    svuint32_t ind = svdupq_n_u32(4, 5, 6, 7);
+    Vec v1 = svtbl_f32(v, ind);
+    v = vec_fun(v, v1);
+    // 64-bit shuffle
+    ind = svdupq_n_u32(2, 3, 0, 1);
+    v1 = svtbl_f32(v, ind);
+    v = vec_fun(v, v1);
+    // 32-bit shuffle
+    ind = svdupq_n_u32(1, 0, 2, 3);
+    v1 = svtbl_f32(v, ind);
+    v = vec_fun(v, v1);
+    return svlasta(svpfalse(), v);
+  }
+};
+#endif // defined(__aarch64__)
+
 
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(const Op& vec_fun, const Vectorized<scalar_t>& acc_vec) {

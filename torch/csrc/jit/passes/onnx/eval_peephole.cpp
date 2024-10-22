@@ -6,8 +6,7 @@
 #include <c10/util/irange.h>
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -152,5 +151,4 @@ void EvalPeepholeONNX(std::shared_ptr<Graph>& g, ParamMap& paramsDict) {
   GRAPH_DUMP("After EvalPeepholeONNX:", g);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

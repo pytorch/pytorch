@@ -32,9 +32,9 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -109,6 +109,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
+            None,  # shard_placement_fn
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -235,7 +236,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.lazy_init()
+        fsdp_param_group.comm_ctx.lazy_init(self.device)
 
         # Run one unshard to initialize metadata
         fsdp_param_group.unshard()
@@ -949,6 +950,37 @@ class TestFullyShardPrefetch(FSDPTest):
                 events.clear()
                 optim.step()
                 optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
+    def test_backward_misprefetch(self):
+        torch.manual_seed(42)
+        model = MLP(dim=16, device="cuda")
+        ref_model = copy.deepcopy(model)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard(model.in_proj)
+        fully_shard(model.out_proj)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        # Backward should run through `out_proj` -> `in_proj`, so if `in_proj`
+        # prefetches for `out_proj`, then this is a misprefetch, as `out_proj`
+        # should not be needed anymore for backward.
+        model.in_proj.set_modules_to_backward_prefetch([model.out_proj])
+
+        torch.manual_seed(self.rank + 1)
+        inp = torch.randn((2, 16), device="cuda")
+        for _ in range(3):
+            ref_optim.zero_grad()
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            ref_optim.step()
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
 
     def _init_transformer(
         self,

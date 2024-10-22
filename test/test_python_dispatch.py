@@ -1793,6 +1793,23 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
 
+    # See https://github.com/pytorch/pytorch/issues/136064
+    def test_view_returns_alias_under_torch_dispatch(self):
+        class MyMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **kwargs)
+                if func == torch.ops.aten.view.dtype:
+                    # view should return a fresh TensorImpl
+                    self.testcase.assertTrue(out is not args[0])
+                return out
+
+        with MyMode(self):
+            x = torch.ones(4, dtype=torch.float32)
+            out = x.view(torch.float32)
+
     def test_record_stream(self) -> None:
         class TestMode(TorchDispatchMode):
             def __init__(self, testcase):
@@ -2577,6 +2594,28 @@ def forward(self, x_1):
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
+
+    def test_wrapper_subclass_reentrant_dispatch_with_mode(self):
+        # Tests the interaction between a wrapper subclass using reentrant dispatch
+        # and a TorchDispatchMode. See https://github.com/pytorch/pytorch/issues/136565
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        # derive from TwoTensor to minimize boilerplate
+        class MySubclass(TwoTensor):
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func(args[0].a)
+
+        t = MySubclass(torch.rand(2), torch.rand(2))
+        with CustomDispatchMode():
+            res = t.clone()
+
+        self.assertEqual(res, t.a)
+        self.assertIs(type(res), torch.Tensor)
 
 
 class TestPythonDispatcher(TestCase):

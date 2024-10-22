@@ -364,6 +364,23 @@ def should_pad(key: str, ori_time, pad_time) -> bool:
     return should_pad
 
 
+def should_pad_mm_bf16(dtype, M, N, K):
+    # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
+    large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
+        "pad_aten_mm_pass"
+    ].get("k_threshold_to_pad", 8388608)
+    if (
+        dtype is torch.bfloat16
+        and K > M
+        and K > N
+        and N % 2 == 1
+        and K >= large_k_threshold_to_pad
+        and torch.cuda.get_device_capability() < (9, 0)
+    ):  # doesnt repro on h100s:
+        return True
+    return False
+
+
 def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
@@ -408,6 +425,12 @@ def should_pad_bench(
             return False
 
         if torch._inductor.config.force_shape_pad:
+            return True
+
+        if (
+            "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
+            and should_pad_mm_bf16(mat1.dtype, m, n, k)
+        ):
             return True
 
         if not has_triton():
@@ -683,35 +706,25 @@ def should_pad_mm(match: Match) -> bool:
 
 
 def pad_mat1(mat1, *, m_padded_length, k_padded_length, is_bmm=False):
-    if m_padded_length == 0 and k_padded_length == 0:
-        return mat1
-    elif k_padded_length != 0 and m_padded_length != 0:
+    if k_padded_length != 0 or m_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, k_padded_length, 0, m_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat1, pad_arg)
-    elif m_padded_length != 0:
-        return pad_dim(mat1, m_padded_length, 0 if not is_bmm else 1)
     else:
-        assert k_padded_length != 0
-        return pad_dim(mat1, k_padded_length, 1 if not is_bmm else 2)
+        return mat1
 
 
 def pad_mat2(mat2, *, k_padded_length, n_padded_length, is_bmm=False):
-    if k_padded_length == 0 and n_padded_length == 0:
-        return mat2
-    elif k_padded_length != 0 and n_padded_length != 0:
+    if k_padded_length != 0 or n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
         return aten.constant_pad_nd(mat2, pad_arg)
-    elif k_padded_length != 0:
-        return pad_dim(mat2, k_padded_length, 0 if not is_bmm else 1)
     else:
-        assert n_padded_length != 0
-        return pad_dim(mat2, n_padded_length, 1 if not is_bmm else 2)
+        return mat2
 
 
 def pad_mm(

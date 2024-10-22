@@ -31,6 +31,28 @@ def eager(gm, fake_tensor_inputs, **kwargs):
     return gm.forward
 
 
+def make_eager_backend_with_torch_function_mode(mode):
+    return make_eager_backend_with_torch_function_modes([mode])
+
+
+def make_eager_backend_with_torch_function_modes(modes):
+    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
+    in the HOP, so we need to externally run this mode and not trace it."""
+    from contextlib import ExitStack
+
+    def fn(gm, fake_tensor_inputs, **kwargs):
+        stack = ExitStack()
+        for mode in modes:
+            stack.enter_context(mode)
+
+        result = gm.forward
+        stack.close()
+        return result
+
+    return fn
+
+
 @register_backend
 def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
@@ -98,11 +120,21 @@ def boxed_nop(fx_g, example_inputs):
 
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(
-    fw_compiler=boxed_nop,
-    partition_fn=min_cut_rematerialization_partition,
-    keep_inference_input_mutations=True,
-)
+def aot_eager(
+    gm,
+    fake_tensor_inputs,
+    fw_compiler=None,
+    bw_compiler=None,
+    **kwargs,
+):
+    return aot_autograd(
+        fw_compiler=fw_compiler or boxed_nop,
+        bw_compiler=bw_compiler or boxed_nop,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs, **kwargs)
+
+
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
 aot_eager_default_partitioner = aot_autograd(
@@ -123,7 +155,15 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    with functorch_config.patch(unlift_effect_tokens=True):
+    from torch._inductor.bisect_helper import BisectionManager
+
+    config_patches = {"unlift_effect_tokens": True}
+    if bisect_changes := BisectionManager.get_config_change(
+        "aot_eager_decomp_partition"
+    ):
+        config_patches.update(bisect_changes)
+
+    with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
             fw_compiler=boxed_nop,

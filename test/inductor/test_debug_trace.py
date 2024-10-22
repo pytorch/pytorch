@@ -18,7 +18,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -212,6 +212,22 @@ op2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
+
+    def test_debug_printer_const(self):
+        """Test that having a const example_input does not break the debug printer."""
+
+        class Model(torch.nn.Module):
+            def forward(self, x, ks0):
+                return x.sum()
+
+        example_inputs = (
+            torch.tensor([0, 3, 6], dtype=torch.int64),
+            70,  # const input, that will be filtered in the examples
+        )
+        _ = torch._export.aot_compile(
+            Model(),
+            example_inputs,
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):

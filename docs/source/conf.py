@@ -2165,6 +2165,7 @@ coverage_ignore_classes = [
     "SynchronizationError",
     "UnsynchronizedAccessError",
     # torch.cuda.memory
+    "MemPool",
     "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
@@ -3470,9 +3471,7 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_css_files = [
-    "css/jit.css",
-]
+html_css_files = ["css/jit.css", "css/custom.css"]
 
 from sphinx.ext.coverage import CoverageBuilder
 

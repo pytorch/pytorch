@@ -5,6 +5,10 @@
 #elif defined(__clang__) && (defined(__ARM_NEON__) || defined(__aarch64__))
 /* Clang-compatible compiler, targeting arm neon */
 #include <arm_neon.h>
+#if defined(__ARM_FEATURE_SVE)
+/* CLANG-compatible compiler, targeting ARM with SVE */
+#include <arm_sve.h>
+#endif
 #elif defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
@@ -17,6 +21,10 @@
 #elif defined(__GNUC__) && (defined(__ARM_NEON__) || defined(__aarch64__))
 /* GCC-compatible compiler, targeting ARM with NEON */
 #include <arm_neon.h>
+#if defined(__ARM_FEATURE_SVE)
+/* GCC-compatible compiler, targeting ARM with SVE */
+#include <arm_sve.h>
+#endif
 #if defined (MISSING_ARM_VLD1)
 #include <ATen/cpu/vec/vec256/missing_vld1_neon.h>
 #elif defined (MISSING_ARM_VST1)

@@ -6,6 +6,7 @@ import torch._inductor.runtime.hints
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
+from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch._prims_common import prod
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
@@ -114,7 +115,6 @@ class TritonSplitScanKernel(TritonKernel):
 
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
         value = cse_compute(f"{value}.to({compute_type})")
@@ -170,5 +170,8 @@ class TritonSplitScanKernel(TritonKernel):
     def _get_heuristic(self):
         return "split_scan"
 
-    def _get_grid_fn(self):
+    def _get_grid_fn_str(self):
         return "split_scan_grid"
+
+    def _get_grid_fn(self):
+        return split_scan_grid

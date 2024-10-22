@@ -4,41 +4,18 @@
 #include <cstring>
 
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 namespace torch {
 namespace {
 bool compute_cpp_stack_traces_enabled() {
-  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
-      return false;
-    }
-    if (strcmp(envar, "1") == 0) {
-      return true;
-    }
-    TORCH_WARN(
-        "ignoring invalid value for TORCH_SHOW_CPP_STACKTRACES: ",
-        envar,
-        " valid values are 0 or 1.");
-  }
-  return false;
+  auto envvar = c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES");
+  return envvar.has_value() && envvar.value();
 }
 
 bool compute_disable_addr2line() {
-  auto envar = std::getenv("TORCH_DISABLE_ADDR2LINE");
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
-      return false;
-    }
-    if (strcmp(envar, "1") == 0) {
-      return true;
-    }
-    TORCH_WARN(
-        "ignoring invalid value for TORCH_DISABLE_ADDR2LINE: ",
-        envar,
-        " valid values are 0 or 1.");
-  }
-  return false;
+  auto envvar = c10::utils::check_env("TORCH_DISABLE_ADDR2LINE");
+  return envvar.has_value() && envvar.value();
 }
 } // namespace
 
@@ -48,20 +25,19 @@ bool get_cpp_stacktraces_enabled() {
 }
 
 static torch::unwind::Mode compute_symbolize_mode() {
-  auto envar_c = std::getenv("TORCH_SYMBOLIZE_MODE");
-  if (envar_c) {
-    std::string envar = envar_c;
-    if (envar == "dladdr") {
+  auto envar_c = c10::utils::get_env("TORCH_SYMBOLIZE_MODE");
+  if (envar_c.has_value()) {
+    if (envar_c == "dladdr") {
       return unwind::Mode::dladdr;
-    } else if (envar == "addr2line") {
+    } else if (envar_c == "addr2line") {
       return unwind::Mode::addr2line;
-    } else if (envar == "fast") {
+    } else if (envar_c == "fast") {
       return unwind::Mode::fast;
     } else {
       TORCH_CHECK(
           false,
           "expected {dladdr, addr2line, fast} for TORCH_SYMBOLIZE_MODE, got ",
-          envar);
+          envar_c.value());
     }
   } else {
     return compute_disable_addr2line() ? unwind::Mode::dladdr

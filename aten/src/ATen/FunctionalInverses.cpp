@@ -231,6 +231,7 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
@@ -452,6 +453,7 @@ Tensor FunctionalInverses::chunk_inverse(const at::Tensor & base, const at::Tens
     return split_with_sizes_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.

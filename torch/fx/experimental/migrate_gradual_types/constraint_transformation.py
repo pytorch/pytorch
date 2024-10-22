@@ -1,20 +1,54 @@
 # mypy: ignore-errors
 import copy
 import itertools
-from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT, MAX_TENSOR_RANK
-from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar, \
-    Transpose
-from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
-from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
-from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool
-from torch.fx.experimental.migrate_gradual_types.constraint import CalcProduct, CanReshape
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F, GetItem, GetItemTensor, IndexSelect
-from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_precision, op_leq, op_matching
-from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_neq
-from torch.fx.experimental.migrate_gradual_types.operation import op_mul, op_add, op_sub, op_div, op_mod
-from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar
-from torch.fx.tensor_type import TensorType, Dyn
 from typing import Callable, Dict, List
+
+from torch.fx.experimental.migrate_gradual_types.constraint import (
+    ApplyBroadcasting,
+    BinConstraintD,
+    CalcConv,
+    CalcMaxPool,
+    CalcProduct,
+    CanReshape,
+    Conj,
+    Constraint,
+    DGreatestUpperBound,
+    Disj,
+    DVar,
+    F,
+    GetItem,
+    GetItemTensor,
+    IndexSelect,
+    Prod,
+    T,
+    TGreatestUpperBound,
+    Transpose,
+    TVar,
+)
+from torch.fx.experimental.migrate_gradual_types.constraint_generator import (
+    BinConstraintT,
+    MAX_TENSOR_RANK,
+)
+from torch.fx.experimental.migrate_gradual_types.operation import (
+    op_add,
+    op_consistency,
+    op_div,
+    op_eq,
+    op_leq,
+    op_matching,
+    op_mod,
+    op_mul,
+    op_neq,
+    op_precision,
+    op_sub,
+)
+from torch.fx.experimental.migrate_gradual_types.util import (
+    gen_dvar,
+    gen_nat_constraints,
+    gen_tensor_dims,
+)
+from torch.fx.tensor_type import Dyn, TensorType
+
 
 _TRANSFORMATION_RULES: Dict[Constraint, Callable] = {}
 
@@ -22,9 +56,12 @@ _TRANSFORMATION_RULES: Dict[Constraint, Callable] = {}
 def register_transformation_rule(call_target):
     def register(fn):
         if call_target in _TRANSFORMATION_RULES:
-            raise RuntimeError(f'Transformation rule already registered for {call_target}!')
+            raise RuntimeError(
+                f"Transformation rule already registered for {call_target}!"
+            )
         _TRANSFORMATION_RULES[call_target] = fn
         return fn
+
     return register
 
 
@@ -54,10 +91,15 @@ def transform_transpose(constraint, counter):
         new_dims[constraint.index1] = dims[constraint.index2]
         new_dims[constraint.index2] = dims[constraint.index1]
 
-    transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
-                                   *nat_constraints,
-                                   is_valid_index1, is_valid_index2,
-                                   BinConstraintT(constraint.output, TensorType(new_dims), op_eq)])
+    transformed_constraint = Conj(
+        [
+            BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+            *nat_constraints,
+            is_valid_index1,
+            is_valid_index2,
+            BinConstraintT(constraint.output, TensorType(new_dims), op_eq),
+        ]
+    )
     return transformed_constraint, counter
 
 
@@ -78,10 +120,14 @@ def transform_index_select(constraint, counter):
         new_dims = copy.deepcopy(dims)
         new_dims[constraint.index] = constraint.dim_replace
 
-    transformed_constraint = Conj([BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
-                                   *nat_constraints,
-                                   is_valid_index,
-                                   BinConstraintT(constraint.output, TensorType(new_dims), op_eq)])
+    transformed_constraint = Conj(
+        [
+            BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+            *nat_constraints,
+            is_valid_index,
+            BinConstraintT(constraint.output, TensorType(new_dims), op_eq),
+        ]
+    )
 
     # print(constraints)
     return transformed_constraint, counter
@@ -106,19 +152,23 @@ def transform_get_item(constraint, counter):
     dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
     nat_constraints = gen_nat_constraints(dims)
 
-
     is_valid_index = valid_index(constraint.index, dims)
 
-    all_constraints = [BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
-                       *nat_constraints,
-                       is_valid_index]
+    all_constraints = [
+        BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+        *nat_constraints,
+        is_valid_index,
+    ]
 
     # if the index is valid, we generate a constraint for getting an item
     # otherwise this clause will have been UNSAT due to the wrong index
     if is_valid_index == T():
-        all_constraints.append(BinConstraintD(constraint.res, dims[constraint.index], op_eq))
+        all_constraints.append(
+            BinConstraintD(constraint.res, dims[constraint.index], op_eq)
+        )
 
     return Conj(all_constraints), counter
+
 
 def valid_index_tensor(index, dims):
     """
@@ -133,6 +183,7 @@ def valid_index_tensor(index, dims):
         return F()
     else:
         return T()
+
 
 @register_transformation_rule(GetItemTensor)
 def transform_get_item_tensor(constraint, counter):
@@ -151,7 +202,6 @@ def transform_get_item_tensor(constraint, counter):
     """
     assert isinstance(constraint.index_tuple, tuple)
 
-
     # generate a result tensor of the expected size
     dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
     nat_constraints = gen_nat_constraints(dims)
@@ -163,7 +213,6 @@ def transform_get_item_tensor(constraint, counter):
 
     dim_index = 0
     for i in range(len(constraint.index_tuple)):
-
         # append 1 to the right location of the resulting tensor
         if constraint.index_tuple[i] is None:
             resulting_tensor_dims[i] = 1
@@ -172,7 +221,7 @@ def transform_get_item_tensor(constraint, counter):
             pass
 
         else:
-            raise NotImplementedError('Method not yet implemented')
+            raise NotImplementedError("Method not yet implemented")
 
     # append the remaining dimensions to the right location
     dim_index = 0
@@ -189,10 +238,12 @@ def transform_get_item_tensor(constraint, counter):
         return F(), counter
 
     else:
-        constraints = [BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
-                       BinConstraintT(constraint.res, TensorType(resulting_tensor_dims), op_eq),
-                       *nat_constraints,
-                       is_valid_index]
+        constraints = [
+            BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+            BinConstraintT(constraint.res, TensorType(resulting_tensor_dims), op_eq),
+            *nat_constraints,
+            is_valid_index,
+        ]
         return Conj(constraints), counter
 
 
@@ -217,11 +268,14 @@ def generate_binconstraint_t(constraint, counter):
                     dim, counter = gen_dvar(counter)
                     new_dims.append(dim)
 
-                new_dim_constraints = [BinConstraintD(old_dim, new_dim, op_precision) for
-                                       new_dim, old_dim in zip(new_dims, constraint.lhs.__args__)] + \
-                                      [BinConstraintT(constraint.rhs, TensorType(new_dims), op_eq)] + \
-                                      [BinConstraintD(1, new_dim, op_leq) for
-                                       new_dim in new_dims]
+                new_dim_constraints = (
+                    [
+                        BinConstraintD(old_dim, new_dim, op_precision)
+                        for new_dim, old_dim in zip(new_dims, constraint.lhs.__args__)
+                    ]
+                    + [BinConstraintT(constraint.rhs, TensorType(new_dims), op_eq)]
+                    + [BinConstraintD(1, new_dim, op_leq) for new_dim in new_dims]
+                )
                 return Conj(new_dim_constraints), counter
 
     # matching
@@ -232,17 +286,39 @@ def generate_binconstraint_t(constraint, counter):
         d3 = constraint.rhs.__args__[2]
         d4 = constraint.rhs.__args__[3]
 
-        conj = [BinConstraintT(constraint.lhs, Dyn, op_eq),
-                BinConstraintD(d1, Dyn, op_eq),
-                BinConstraintD(d2, Dyn, op_eq),
-                BinConstraintD(d3, Dyn, op_eq),
-                BinConstraintD(d4, Dyn, op_eq)]
-        return Disj([Conj(conj),
-                     BinConstraintT(constraint.lhs, TensorType([d1, d2, d3, d4]), op_eq)]), counter
+        conj = [
+            BinConstraintT(constraint.lhs, Dyn, op_eq),
+            BinConstraintD(d1, Dyn, op_eq),
+            BinConstraintD(d2, Dyn, op_eq),
+            BinConstraintD(d3, Dyn, op_eq),
+            BinConstraintD(d4, Dyn, op_eq),
+        ]
+        return (
+            Disj(
+                [
+                    Conj(conj),
+                    BinConstraintT(constraint.lhs, TensorType([d1, d2, d3, d4]), op_eq),
+                ]
+            ),
+            counter,
+        )
 
     elif constraint.op == op_consistency:
-        c_dyn = Disj([BinConstraintT(constraint.lhs, Dyn, op_eq), BinConstraintT(constraint.rhs, Dyn, op_eq)])
-        [c_tensor_1, c_tensor_2, c_tensor_3, c_tensor_4], counter = gen_consistency_constraints(constraint, counter)
+        c_dyn = Disj(
+            [
+                BinConstraintT(constraint.lhs, Dyn, op_eq),
+                BinConstraintT(constraint.rhs, Dyn, op_eq),
+            ]
+        )
+        (
+            (
+                c_tensor_1,
+                c_tensor_2,
+                c_tensor_3,
+                c_tensor_4,
+            ),
+            counter,
+        ) = gen_consistency_constraints(constraint, counter)
 
         return Disj([c_dyn, c_tensor_1, c_tensor_2, c_tensor_3, c_tensor_4]), counter
 
@@ -251,7 +327,7 @@ def generate_binconstraint_t(constraint, counter):
         disj = [BinConstraintT(constraint.lhs, Dyn, op_eq)]
         for i in range(1, constraint.rhs + 1):
             dims = []
-            for j in range(1, i + 1):
+            for _ in range(1, i + 1):
                 dim_var, counter = gen_dvar(counter)
                 dims.append(dim_var)
             disj.append(BinConstraintT(constraint.lhs, TensorType(dims), op_eq))
@@ -272,8 +348,16 @@ def generate_binconstraint_d(constraint, counter):
             return T(), counter
 
     elif constraint.op == op_consistency:
-        return Disj([BinConstraintD(constraint.lhs, constraint.rhs, op_eq),
-                     BinConstraintD(constraint.rhs, Dyn, op_eq), BinConstraintD(constraint.lhs, Dyn, op_eq)]), counter
+        return (
+            Disj(
+                [
+                    BinConstraintD(constraint.lhs, constraint.rhs, op_eq),
+                    BinConstraintD(constraint.rhs, Dyn, op_eq),
+                    BinConstraintD(constraint.lhs, Dyn, op_eq),
+                ]
+            ),
+            counter,
+        )
 
     else:
         return constraint, counter
@@ -309,8 +393,17 @@ def generate_gub(constraint, counter):
     Transform greatest upper bound for tensors. Results in equality and Greatest Upper Bound
     on dimensions
     """
-    c1 = Conj([Disj([BinConstraintT(constraint.rhs1, Dyn, op_eq),
-                     BinConstraintT(constraint.rhs2, Dyn, op_eq)]), BinConstraintT(constraint.res, Dyn, op_eq)])
+    c1 = Conj(
+        [
+            Disj(
+                [
+                    BinConstraintT(constraint.rhs1, Dyn, op_eq),
+                    BinConstraintT(constraint.rhs2, Dyn, op_eq),
+                ]
+            ),
+            BinConstraintT(constraint.res, Dyn, op_eq),
+        ]
+    )
 
     [c2, c3, c4, c5], counter = gen_greatest_upper_bound(constraint, counter)
 
@@ -322,9 +415,24 @@ def generate_d_gub(constraint, counter):
     """
     Transform greatest upper bound for dimensions into equality constraints
     """
-    c1 = Conj([BinConstraintD(constraint.rhs1, Dyn, op_eq), BinConstraintD(constraint.res, constraint.rhs2, op_eq)])
-    c2 = Conj([BinConstraintD(constraint.rhs2, Dyn, op_eq), BinConstraintD(constraint.res, constraint.rhs1, op_eq)])
-    c3 = Conj([BinConstraintD(constraint.rhs2, constraint.rhs1, op_eq), BinConstraintD(constraint.res, constraint.rhs1, op_eq)])
+    c1 = Conj(
+        [
+            BinConstraintD(constraint.rhs1, Dyn, op_eq),
+            BinConstraintD(constraint.res, constraint.rhs2, op_eq),
+        ]
+    )
+    c2 = Conj(
+        [
+            BinConstraintD(constraint.rhs2, Dyn, op_eq),
+            BinConstraintD(constraint.res, constraint.rhs1, op_eq),
+        ]
+    )
+    c3 = Conj(
+        [
+            BinConstraintD(constraint.rhs2, constraint.rhs1, op_eq),
+            BinConstraintD(constraint.res, constraint.rhs1, op_eq),
+        ]
+    )
     return Disj([c1, c2, c3]), counter
 
 
@@ -337,17 +445,26 @@ def generate_calc_conv(constraint, counter):
     c1 = BinConstraintT(constraint.conv_result, conv_result, op_eq)
 
     # the second dimension of the output is equal to the output channels
-    c2 = Conj([BinConstraintD(d[1], constraint.c_out, op_eq), BinConstraintD(d[1], Dyn, op_neq)])
+    c2 = Conj(
+        [
+            BinConstraintD(d[1], constraint.c_out, op_eq),
+            BinConstraintD(d[1], Dyn, op_neq),
+        ]
+    )
 
     # the input corresponds to the output in the first dimension of the convolution
     c3 = BinConstraintD(constraint.matching_constraint[0], d[0], op_eq)
 
     c4, c5 = calc_last_two_dims(constraint, d)
 
-    leq_constraints = Conj([BinConstraintD(0, d[0], op_leq),
-                            BinConstraintD(0, d[1], op_leq),
-                            BinConstraintD(0, d[2], op_leq),
-                            BinConstraintD(0, d[3], op_leq)])
+    leq_constraints = Conj(
+        [
+            BinConstraintD(0, d[0], op_leq),
+            BinConstraintD(0, d[1], op_leq),
+            BinConstraintD(0, d[2], op_leq),
+            BinConstraintD(0, d[3], op_leq),
+        ]
+    )
 
     return Conj([c1, c2, c3, c4, c5, leq_constraints]), counter
 
@@ -368,10 +485,14 @@ def generate_calc_maxpool(constraint, counter):
     c3 = BinConstraintD(constraint.matching_constraint[0], d[0], op_eq)
     c4, c5 = calc_last_two_dims(constraint, d)
 
-    leq_constraints = Conj([BinConstraintD(0, d[0], op_leq),
-                            BinConstraintD(0, d[1], op_leq),
-                            BinConstraintD(0, d[2], op_leq),
-                            BinConstraintD(0, d[3], op_leq)])
+    leq_constraints = Conj(
+        [
+            BinConstraintD(0, d[0], op_leq),
+            BinConstraintD(0, d[1], op_leq),
+            BinConstraintD(0, d[2], op_leq),
+            BinConstraintD(0, d[3], op_leq),
+        ]
+    )
 
     return Conj([c1, c2, c3, c4, c5, leq_constraints]), counter
 
@@ -388,7 +509,7 @@ def generate_calc_product(constraint, counter):
     n = len(constraint.dims_to_flatten)
 
     # this will be evaluated right here
-    boundary_check = (0 <= start and start < end and end <= n)
+    boundary_check = 0 <= start and start < end and end <= n
 
     c_boundary = T() if boundary_check else F()
 
@@ -410,16 +531,40 @@ def generate_calc_product(constraint, counter):
             if len(total_constraints) > 4:
                 all_constraints.append(F())
             else:
-                all_constraints.append(Conj([BinConstraintT(flattened, TensorType(lhs + mid_var + rhs), op_eq)] + p))
+                all_constraints.append(
+                    Conj(
+                        [
+                            BinConstraintT(
+                                flattened, TensorType(lhs + mid_var + rhs), op_eq
+                            )
+                        ]
+                        + p
+                    )
+                )
         else:
             new_var, counter = gen_dvar(counter)
-            mid_eq_prod = Conj([BinConstraintD(new_var, Prod(mid), op_eq), BinConstraintD(new_var, Dyn, op_neq)])
+            mid_eq_prod = Conj(
+                [
+                    BinConstraintD(new_var, Prod(mid), op_eq),
+                    BinConstraintD(new_var, Dyn, op_neq),
+                ]
+            )
             mid_var = [new_var]
             total_constraints = lhs + mid_var + rhs
             if len(total_constraints) > 4:
                 all_constraints.append(F())
             else:
-                all_constraints.append(Conj([BinConstraintT(flattened, TensorType(lhs + mid_var + rhs), op_eq), mid_eq_prod] + p))
+                all_constraints.append(
+                    Conj(
+                        [
+                            BinConstraintT(
+                                flattened, TensorType(lhs + mid_var + rhs), op_eq
+                            ),
+                            mid_eq_prod,
+                        ]
+                        + p
+                    )
+                )
 
     return Conj([Disj(all_constraints), c_boundary]), counter
 
@@ -466,22 +611,40 @@ def generate_reshape(constraint, counter):
 
     if is_fully_static:
         # size 1 tensor
-        c3_tensor1 = Disj([d1_eq_dyn,
-                           (Conj([d1_neq_dyn,
-                                  BinConstraintD(d1, Prod(target), op_eq)]))])
+        c3_tensor1 = Disj(
+            [d1_eq_dyn, (Conj([d1_neq_dyn, BinConstraintD(d1, Prod(target), op_eq)]))]
+        )
         all_tensor_1 = Conj([c2_tensor1, c3_tensor1])
 
         # size 2 tensor
-        all_tensor_2 = Conj([c2_tensor2, gen_all_reshape_possibilities([d1, d2], target)])
+        all_tensor_2 = Conj(
+            [c2_tensor2, gen_all_reshape_possibilities([d1, d2], target)]
+        )
 
         # size 3 tensor
-        all_tensor_3 = Conj([c2_tensor3, gen_all_reshape_possibilities([d1, d2, d3], target)])
+        all_tensor_3 = Conj(
+            [c2_tensor3, gen_all_reshape_possibilities([d1, d2, d3], target)]
+        )
 
         # size 4 tensor
-        all_tensor_4 = Conj([c2_tensor4, gen_all_reshape_possibilities([d1, d2, d3, d4], target)])
+        all_tensor_4 = Conj(
+            [c2_tensor4, gen_all_reshape_possibilities([d1, d2, d3, d4], target)]
+        )
 
-        return Conj([Disj([c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]),
-                     nat_d1, nat_d2, nat_d3, nat_d4]), counter
+        return (
+            Conj(
+                [
+                    Disj(
+                        [c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]
+                    ),
+                    nat_d1,
+                    nat_d2,
+                    nat_d3,
+                    nat_d4,
+                ]
+            ),
+            counter,
+        )
 
     # then there must be exactly one occurrence of dyn
     else:
@@ -492,28 +655,57 @@ def generate_reshape(constraint, counter):
                 new_target.append(n)
 
         # tensor 1
-        c3_tensor1 = Disj([d1_eq_dyn,
-                           (Conj([d1_neq_dyn,
-                                  is_dim_div_by_target(new_target, d1)]))])
+        c3_tensor1 = Disj(
+            [d1_eq_dyn, (Conj([d1_neq_dyn, is_dim_div_by_target(new_target, d1)]))]
+        )
         all_tensor_1 = Conj([c2_tensor1, c3_tensor1])
 
         # tensor 2
         c21 = Disj([d1_eq_dyn, d2_eq_dyn])
-        c22 = Conj([d1_neq_dyn, d2_neq_dyn, is_dim_div_by_target(new_target, Prod([d1, d2]))])
+        c22 = Conj(
+            [d1_neq_dyn, d2_neq_dyn, is_dim_div_by_target(new_target, Prod([d1, d2]))]
+        )
         all_tensor_2 = Conj([c2_tensor2, Disj([c21, c22])])
 
         # tensor 3
         c31 = Disj([d1_eq_dyn, d2_eq_dyn, d3_eq_dyn])
-        c32 = Conj([d1_neq_dyn, d2_neq_dyn, d3_neq_dyn, is_dim_div_by_target(new_target, Prod([d1, d2, d3]))])
+        c32 = Conj(
+            [
+                d1_neq_dyn,
+                d2_neq_dyn,
+                d3_neq_dyn,
+                is_dim_div_by_target(new_target, Prod([d1, d2, d3])),
+            ]
+        )
         all_tensor_3 = Conj([c2_tensor3, Disj([c31, c32])])
 
         # tensor 4
         c41 = Disj([d1_eq_dyn, d2_eq_dyn, d3_eq_dyn, d4_eq_dyn])
-        c42 = Conj([d1_neq_dyn, d2_neq_dyn, d3_neq_dyn, d4_neq_dyn, is_dim_div_by_target(new_target, Prod([d1, d2, d3, d4]))])
+        c42 = Conj(
+            [
+                d1_neq_dyn,
+                d2_neq_dyn,
+                d3_neq_dyn,
+                d4_neq_dyn,
+                is_dim_div_by_target(new_target, Prod([d1, d2, d3, d4])),
+            ]
+        )
         all_tensor_4 = Conj([c2_tensor4, Disj([c41, c42])])
 
-        return Conj([Disj([c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]),
-                     nat_d1, nat_d2, nat_d3, nat_d4]), counter
+        return (
+            Conj(
+                [
+                    Disj(
+                        [c1_dyn, all_tensor_1, all_tensor_2, all_tensor_3, all_tensor_4]
+                    ),
+                    nat_d1,
+                    nat_d2,
+                    nat_d3,
+                    nat_d4,
+                ]
+            ),
+            counter,
+        )
 
 
 @register_transformation_rule(ApplyBroadcasting)
@@ -537,40 +729,58 @@ def generate_broadcasting(constraint, counter):
 
     # tensor possibility
     # generate dimensions to create tensors of size 1
-    final_tensor_1_constraint, _, _, nat_dims_1, counter = \
-        gen_broadcasting_constraints(e1, e2, e11, e12, 1, counter)
+    final_tensor_1_constraint, _, _, nat_dims_1, counter = gen_broadcasting_constraints(
+        e1, e2, e11, e12, 1, counter
+    )
 
     # generate dimensions to create tensors of size 2
-    final_tensor_2_constraint_no_padding, final_tensor_2_constraint_padding_arg1, \
-        final_tensor_2_constraint_padding_arg2, nat_dims_2, counter = \
-        gen_broadcasting_constraints(e1, e2, e11, e12, 2, counter)
-
-    # generate dimensions to create tensors of size 3
-    final_tensor_3_constraint_no_padding, final_tensor_3_constraint_padding_arg1, \
-        final_tensor_3_constraint_padding_arg2, nat_dims_3, counter = \
-        gen_broadcasting_constraints(e1, e2, e11, e12, 3, counter)
-
-    # generate dimensions to create tensors of size 4
-    final_tensor_4_constraint_no_padding, final_tensor_4_constraint_padding_arg1, \
-        final_tensor_4_constraint_padding_arg2, nat_dims_4, counter = \
-        gen_broadcasting_constraints(e1, e2, e11, e12, 4, counter)
-
-    final_result = Disj([
-        e1_dyn_constraint,
-        e2_dyn_constraint,
-        final_tensor_1_constraint,
+    (
         final_tensor_2_constraint_no_padding,
         final_tensor_2_constraint_padding_arg1,
         final_tensor_2_constraint_padding_arg2,
+        nat_dims_2,
+        counter,
+    ) = gen_broadcasting_constraints(e1, e2, e11, e12, 2, counter)
+
+    # generate dimensions to create tensors of size 3
+    (
         final_tensor_3_constraint_no_padding,
         final_tensor_3_constraint_padding_arg1,
         final_tensor_3_constraint_padding_arg2,
+        nat_dims_3,
+        counter,
+    ) = gen_broadcasting_constraints(e1, e2, e11, e12, 3, counter)
+
+    # generate dimensions to create tensors of size 4
+    (
         final_tensor_4_constraint_no_padding,
         final_tensor_4_constraint_padding_arg1,
-        final_tensor_4_constraint_padding_arg2
-    ])
+        final_tensor_4_constraint_padding_arg2,
+        nat_dims_4,
+        counter,
+    ) = gen_broadcasting_constraints(e1, e2, e11, e12, 4, counter)
 
-    return Conj([final_result, *nat_dims_1, *nat_dims_2, *nat_dims_3, *nat_dims_4]), counter
+    final_result = Disj(
+        [
+            e1_dyn_constraint,
+            e2_dyn_constraint,
+            final_tensor_1_constraint,
+            final_tensor_2_constraint_no_padding,
+            final_tensor_2_constraint_padding_arg1,
+            final_tensor_2_constraint_padding_arg2,
+            final_tensor_3_constraint_no_padding,
+            final_tensor_3_constraint_padding_arg1,
+            final_tensor_3_constraint_padding_arg2,
+            final_tensor_4_constraint_no_padding,
+            final_tensor_4_constraint_padding_arg1,
+            final_tensor_4_constraint_padding_arg2,
+        ]
+    )
+
+    return (
+        Conj([final_result, *nat_dims_1, *nat_dims_2, *nat_dims_3, *nat_dims_4]),
+        counter,
+    )
 
 
 def transform_constraint(constraint: Constraint, counter: int):
@@ -589,8 +799,6 @@ def transform_constraint(constraint: Constraint, counter: int):
 
     else:
         return constraint, counter
-
-
 
 
 def calc_last_two_dims(constraint, d: List[DVar]):
@@ -612,29 +820,49 @@ def calc_last_two_dims(constraint, d: List[DVar]):
     b3_dyn = Conj([BinConstraintD(d[2], Dyn, op_eq), BinConstraintD(b3, Dyn, op_eq)])
     b4_dyn = Conj([BinConstraintD(d[3], Dyn, op_eq), BinConstraintD(b4, Dyn, op_eq)])
 
-    d3_not_dyn = Conj([BinConstraintD(d[2], Dyn, op_neq), BinConstraintD(b3, Dyn, op_neq)])
-    d4_not_dyn = Conj([BinConstraintD(d[3], Dyn, op_neq), BinConstraintD(b4, Dyn, op_neq)])
+    d3_not_dyn = Conj(
+        [BinConstraintD(d[2], Dyn, op_neq), BinConstraintD(b3, Dyn, op_neq)]
+    )
+    d4_not_dyn = Conj(
+        [BinConstraintD(d[3], Dyn, op_neq), BinConstraintD(b4, Dyn, op_neq)]
+    )
 
     # transform parameters into tuples incase they are not already
-    padding = (constraint.padding, constraint.padding) \
-        if isinstance(constraint.padding, int) else constraint.padding
-    kernel = (constraint.kernel, constraint.kernel) \
-        if isinstance(constraint.kernel, int) else constraint.kernel
-    stride = (constraint.stride, constraint.stride) \
-        if isinstance(constraint.stride, int) else constraint.stride
-    dilation = (constraint.dilation, constraint.dilation) \
-        if isinstance(constraint.dilation, int) else constraint.dilation
+    padding = (
+        (constraint.padding, constraint.padding)
+        if isinstance(constraint.padding, int)
+        else constraint.padding
+    )
+    kernel = (
+        (constraint.kernel, constraint.kernel)
+        if isinstance(constraint.kernel, int)
+        else constraint.kernel
+    )
+    stride = (
+        (constraint.stride, constraint.stride)
+        if isinstance(constraint.stride, int)
+        else constraint.stride
+    )
+    dilation = (
+        (constraint.dilation, constraint.dilation)
+        if isinstance(constraint.dilation, int)
+        else constraint.dilation
+    )
 
     f1 = BinConstraintD(b3, BinConstraintD(2, padding[0], op_mul), op_add)
     f2 = BinConstraintD(dilation[0], BinConstraintD(kernel[0], 1, op_sub), op_mul)
-    f3 = BinConstraintD(BinConstraintD(BinConstraintD(f1, f2, op_sub), 1, op_sub), stride[0], op_div)
+    f3 = BinConstraintD(
+        BinConstraintD(BinConstraintD(f1, f2, op_sub), 1, op_sub), stride[0], op_div
+    )
     f4 = BinConstraintD(f3, 1, op_add)
 
     c4 = Disj([b3_dyn, Conj([d3_not_dyn, BinConstraintD(d[2], f4, op_eq)])])
 
     f11 = BinConstraintD(b4, BinConstraintD(2, padding[1], op_mul), op_add)
     f22 = BinConstraintD(dilation[1], BinConstraintD(kernel[1], 1, op_sub), op_mul)
-    f33 = BinConstraintD(BinConstraintD(BinConstraintD(f11, f22, op_sub), 1, op_sub), stride[1], op_div)
+    f33 = BinConstraintD(
+        BinConstraintD(BinConstraintD(f11, f22, op_sub), 1, op_sub), stride[1], op_div
+    )
     f44 = BinConstraintD(f33, 1, op_add)
 
     c5 = Disj([b4_dyn, Conj([d4_not_dyn, BinConstraintD(d[3], f44, op_eq)])])
@@ -652,8 +880,12 @@ def generate_all_int_dyn_dim_possibilities(my_list: List[DVar]):
     one possibility about the values of the dimension variables
     """
     # generate all possibilities of being equal or not equal to dyn for my_list
-    eq_possibilities = [BinConstraintD(my_list[i], Dyn, op_eq) for i in range(len(my_list))]
-    neq_possibilities = [BinConstraintD(my_list[i], Dyn, op_neq) for i in range(len(my_list))]
+    eq_possibilities = [
+        BinConstraintD(my_list[i], Dyn, op_eq) for i in range(len(my_list))
+    ]
+    neq_possibilities = [
+        BinConstraintD(my_list[i], Dyn, op_neq) for i in range(len(my_list))
+    ]
     d_possibilities = []
 
     for i in zip(eq_possibilities, neq_possibilities):
@@ -721,10 +953,13 @@ def gen_all_reshape_possibilities(list_of_dims, target):
             all_constraints.append(Conj(p))
 
         elif len(to_multiply) < len(list_of_dims):
-            all_constraints.append(Conj(p + [is_target_div_by_dim(target, Prod(to_multiply))]))
+            all_constraints.append(
+                Conj(p + [is_target_div_by_dim(target, Prod(to_multiply))])
+            )
         else:
-            all_constraints.append(Conj(p + [BinConstraintD(Prod(list_of_dims),
-                                                            Prod(target), op_eq)]))
+            all_constraints.append(
+                Conj(p + [BinConstraintD(Prod(list_of_dims), Prod(target), op_eq)])
+            )
 
     return Disj(all_constraints)
 
@@ -746,27 +981,36 @@ def broadcast_dim(tensor_input1, tensor_input2, res1, res2, index, padding=False
     if tensor_input1[index] is None:
         assert padding
 
-
     if not padding:
         # then the inputs are the same length so they all have dimensions at "index"
-        return Conj([BinConstraintD(tensor_input1[index], 1, op_eq),
-                     BinConstraintD(res1[index], res2[index], op_eq),
-                     BinConstraintD(res2[index], tensor_input2[index], op_eq)])
+        return Conj(
+            [
+                BinConstraintD(tensor_input1[index], 1, op_eq),
+                BinConstraintD(res1[index], res2[index], op_eq),
+                BinConstraintD(res2[index], tensor_input2[index], op_eq),
+            ]
+        )
 
     else:
         # we don't set the input dimension to 1, since it doesn't exist.
-        return Conj([BinConstraintD(res1[index], res2[index], op_eq),
-                     BinConstraintD(res2[index], tensor_input2[index], op_eq)])
+        return Conj(
+            [
+                BinConstraintD(res1[index], res2[index], op_eq),
+                BinConstraintD(res2[index], tensor_input2[index], op_eq),
+            ]
+        )
 
 
-def apply_padding(e1_var: TVar,
-                  e11: BinConstraintT,
-                  e2: BinConstraintT,
-                  e12: BinConstraintT,
-                  d2: List[DVar],
-                  d11: List[DVar],
-                  d12: List[DVar],
-                  counter: int):
+def apply_padding(
+    e1_var: TVar,
+    e11: BinConstraintT,
+    e2: BinConstraintT,
+    e12: BinConstraintT,
+    d2: List[DVar],
+    d11: List[DVar],
+    d12: List[DVar],
+    counter: int,
+):
     """
     We are considering the possibility where one input has less dimensions than
     another input, so we apply padding to the broadcasted results
@@ -789,7 +1033,6 @@ def apply_padding(e1_var: TVar,
 
     # pad the shorter input with None so we can pass it to the broadcasting helper function
     for i in range(1, len(d2)):
-
         d1, counter = gen_tensor_dims(i, counter)
 
         nat_constraints = gen_nat_constraints(d1 + d2 + d11 + d12)
@@ -804,30 +1047,37 @@ def apply_padding(e1_var: TVar,
 
         # for every padding size, we also consider broadcasting
         for j in range(len(d2) - i):
-            broadcast_padding.append(broadcast_dim(simulate_padding, d2, d11, d12, j, True))
+            broadcast_padding.append(
+                broadcast_dim(simulate_padding, d2, d11, d12, j, True)
+            )
 
         # we consider the possibilities for broadcasting for every dimension. Since we already
         # padded d1, we do not consider it while broadcasting
-        all_broadcasting_possibilities = generate_all_broadcasting_possibilities_no_padding(d1,
-                                                                                            d2[(len(d2) - i):],
-                                                                                            d11[(len(d2) - i):],
-                                                                                            d12[(len(d2) - i):])
+        all_broadcasting_possibilities = (
+            generate_all_broadcasting_possibilities_no_padding(
+                d1, d2[(len(d2) - i) :], d11[(len(d2) - i) :], d12[(len(d2) - i) :]
+            )
+        )
         # combine all constraints into a conjunction
-        c = Conj([e1, e11, e2, e12,
-                  *broadcast_padding,
-                  all_broadcasting_possibilities,
-                  *nat_constraints
-                  ])
+        c = Conj(
+            [
+                e1,
+                e11,
+                e2,
+                e12,
+                *broadcast_padding,
+                all_broadcasting_possibilities,
+                *nat_constraints,
+            ]
+        )
         res.append(c)
 
     return Disj(res), counter
 
 
-def no_broadcast_dim_with_index(d1: List[DVar],
-                                d2: List[DVar],
-                                d3: List[DVar],
-                                d4: List[DVar],
-                                i: int):
+def no_broadcast_dim_with_index(
+    d1: List[DVar], d2: List[DVar], d3: List[DVar], d4: List[DVar], i: int
+):
     """
     Args:
         d1: input 1
@@ -838,17 +1088,28 @@ def no_broadcast_dim_with_index(d1: List[DVar],
 
     Returns: Constraints for when no broadcasting occurs
     """
-    return Conj([
-        Disj([
-            Conj([BinConstraintD(d1[i], 1, op_eq),
-                  BinConstraintD(d2[i], 1, op_eq)]),
-
-            Conj([BinConstraintD(d1[i], 1, op_neq),
-                  BinConstraintD(d2[i], 1, op_neq)])]),
-
-        BinConstraintD(d1[i], d3[i], op_eq),
-        BinConstraintD(d2[i], d4[i], op_eq)])
-
+    return Conj(
+        [
+            Disj(
+                [
+                    Conj(
+                        [
+                            BinConstraintD(d1[i], 1, op_eq),
+                            BinConstraintD(d2[i], 1, op_eq),
+                        ]
+                    ),
+                    Conj(
+                        [
+                            BinConstraintD(d1[i], 1, op_neq),
+                            BinConstraintD(d2[i], 1, op_neq),
+                        ]
+                    ),
+                ]
+            ),
+            BinConstraintD(d1[i], d3[i], op_eq),
+            BinConstraintD(d2[i], d4[i], op_eq),
+        ]
+    )
 
 
 def gen_lists_of_dims(num_tensors: int, dim_size: int, counter: int):
@@ -871,14 +1132,16 @@ def gen_lists_of_dims(num_tensors: int, dim_size: int, counter: int):
     return res, counter
 
 
-def create_equality_constraints_for_broadcasting(e1: TVar,
-                                                 e2: TVar,
-                                                 e11: TVar,
-                                                 e12: TVar,
-                                                 d1: List[DVar],
-                                                 d2: List[DVar],
-                                                 d11: List[DVar],
-                                                 d12: List[DVar]):
+def create_equality_constraints_for_broadcasting(
+    e1: TVar,
+    e2: TVar,
+    e11: TVar,
+    e12: TVar,
+    d1: List[DVar],
+    d2: List[DVar],
+    d11: List[DVar],
+    d12: List[DVar],
+):
     """
     Create equality constraints for when no broadcasting occurs
     Args:
@@ -920,10 +1183,17 @@ def gen_consistency_constraints(constraint: Constraint, counter: int):
 
         nat_constraints = gen_nat_constraints(new_dims_rhs_1 + new_dims_rhs_2)
 
-        c_tensor_i = Conj([BinConstraintT(constraint.lhs, TensorType(new_dims_rhs_1), op_eq),
-                           BinConstraintT(constraint.rhs, TensorType(new_dims_rhs_2), op_eq)] +
-                          [BinConstraintD(d1, d2, op_consistency) for
-                           d1, d2 in zip(new_dims_rhs_1, new_dims_rhs_2)] + nat_constraints)
+        c_tensor_i = Conj(
+            [
+                BinConstraintT(constraint.lhs, TensorType(new_dims_rhs_1), op_eq),
+                BinConstraintT(constraint.rhs, TensorType(new_dims_rhs_2), op_eq),
+            ]
+            + [
+                BinConstraintD(d1, d2, op_consistency)
+                for d1, d2 in zip(new_dims_rhs_1, new_dims_rhs_2)
+            ]
+            + nat_constraints
+        )
 
         all_constraints.append(c_tensor_i)
 
@@ -953,22 +1223,29 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
         dims3, counter = gen_tensor_dims(i, counter)
         c3tensor = TensorType(dims3)
 
-        c += [BinConstraintT(constraint.rhs1, c1tensor, op_eq),
-              BinConstraintT(constraint.rhs2, c2tensor, op_eq),
-              BinConstraintT(constraint.res, c3tensor, op_eq)] + \
-            gen_nat_constraints(dims1 + dims2 + dims3)
+        c += [
+            BinConstraintT(constraint.rhs1, c1tensor, op_eq),
+            BinConstraintT(constraint.rhs2, c2tensor, op_eq),
+            BinConstraintT(constraint.res, c3tensor, op_eq),
+        ] + gen_nat_constraints(dims1 + dims2 + dims3)
 
-        assert len(c3tensor.__args__) == len(c1tensor.__args__) == len(c2tensor.__args__)
+        assert (
+            len(c3tensor.__args__) == len(c1tensor.__args__) == len(c2tensor.__args__)
+        )
         for i in range(len(c3tensor.__args__)):
-            c.append(DGreatestUpperBound(c3tensor.__args__[i],
-                                         c1tensor.__args__[i],
-                                         c2tensor.__args__[i]))
+            c.append(
+                DGreatestUpperBound(
+                    c3tensor.__args__[i], c1tensor.__args__[i], c2tensor.__args__[i]
+                )
+            )
 
         all_constraints.append(Conj(c))
     return all_constraints, counter
 
 
-def generate_all_broadcasting_possibilities_no_padding(d1: List[DVar], d2: List[DVar], d11: List[DVar], d12: List[DVar]):
+def generate_all_broadcasting_possibilities_no_padding(
+    d1: List[DVar], d2: List[DVar], d11: List[DVar], d12: List[DVar]
+):
     """
     Generate broadcasting constraints assuming no padding. Broadcasting can happen at any dimension.
     We look at all combinations for all dimensions in d1 and d2
@@ -996,7 +1273,9 @@ def generate_all_broadcasting_possibilities_no_padding(d1: List[DVar], d2: List[
     return Conj(res2)
 
 
-def gen_broadcasting_constraints(e1: TVar, e2: TVar, e11: TVar, e12: TVar, i: int, counter: int):
+def gen_broadcasting_constraints(
+    e1: TVar, e2: TVar, e11: TVar, e12: TVar, i: int, counter: int
+):
     """
     Simulates broadcasting on e1 and e2 and returns the results
     respectively in e11 and e12. Because of gradual types,
@@ -1019,22 +1298,33 @@ def gen_broadcasting_constraints(e1: TVar, e2: TVar, e11: TVar, e12: TVar, i: in
     [d1, d2, d3, d4] = dims
     nat_dims_i = gen_nat_constraints(list(itertools.chain.from_iterable(dims)))
 
-    initialize_tensors_constraints = create_equality_constraints_for_broadcasting(e1, e2, e11, e12,
-                                                                                  d1, d2, d3, d4)
+    initialize_tensors_constraints = create_equality_constraints_for_broadcasting(
+        e1, e2, e11, e12, d1, d2, d3, d4
+    )
 
     [e1_tensor, e11_tensor, e2_tensor, e12_tensor] = initialize_tensors_constraints
 
     # without padding, broadcast all possibilities for tensors of size i
-    final_tensor_constraint_no_padding = Conj([*initialize_tensors_constraints,
-                                               generate_all_broadcasting_possibilities_no_padding(d1, d2, d3, d4)])
+    final_tensor_constraint_no_padding = Conj(
+        [
+            *initialize_tensors_constraints,
+            generate_all_broadcasting_possibilities_no_padding(d1, d2, d3, d4),
+        ]
+    )
 
     # with padding, broadcast all possibilities for tensors of size i
-    final_tensor_constraint_padding_arg1, counter = \
-        apply_padding(e1, e11_tensor, e2_tensor, e12_tensor, d2, d3, d4, counter)
+    final_tensor_constraint_padding_arg1, counter = apply_padding(
+        e1, e11_tensor, e2_tensor, e12_tensor, d2, d3, d4, counter
+    )
 
-    final_tensor_constraint_padding_arg2, counter = \
-        apply_padding(e2, e12_tensor, e1_tensor, e11_tensor, d1, d4, d3, counter)
+    final_tensor_constraint_padding_arg2, counter = apply_padding(
+        e2, e12_tensor, e1_tensor, e11_tensor, d1, d4, d3, counter
+    )
 
-    return final_tensor_constraint_no_padding, \
-        final_tensor_constraint_padding_arg1, \
-        final_tensor_constraint_padding_arg2, nat_dims_i, counter
+    return (
+        final_tensor_constraint_no_padding,
+        final_tensor_constraint_padding_arg1,
+        final_tensor_constraint_padding_arg2,
+        nat_dims_i,
+        counter,
+    )

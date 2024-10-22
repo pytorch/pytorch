@@ -19,8 +19,7 @@ constexpr int kSynchronizeBusyWaitMillis = 10;
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  auto new_pool = c10::cuda::MemPool();
-  return new_pool.id();
+  return c10::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -115,8 +114,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   } else {
     // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    auto mempool = c10::cuda::MemPool({}, false);
-    mempool_id_ = mempool.id();
+    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
@@ -125,7 +123,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
       cudaStreamCaptureStatus status;
-      CaptureId_t stream_capture_id;
+      CaptureId_t stream_capture_id = 0;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
@@ -160,7 +158,7 @@ void CUDAGraph::capture_end() {
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
 
-  TORCH_CHECK(graph_ != NULL, "Invalid capture.");
+  TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
@@ -175,7 +173,7 @@ void CUDAGraph::capture_end() {
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11040)
-  int version;
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
 #endif
@@ -203,7 +201,7 @@ void CUDAGraph::capture_end() {
   }
 
   size_t numCUDAGraphNodes = 0;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
   if (numCUDAGraphNodes == 0) {
       TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
                  "attempted to be captured on wrong device or stream.");
@@ -233,7 +231,7 @@ void CUDAGraph::replay() {
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
-  int version;
+  int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
     // Workaround for bug in libcuda.so that causes replayed graphs with

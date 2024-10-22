@@ -3,6 +3,12 @@ PyTorch 2.0 Troubleshooting
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
+
+.. note:: This document is currently outdated and requires revision.  For the interim period, please refer to
+   the `comprehensive manual for torch.compile <https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab>`__
+   as the primary resource for troubleshooting guidance.
+
+
 We are actively developing debug tools, profilers, and improving our
 error and warning messages. Below is a table of the available
 tools and their typical usage. For additional help see
@@ -663,13 +669,6 @@ recompile that function (or part) up to
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
-The `compile profiler <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/utils.py>`__ automates the
-process of setting TorchDynamo’s cache limit to 1 and running your
-program under an observation-only 'compiler' that records the causes of
-any guard failures. You should be sure to run your program for at least
-as long (as many iterations) as you were running when you ran into
-trouble, and the profiler will accumulate statistics over this duration.
-
 If your program exhibits a bounded amount of dynamism, you may be able
 to tune the TorchDynamo cache limit to allow for each variation to be
 compiled and cached, but if the cache limit is too high you may find the
@@ -684,18 +683,6 @@ such as varying batch size or sequence length. It does not plan to
 support rank-dynamism. In the meantime, setting a specific cache limit
 can be used in coordination with bucketing techniques to achieve an
 acceptable number of recompilations for some dynamic models.
-
-.. code-block:: python
-
-   from torch._dynamo.utils import CompileProfiler
-
-   def my_model():
-       ...
-
-   with CompileProfiler() as prof:
-       profiler_model = torch.compile(my_model, backend=prof)
-       profiler_model()
-       print(prof.report())
 
 Accuracy Debugging
 ~~~~~~~~~~~~~~~~~~

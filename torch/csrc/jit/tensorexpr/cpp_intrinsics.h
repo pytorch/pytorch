@@ -8,13 +8,13 @@ constexpr auto cpp_intrinsics_definition = R"(
 namespace std {
 
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T rsqrt(T v) {
   return 1.0f / std::sqrt(v);
 }
 
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T frac(T v) {
   T intpart;
   return std::modf(v, &intpart);

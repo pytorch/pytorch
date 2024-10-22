@@ -271,7 +271,7 @@ Kernel(
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
         {event_tracer_output_logging}
@@ -295,7 +295,7 @@ def gen_unboxing(
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
-        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]]
+        item: tuple[NativeFunction, tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         return item[0].root_name + ":" + item[1][0].to_native_string()
 
@@ -337,12 +337,11 @@ def compute_native_function_declaration(
     metadata_list = kernel_index.get_kernels(g).values()
     if metadata_list is None:
         return []
-    prefix = "TORCH_API"
 
     # for kernels in lean mode, we declare two versions, one with context and one without.
     # In the end we will cleanup the unused one.
     def gen_decl(metadata: BackendMetadata, include_context: bool) -> str:
-        return f"{prefix} {sig.decl(name=metadata.kernel, include_context=include_context)};"
+        return f"{sig.decl(name=metadata.kernel, include_context=include_context)};"
 
     return [
         gen_decl(metadata, include_context)
@@ -499,11 +498,11 @@ def gen_headers(
     headers = {
         "headers": [
             "#include <executorch/runtime/core/exec_aten/exec_aten.h> // at::Tensor etc.",
-            "#include <executorch/codegen/macros.h> // TORCH_API",
             "#include <executorch/runtime/kernel/kernel_runtime_context.h>",
         ],
     }
     if use_aten_lib:
+        headers["headers"].append("#include <executorch/codegen/macros.h> // TORCH_API")
         cpu_fm.write(
             "NativeFunctions.h",
             lambda: dict(
@@ -740,7 +739,7 @@ def parse_yaml(
 
         # (2) Return BackendIndices if kernel index is absent
         def map_index(
-            m: dict[OperatorName, BackendMetadata]
+            m: dict[OperatorName, BackendMetadata],
         ) -> dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 

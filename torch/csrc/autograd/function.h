@@ -252,6 +252,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return std::nullopt;
   }
 
+  // Used by the engine to determine what device thread to run on
+  at::Device device() {
+    // Since we pick the first non-CPU tensor, this won't work with
+    // mixed device-type operations (e.g., an op that is both CUDA
+    // and XLA).  This is *incredibly* unlikely, so we don't worry
+    // about it.
+    for (const auto& metadata : input_metadata_) {
+      auto device = metadata.device();
+      if (device.type() != at::kCPU) {
+        return device;
+      }
+    }
+    // Only report to the CPU thread if there really were no tensors
+    // from other devices.
+    return at::kCPU;
+  }
+
   void clear_input_metadata() {
     input_metadata_.clear();
   }

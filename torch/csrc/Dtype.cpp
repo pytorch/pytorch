@@ -123,7 +123,8 @@ PyObject* THPDtype_repr(THPDtype* self) {
 }
 
 PyTypeObject THPDtypeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.dtype", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.dtype", /* tp_name */
     sizeof(THPDtype), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

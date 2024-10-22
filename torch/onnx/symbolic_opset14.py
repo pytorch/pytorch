@@ -148,11 +148,8 @@ def scaled_dot_product_attention(
     assert (not is_causal) or (
         is_causal and symbolic_helper._is_none(attn_mask)
     ), "is_causal and attn_mask cannot be set at the same time"
-    assert (
-        not enable_gqa
-    ), "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
+    assert not enable_gqa, "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
 
-    scale = symbolic_helper._maybe_get_const(scale, "f")
     if symbolic_helper._is_none(scale):
         scale = _attention_scale(g, query)
 
@@ -254,7 +251,7 @@ def _causal_attention_mask(
     Equivalent to::
         mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
         attn_mask = torch.zeros(L, S, dtype=torch.float)
-        attn_mask = attn_mask.masked_fill(not mask, -float('inf'))
+        attn_mask = attn_mask.masked_fill(not mask, -float("inf"))
 
     Args:
         query: Tensor of shape [..., L, E]

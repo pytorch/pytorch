@@ -281,7 +281,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   bool use_cutlass)
 {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_sparse_semi_structured_tile: not supported");
+  TORCH_CHECK(false, "_sparse_semi_structured_tile: not supported");
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{});
 #else
   std::string algo(algorithm.data(), algorithm.size());

@@ -10,9 +10,11 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
+    onlyNativeDeviceTypesAnd,
     skipLazy,
     skipMeta,
     skipXLA,
@@ -22,6 +24,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     complex_types,
     floating_and_complex_types_and,
+    integral_types_and,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -395,6 +398,9 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(
+        *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
+    )
     def test_view_tensor_split(self, device, dtype):
         a = make_tensor((40, 30), dtype=dtype, device=device, low=-9, high=9)
         a_split_dim0 = a.tensor_split(7, 0)
@@ -434,8 +440,9 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
-    @onlyNativeDeviceTypes
+    @onlyNativeDeviceTypesAnd("mps")
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypesIfMPS(*integral_types_and(torch.half, torch.bool, torch.float32))
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -2030,7 +2037,7 @@ class TestOldViewOps(TestCase):
         t.col_indices()
 
 
-instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True)
+instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True, allow_mps=True)
 instantiate_device_type_tests(TestOldViewOps, globals())
 
 if __name__ == "__main__":
