@@ -37,8 +37,8 @@ bool forwardHasOp(
 }
 
 namespace {
-C10_UNUSED
-void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void ConcatAddMulReplaceNaNClip(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j):
@@ -91,8 +91,8 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED
-void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void CastedBatchOneHotLengths(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -122,8 +122,8 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED
-void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void ConcatBatchMatMulBatchGather(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
         %y0 : Tensor = aten::stack(%a, %b)
@@ -171,7 +171,7 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ClipRangesGatherRangesLengthsToOffsets(
+[[maybe_unused]] void ClipRangesGatherRangesLengthsToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -189,7 +189,8 @@ C10_UNUSED void ClipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void ClipRangesGather(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   // fuse without lengths-to-offsets
   std::string pattern = R"IR(
@@ -206,7 +207,7 @@ C10_UNUSED void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
+[[maybe_unused]] void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e):
@@ -224,7 +225,7 @@ C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ClipRangesToGatherToOffsets(
+[[maybe_unused]] void ClipRangesToGatherToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %to0_in0, %to0_in1, %to0_in2):
@@ -254,7 +255,8 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void ToLengthsToOffsets(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
         %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
@@ -281,8 +283,8 @@ C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED
-void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
+[[maybe_unused]] void ClipRangesGatherSigridHash(
+    std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g, %h):
@@ -298,7 +300,7 @@ void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ClipRangesGatherRangesSigridHash(
+[[maybe_unused]] void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f, %g):
@@ -316,7 +318,7 @@ C10_UNUSED void ClipRangesGatherRangesSigridHash(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
+[[maybe_unused]] void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
   std::string pattern = R"IR(
@@ -357,7 +359,7 @@ C10_UNUSED void ClipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
-C10_UNUSED void SplitOutPrecomputeOpsForSparseNN(
+[[maybe_unused]] void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   PrecomputeMultiplierShiftForSigridHash(graph);
@@ -1295,12 +1297,12 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   }
 }
 
-C10_UNUSED void RemoveUnnecessaryOutputs(
+[[maybe_unused]] void RemoveUnnecessaryOutputs(
     std::shared_ptr<torch::jit::Graph>& graph) {
   RemoveUnnecessaryEmbeddingBagOutputs(graph);
 }
 
-C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
+[[maybe_unused]] void RemoveUnnecessaryEmbeddingBagOutputs(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
     graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
