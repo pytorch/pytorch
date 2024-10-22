@@ -34,6 +34,7 @@ Module::Module()
     : parameters_("Parameter"), buffers_("Buffer"), children_("Submodule") {}
 
 Module::Module(std::string name) : Module() {
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   name_ = std::move(name);
 }
 
