@@ -41,7 +41,6 @@ from torch._export.utils import (
     apply_runtime_assertion_pass,
     placeholder_naming_pass,
     placeholder_prefixes,
-    _update_gm_meta_if_possible,
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
@@ -409,16 +408,26 @@ def _remap_constants(
                 constants[target] = constant
 
 
-def _produce_aten_artifact(*, gm, mod, constant_attrs, graph_signature, pre_dispatch, fake_args, fake_kwargs, fake_params_buffers) -> ATenExportArtifact:
+def _produce_aten_artifact(
+    *,
+    gm,
+    mod,
+    constant_attrs,
+    graph_signature,
+    pre_dispatch,
+    fake_args,
+    fake_kwargs,
+    fake_params_buffers,
+) -> ATenExportArtifact:
     """
-    This is a helper function that is shared between export_to_aten_ir and export_to_aten_ir_make_fx 
+    This is a helper function that is shared between export_to_aten_ir and export_to_aten_ir_make_fx
     to produce the aten artifact. (export compatible graph module + signature)
 
     It does:
-    1. Applies runtime assertion pass 
-    2. Populate meta val when missing 
+    1. Applies runtime assertion pass
+    2. Populate meta val when missing
     3. Lift constants as placeholders
-    4. Replace raw autograd and autocast ops with HOPs 
+    4. Replace raw autograd and autocast ops with HOPs
     5. Prettify names for placeholders
     6. Preserve requires_grad value on node meta val
     """
@@ -491,7 +500,6 @@ def _produce_aten_artifact(*, gm, mod, constant_attrs, graph_signature, pre_disp
         export_graph_signature,
         constants,
     )
-
 
 
 def _rename_constants_nodes(
@@ -763,14 +771,14 @@ def _export_to_aten_ir(
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
     return _produce_aten_artifact(
-        gm=gm, 
-        mod=mod, 
-        constant_attrs=constant_attrs, 
-        graph_signature=graph_signature, 
-        pre_dispatch=pre_dispatch, 
-        fake_args=fake_args, 
-        fake_kwargs=fake_kwargs, 
-        fake_params_buffers=fake_params_buffers
+        gm=gm,
+        mod=mod,
+        constant_attrs=constant_attrs,
+        graph_signature=graph_signature,
+        pre_dispatch=pre_dispatch,
+        fake_args=fake_args,
+        fake_kwargs=fake_kwargs,
+        fake_params_buffers=fake_params_buffers,
     )
 
 
@@ -1544,14 +1552,14 @@ def _export_to_aten_ir_make_fx(
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
     return _produce_aten_artifact(
-        gm=gm, 
-        mod=mod, 
-        constant_attrs=constant_attrs, 
-        graph_signature=graph_signature, 
-        pre_dispatch=True, 
-        fake_args=fake_args, 
-        fake_kwargs=fake_kwargs, 
-        fake_params_buffers=fake_params_buffers
+        gm=gm,
+        mod=mod,
+        constant_attrs=constant_attrs,
+        graph_signature=graph_signature,
+        pre_dispatch=True,
+        fake_args=fake_args,
+        fake_kwargs=fake_kwargs,
+        fake_params_buffers=fake_params_buffers,
     )
 
 
