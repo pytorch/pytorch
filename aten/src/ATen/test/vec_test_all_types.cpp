@@ -821,6 +821,17 @@ namespace {
             createDefaultTernaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_clamp));
     }
+    TYPED_TEST(MinMax, ClampVecN) {
+        using VT = ValueType<TypeParam>;
+        using vec = at::vec::VectorizedN<VT, 1>;
+        test_ternary<vec>(
+            NAME_INFO(clamp), clamp<VT>,
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return clamp(v0, v1, v2);
+            },
+            createDefaultTernaryTestCase<vec>(TestSeed()),
+                RESOLVE_OVERLOAD(filter_clamp));
+    }
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -895,7 +906,25 @@ namespace {
           .setTestSeed(TestSeed());
 
         test_ternary<vec>(
-            NAME_INFO(clamp), RESOLVE_OVERLOAD(local_fmadd),
+            NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fmadd(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
+        using VT = ValueType<TypeParam>;
+        using vec = at::vec::VectorizedN<VT, 1>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
             [](const vec& v0, const vec& v1, const vec& v2) {
                 return at::vec::fmadd(v0, v1, v2);
             },
