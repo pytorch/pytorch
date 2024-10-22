@@ -92,58 +92,60 @@ def grouped_matmul_kernel(
     BLOCK_SIZE_K: tl.constexpr,
 ):
     tile_idx = tl.program_id(0)
-    last_problem_end = 0
     num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
-    for g in range(group_size):
-        # get the gemm size of the current problem
-        # gm = tl.load(group_gemm_sizes + g) # * 3)
-        a_offset_0 = tl.load(a_offsets_ptr + g)
-        a_offset_1 = tl.load(a_offsets_ptr + g + 1)
-        gm = a_offset_1 - a_offset_0
-        # gn = tl.load(group_gemm_sizes + g * 3 + 1)
-        # gk = tl.load(group_gemm_sizes + g * 3 + 2)
-        num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
-        num_tiles = num_m_tiles * num_n_tiles
-        # iterate through the tiles in the current gemm problem
-        while (tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles):
-            # pick up a tile from the current gemm problem
-            b_ptr = (b_ptr_base + g * gn * k).to(tl.pointer_type(tl.float16))
-            # figure out tile coordinates
-            tile_idx_in_gemm = tile_idx - last_problem_end
-            tile_m_idx = tile_idx_in_gemm // num_n_tiles
-            tile_n_idx = tile_idx_in_gemm % num_n_tiles
+    # for g in range(group_size):
+    g = tl.program_id(1)
 
-            # do regular gemm here
-            offs_am = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-            offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-            offs_k = tl.arange(0, BLOCK_SIZE_K)
-            a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
-            b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
-            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-            for kk in range(0, tl.cdiv(k, BLOCK_SIZE_K)):
-                # hint to Triton compiler to do proper loop pipelining
-                tl.multiple_of(a_ptrs, [16, 16])
-                tl.multiple_of(b_ptrs, [16, 16])
-                # assume full tile for now
-                a = tl.load(a_ptrs)
-                b = tl.load(b_ptrs)
-                accumulator += tl.dot(a, b)
-                a_ptrs += BLOCK_SIZE_K
-                b_ptrs += BLOCK_SIZE_K * ldb
-            c = accumulator.to(tl.float16)
+    # get the gemm size of the current problem
+    # gm = tl.load(group_gemm_sizes + g) # * 3)
+    a_offset_0 = tl.load(a_offsets_ptr + g)
+    a_offset_1 = tl.load(a_offsets_ptr + g + 1)
+    gm = a_offset_1 - a_offset_0
+    # gn = tl.load(group_gemm_sizes + g * 3 + 1)
+    # gk = tl.load(group_gemm_sizes + g * 3 + 2)
+    num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
+    num_tiles = num_m_tiles * num_n_tiles
+    last_problem_end = g * num_tiles
+    # iterate through the tiles in the current gemm problem
+    while (tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles):
+        # pick up a tile from the current gemm problem
+        b_ptr = (b_ptr_base + g * gn * k).to(tl.pointer_type(tl.float16))
+        # figure out tile coordinates
+        tile_idx_in_gemm = tile_idx - last_problem_end
+        tile_m_idx = tile_idx_in_gemm // num_n_tiles
+        tile_n_idx = tile_idx_in_gemm % num_n_tiles
 
-            offs_cm = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-            offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-            c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
+        # do regular gemm here
+        offs_am = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        offs_k = tl.arange(0, BLOCK_SIZE_K)
+        a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
+        b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+        for kk in range(0, tl.cdiv(k, BLOCK_SIZE_K)):
+            # hint to Triton compiler to do proper loop pipelining
+            tl.multiple_of(a_ptrs, [16, 16])
+            tl.multiple_of(b_ptrs, [16, 16])
+            # assume full tile for now
+            a = tl.load(a_ptrs)
+            b = tl.load(b_ptrs)
+            accumulator += tl.dot(a, b)
+            a_ptrs += BLOCK_SIZE_K
+            b_ptrs += BLOCK_SIZE_K * ldb
+        c = accumulator.to(tl.float16)
 
-            # assumes full tile for now
-            tl.store(c_ptrs, c)
+        offs_cm = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
 
-            # go to the next tile by advancing NUM_SM
-            tile_idx += NUM_SM
+        # assumes full tile for now
+        tl.store(c_ptrs, c)
 
-        # get ready to go to the next gemm problem
-        last_problem_end = last_problem_end + num_tiles
+        # go to the next tile by advancing NUM_SM
+        tile_idx += NUM_SM
+
+    # # get ready to go to the next gemm problem
+    # last_problem_end = last_problem_end + num_tiles
 
 
 def group_gemm_fn(tensor_a, tensor_b):
@@ -165,7 +167,7 @@ def group_gemm_fn(tensor_a, tensor_b):
     c_offsets = a_offsets
 
     # we use a fixed number of CTA, and it's auto-tunable
-    grid = lambda META: (META['NUM_SM'], )
+    grid = lambda META: (META['NUM_SM'], group_size)
     grouped_matmul_kernel[grid](
         tensor_b,
         group_size,
