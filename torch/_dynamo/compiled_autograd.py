@@ -306,6 +306,7 @@ class AutogradCompilerInstance:
         )
         self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
+        self.reorder_post_hook_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -444,6 +445,33 @@ class AutogradCompilerInstance:
             arg = max(node.args)  # last arg
             if arg is not node.prev and arg.op != "placeholder":
                 arg.append(node)
+
+    def reorder_post_hook_nodes(self):
+        """
+        Usage of AOTAutograd causes all the call_hook nodes to get pushed to the
+        end of the graph.  This differs from eager mode, which schedules them as
+        soon as possible. This pass attempts to reorder the graph to mimic eager
+        behavior.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "post_hook":
+                continue
+
+            getitem_node = node.args[0]
+            input_nodes = node.args[2]
+            input_nodes_and_users = []
+            input_nodes_and_users.extend(list(input_nodes))
+            for input_node in input_nodes:
+                for user in list(input_node.users.keys()):
+                    if user != node:
+                        input_nodes_and_users.append(user)
+
+            arg = max(input_nodes_and_users)  # last input users
+            if arg is not node.prev and arg.op != "placeholder":
+                arg.append(getitem_node)
+                getitem_node.append(node)
 
     def to_proxy(self, t):
         if t is None:

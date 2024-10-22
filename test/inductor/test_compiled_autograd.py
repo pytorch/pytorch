@@ -251,6 +251,48 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_reorder_post_hook1(self):
+        def grad_div(param):
+            param.grad = param.grad / 4.0
+
+        class Module(torch.nn.Module):
+            def __init__(self, ioc):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(ioc, ioc, bias=False)
+                self.fc2 = torch.nn.Linear(ioc, ioc, bias=False)
+
+                self.grad_acc_hooks = []
+                self.grad_acc = []
+                self.params = [self.fc1.weight, self.fc2.weight]
+                for i, param in enumerate(self.params):
+
+                    def wrapper(param):
+                        param_tmp = param.expand_as(param)
+                        grad_acc = param_tmp.grad_fn.next_functions[0][0]
+
+                        def grad_acc_hook(*notneeded):
+                            grad_div(param)
+
+                        self.grad_acc.append(grad_acc)
+                        self.grad_acc_hooks.append(
+                            grad_acc.register_hook(grad_acc_hook))
+
+                    wrapper(param)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x.sum()
+
+        bs = 8
+        ioc = 16
+        model = Module(ioc)
+        model_to_train = torch.compile(model, backend="inductor")
+        input = torch.randn([bs, ioc])
+        loss = model_to_train(input)
+        with compiled_autograd.enable(compiler_fn):
+            loss.backward()
+
     def test_torch_compile(self):
         def fn():
             model = torch.nn.Sequential(
@@ -2990,7 +3032,8 @@ known_failing_tests = {
     "test_save_output_nr",  # output_nr grad passed as None
     "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
     "test_lobpcg",  # create_graph
-    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_grad_nonleaf_register_hook",
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
     # Category: Dynamo
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
