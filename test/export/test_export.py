@@ -4138,13 +4138,13 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
         self.assertExpectedInline(
-                str(ep.graph_module.code).strip(),
-                """\
+            str(ep.graph_module.code).strip(),
+            """\
 def forward(self, c_lifted_tensor_0, x):
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
     _assert_async = torch.ops.aten._assert_async.msg(lift_fresh_copy, 'Fail');  lift_fresh_copy = _assert_async = None
     return (x,)""",
-            )
+        )
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
