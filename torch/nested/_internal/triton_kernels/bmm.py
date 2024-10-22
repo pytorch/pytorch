@@ -140,7 +140,11 @@ def grouped_matmul_kernel(
         last_problem_end = last_problem_end + num_tiles
 
 
-def group_gemm_fn(group_A, group_B):
+def group_gemm_fn(tensor_a, tensor_b):
+    assert tensor_a.is_nested
+    assert not tensor_b.is_nested
+    group_A = list(tensor_a.unbind())
+    group_B = list(tensor_b.unbind())
     device = torch.device('cuda')
     assert len(group_A) == len(group_B)
     group_size = len(group_A)
@@ -183,103 +187,3 @@ def group_gemm_fn(group_A, group_B):
     )
 
     return group_C
-
-
-group_m = [1024, 512, 256, 128]
-group_n = [1024, 512, 256, 128]
-group_k = [1024, 512, 256, 128]
-group_A = []
-group_B = []
-assert len(group_m) == len(group_n)
-assert len(group_n) == len(group_k)
-group_size = len(group_m)
-for i in range(group_size):
-    M = group_m[i]
-    N = group_n[i]
-    K = group_k[i]
-    A = torch.rand((M, K), device="cuda", dtype=torch.float16)
-    B = torch.rand((K, N), device="cuda", dtype=torch.float16)
-    group_A.append(A)
-    group_B.append(B)
-
-tri_out = group_gemm_fn(group_A, group_B)
-ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
-for i in range(group_size):
-    assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0)
-
-
-# only launch the kernel, no tensor preparation here to remove all overhead
-def triton_perf_fn(a_ptrs, b_ptrs, c_ptrs, sizes, lds, group_size):
-    grid = lambda META: (META['NUM_SM'], )
-    grouped_matmul_kernel[grid](
-        a_ptrs,
-        b_ptrs,
-        c_ptrs,
-        sizes,
-        lds,
-        group_size,
-    )
-
-
-def torch_perf_fn(group_A, group_B):
-    for a, b in zip(group_A, group_B):
-        torch.matmul(a, b)
-
-
-@triton.testing.perf_report(
-    triton.testing.Benchmark(
-        # argument names to use as an x-axis for the plot
-        x_names=['N'],
-        x_vals=[2**i for i in range(7, 11)],  # different possible values for `x_name`
-        line_arg='provider',
-        # argument name whose value corresponds to a different line in the plot
-        # possible values for `line_arg``
-        line_vals=['cublas', 'triton'],
-        # label name for the lines
-        line_names=["cuBLAS", "Triton"],
-        # line styles
-        styles=[('green', '-'), ('blue', '-')],
-        ylabel="runtime(ms)",  # label name for the y-axis
-        plot_name="group-gemm-performance",
-        # name for the plot. Used also as a file name for saving the plot.
-        args={},
-    ))
-def benchmark(N, provider):
-    group_size = 4
-    group_A = []
-    group_B = []
-    A_addrs = []
-    B_addrs = []
-    C_addrs = []
-    g_sizes = []
-    g_lds = []
-    group_C = []
-    for i in range(group_size):
-        A = torch.rand((N, N), device="cuda", dtype=torch.float16)
-        B = torch.rand((N, N), device="cuda", dtype=torch.float16)
-        C = torch.empty((N, N), device="cuda", dtype=torch.float16)
-        group_A.append(A)
-        group_B.append(B)
-        group_C.append(C)
-        A_addrs.append(A.data_ptr())
-        B_addrs.append(B.data_ptr())
-        C_addrs.append(C.data_ptr())
-        g_sizes += [N, N, N]
-        g_lds += [N, N, N]
-
-    d_a_ptrs = torch.tensor(A_addrs, device="cuda")
-    d_b_ptrs = torch.tensor(B_addrs, device="cuda")
-    d_c_ptrs = torch.tensor(C_addrs, device="cuda")
-    d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device="cuda")
-    d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device="cuda")
-
-    quantiles = [0.5, 0.2, 0.8]
-    if provider == 'cublas':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch_perf_fn(group_A, group_B), quantiles=quantiles)
-    if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: triton_perf_fn(d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_size), quantiles=quantiles)
-    return ms, max_ms, min_ms
-
-
-# benchmark.run(show_plots=False, print_data=True)

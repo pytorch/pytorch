@@ -1137,9 +1137,7 @@ def bmm_default(func, *args, **kwargs):
         b = other
         from torch.nested._internal.triton_kernels.bmm import group_gemm_fn
         # TODO: Start inlining this into the kernel
-        a_list = list(a.unbind())
-        b_list = list(b.unbind())
-        c = group_gemm_fn(a_list, b_list)
+        c = group_gemm_fn(a, b)
         return NestedTensor(torch.cat(c), **extract_kwargs(inp))
 
     return matmul_default(torch.ops.aten.matmul.default, inp, other)
