@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 # flake8: noqa: B950
 
 import functools
@@ -3041,8 +3042,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("compile", [False, True])
     def test_no_q_info(self, compile: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 

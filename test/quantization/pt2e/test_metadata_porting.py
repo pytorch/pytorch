@@ -109,7 +109,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         m(*example_inputs)
         m = convert_pt2e(m)
 
-        pt2_quant_output = m(*example_inputs)
+        m(*example_inputs)
         recorded_node_tags = {}
         for n in m.graph.nodes:
             if "quantization_tag" not in n.meta:
@@ -431,7 +431,6 @@ class TestMetaDataPorting(QuantizationTestCase):
     def test_no_metadata_porting(self):
         class BackendAQuantizer(Quantizer):
             def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                backend_string = "BackendA"
                 quantization_config = get_symmetric_quantization_config(
                     is_per_channel=True
                 )
@@ -476,7 +475,6 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                backend_string = "BackendA"
                 qconfig = get_symmetric_quantization_config()
                 for n in gm.graph.nodes:
                     if n.op != "call_function":
@@ -513,7 +511,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tensor_tags,
         }
-        m = self._test_metadata_porting(
+        self._test_metadata_porting(
             MatmulWithConstInput(),
             example_inputs,
             BackendAQuantizer(),

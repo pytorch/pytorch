@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
+# ruff: noqa: F841
 import copy
 import itertools
 import os
@@ -91,7 +93,7 @@ try:
             requires_multigpu,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -2221,7 +2223,7 @@ class AOTInductorTestsTemplate:
                 output_wo_y = torch.empty_like(x)
                 output_with_y = torch.empty_like(x)
 
-                wo_kernel = add_kernel_with_optional_param[(1,)](
+                add_kernel_with_optional_param[(1,)](
                     x,
                     None,
                     output_wo_y,
@@ -2229,7 +2231,7 @@ class AOTInductorTestsTemplate:
                     ARGS_PASSED="one",
                     BLOCK_SIZE=BLOCK_SIZE,
                 )
-                with_kernel = add_kernel_with_optional_param[(1,)](
+                add_kernel_with_optional_param[(1,)](
                     x,
                     y,
                     output_with_y,
@@ -2603,8 +2605,6 @@ class AOTInductorTestsTemplate:
                 x = self.bar(x)
                 return x
 
-        orig_eager = MyModule()
-
         self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
 
     def test_model_modified_weights(self):
@@ -2620,7 +2620,6 @@ class AOTInductorTestsTemplate:
         M = 16
         N = 10
         K = 128
-        batch = 8
         example_inputs = (torch.randn(2, M, K, device=self.device),)
         model = Model(N, K, self.device)
         self.check_model(model, example_inputs)

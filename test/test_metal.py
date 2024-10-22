@@ -20,7 +20,7 @@ class TestMetalRewritePass(TestCase):
         scripted_model = torch.jit.script(module_instance)
         scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
-        ref_result = scripted_model(input_data)
+        scripted_model(input_data)
         torch._C._jit_pass_metal_insert_prepacked_ops(scripted_model._c)
         if fuse_clamping_ops or prepack_removal:
             scripted_model._c = torch._C._freeze_module(scripted_model._c)
@@ -55,7 +55,6 @@ class TestMetalRewritePass(TestCase):
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)

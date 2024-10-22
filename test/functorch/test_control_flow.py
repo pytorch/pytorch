@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
 import contextlib
 import functools
 import unittest
@@ -1173,15 +1174,15 @@ def forward(self, pred_1, x_1):
         with self.assertRaisesRegex(
             RuntimeError, r"Expect outputs of map only contains tensors or None\."
         ):
-            _ = control_flow.map(f, x, y)
+            control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Expect outputs of map only contains tensors or None\."
         ):
-            out = control_flow.map(f1, x, y)
+            control_flow.map(f1, x, y)
 
         # return None is OK
-        _ = control_flow.map(f2, x, y)
+        control_flow.map(f2, x, y)
 
     def test_map_list_in_out(self):
         def f(x, y):
@@ -1768,7 +1769,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+            associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -1844,7 +1845,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result = scan(fct_wrong_pytree, init, inp, dim=0)
+            scan(fct_wrong_pytree, init, inp, dim=0)
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2120,7 +2121,7 @@ def forward(self, pred_1, x_1):
             Exception,
             "For combine_mode='pointwise', the combine_fn needs to be pointwise",
         ):
-            out = associative_scan(
+            associative_scan(
                 get_scan_combine_fn("non_pointwise", True),
                 x,
                 0,
@@ -2326,7 +2327,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result_init = scan_fct(
+            scan_fct(
                 get_scan_combine_fn("add", False),
                 init,
                 inp,
@@ -2351,7 +2352,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result_init = scan_fct(
+            scan_fct(
                 get_scan_combine_fn("add", False), init, x, dim=dim, reverse=reverse
             )
 
@@ -2375,7 +2376,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result_init = scan_fct(
+            scan_fct(
                 get_scan_combine_fn("add", False),
                 init,
                 inp,
@@ -2410,7 +2411,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result_init = scan_fct(add_one_carry, init, inp, dim=dim, reverse=reverse)
+            scan_fct(add_one_carry, init, inp, dim=dim, reverse=reverse)
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2554,7 +2555,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result = scan(
+            scan(
                 fct_pointwise_carry_wrong_pytree,
                 init,
                 inp,
@@ -2590,7 +2591,7 @@ def forward(self, pred_1, x_1):
             Exception,
             ".*",
         ):
-            result = scan(
+            scan(
                 get_scan_combine_fn("complex_pointwise", False),
                 init,
                 inp,
@@ -2768,7 +2769,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            gm = make_fx(f, tracing_mode="symbolic")(
+            make_fx(f, tracing_mode="symbolic")(
                 get_scan_combine_fn("add", True), init, x
             )
 
@@ -2790,7 +2791,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
+            make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
 
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_wrong_dtype(self):
@@ -2811,7 +2812,7 @@ def forward(self, pred_1, x_1):
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             ".*",
         ):
-            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
+            make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
     @skipIfNoDynamoSupport
     @skipIfCrossRef  # Arg order changes with crossref
@@ -3259,7 +3260,6 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
         graphs = self._check_tracing(fn, inp)
         gm = graphs["symbolic"]
         outer_body = gm.while_loop_body_graph_0
-        outer_cond = gm.while_loop_cond_graph_0
         inner_body = outer_body.while_loop_body_graph_0
         inner_cond = outer_body.while_loop_cond_graph_0
         self.assertExpectedInline(
@@ -5312,7 +5312,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
             pass
 
         with self.assertRaisesRegex(TypeError, "WrongHop"):
-            wrong_hop = WrongHop("wrong_hop")
+            WrongHop("wrong_hop")
 
     def test_scan_functionalized(self):
         def f(init, xs):
@@ -5524,7 +5524,6 @@ class TestHopSchema(TestCase):
 
         example_val = self._get_example_val(schema_type)
         li1 = [example_val]
-        li2 = [example_val, example_val]
         ty1 = TypeGen.from_example(li1)
         ty2 = TypeGen.from_example(li1)
         self.assertEqual(ty1.parse(str(ty1)), ty1)
@@ -5537,7 +5536,6 @@ class TestHopSchema(TestCase):
             (schema_type + "_v", self._get_example_val(schema_type))
             for schema_type in _hop_schema_test_schema_types
         ]
-        op_name = "test_op"
         schema1 = FunctionSchemaGen.from_example("test_op1", inps, torch.ones(1))
         schema2 = FunctionSchemaGen.from_example(
             "test_op2",
