@@ -93,16 +93,12 @@ def grouped_matmul_kernel(
 ):
     tile_idx = tl.program_id(0)
     num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
-    # for g in range(group_size):
     g = tl.program_id(1)
 
     # get the gemm size of the current problem
-    # gm = tl.load(group_gemm_sizes + g) # * 3)
     a_offset_0 = tl.load(a_offsets_ptr + g)
     a_offset_1 = tl.load(a_offsets_ptr + g + 1)
     gm = a_offset_1 - a_offset_0
-    # gn = tl.load(group_gemm_sizes + g * 3 + 1)
-    # gk = tl.load(group_gemm_sizes + g * 3 + 2)
     num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
     num_tiles = num_m_tiles * num_n_tiles
     last_problem_end = g * num_tiles
@@ -143,10 +139,6 @@ def grouped_matmul_kernel(
 
         # go to the next tile by advancing NUM_SM
         tile_idx += NUM_SM
-
-    # # get ready to go to the next gemm problem
-    # last_problem_end = last_problem_end + num_tiles
-
 
 def group_gemm_fn(tensor_a, tensor_b):
     assert tensor_a.is_nested
