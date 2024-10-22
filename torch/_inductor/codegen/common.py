@@ -1429,9 +1429,9 @@ class KernelArgs:
         Allocate or extend a workspace buffer of nbytes bytes.
 
         This function manages the allocation of a workspace buffer. It either creates
-        a new WorkspaceArg or extends an existing one. 
+        a new WorkspaceArg or extends an existing one.
 
-        Note: 
+        Note:
         - Calling this function will in-place mutate the args by adding or updating
         a WorkspaceArg.
         - The codegen for generating the Python argdefs and call_defs will check

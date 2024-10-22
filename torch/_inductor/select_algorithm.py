@@ -1455,7 +1455,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(choices: List[TritonTemplateCaller]):
+        def get_inputs(choices: List[ChoiceCaller]):
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
