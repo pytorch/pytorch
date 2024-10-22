@@ -17,7 +17,6 @@ from torch.utils._pytree import (
     SequenceKey,
     SUPPORTED_NODES,
     tree_iter,
-    tree_leaves,
     tree_map_with_path,
     tree_structure,
     TreeSpec,
