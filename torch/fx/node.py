@@ -1,39 +1,71 @@
 # Nodes represent a definition of a value in our graph of operators.
-from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
+import builtins
+import inspect
+import types
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+
+import torch
+from torch._C import _NodeBase
+from torch.fx.operator_schemas import (
+    ArgsKwargsPair,
+    normalize_function,
+    normalize_module,
+)
+
+from .._ops import ops as _ops
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict, immutable_list
-import torch
-import builtins
-import types
-import inspect
-import warnings
-from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
-from .._ops import ops as _ops
-from torch._C import _NodeBase
+
 
 if TYPE_CHECKING:
     from .graph import Graph
 
-__all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
+__all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
-BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
-                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload,
-                          torch.SymInt, torch.SymBool, torch.SymFloat]
+BaseArgumentTypes = Union[
+    str,
+    int,
+    float,
+    bool,
+    complex,
+    torch.dtype,
+    torch.Tensor,
+    torch.device,
+    torch.memory_format,
+    torch.layout,
+    torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymBool,
+    torch.SymFloat,
+]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
 
-Argument = Optional[Union[
-    Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-    List[Any],  # actually Argument
-    Dict[str, Any],  # actually Argument
-    slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-    range,
-    'Node',
-    BaseArgumentTypes
-]]
+Argument = Optional[
+    Union[
+        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
+        List[Any],  # actually Argument
+        Dict[str, Any],  # actually Argument
+        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+        range,
+        "Node",
+        BaseArgumentTypes,
+    ]
+]
 
-_legal_ops = dict.fromkeys(['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root'])
+_legal_ops = dict.fromkeys(
+    [
+        "placeholder",
+        "call_method",
+        "call_module",
+        "call_function",
+        "get_attr",
+        "output",
+        "root",
+    ]
+)
 
 _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
     torch._C._set_grad_enabled,
@@ -74,7 +106,8 @@ def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
     for guess in [torch, torch.nn.functional]:
         if getattr(guess, name, None) is orig_method:
             return guess.__name__
-    raise RuntimeError(f'cannot find module for {orig_method}')
+    raise RuntimeError(f"cannot find module for {orig_method}")
+
 
 # Borrowed from CPython typing module
 # https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
@@ -86,22 +119,24 @@ def _type_repr(obj: object) -> str:
     else, we fall back on repr(obj).
     """
     if isinstance(obj, type):
-        if obj.__module__ == 'builtins':
+        if obj.__module__ == "builtins":
             return obj.__qualname__
-        return f'{obj.__module__}.{obj.__qualname__}'
+        return f"{obj.__module__}.{obj.__qualname__}"
     if obj is ...:
-        return '...'
+        return "..."
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)
+
 
 def _get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
     # torch.Tensor.{fn}
-    if (isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
-       and func is getattr(torch.Tensor, func.__name__, None)):
+    if isinstance(
+        func, (types.MethodDescriptorType, types.WrapperDescriptorType)
+    ) and func is getattr(torch.Tensor, func.__name__, None):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
     if name == "<lambda>":
@@ -111,32 +146,44 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
         except Exception as e:
             raise RuntimeError("Unable to represent lambda") from e
     module = _find_module_of_method(func)
-    module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+    module = module.replace(
+        "torch._ops", "torch.ops"
+    )  # WAR for bug in how torch.ops assigns module
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
-    return f'{module}.{name}'
+    return f"{module}.{name}"
 
-def _format_arg(arg: object, max_list_len: float = float('inf')) -> str:
-    if hasattr(arg, '_custom_fx_repr_fn'):
+
+def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
+    if hasattr(arg, "_custom_fx_repr_fn"):
         return arg._custom_fx_repr_fn()
     elif isinstance(arg, list):
-        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
-        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
-        return f'[{items}{maybe_len}]'
+        items = ", ".join(
+            _format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len
+        )
+        maybe_len = (
+            "" if len(arg) < max_list_len + 1 else f", ...[total_len={len(arg)}]"
+        )
+        return f"[{items}{maybe_len}]"
     elif isinstance(arg, tuple):
-        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
-        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
-        maybe_comma = ',' if len(arg) == 1 else ''
-        return f'({items}{maybe_comma}{maybe_len})'
+        items = ", ".join(
+            _format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len
+        )
+        maybe_len = (
+            "" if len(arg) < max_list_len + 1 else f", ...[total_len={len(arg)}]"
+        )
+        maybe_comma = "," if len(arg) == 1 else ""
+        return f"({items}{maybe_comma}{maybe_len})"
     elif isinstance(arg, dict):
-        items_str = ', '.join(f'{k}: {_format_arg(v)}' for k, v in arg.items())
-        return f'{{{items_str}}}'
+        items_str = ", ".join(f"{k}: {_format_arg(v)}" for k, v in arg.items())
+        return f"{{{items_str}}}"
 
     if isinstance(arg, Node):
-        return '%' + str(arg)
+        return "%" + str(arg)
     else:
         return str(arg)
+
 
 @compatibility(is_backward_compatible=True)
 class Node(_NodeBase):
@@ -166,23 +213,31 @@ class Node(_NodeBase):
     - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
       in the Graph printout.
     """
-    _args: Tuple['Argument', ...]
-    _kwargs: Dict[str, 'Argument']
-    graph: 'Graph'
+
+    _args: Tuple["Argument", ...]
+    _kwargs: Dict[str, "Argument"]
+    graph: "Graph"
     name: str
     op: str
-    target: 'Target'
-    _input_nodes: Dict['Node', None]
-    users: Dict['Node', None]
+    target: "Target"
+    _input_nodes: Dict["Node", None]
+    users: Dict["Node", None]
     type: Optional[Any]
     _sort_key: Any
-    _repr_fn: Optional[Callable[['Node'], str]]
+    _repr_fn: Optional[Callable[["Node"], str]]
     meta: Dict[str, Any]
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
-                 args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
-                 return_type : Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        graph: "Graph",
+        name: str,
+        op: str,
+        target: "Target",
+        args: Tuple["Argument", ...],
+        kwargs: Dict[str, "Argument"],
+        return_type: Optional[Any] = None,
+    ) -> None:
         """
         Instantiate an instance of ``Node``. Note: most often, you want to use the
         Graph APIs, i.e. ``Graph.call_module``, ``Graph.call_method``, etc. rather
@@ -210,14 +265,18 @@ class Node(_NodeBase):
                 of analyses.
         """
         assert op in _legal_ops
-        if op == 'call_function':
+        if op == "call_function":
             if not callable(target):
-                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
-                                 'but a Callable is expected')
+                raise ValueError(
+                    f"Node [graph = {graph}, name = '{name}'] target {target} has type {torch.typename(target)} "
+                    "but a Callable is expected"
+                )
         else:
             if not isinstance(target, str):
-                raise ValueError(f'Node [graph = {graph}, name = \'{name}\'] target {target} has type {torch.typename(target)} '
-                                 'but a str is expected')
+                raise ValueError(
+                    f"Node [graph = {graph}, name = '{name}'] target {target} has type {torch.typename(target)} "
+                    "but a str is expected"
+                )
         super().__init__()
 
         # bypass Node.__setattr__ for perf and so that it doesn't need to handle half-built objects
@@ -225,9 +284,13 @@ class Node(_NodeBase):
 
         assign(self, "graph", graph)
         assign(self, "name", name)  # unique name of value being created
-        assign(self, "op", op)  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
+        assign(
+            self, "op", op
+        )  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
 
-        assign(self, "target", target)  # for method/module/function, the name of the method/module/function/attr
+        assign(
+            self, "target", target
+        )  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
 
         # All `Node`-valued inputs. Key is the Node, value is don't-care.
@@ -280,7 +343,7 @@ class Node(_NodeBase):
         self._next = _next
 
     @property
-    def next(self) -> 'Node':
+    def next(self) -> "Node":
         """
         Returns the next ``Node`` in the linked list of Nodes.
 
@@ -291,7 +354,7 @@ class Node(_NodeBase):
         return self._next
 
     @property
-    def prev(self) -> 'Node':
+    def prev(self) -> "Node":
         """
         Returns the previous ``Node`` in the linked list of Nodes.
 
@@ -302,7 +365,7 @@ class Node(_NodeBase):
         return self._prev
 
     @compatibility(is_backward_compatible=True)
-    def prepend(self, x: 'Node') -> None:
+    def prepend(self, x: "Node") -> None:
         """
         Insert x before this node in the list of nodes in the graph. Example::
 
@@ -316,7 +379,9 @@ class Node(_NodeBase):
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         if self == x:
-            warnings.warn("Trying to prepend a node to itself. This behavior has no effect on the graph.")
+            warnings.warn(
+                "Trying to prepend a node to itself. This behavior has no effect on the graph."
+            )
             return
         x._remove_from_list()
         p = self._prev
@@ -328,28 +393,28 @@ class Node(_NodeBase):
         nsk = x._next._sort_key
         if len(psk) > len(nsk):
             idx: int
-            *prefix, idx = psk[:len(nsk) + 1]
+            *prefix, idx = psk[: len(nsk) + 1]
             x._sort_key = (*prefix, idx + 1)
         elif len(psk) < len(nsk):
-            *prefix, idx = nsk[:len(psk) + 1]
+            *prefix, idx = nsk[: len(psk) + 1]
             x._sort_key = (*prefix, idx - 1)
         else:  # same length, increase length by 1
             x._sort_key = (*psk, 0)
 
-    def __gt__(self, other: 'Node') -> bool:
+    def __gt__(self, other: "Node") -> bool:
         return self._sort_key > other._sort_key
 
-    def __lt__(self, other: 'Node') -> bool:
+    def __lt__(self, other: "Node") -> bool:
         return self._sort_key < other._sort_key
 
-    def __ge__(self, other: 'Node') -> bool:
+    def __ge__(self, other: "Node") -> bool:
         return self > other or self == other
 
-    def __le__(self, other: 'Node') -> bool:
+    def __le__(self, other: "Node") -> bool:
         return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
-    def append(self, x: 'Node') -> None:
+    def append(self, x: "Node") -> None:
         """
         Insert ``x`` after this node in the list of nodes in the graph.
         Equivalent to ``self.next.prepend(x)``
@@ -376,7 +441,7 @@ class Node(_NodeBase):
         return self._args
 
     @args.setter
-    def args(self, a : Tuple[Argument, ...]) -> None:
+    def args(self, a: Tuple[Argument, ...]) -> None:
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -399,7 +464,7 @@ class Node(_NodeBase):
         return self._kwargs
 
     @kwargs.setter
-    def kwargs(self, k : Dict[str, Argument]) -> None:
+    def kwargs(self, k: Dict[str, Argument]) -> None:
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -410,7 +475,7 @@ class Node(_NodeBase):
         self.__update_args_kwargs(self._args, k)
 
     @property
-    def all_input_nodes(self) -> List['Node']:
+    def all_input_nodes(self) -> List["Node"]:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
         iterating over ``args`` and ``kwargs`` and only collecting the values that
@@ -424,7 +489,7 @@ class Node(_NodeBase):
         return list(self._input_nodes.keys())
 
     @compatibility(is_backward_compatible=True)
-    def update_arg(self, idx : int, arg : Argument) -> None:
+    def update_arg(self, idx: int, arg: Argument) -> None:
         """
         Update an existing positional argument to contain the new value
         ``arg``. After calling, ``self.args[idx] == arg``.
@@ -439,7 +504,7 @@ class Node(_NodeBase):
         self.args = tuple(args)
 
     @compatibility(is_backward_compatible=True)
-    def insert_arg(self, idx : int, arg : Argument) -> None:
+    def insert_arg(self, idx: int, arg: Argument) -> None:
         """
         Insert an positional argument to the argument list with given index.
 
@@ -448,7 +513,9 @@ class Node(_NodeBase):
             idx (int): The index of the element in ``self.args`` to be inserted before.
             arg (Argument): The new argument value to insert into ``args``
         """
-        assert 0 <= idx <= len(self.args), "insert_args index must be between 0 and len(self.args)"
+        assert (
+            0 <= idx <= len(self.args)
+        ), "insert_args index must be between 0 and len(self.args)"
         args_left = self.args[:idx]
         args_right = self.args[idx:]
 
@@ -463,7 +530,7 @@ class Node(_NodeBase):
                 new_use.users.setdefault(self)
 
     @compatibility(is_backward_compatible=True)
-    def update_kwarg(self, key : str, arg : Argument) -> None:
+    def update_kwarg(self, key: str, arg: Argument) -> None:
         """
         Update an existing keyword argument to contain the new value
         ``arg``. After calling, ``self.kwargs[key] == arg``.
@@ -490,13 +557,16 @@ class Node(_NodeBase):
         return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
-    def stack_trace(self, trace : Optional[str]) -> None:
+    def stack_trace(self, trace: Optional[str]) -> None:
         self.meta["stack_trace"] = trace
 
-    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']) -> None:
+    def __update_args_kwargs(
+        self, new_args: Tuple["Argument", ...], new_kwargs: Dict[str, "Argument"]
+    ) -> None:
         """
         This API is internal. Do *not* call it directly.
         """
+
         def update_users_and_input_nodes(n: Any) -> Any:
             if isinstance(n, Node):
                 self._input_nodes.setdefault(n)
@@ -512,8 +582,12 @@ class Node(_NodeBase):
         # - Normalize list->immutable_list, dict->immutable_dict, etc
         # - Populate self._input_nodes
         # - Populate arg.users[self] for each arg
-        object.__setattr__(self, "_args", map_aggregate(new_args, update_users_and_input_nodes))
-        object.__setattr__(self, "_kwargs", map_aggregate(new_kwargs, update_users_and_input_nodes))
+        object.__setattr__(
+            self, "_args", map_aggregate(new_args, update_users_and_input_nodes)
+        )
+        object.__setattr__(
+            self, "_kwargs", map_aggregate(new_kwargs, update_users_and_input_nodes)
+        )
 
     def __repr__(self) -> str:
         if self._repr_fn:
@@ -529,8 +603,8 @@ class Node(_NodeBase):
         """
         if isinstance(target, str):
             return target
-        if hasattr(target, '__module__'):
-            name = getattr(target, '__name__', None)
+        if hasattr(target, "__module__"):
+            name = getattr(target, "__name__", None)
             if name is None:
                 # Just to be defensive, if we don't have `__name__`, get the
                 # qualname. Not sure if this happens for any members of `operator`
@@ -538,16 +612,18 @@ class Node(_NodeBase):
                 # things in `operator` have `_operator` as their __module__.
                 # TODO: THIS IS BROKEN: _get_qualified_name calls `__name__`
                 return _get_qualified_name(target)  # type: ignore[arg-type]
-            if target.__module__ == 'builtins':
-                return f'builtins.{name}'
-            elif target.__module__ == '_operator':
-                return f'operator.{name}'
+            if target.__module__ == "builtins":
+                return f"builtins.{name}"
+            elif target.__module__ == "_operator":
+                return f"operator.{name}"
         return _get_qualified_name(target)  # type: ignore[arg-type]
 
     @compatibility(is_backward_compatible=True)
-    def format_node(self,
-                    placeholder_names: Optional[List[str]] = None,
-                    maybe_return_typename: Optional[List[str]] = None) -> Optional[str]:
+    def format_node(
+        self,
+        placeholder_names: Optional[List[str]] = None,
+        maybe_return_typename: Optional[List[str]] = None,
+    ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
 
@@ -576,37 +652,46 @@ class Node(_NodeBase):
                 return a  descriptive string representation of the
                 current Node.
         """
-        if self.op == 'placeholder':
+        if self.op == "placeholder":
             assert isinstance(self.target, str)
             arg_str = self.target
-            arg_str += arg_str + f': {_type_repr(self.type)}' if self.type else ''
+            arg_str += arg_str + f": {_type_repr(self.type)}" if self.type else ""
             if placeholder_names:
                 placeholder_names.append(arg_str)
                 return None
-            maybe_typename = f'{_type_repr(self.type)} ' if self.type else ''
-            default_val = '(default=' + str(self.args[0]) + ')' if self.args else ''
-            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
-        elif self.op == 'get_attr':
-            maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
-                   f'{self.op}[target={self._pretty_print_target(self.target)}]'
-        elif self.op == 'output':
+            maybe_typename = f"{_type_repr(self.type)} " if self.type else ""
+            default_val = "(default=" + str(self.args[0]) + ")" if self.args else ""
+            return f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = {self.op}[target={self.target}]{default_val}"
+        elif self.op == "get_attr":
+            maybe_typename = (
+                f"{_type_repr(self.type)} " if self.type is not None else ""
+            )
+            return (
+                f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = "
+                f"{self.op}[target={self._pretty_print_target(self.target)}]"
+            )
+        elif self.op == "output":
             if self.type and maybe_return_typename:
-                maybe_return_typename[0] = f' -> {_type_repr(self.type)}'
-            return f'return {self.args[0]}'
+                maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
+            return f"return {self.args[0]}"
         else:
-            maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
-                   f'{self.op}[target={self._pretty_print_target(self.target)}](' \
-                   f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
+            maybe_typename = (
+                f"{_type_repr(self.type)} " if self.type is not None else ""
+            )
+            return (
+                f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = "
+                f"{self.op}[target={self._pretty_print_target(self.target)}]("
+                f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
+            )
 
     @compatibility(is_backward_compatible=True)
-    def replace_all_uses_with(self,
-                              replace_with: 'Node',
-                              delete_user_cb: Callable[['Node'], bool] = lambda user: True,
-                              *,
-                              propagate_meta: bool = False
-                              ) -> List['Node']:
+    def replace_all_uses_with(
+        self,
+        replace_with: "Node",
+        delete_user_cb: Callable[["Node"], bool] = lambda user: True,
+        *,
+        propagate_meta: bool = False,
+    ) -> List["Node"]:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
 
@@ -625,9 +710,10 @@ class Node(_NodeBase):
             The list of Nodes on which this change was made.
         """
         if propagate_meta:
-            assert len(replace_with.meta) == 0, \
-                'Called node.replace_all_uses_with(replace_with, propagate_meta=True), ' \
-                'but replace_with already has .meta keys'
+            assert len(replace_with.meta) == 0, (
+                "Called node.replace_all_uses_with(replace_with, propagate_meta=True), "
+                "but replace_with already has .meta keys"
+            )
             for k, v in self.meta.items():
                 replace_with.meta[k] = v
         to_process = list(self.users)
@@ -638,7 +724,7 @@ class Node(_NodeBase):
                 skipped.append(use_node)
                 continue
 
-            def maybe_replace_node(n : Node) -> Node:
+            def maybe_replace_node(n: Node) -> Node:
                 if n == self:
                     return replace_with
                 else:
@@ -690,9 +776,12 @@ class Node(_NodeBase):
 
     @compatibility(is_backward_compatible=False)
     def normalized_arguments(
-            self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
-            kwarg_types : Optional[Dict[str, Any]] = None,
-            normalize_to_only_use_kwargs : bool = False) -> Optional[ArgsKwargsPair]:
+        self,
+        root: torch.nn.Module,
+        arg_types: Optional[Tuple[Any]] = None,
+        kwarg_types: Optional[Dict[str, Any]] = None,
+        normalize_to_only_use_kwargs: bool = False,
+    ) -> Optional[ArgsKwargsPair]:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's
@@ -715,17 +804,23 @@ class Node(_NodeBase):
 
             Returns NamedTuple ArgsKwargsPair, or `None` if not successful.
         """
-        if self.op == 'call_function':
+        if self.op == "call_function":
             assert callable(self.target)
-            return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore[arg-type]
-        elif self.op == 'call_module':
+            return normalize_function(
+                self.target,
+                self.args,  # type: ignore[arg-type]
+                self.kwargs,
+                arg_types,
+                kwarg_types,
+            )
+        elif self.op == "call_module":
             assert isinstance(self.target, str)
             return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
 
         return None
 
     @compatibility(is_backward_compatible=True)
-    def replace_input_with(self, old_input: 'Node', new_input: 'Node') -> None:
+    def replace_input_with(self, old_input: "Node", new_input: "Node") -> None:
         """
         Loop through input nodes of ``self``, and replace all instances of
         ``old_input`` with ``new_input``.
@@ -735,7 +830,8 @@ class Node(_NodeBase):
             old_input (Node): The old input node to be replaced.
             new_input (Node): The new input node to replace ``old_input``.
         """
-        def maybe_replace_node(n : Node) -> Node:
+
+        def maybe_replace_node(n: Node) -> Node:
             return new_input if n == old_input else n
 
         m = self.graph.owning_module
@@ -756,7 +852,7 @@ class Node(_NodeBase):
         self.graph._graph_namespace._rename_object(self, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name == 'name' and hasattr(self, "name"):
+        if name == "name" and hasattr(self, "name"):
             m = self.graph.owning_module
             if getattr(m, "_replace_hook", None):
                 assert isinstance(value, str)
@@ -764,15 +860,16 @@ class Node(_NodeBase):
                     m._replace_hook(old=self, new=value, user=user)
         update = False
         if (
-                hasattr(self, name) and
-                hasattr(self.graph, "_find_nodes_lookup_table") and
-                self in self.graph._find_nodes_lookup_table
+            hasattr(self, name)
+            and hasattr(self.graph, "_find_nodes_lookup_table")
+            and self in self.graph._find_nodes_lookup_table
         ):
             update = True
             self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
         if update:
             self.graph._find_nodes_lookup_table.insert(self)
+
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
@@ -782,6 +879,7 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
+
 @compatibility(is_backward_compatible=True)
 def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     """
@@ -790,7 +888,7 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     if isinstance(a, tuple):
         t = tuple([map_aggregate(elem, fn) for elem in a])
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
-        return t if not hasattr(a, '_fields') else type(a)(*t)  # type: ignore[arg-type]
+        return t if not hasattr(a, "_fields") else type(a)(*t)  # type: ignore[arg-type]
     elif isinstance(a, list):
         return immutable_list([map_aggregate(elem, fn) for elem in a])
     elif isinstance(a, dict):
@@ -799,6 +897,10 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
             dict.__setitem__(rv, k, map_aggregate(v, fn))
         return rv
     elif isinstance(a, slice):
-        return slice(map_aggregate(a.start, fn), map_aggregate(a.stop, fn), map_aggregate(a.step, fn))
+        return slice(
+            map_aggregate(a.start, fn),
+            map_aggregate(a.stop, fn),
+            map_aggregate(a.step, fn),
+        )
     else:
         return fn(a)

@@ -39,9 +39,9 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
   /// Insert the parameter along with the key into ParameterDict
   /// The parameter is set to be require grad by default
-  Tensor& insert(std::string key, Tensor param) {
+  Tensor& insert(const std::string& key, const Tensor& param) {
     bool requires_grad = param.requires_grad();
-    return register_parameter(std::move(key), std::move(param), requires_grad);
+    return register_parameter(key, param, requires_grad);
   }
 
   /// Remove key from the ParameterDict and return its value, throw exception
