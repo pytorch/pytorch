@@ -110,6 +110,7 @@ file(GLOB mps_mm "mps/*.mm")
 file(GLOB mps_h "mps/*.h")
 file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
 file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
 file(GLOB_RECURSE native_mps_h "native/mps/*.h")
 
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
@@ -561,6 +562,34 @@ endif()
 
 if(USE_MPS)
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+    function(metal_to_air SRC TARGET FLAGS)
+        add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} -Wall -Wextra -fno-fast-math
+                           DEPENDS ${SRC}
+                           OUTPUT ${TARGET}
+                           COMMENT "Compiling ${SRC} to ${TARGET}"
+                           VERBATIM)
+    endfunction()
+    function(air_to_metallib TARGET OBJECTS)
+        set(_OBJECTS ${OBJECTS} ${ARGN})
+        add_custom_command(COMMAND xcrun metallib -o ${TARGET} ${_OBJECTS}
+                           DEPENDS ${_OBJECTS}
+                           OUTPUT ${TARGET}
+                           COMMENT "Linking ${TARGET}"
+                           VERBATIM)
+    endfunction()
+
+    foreach(SHADER ${native_mps_metal})
+        cmake_path(GET SHADER STEM TGT_STEM)
+        string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
+        string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+        list(APPEND AIR_BASIC ${TGT_BASIC})
+        list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
+        metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
+        metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+    endforeach()
+    air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
+    air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
+    add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib)
 endif()
 
 if(USE_ROCM)

@@ -792,6 +792,10 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
     endif()
   endforeach()
 endif()
+if(USE_MPS)
+  add_dependencies(torch_cpu metallibs)
+  target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
 if(TORCH_USE_IWYU)
