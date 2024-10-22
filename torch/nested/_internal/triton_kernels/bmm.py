@@ -82,6 +82,8 @@ def grouped_matmul_kernel(
     a_offsets_ptr,
     a_ptr,
     lda,
+    ldc,
+    c_ptr,
     # number of virtual SM
     NUM_SM: tl.constexpr,
     # tile sizes
@@ -110,11 +112,11 @@ def grouped_matmul_kernel(
             # lda = a_offset_0 * k
             # tl.device_print("lda", lda)
             # ldb = tl.load(g_lds + g * 3 + 1)
-            ldc = tl.load(g_lds + g * 3 + 2)
+            # ldc = tl.load(g_lds + g * 3 + 2)
             # a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
             # b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
             b_ptr = (b_ptr_base + g * gn * k).to(tl.pointer_type(tl.float16))
-            c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
+            # c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
             # figure out tile coordinates
             tile_idx_in_gemm = tile_idx - last_problem_end
             tile_m_idx = tile_idx_in_gemm // num_n_tiles
@@ -139,7 +141,7 @@ def grouped_matmul_kernel(
                 b_ptrs += BLOCK_SIZE_K * ldb
             c = accumulator.to(tl.float16)
 
-            offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_cm = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
             offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
             c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
 
@@ -222,6 +224,8 @@ def group_gemm_fn(tensor_a, tensor_b):
         a_offsets.to(torch.int32),
         a_values,
         a_values.stride(0),
+        c_values.stride(0),
+        c_values,
     )
 
     return c_values
