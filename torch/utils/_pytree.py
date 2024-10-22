@@ -472,10 +472,14 @@ def is_structseq(obj: Union[object, type]) -> bool:
     return is_structseq_class(cls)
 
 
+# Set if the type allows subclassing (see CPython's Include/object.h)
+Py_TPFLAGS_BASETYPE: int = 1 << 10
+
+
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_structseq_class(cls: type) -> bool:
     """Return whether the class is a class of PyStructSequence."""
-    if (
+    return (
         isinstance(cls, type)
         # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
         and cls.__bases__ == (tuple,)
@@ -483,17 +487,9 @@ def is_structseq_class(cls: type) -> bool:
         and isinstance(getattr(cls, "n_fields", None), int)
         and isinstance(getattr(cls, "n_sequence_fields", None), int)
         and isinstance(getattr(cls, "n_unnamed_fields", None), int)
-    ):
         # Check the type does not allow subclassing
-        try:
-
-            class _(cls):  # type: ignore[misc]
-                pass
-
-        except TypeError:
-            return True
-        return False
-    return False
+        and not bool(cls.__flags__ & Py_TPFLAGS_BASETYPE)  # only works for CPython
+    )
 
 
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
@@ -791,6 +787,15 @@ BUILTIN_TYPES: FrozenSet[type] = frozenset(
         structseq,
     },
 )
+
+
+@deprecated(
+    "torch.utils._pytree._is_namedtuple_instance is private and will be removed in a future release. "
+    "Please use torch.utils._pytree.is_namedtuple_instance instead.",
+    category=FutureWarning,
+)
+def _is_namedtuple_instance(tree: Any) -> bool:
+    return is_namedtuple_instance(tree)
 
 
 def _get_node_type(tree: Any) -> Any:
