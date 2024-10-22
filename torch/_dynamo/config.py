@@ -252,10 +252,6 @@ allow_complex_guards_as_runtime_asserts = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
-# Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
-# false_fn produces code with identical guards.
-enforce_cond_guards_match = True
-
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
@@ -494,8 +490,7 @@ _custom_ops_profile: Optional[Any] = None
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes):
-        ...
+    def _make_closure_patcher(**changes): ...
 
 
 from torch.utils._config_module import install_config_module
