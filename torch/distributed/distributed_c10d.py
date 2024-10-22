@@ -1733,7 +1733,7 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
-    use_split=True,
+    use_split=False,
 ):
     """
     Create a new distributed process group.
@@ -4732,7 +4732,7 @@ def new_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=True,
+    use_split=False,
 ):
     """
     Create a new distributed group.
@@ -4785,10 +4785,11 @@ def new_group(
             in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
-        use_split (bool, optional): for some backends, such as NCCL, split op is supported
+        use_split (bool): for some backends, such as NCCL, split op is supported
             to create a new process group using the default PG's communicator resourses. This
-            is helpful to speed up the process group creation and save resources.
-
+            is helpful to speed up the process group creation and save resources. By default,
+            use_split is False. For NCCL backend, if users do want to use the split semantics,
+            It is suggested to use split_group() API instead of this API.
     Returns:
         A handle of distributed group that can be given to collective calls or
         GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
@@ -4823,7 +4824,7 @@ def _new_group_with_tag(
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=True,
+    use_split=False,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
