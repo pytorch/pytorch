@@ -583,9 +583,9 @@ class TestDeserialize(TestCase):
                     strict=strict,
                 )
             else:
-                # We should have this branch because 
+                # We should have this branch because
                 # PT2 Inference goes through this private
-                # export API. 
+                # export API.
                 ep = torch.export._trace._export(
                     fn,
                     _deepcopy_inputs(inputs),
