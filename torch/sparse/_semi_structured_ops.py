@@ -187,7 +187,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     if isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
         assert A.packed is not None
         row, col = B.shape
-        B_padded = A._pad_dense_input(B).contiguous()
+        B_padded = A._pad_dense_input(B).contiguous().t()
         sparse_result = torch._cslt_sparse_mm(
             A.packed,
             B_padded,

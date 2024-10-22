@@ -1199,6 +1199,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 12.4+ has cuSPARSELt v0.6.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
+            print(torch.backends.cusparselt.get_max_alg_id())
             if PLATFORM_SUPPORTS_FP8:
                 assert torch.backends.cusparselt.get_max_alg_id() == 44
             else:
