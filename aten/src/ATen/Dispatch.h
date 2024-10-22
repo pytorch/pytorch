@@ -104,23 +104,23 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
 }
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, "
-    "pass an at::ScalarType instead")]] inline at::ScalarType
-scalar_type(const at::DeprecatedTypeProperties& t) {
+    "pass an at::ScalarType instead")
+inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
   return t.scalarType();
 }
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, "
-    "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")]] inline void
-deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
+    "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")
+inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX is deprecated, "
     "use AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, ...) "
-    "instead")]] inline void
-deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
+    "instead")
+inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 } // namespace detail
 
