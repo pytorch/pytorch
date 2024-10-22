@@ -557,7 +557,6 @@ inline void _dequant_max_fusion_kernel(
     const int& M,
     const int& N,
     const int& ldi,
-    const int& ldm, // leading dimension mask
     const int& ldo,
     const int32_t& beta, // zp_a*zp_b*k
     const float& alpha, // scale_a*scale_b*scale_sdpa
@@ -609,14 +608,13 @@ template <typename scalar_t>
 inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
     const float* in,
     const int64_t& M,
-    const int64_t& N,
     const int64_t& N_step,
-    const int& ldn,
+    const int64_t& NSlice,
+    const int& ldi,
+    const int& ldo,
     const int& kvSize,
     const int& rndkvSplitSize,
-    const int& rndkvTail,
     const int& av_gemm_K,
-    const int& av_gemm_K_tail,
     const int32_t& beta1, // zp_a
     const int32_t& beta2, // zp_b
     const float& alpha, // scale_a
@@ -630,20 +628,24 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
   float max_val = 255;
   auto vec_min_val = at::vec::Vectorized<float>(min_val);
   auto vec_max_val = at::vec::Vectorized<float>(max_val);
+  scalar_t zero = 0;
+  auto vec_zero = vec::Vectorized<scalar_t>(zero);
   float beta1_float = (float) beta1;
   auto vec_beta1 = at::vec::Vectorized<float>(beta1_float);
   for (int64_t row = 0; row < M; ++row) {
     auto sfm_max = sfm_max_ptr[row];
     auto vec_max = at::vec::Vectorized<float>(sfm_max);
     // sub max, exp, sum reduce
-    for (int64_t n = 0; n < N; n += N_step) {
+    const float* qk_block_data = in + row * rndkvSplitSize;
+    for (int64_t l = 0; l < NSlice; l ++) {
+      int64_t n = l * N_step;
       int64_t kvBlockSize = std::min(N_step, kvSize - n);
-      const float* qk_block_data = in + n * ldn + row * kvBlockSize;
+      const float* tmp_in = qk_block_data + l * ldi;
       float tmp_sum = 0;
       auto vec_tmp_sum = at::vec::Vectorized<float>(tmp_sum);
       float* tmp_out = local + n;
       for (long col = 0; col < vec_size * (kvBlockSize / vec_size); col += vec_size) {
-        auto tmp0 = at::vec::Vectorized<float>::loadu(qk_block_data + col);
+        auto tmp0 = at::vec::Vectorized<float>::loadu(tmp_in + col);
         auto tmp1 = tmp0 - vec_max;
         auto tmp2 = tmp1.exp_u20();
         vec_tmp_sum += tmp2;
@@ -651,7 +653,7 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
       }
       tmp_sum += vec_tmp_sum.reduce_add();
       for (long col = vec_size * (kvBlockSize / vec_size); col < kvBlockSize; col++) {
-        auto tmp0 = qk_block_data[col];
+        auto tmp0 = tmp_in[col];
         auto tmp1 = tmp0 - sfm_max;
         auto tmp2 = exp(tmp1);
         tmp_sum += tmp2;
@@ -662,14 +664,15 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
     // div sum, sum for attention
     auto sum_scale = 1 / sfm_sum_ptr[row] / alpha;
     auto vec_sum_scale = vec::Vectorized<float>(sum_scale);
-    for (int64_t n = 0; n < N; n += N_step) {
-      int64_t rndkvBlockSize = (kvSize - n) == N_step ? rndkvSplitSize : rndkvTail;
-      scalar_t* qk_reduced_block_data = out + n * ldn;
+    scalar_t* qk_reduced_block_data = out + row * av_gemm_K;
+    for (int64_t l = 0; l < NSlice; l ++) {
+      int64_t n = l * N_step;
+      int64_t kvBlockSize = std::min(N_step, kvSize - n);
       int32_t tmp_sum = 0;
       auto vec_tmp_sum = at::vec::Vectorized<int32_t>(tmp_sum);
       float* tmp_in = local + n;
-      scalar_t* tmp_out = qk_reduced_block_data + row * (n + N_step >= kvSize ? av_gemm_K_tail : av_gemm_K);
-      for (long col = 0; col < vec_size * (rndkvBlockSize / vec_size); col += vec_size) {
+      scalar_t* tmp_out = qk_reduced_block_data + l * ldo;
+      for (long col = 0; col < vec_size * (kvBlockSize / vec_size); col += vec_size) {
         auto tmp0 = vec::Vectorized<float>::loadu(tmp_in + col);
         auto tmp1 = tmp0 * vec_sum_scale;
         auto tmp2 = tmp1.round();
@@ -681,7 +684,7 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
         vec_tmp_sum += tmp6;
       }
       tmp_sum += vec_tmp_sum.reduce_add();
-      for (long col = vec_size * (rndkvBlockSize / vec_size); col < rndkvBlockSize; col++) {
+      for (long col = vec_size * (kvBlockSize / vec_size); col < kvBlockSize; col++) {
         auto tmp0 = tmp_in[col];
         auto tmp1 = tmp0 * sum_scale;
         auto tmp2 = std::nearbyint(tmp1);
@@ -693,6 +696,13 @@ inline void _sub_exp_sum_div_quant_sum_fusion_kernel(
         tmp_sum += tmp6;
       }
       sum_a_ptr[row] += tmp_sum * beta2;
+      // set zero
+      for (long col = kvBlockSize; col <  vec_size * (av_gemm_K / vec_size); col += vec_size) {
+        _store(tmp_out + col, vec_zero);
+      }
+      for (long col = vec_size * (av_gemm_K / vec_size); col < av_gemm_K; col++) {
+        tmp_out[col] = zero;
+      }
     }
   }
 }
@@ -701,14 +711,13 @@ template <typename scalar_t>
 inline void _sub_exp_sum_div_quant_fusion_kernel(
     const float* in,
     const int64_t& M,
-    const int64_t& N,
     const int64_t& N_step,
-    const int& ldn,
+    const int64_t& NSlice,
+    const int& ldi,
+    const int& ldo,
     const int& kvSize,
     const int& rndkvSplitSize,
-    const int& rndkvTail,
     const int& av_gemm_K,
-    const int& av_gemm_K_tail,
     const int32_t& beta1, // zp_a
     const float& alpha, // scale_a
     float* local,
@@ -720,20 +729,24 @@ inline void _sub_exp_sum_div_quant_fusion_kernel(
   float max_val = 255;
   auto vec_min_val = at::vec::Vectorized<float>(min_val);
   auto vec_max_val = at::vec::Vectorized<float>(max_val);
+  scalar_t zero = 0;
+  auto vec_zero = vec::Vectorized<scalar_t>(zero);
   float beta1_float = (float) beta1;
   auto vec_beta1 = at::vec::Vectorized<float>(beta1_float);
   for (int64_t row = 0; row < M; ++row) {
     auto sfm_max = sfm_max_ptr[row];
     auto vec_max = at::vec::Vectorized<float>(sfm_max);
     // sub max, exp, sum reduce
-    for (int64_t n = 0; n < N; n += N_step) {
+    const float* qk_block_data = in + row * rndkvSplitSize;
+    for (int64_t l = 0; l < NSlice; l ++) {
+      int64_t n = l * N_step;
       int64_t kvBlockSize = std::min(N_step, kvSize - n);
-      const float* qk_block_data = in + n * ldn + row * kvBlockSize;
+      const float* tmp_in = qk_block_data + l * ldi;
       float tmp_sum = 0;
       auto vec_tmp_sum = at::vec::Vectorized<float>(tmp_sum);
       float* tmp_out = local + n;
       for (long col = 0; col < vec_size * (kvBlockSize / vec_size); col += vec_size) {
-        auto tmp0 = at::vec::Vectorized<float>::loadu(qk_block_data + col);
+        auto tmp0 = at::vec::Vectorized<float>::loadu(tmp_in + col);
         auto tmp1 = tmp0 - vec_max;
         auto tmp2 = tmp1.exp_u20();
         vec_tmp_sum += tmp2;
@@ -741,7 +754,7 @@ inline void _sub_exp_sum_div_quant_fusion_kernel(
       }
       tmp_sum += vec_tmp_sum.reduce_add();
       for (long col = vec_size * (kvBlockSize / vec_size); col < kvBlockSize; col++) {
-        auto tmp0 = qk_block_data[col];
+        auto tmp0 = tmp_in[col];
         auto tmp1 = tmp0 - sfm_max;
         auto tmp2 = exp(tmp1);
         tmp_sum += tmp2;
@@ -752,12 +765,13 @@ inline void _sub_exp_sum_div_quant_fusion_kernel(
     // div sum, sum for attention
     auto sum_scale = 1 / sfm_sum_ptr[row] / alpha;
     auto vec_sum_scale = vec::Vectorized<float>(sum_scale);
-    for (int64_t n = 0; n < N; n += N_step) {
-      int64_t rndkvBlockSize = (kvSize - n) == N_step ? rndkvSplitSize : rndkvTail;
-      scalar_t* qk_reduced_block_data = out + n * ldn;
+    scalar_t* qk_reduced_block_data = out + row * av_gemm_K;
+    for (int64_t l = 0; l < NSlice; l ++) {
+      int64_t n = l * N_step;
+      int64_t kvBlockSize = std::min(N_step, kvSize - n);
       float* tmp_in = local + n;
-      scalar_t* tmp_out = qk_reduced_block_data + row * (n + N_step >= kvSize ? av_gemm_K_tail : av_gemm_K);
-      for (long col = 0; col < vec_size * (rndkvBlockSize / vec_size); col += vec_size) {
+      scalar_t* tmp_out = qk_reduced_block_data + l * ldo;
+      for (long col = 0; col < vec_size * (kvBlockSize / vec_size); col += vec_size) {
         auto tmp0 = vec::Vectorized<float>::loadu(tmp_in + col);
         auto tmp1 = tmp0 * vec_sum_scale;
         auto tmp2 = tmp1.round();
@@ -766,7 +780,7 @@ inline void _sub_exp_sum_div_quant_fusion_kernel(
         auto tmp5 = at::vec::minimum(tmp4, vec_max_val);
         _store(tmp_out + col, tmp5);
       }
-      for (long col = vec_size * (rndkvBlockSize / vec_size); col < rndkvBlockSize; col++) {
+      for (long col = vec_size * (kvBlockSize / vec_size); col < kvBlockSize; col++) {
         auto tmp0 = tmp_in[col];
         auto tmp1 = tmp0 * sum_scale;
         auto tmp2 = std::nearbyint(tmp1);
@@ -774,6 +788,13 @@ inline void _sub_exp_sum_div_quant_fusion_kernel(
         auto tmp4 = std::max(tmp3, min_val);
         auto tmp5 = std::min(tmp4, max_val);
         tmp_out[col] = tmp5;
+      }
+      // set zero
+      for (long col = kvBlockSize; col <  vec_size * (av_gemm_K / vec_size); col += vec_size) {
+        _store(tmp_out + col, vec_zero);
+      }
+      for (long col = vec_size * (av_gemm_K / vec_size); col < av_gemm_K; col++) {
+        tmp_out[col] = zero;
       }
     }
   }
@@ -840,6 +861,85 @@ inline void _dequant_quant_fusion_kernel(
     }
   }
 }
+
+// template <typename scalar_t>
+// inline void _dequant_quant_fusion_kernel(
+//     const int32_t* in,
+//     const int32_t* sum_a_ptr,
+//     const int32_t* sum_b_ptr,
+//     const int& M,
+//     const int& N,
+//     const int& ldi,
+//     const int& ldo,
+//     const int32_t& beta1, // zp_a*zp_b*k
+//     const int32_t& beta2, // zp_c
+//     const float& alpha, // scale_a*scale_b
+//     const float& alpha2, // scale_c
+//     scalar_t* out) {
+//   const int32_t vec_size = at::vec::Vectorized<float>::size();
+//   float min_val = 0;
+//   float max_val = 255;
+//   auto vec_min_val = at::vec::Vectorized<float>(min_val);
+//   auto vec_max_val = at::vec::Vectorized<float>(max_val);
+//   auto vec_beta1 = at::vec::Vectorized<int32_t>(beta1);
+//   auto vec_alpha = at::vec::Vectorized<float>(alpha);
+//   auto vec_alpha2 = at::vec::Vectorized<float>(alpha2);
+//   float beta2_float = (float) beta2;
+//   auto vec_beta2 = at::vec::Vectorized<float>(beta2_float);
+//   for (long row = 0; row < M; row += 1) {
+//     auto sum_a = sum_a_ptr[row];
+//     auto vec_sum_a = at::vec::Vectorized<int32_t>(sum_a);
+//     const int32_t* tmp_in = in + row * ldi;
+//     scalar_t* tmp_out = out + row * ldo;
+//     // for (long col = 0; col < vec_size * (N / vec_size); col += vec_size) {
+//     //   auto vec_sum_b = at::vec::Vectorized<int32_t>::loadu(sum_b_ptr + col);
+//     //   auto tmp0 = at::vec::Vectorized<int32_t>::loadu(tmp_in + col);
+//     //   auto tmp1 = tmp0 - vec_sum_b;
+//     //   auto tmp2 = tmp1 - vec_sum_a;
+//     //   auto tmp3 = tmp2 + vec_beta1;
+//     //   auto tmp4 = at::vec::convert<float>(tmp3);
+//     //   auto tmp05 = tmp4 * vec_alpha;
+//     //   _store(tmp_out + col, tmp05);
+//     // }
+//     // for (long col = vec_size * (N / vec_size); col < N; col++) {
+//     std::cout << "res: " << row;
+//     for (long col = 0; col < N; col++) {
+//       auto sum_b = sum_b_ptr[col];
+//       auto tmp0 = tmp_in[col];
+//       std::cout << ", " << (float) tmp0;
+//       auto tmp1 = tmp0 - sum_b;
+//       auto tmp2 = tmp1 - sum_a;
+//       auto tmp3 = tmp2 + beta1;
+//       auto tmp4 = (float) tmp3;
+//       auto tmp05 = tmp4 * alpha;
+//       std::cout << " " << (float) tmp05;
+//       tmp_out[col] = tmp05;
+//     }
+//     std::cout << std::endl;
+//   }
+//   // for (long row = 0; row < M; row += 1) {
+//   //   // const int32_t* tmp_in = in + row * ldi;
+//   //   scalar_t* tmp_out = out + row * ldo;
+//   //   for (long col = 0; col < vec_size * (N / vec_size); col += vec_size) {
+//   //     auto tmp05 = at::vec::Vectorized<int32_t>::loadu(tmp_out + col);
+//   //     auto tmp5 = tmp05 / vec_alpha2;
+//   //     auto tmp6 = tmp5.round();
+//   //     auto tmp7 = tmp6 + vec_beta2;
+//   //     auto tmp8 = at::vec::maximum(tmp7, vec_min_val);
+//   //     auto tmp9 = at::vec::minimum(tmp8, vec_max_val);
+//   //     _store(tmp_out + col, tmp9);
+//   //   }
+//   //   for (long col = vec_size * (N / vec_size); col < N; col++) {
+//   //     auto tmp05 = tmp_out[col];
+//   //     auto tmp5 = tmp05 / alpha2;
+//   //     auto tmp6 = std::nearbyint(tmp5);
+//   //     auto tmp7 = tmp6 + beta2_float;
+//   //     auto tmp8 = std::max(tmp7, min_val);
+//   //     auto tmp9 = std::min(tmp8, max_val);
+//   //     tmp_out[col] = tmp9;
+//   //   }
+//   // }
+// }
 
 // // 1) out = a - max
 // // 2) out = exp(out)
@@ -1801,7 +1901,7 @@ cpu_flash_attention_u8(
   auto && qk_gemm_qtail = create_or_get_microkernel(
     qTail, block_64, qk_gemm_K,
             1, //batch_size
-            headSize_mul4 ? qStrideM : qk_gemm_K, // lda
+            qk_gemm_K,//headSize_mul4 ? qStrideM : qk_gemm_K, // lda
             block_64, //ldb
             rndkvSplitSize, //ldc
             u8_dt, //a dtype
@@ -2127,7 +2227,9 @@ cpu_flash_attention_u8(
               fill_stub(
                 q_sum_ptr, static_cast<int32_t>(0), qSplitSize);
             }
-            for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
+            const int64_t rkvSlice = (num_keys - 1) / kvSplitSize + 1;
+            for (int64_t l = 0; l < rkvSlice; l++) {
+              int64_t n = l * kvSplitSize;
               int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
               // Calculate sums for dequant compensation item
               if (qBlockSize == qSplitSize) {
@@ -2221,7 +2323,7 @@ cpu_flash_attention_u8(
 
               // do dequant compensation, add mask, max reduce for softmax, and convert qk from s32 to fp32
               int64_t rndkvBlockSize = kvBlockSize == kvSplitSize ? rndkvSplitSize : rndkvTail;
-              accum_t* qk_block_data = qk_data + n * qSplitSize;
+              accum_t* qk_block_data = qk_data + l * qSplitSize * rndkvSplitSize;
               if (has_attn_mask) {
                 mask_t* mask_data_offset = mask_data + i * mStrideB + j * mStrideH + m * mStrideM + (mStrideN == 0 ? 0 : n);
                 _dequant_mask_max_fusion_kernel(
@@ -2230,10 +2332,10 @@ cpu_flash_attention_u8(
                   q_sum_ptr, //sum_a_ptr
                   k_sum_ptr + n, //sum_b_ptr
                   qBlockSize, //M
-                  rndkvBlockSize, //N
+                  kvBlockSize, //N
                   rndkvBlockSize, //ldi
                   mStrideM, //ldm
-                  kvBlockSize, //ldo
+                  rndkvSplitSize,//kvBlockSize, //ldo
                   q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
                   q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
                   qk_block_data, //out
@@ -2245,10 +2347,9 @@ cpu_flash_attention_u8(
                   q_sum_ptr, //sum_a_ptr
                   k_sum_ptr + n, //sum_b_ptr
                   qBlockSize, //M
-                  rndkvBlockSize, //N
+                  kvBlockSize, //N
                   rndkvBlockSize, //ldi
-                  mStrideM, //ldm
-                  kvBlockSize, //ldo
+                  rndkvSplitSize,//kvBlockSize, //ldo
                   q_zp * k_zp * headSize, //zp_a*zp_b*k=beta
                   q_scale * k_scale * scaling_factor, //scale_a*scale_b*scale_sdpa=alpha
                   qk_block_data, //out
@@ -2264,14 +2365,13 @@ cpu_flash_attention_u8(
               _sub_exp_sum_div_quant_fusion_kernel(
                 qk_data, //in
                 qBlockSize, //M
-                num_keys, //N
                 kvSplitSize, //N_step
-                qSplitSize, //ldn
+                rkvSlice, //NSlices
+                qSplitSize * rndkvSplitSize, //ldi
+                qSplitSize * av_gemm_K, //ldo
                 kvSize, //kvSize
                 rndkvSplitSize, //rndkvSplitSize
-                rndkvTail, //rndkvTail
                 av_gemm_K, //av_gemm_K
-                av_gemm_K_tail, //av_gemm_K_tail
                 a_zp, // zp_a=beta1
                 a_scale, // scale_a=alpha
                 qk_local_data, //local
@@ -2283,14 +2383,13 @@ cpu_flash_attention_u8(
               _sub_exp_sum_div_quant_sum_fusion_kernel(
                 qk_data, //in
                 qBlockSize, //M
-                num_keys, //N
                 kvSplitSize, //N_step
-                qSplitSize, //ldn
+                rkvSlice, //NSlice
+                qSplitSize * rndkvSplitSize, //ldi
+                qSplitSize * av_gemm_K, //ldo
                 kvSize, //kvSize
                 rndkvSplitSize, //rndkvSplitSize
-                rndkvTail, //rndkvTail
                 av_gemm_K, //av_gemm_K
-                av_gemm_K_tail, //av_gemm_K_tail
                 a_zp, // zp_a=beta1
                 v_zp, // zp_b=beta2
                 a_scale, // scale_a=alpha
@@ -2321,7 +2420,7 @@ cpu_flash_attention_u8(
               a_sum_ptr, //sum_a_ptr
               v_sum_ptr, //sum_b_ptr
               qBlockSize, //M
-              rndHeadSize, //N
+              headSize, //N
               rndHeadSize, //ldi
               oStrideM, //ldo
               a_zp * v_zp * kvSize, //zp_a*zp_b*k=beta1
