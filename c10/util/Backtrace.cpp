@@ -281,6 +281,7 @@ class GetBacktraceImpl {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool skip_python_frames_;
   std::vector<void*> callstack_;
 };
