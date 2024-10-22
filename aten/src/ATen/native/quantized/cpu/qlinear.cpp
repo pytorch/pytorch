@@ -1120,8 +1120,6 @@ namespace native {
       torch::List<std::optional<at::Scalar>> post_op_args,
       c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    printf("act_scale numel: %ld\n", act_scale.numel());
-    printf("act_zero_point numel: %ld\n", act_zero_point.numel());
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
     static std::optional<at::Tensor> other = std::nullopt;
