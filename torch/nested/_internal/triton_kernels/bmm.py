@@ -77,7 +77,8 @@ def grouped_matmul_kernel(
     group_size,
     # MISC
     gn,
-    gk,
+    k,
+    ldb,
     # number of virtual SM
     NUM_SM: tl.constexpr,
     # tile sizes
@@ -98,13 +99,13 @@ def grouped_matmul_kernel(
         # iterate through the tiles in the current gemm problem
         while (tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles):
             # pick up a tile from the current gemm problem
-            k = gk
+            # k = gk
             lda = tl.load(g_lds + g * 3)
-            ldb = tl.load(g_lds + g * 3 + 1)
+            # ldb = tl.load(g_lds + g * 3 + 1)
             ldc = tl.load(g_lds + g * 3 + 2)
             a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
             # b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
-            b_ptr = (b_ptr_base + g * gn * gk).to(tl.pointer_type(tl.float16))
+            b_ptr = (b_ptr_base + g * gn * k).to(tl.pointer_type(tl.float16))
             c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
             # figure out tile coordinates
             tile_idx_in_gemm = tile_idx - last_problem_end
@@ -179,8 +180,8 @@ def group_gemm_fn(tensor_a, tensor_b):
         C_addrs.append(C.data_ptr())
         # g_sizes += [M, N, K]
         g_sizes += [M] #, N, K]
-        g_lds += [A.stride(0), tensor_b.stride(1), C.stride(0)]
-        # g_lds += [A.stride(0), 0, C.stride(0)]
+        # g_lds += [A.stride(0), tensor_b.stride(1), C.stride(0)]
+        g_lds += [A.stride(0), -1, C.stride(0)]
 
     # note these are device tensors
     d_a_ptrs = torch.tensor(A_addrs, device=device)
@@ -199,6 +200,7 @@ def group_gemm_fn(tensor_a, tensor_b):
         group_size,
         N,
         K,
+        tensor_b.stride(1),
     )
 
     return group_C
