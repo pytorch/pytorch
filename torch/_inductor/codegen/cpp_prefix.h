@@ -159,16 +159,34 @@ T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   return T::set(a, out, tail_size);
 }
 
+template <>
+at::vec::VecMask<float,1> max_masked_reduce<at::vec::VecMask<float,1>>(const at::vec::VecMask<float,1>& a, const at::vec::VecMask<float,1>& b, const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float,1>::set(a, out, tail_size);
+}
+
 template <typename T>
 T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::minimum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+at::vec::VecMask<float,1> min_masked_reduce<at::vec::VecMask<float,1>>(const at::vec::VecMask<float,1>& a, const at::vec::VecMask<float,1>& b, const int64_t tail_size) {
+  auto out = a & b;
+  return at::vec::VecMask<float,1>::set(a, out, tail_size);
+}
+
 template <typename T>
 T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
   return T::set(a, out, tail_size);
+}
+
+template <>
+at::vec::VecMask<float,1> sum_masked_reduce<at::vec::VecMask<float,1>>(const at::vec::VecMask<float,1>& a, const at::vec::VecMask<float,1>& b, const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float,1>::set(a, out, tail_size);
 }
 
 template <typename T>
@@ -181,6 +199,12 @@ template <typename T>
 T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a ^ b;
   return T::set(a, out, tail_size);
+}
+
+template <typename T1, typename T2>
+T1 any_masked_reduce(const T1& a, const T2& b, const int64_t tail_size) {
+  T1 out = a | b;
+  return T1::set(a, out, tail_size);
 }
 #endif
 
@@ -632,14 +656,15 @@ atomic_add(volatile T *addr, T offset) {
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T, int NI, int NV>
-void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::VectorizedN<T, NV> offset) {
+void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::VectorizedN<T, NV> offset, std::optional<int64_t> tail_size = std::nullopt) {
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data());
   index.store(tmpidx.data());
-  for (int i = 0; i < len; i++){
+  int size = tail_size.has_value() ? tail_size.value() : at::vec::VectorizedN<int64_t, NI>::size();
+  for (int i = 0; i < size; i++){
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }
