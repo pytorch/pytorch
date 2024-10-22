@@ -116,8 +116,8 @@ class TestInductorDynamic(TestCase):
     def setUp(self):
         # HAS_CUDA also checks compute capability to skip tests
         # on older devices
-        if not HAS_GPU:
-            self.skipTest("Triton not available")
+        # if not HAS_GPU:
+        #     self.skipTest("Triton not available")
         torch._dynamo.reset()
         TestCase.setUp(self)
         # this should be in setUpClass, but device-generic tests
@@ -958,15 +958,17 @@ class TestInductorDynamic(TestCase):
         for name, op in operations.items():
             with self.subTest(operation=name):
 
-                def fn(x, y):
-                    return op(x, y)
+                def fn(x, y, z):
+                    a = torch.exp(torch.tensor(z))
+                    return a * op(x, y)
 
                 cnt = CompileCounterWithBackend("inductor")
                 fn_opt = torch._dynamo.optimize(cnt)(fn)
 
                 x = torch.arange(3)
-                self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
-                self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+                z = 1.3
+                self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
+                self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
                 self.assertEqual(cnt.frame_count, 1)
 
     def test_sort_dynamic_shape_with_check(self, device):

@@ -107,7 +107,7 @@ def tensorify_python_scalars(
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
     specialized_float_nodes: dict[fx.Node, float] = {}
-    to_delete: set[fx.Node] = set()
+    deleted: set[fx.Node] = set()
 
     first_non_placeholder = None
     placeholders = set()
@@ -120,23 +120,16 @@ def tensorify_python_scalars(
 
     Analysis = TensorReferenceAnalysis
 
-    def dce() -> None:
-        # First erase all to_delete nodes so our ref counts are correct
-        for node in to_delete:
-            graph.erase_node(node)
-
-        # DCE symbols (which are guaranteed to be pure) only
-        for proxy in reversed(expr_to_sym_proxy.values()):
-            node = proxy.node
+    def dce(graph, deleted) -> None:
+        for node in graph.nodes:
             if (
-                len(proxy.node.users) == 0
-                and proxy.node.op != "placeholder"
-                and (node not in to_delete)
+                len(node.users) == 0
+                and node.op != "placeholder"
+                and node.op != "output"
+                and node not in deleted
             ):
                 graph.erase_node(node)
-
-        # Only now clear to_delete otherwise we may erase a node twice
-        to_delete.clear()
+                deleted.add(node)
 
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
@@ -266,10 +259,11 @@ def tensorify_python_scalars(
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)
-                    to_delete.add(node)
+                    graph.erase_node(node)
+                    deleted.add(node)
 
     # DCE symbols (which are guaranteed to be pure) only
-    dce()
+    dce(graph, deleted)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -309,22 +303,26 @@ def tensorify_python_scalars(
 
             if (
                 node.op != "placeholder"
+                and node.op != "get_attr"
                 and all(isinstance(arg, (float)) for arg in args)
-                and all(isinstance(v, (float, int)) for v in kwargs.values())
+                and (type(result := node.target(*args, **kwargs)) == float)
             ):
-                # If all args are constants, add node to specialized_float_nodes and continue.
+                # If all args are constants and resulting value is a float,
+                # add node to specialized_float_nodes and continue.
                 # In later iterations we'll DCE this node by specializing the float value
                 # into the args of downstream fx nodes.
-                specialized_float_nodes[node] = node.target(*args, **kwargs)
+                specialized_float_nodes[node] = result
                 continue
 
             if transform:
-                replacement_proxy = node.target(*args, **kwargs)
-                node.replace_all_uses_with(replacement_proxy.node)
-                to_delete.add(node)
+                # args may not be metaproxy (eg. float) so can't use metaproxy here
+                replacement_node = graph.call_function(node.target, tuple(args), kwargs)
+                replacement_node.meta["val"] = node.target(*args, **kwargs)
+                node.replace_all_uses_with(replacement_node)
+                graph.erase_node(node)
 
     # DCE one more time to remove specialized item calls
-    dce()
+    dce(graph, deleted)
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
