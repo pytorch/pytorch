@@ -194,6 +194,36 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0);
 
+// TODO: __qconv2d??
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle accum,
+    AtenTensorHandle* B,
+    const int64_t* stride_args,
+    int64_t stride_len_,
+    const int64_t* padding_args,
+    int64_t padding_len_,
+    const int64_t* dilation_args,
+    int64_t dilation_len_,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    double accum_scale,
+    int64_t accum_zero_point,    
+    const char* binary_attr,
+    double* alpha,
+    const char** unary_attr,
+    const double** unary_scalars,
+    int64_t unary_scalars_len_,
+    const char** unary_algorithm,
+    AtenTensorHandle* ret0);
+
 #if AT_MKL_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(

@@ -434,6 +434,86 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle accum,
+    AtenTensorHandle* B,
+    const int64_t* stride_args,
+    int64_t stride_len_,
+    const int64_t* padding_args,
+    int64_t padding_len_,
+    const int64_t* dilation_args,
+    int64_t dilation_len_,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    double accum_scale,
+    int64_t accum_zero_point,    
+    const char* binary_attr,
+    double* alpha,
+    const char** unary_attr,
+    const double** unary_scalars,
+    int64_t unary_scalars_len_,
+    const char** unary_algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+    unary_scalars_list.reserve(unary_scalars_len_);
+    for (int64_t i = 0; i < unary_scalars_len_; i++) {
+      unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
+    }
+
+    c10::List<int64_t> stride_list;
+    stride_list.reserve(stride_len_);
+    for (int64_t i = 0; i < stride_len_; i++) {
+      stride_list.emplace_back(stride_args[i]);
+    }
+
+    c10::List<int64_t> padding_list;
+    padding_list.reserve(padding_len_);
+    for (int64_t i = 0; i < padding_len_; i++) {
+      padding_list.emplace_back(padding_args[i]);
+    }
+
+    c10::List<int64_t> dilation_list;
+    stride_list.reserve(dilation_len_);
+    for (int64_t i = 0; i < dilation_len_; i++) {
+      dilation_list.emplace_back(dilation_args[i]);
+    }
+
+    auto tmp_result = at::native::QConvoneDNN::run_pointwise_binary_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        *tensor_handle_to_tensor_pointer(accum),
+        pointer_to_optional<at::Tensor>(B),
+        stride_list,
+        padding_list,
+        dilation_list,
+        groups,
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        accum_scale,
+        accum_zero_point,        
+        binary_attr,
+        pointer_to_optional<c10::Scalar>(alpha),
+        pointer_to_optional<c10::string_view>(unary_attr),
+        unary_scalars_list,
+        pointer_to_optional<c10::string_view>(unary_algorithm));
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
 #if AT_MKL_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
