@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
+from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -201,27 +202,35 @@ class AsyncCompile:
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
-        kernel_code_log.info("Triton Kernel:\n%s", source_code)
-        _compile_start()
-        _set_triton_ptxas_path()
+        with dynamo_timed("async_compile.triton", phase_name="triton_compile", fwd_only=False):
+            kernel_code_log.info("Triton Kernel:\n%s", source_code)
 
-        kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self._use_process_pool():
-            # We want to support changing these env vars after (and while) the
-            # process pool is running, so pass them to the subprocess to reset.
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                    extra_env,
-                ),
+            get_chromium_event_logger().add_event_data(
+                "triton_compile",
+                kernel_name=kernel_name,
+                source_code=source_code,
+                device_str=device_str
             )
-        else:
-            kernel.precompile()
-            return kernel
+            _compile_start()
+            _set_triton_ptxas_path()
+
+            kernel = TritonCodeCache.load(kernel_name, source_code)
+            if self._use_process_pool():
+                # We want to support changing these env vars after (and while) the
+                # process pool is running, so pass them to the subprocess to reset.
+                env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+                extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+                return TritonFuture(
+                    kernel,
+                    self.process_pool().submit(
+                        _worker_compile_triton,
+                        kernel._reload_in_subproc,
+                        extra_env,
+                    ),
+                )
+            else:
+                kernel.precompile()
+                return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
