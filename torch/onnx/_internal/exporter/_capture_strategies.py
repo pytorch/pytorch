@@ -51,7 +51,9 @@ def _patch_dynamo_unsupported_functions():
 
     mark_static_address = torch._dynamo.mark_static_address
     torch._dynamo.mark_static_address = lambda *_, **__: None
-    logger.info("Replaced torch._dynamo.mark_static_address with empty function to allow dynamo tracing")
+    logger.info(
+        "Replaced torch._dynamo.mark_static_address with empty function to allow dynamo tracing"
+    )
 
     try:
         yield

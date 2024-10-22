@@ -46,9 +46,7 @@ class DynamoExporterTest(common_utils.TestCase):
 
         a = torch.rand(8, 8, dtype=torch.float16)
         cst = torch.rand(8, 8, dtype=torch.float16)
-        onnx_program = torch.onnx.export(
-            model, (a, cst), dynamo=True, fallback=False
-        )
+        onnx_program = torch.onnx.export(model, (a, cst), dynamo=True, fallback=False)
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
