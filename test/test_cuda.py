@@ -3935,24 +3935,107 @@ class TestCudaMallocAsync(TestCase):
         finally:
             random.setstate(state)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
             self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_raw_amdsmi_device_count(self):
+        """
+        This unit test will verify if the number of GPUs shown in `amd-smi
+        list` is equivalent to the count returned by `_raw_device_count_amdsmi`.
+        This should be unaffected by visible device settings.
+        """
+        raw_device_cnt = int(
+            subprocess.check_output(
+                "amd-smi list | grep 'GPU' | wc -l", shell=True
+            ).strip()
+        )
+        self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_raw_amdsmi_device_uuids(self):
+        """
+        This unit test will extract a list of UUIDs for each GPU using
+        rocminfo information, and check whether each UUID is present in
+        the output from `_raw_device_uuid_amdsmi` this allows us to test
+        that the pytorch call is returning a correct list of UUIDs.
+        """
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid:.*GPU-//'"
+        uuids = (
+            subprocess.check_output(cmd, shell=True, universal_newlines=True)
+            .strip()
+            .split("\n")
+        )
+        uuids = [s.strip() for s in uuids]
+        raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
+        for uuid in uuids:
+            matching = True
+            if not any(uuid in raw_id for raw_id in raw_uuids):
+                matching = False
+        self.assertEqual(True, matching)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_uuid_visible_devices(self):
+        """
+        This unit test will simulate an environment where a UUID is passed
+        via CUDA/HIP_VISIBLE_DEVICES and ensure that the correct device count
+        is returned. This allows us to test that the visible device functionality
+        is operating as expected.
+        """
+        test_script = """\
+import torch
+import os
+print(f"{torch.cuda.device_count()}")
+        """
+        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
+        uuids = (
+            subprocess.check_output(cmd, shell=True, universal_newlines=True)
+            .strip()
+            .split("\n")
+        )
+        uuids = [s.strip() for s in uuids]
+
+        custom_envs = []
+        for uuid in uuids:
+            custom_envs.append(
+                {"CUDA_VISIBLE_DEVICES": f"{uuid}", "HIP_VISIBLE_DEVICES": None}
+            )
+            custom_envs.append(
+                {"HIP_VISIBLE_DEVICES": f"{uuid}", "CUDA_VISIBLE_DEVICES": None}
+            )
+
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("1", r)
 
 
 MIN_BLOCK_SIZE = 512
@@ -4456,13 +4539,25 @@ class TestMemPool(TestCase):
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
 
+        # pool's use count should be 1 at this point as MemPool object
+        # holds a reference
+        self.assertEqual(pool.use_count(), 1)
+
         # no allocations happened yet, so called_dummy_alloc should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
         self.assertEqual(called_dummy_alloc.value, 0)
 
         with torch.cuda.use_mem_pool(pool):
-            out = torch.randn(1, device="cuda")
+            out_0 = torch.randn(1, device="cuda")
+
+            # pool's use count should be 2 at this point as use_mem_pool
+            # holds a reference
+            self.assertEqual(pool.use_count(), 2)
+
+        # pool's use count should be back to 1 at this point as use_mem_pool
+        # released its reference
+        self.assertEqual(pool.use_count(), 1)
 
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor

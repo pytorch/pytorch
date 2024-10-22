@@ -24,9 +24,13 @@ def autotune_remote_cache_default() -> Optional[bool]:
     return _get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
 
+def bundled_autotune_remote_cache_default() -> Optional[bool]:
+    return _get_tristate_env("TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE")
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
-    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "0") == "1"
+    os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
 )
 
 # add some debug printouts
@@ -49,14 +53,35 @@ fx_graph_cache = (
 # None: Not set -- Off for OSS, JustKnobs based for internal
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
-# enable autotune local cache
-autotune_local_cache = True
+# Enable autotune local cache.
+#
+# See bundled_autotune_remote_cache for the effect this flag has on the bundled
+# remote cache.
+autotune_local_cache: bool = True
 
-# enable autotune remote cache
+# Enable autotune remote cache.
+#
+# Enables/disables the autotune remote cache regardless of the state of
+# autotune_local_cache. If both local and remote are enabled then on write both
+# are written and on read local is checked first and only on a cache miss is
+# remote read.
+#
 # False: Disables the cache
 # True: Enables the cache
 # None: Not set -- Off for OSS, JustKnobs based for internal
 autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
+
+# Enable bundled autotune cache.
+#
+# Enables/disables the bundled autotune cache regardless of the state of
+# autotune_remote_cache. However it does depend on the local cache for local
+# state management - as a result if the local cache is disabled this will also
+# disable the bundled autotune cache.
+#
+# False: Disables the cache
+# True: Enables the cache (requires autotune_local_cache)
+# None: Not set -- Off for OSS, JustKnobs based for internal
+bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
@@ -77,11 +102,6 @@ triton_kernel_default_layout_constraint = "flexible_layout"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
-
-# codegen cpp wrapper code in an ABI compatible mode
-abi_compatible = (
-    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
-)
 
 c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
@@ -417,6 +437,17 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 loop_ordering_after_fusion = (
     os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
 )
+
+# If fusing two nodes only save less then score_fusion_memory_threshold memory,
+# we should not bother fusing the nodes.
+#
+# This is especially helpful to resolve https://github.com/pytorch/pytorch/issues/133242
+# Previously we fuse two nodes because of common read of a scalar tensor.
+# If we skip it, the loop ordering after fusion mechanism kicks in and can
+# brings more savings.
+#
+# For the cases loop ordering after fusion does not help, we don't lose much.
+score_fusion_memory_threshold = 10
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (
@@ -1032,6 +1063,11 @@ class aot_inductor:
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
     metadata: Dict[str, str] = {}
+
+    # fbcode only. Whether to raise error if C++ codegen is too big to optimize
+    raise_error_on_ignored_optimization: bool = (
+        os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
+    )
 
 
 class cuda:
