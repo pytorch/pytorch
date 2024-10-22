@@ -71,7 +71,7 @@ class CooperativeReductionTests(TestCase):
 
         args = [torch.randn(1024, device="cuda") for _ in range(2)]
         source_code = self.run_and_check(fn, args)
-        before, after = source_code.split("triton_helpers.gpu_barrier")
+        before, after = source_code.split("triton_helpers.x_grid_barrier")
         self.assertEqual(before.count("if rsplit_id == ("), 0)
         self.assertEqual(after.count("if rsplit_id == ("), 6)
 
@@ -92,7 +92,7 @@ class CooperativeReductionTests(TestCase):
 
         args = [torch.randn(4, 100000, device="cuda")]
         source_code = self.run_and_check(fn, args)
-        self.assertEqual(source_code.count("triton_helpers.gpu_barrier"), 16)
+        self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
         self.assertEqual(source_code.count("empty_strided_cuda"), 8)
 
     def test_reduce_split(self):

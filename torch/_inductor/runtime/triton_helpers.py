@@ -617,49 +617,33 @@ def select_one(x, mask, dim, keep_dims=False):
 
 
 @triton.jit
-def gpu_barrier(
-    sem, total: tl.constexpr, first_barrier: tl.constexpr = tl.constexpr(False)
-):
+def x_grid_barrier(sem):
     """
-    Wait for all other thread blocks to reach this barrier before returning.
-
-    if *sem <= total:   we are in count_up mode waiting for all threads to enter
-    if *sem >= total*2: we are in count_down mode waiting for all threads to leave
+    Wait for all other thread blocks in grid sharing same y/z program_id
+    to reach this barrier before returning.
 
     Args:
-        sem: an int32 semaphores, zero initialized
-        total: how many other blocks are running
-        first_barrier: True if we can skip waiting for exit from last barrier.  Can set either on the first call,
-                       or if one ping-pongs between two semaphores.
+        sem: an uint32 semaphores, zero or 0x80000000 initialized.  Must be unique to each y/z program ID.
     """
     # ensure stores before this are visible
     tl.debug_barrier()
 
-    # scaling factor so we know which mode we are in
-    count_down = 2 * total
-
-    if not first_barrier:
-        # all threads must exit prior barrier before we start
-        # expect this to already be true in common case
-        while tl.load(sem, volatile=True) >= count_down:
-            pass
-
-    # count threads entering barrier
-    num_here = tl.atomic_add(sem, 1) + 1  # acts as a memory fence
-    if num_here == total:
-        # all other threads are spinning on count_down mode starting
-        # the last thread flips from count_up mode to count_down mode
-        tl.atomic_xchg(sem, count_down * (total - 1), sem="relaxed")
+    one_i32 = 1
+    one_u32 = one_i32.to(tl.uint32)  # type: ignore[attr-defined]
+    expected = tl.num_programs(0).to(tl.uint32)
+    if tl.program_id(0) == 0:
+        nb = 0x80000000 - (expected - one_u32)
     else:
-        prior = 0
-        while prior < count_down:  # wait for last thread to flip the mode to count_down
-            # TODO(jansel): is it faster to spin with a normal read rather than CAS?
-            prior = tl.atomic_cas(
-                sem, count_down * (total - 1), count_down * (total - 2), sem="relaxed"
-            )
+        nb = one_u32
 
-        if prior != count_down * (total - 1):  # did the cas decrement already?
-            tl.atomic_add(sem, -count_down, sem="relaxed")
+    old_arrive = tl.atomic_add(sem, nb, sem="release")
+
+    bar_flipped = False
+    while not bar_flipped:
+        # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
+        # current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        current_arrive = tl.load(sem, volatile=True)  # is missing .acquire
+        bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
 
     # TODO(jansel): is this needed?
     tl.debug_barrier()
