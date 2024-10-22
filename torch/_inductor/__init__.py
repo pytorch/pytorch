@@ -1,8 +1,13 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Tuple
+
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._inductor.utils import InputType
 
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
@@ -10,7 +15,7 @@ __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
+    example_inputs: List["InputType"],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
