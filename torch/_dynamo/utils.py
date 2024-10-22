@@ -3048,7 +3048,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.local.get("in_compiled_autograd_region"):
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
