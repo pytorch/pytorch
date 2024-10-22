@@ -15,7 +15,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
-from torch._dynamo.utils import dynamo_timed, preserve_rng_state
+from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, preserve_rng_state
 from torch._guards import detect_fake_mode
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -1054,6 +1054,7 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
     )
+
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
 

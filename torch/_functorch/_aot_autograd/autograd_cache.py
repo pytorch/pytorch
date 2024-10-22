@@ -618,6 +618,7 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             cache_state = "bypass"
             cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = e
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
@@ -637,6 +638,18 @@ class AOTAutogradCache:
         chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
+
+        chromium_log.add_event_data(
+            "backend_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_event_time,
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
+
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
