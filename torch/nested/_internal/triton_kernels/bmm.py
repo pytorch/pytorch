@@ -64,12 +64,12 @@ import triton.language as tl
 @triton.jit
 def grouped_matmul_kernel(
     # device tensor of matrices pointers
-    group_a_ptrs,
+    # group_a_ptrs,
     b_ptr_base,
     group_c_ptrs,
-    # device tensor of gemm sizes. its shape is [group_size, 3]
-    # dim 0 is group_size, dim 1 is the values of <M, N, K> of each gemm
-    group_gemm_sizes,
+    # # device tensor of gemm sizes. its shape is [group_size, 3]
+    # # dim 0 is group_size, dim 1 is the values of <M, N, K> of each gemm
+    # group_gemm_sizes,
     # device tensor of leading dimension sizes. its shape is [group_size, 3]
     # dim 0 is group_size, dim 1 is the values of <lda, ldb, ldc> of each gemm
     g_lds,
@@ -79,6 +79,9 @@ def grouped_matmul_kernel(
     gn,
     k,
     ldb,
+    a_offsets_ptr,
+    a_ptr,
+    lda,
     # number of virtual SM
     NUM_SM: tl.constexpr,
     # tile sizes
@@ -91,7 +94,10 @@ def grouped_matmul_kernel(
     num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
     for g in range(group_size):
         # get the gemm size of the current problem
-        gm = tl.load(group_gemm_sizes + g) # * 3)
+        # gm = tl.load(group_gemm_sizes + g) # * 3)
+        a_offset_0 = tl.load(a_offsets_ptr + g)
+        a_offset_1 = tl.load(a_offsets_ptr + g + 1)
+        gm = a_offset_1 - a_offset_0
         # gn = tl.load(group_gemm_sizes + g * 3 + 1)
         # gk = tl.load(group_gemm_sizes + g * 3 + 2)
         num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
@@ -100,10 +106,12 @@ def grouped_matmul_kernel(
         while (tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles):
             # pick up a tile from the current gemm problem
             # k = gk
-            lda = tl.load(g_lds + g * 3)
+            # lda = tl.load(g_lds + g * 3)
+            # lda = a_offset_0 * k
+            # tl.device_print("lda", lda)
             # ldb = tl.load(g_lds + g * 3 + 1)
             ldc = tl.load(g_lds + g * 3 + 2)
-            a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
+            # a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
             # b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
             b_ptr = (b_ptr_base + g * gn * k).to(tl.pointer_type(tl.float16))
             c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
@@ -113,7 +121,7 @@ def grouped_matmul_kernel(
             tile_n_idx = tile_idx_in_gemm % num_n_tiles
 
             # do regular gemm here
-            offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+            offs_am = a_offset_0 + tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
             offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
             offs_k = tl.arange(0, BLOCK_SIZE_K)
             a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
@@ -158,7 +166,15 @@ def group_gemm_fn(tensor_a, tensor_b):
 
     assert tensor_b.is_contiguous()
 
+    a_values = tensor_a.values()
+    a_offsets = tensor_a.offsets()
+
+    assert a_values.dim() == 2
+
     B, K, N = tensor_b.shape
+
+    c_values = a_values.new_empty((a_values.size(0), N))
+    c_offsets = a_offsets
 
     A_addrs = []
     # B_addrs = []
@@ -167,13 +183,15 @@ def group_gemm_fn(tensor_a, tensor_b):
     g_lds = []
     group_C = []
     for i in range(group_size):
-        A = group_A[i]
+        # A = group_A[i]
+        A = a_values[a_offsets[i]:a_offsets[i+1]]
         # B = group_B[i]
         # assert A.shape[1] == B.shape[0]
         M, Ki = A.shape
         assert Ki == K
         # K, N = B.shape
-        C = torch.empty((M, N), device=device, dtype=A.dtype)
+        # C = torch.empty((M, N), device=device, dtype=A.dtype)
+        C = c_values[c_offsets[i]:c_offsets[i + 1]]
         group_C.append(C)
         A_addrs.append(A.data_ptr())
         # B_addrs.append(B.data_ptr())
@@ -187,20 +205,23 @@ def group_gemm_fn(tensor_a, tensor_b):
     d_a_ptrs = torch.tensor(A_addrs, device=device)
     # d_b_ptrs = torch.tensor(B_addrs, device=device)
     d_c_ptrs = torch.tensor(C_addrs, device=device)
-    d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
+    # d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
     # we use a fixed number of CTA, and it's auto-tunable
     grid = lambda META: (META['NUM_SM'], )
     grouped_matmul_kernel[grid](
-        d_a_ptrs,
+        # d_a_ptrs,
         tensor_b,
         d_c_ptrs,
-        d_g_sizes,
+        # d_g_sizes,
         d_g_lds,
         group_size,
         N,
         K,
         tensor_b.stride(1),
+        a_offsets.to(torch.int32),
+        a_values,
+        a_values.stride(0),
     )
 
-    return group_C
+    return c_values
