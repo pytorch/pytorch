@@ -65,7 +65,7 @@ import triton.language as tl
 def grouped_matmul_kernel(
     # device tensor of matrices pointers
     group_a_ptrs,
-    group_b_ptrs,
+    b_ptr_base,
     group_c_ptrs,
     # device tensor of gemm sizes. its shape is [group_size, 3]
     # dim 0 is group_size, dim 1 is the values of <M, N, K> of each gemm
@@ -100,7 +100,8 @@ def grouped_matmul_kernel(
             ldb = tl.load(g_lds + g * 3 + 1)
             ldc = tl.load(g_lds + g * 3 + 2)
             a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
-            b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
+            # b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
+            b_ptr = (b_ptr_base + g * gn * gk).to(tl.pointer_type(tl.float16))
             c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
             # figure out tile coordinates
             tile_idx_in_gemm = tile_idx - last_problem_end
@@ -144,34 +145,42 @@ def group_gemm_fn(tensor_a, tensor_b):
     assert tensor_a.is_nested
     assert not tensor_b.is_nested
     group_A = list(tensor_a.unbind())
-    group_B = list(tensor_b.unbind())
+    # group_B = list(tensor_b.unbind())
     device = torch.device('cuda')
-    assert len(group_A) == len(group_B)
-    group_size = len(group_A)
+    assert tensor_a.size(0) == tensor_b.size(0)
+    # assert len(group_A) == len(group_B)
+    group_size = tensor_a.size(0)
+    # group_size = len(group_A)
+
+    assert tensor_b.is_contiguous()
+
+    B, K, N = tensor_b.shape
 
     A_addrs = []
-    B_addrs = []
+    # B_addrs = []
     C_addrs = []
     g_sizes = []
     g_lds = []
     group_C = []
     for i in range(group_size):
         A = group_A[i]
-        B = group_B[i]
-        assert A.shape[1] == B.shape[0]
-        M, K = A.shape
-        K, N = B.shape
+        # B = group_B[i]
+        # assert A.shape[1] == B.shape[0]
+        M, Ki = A.shape
+        assert Ki == K
+        # K, N = B.shape
         C = torch.empty((M, N), device=device, dtype=A.dtype)
         group_C.append(C)
         A_addrs.append(A.data_ptr())
-        B_addrs.append(B.data_ptr())
+        # B_addrs.append(B.data_ptr())
         C_addrs.append(C.data_ptr())
         g_sizes += [M, N, K]
-        g_lds += [A.stride(0), B.stride(0), C.stride(0)]
+        g_lds += [A.stride(0), tensor_b.stride(1), C.stride(0)]
+        # g_lds += [A.stride(0), 0, C.stride(0)]
 
     # note these are device tensors
     d_a_ptrs = torch.tensor(A_addrs, device=device)
-    d_b_ptrs = torch.tensor(B_addrs, device=device)
+    # d_b_ptrs = torch.tensor(B_addrs, device=device)
     d_c_ptrs = torch.tensor(C_addrs, device=device)
     d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
     d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
@@ -179,7 +188,7 @@ def group_gemm_fn(tensor_a, tensor_b):
     grid = lambda META: (META['NUM_SM'], )
     grouped_matmul_kernel[grid](
         d_a_ptrs,
-        d_b_ptrs,
+        tensor_b,
         d_c_ptrs,
         d_g_sizes,
         d_g_lds,
