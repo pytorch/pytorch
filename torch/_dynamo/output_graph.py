@@ -1826,7 +1826,8 @@ class SubgraphTracer(fx.Tracer):
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
-        # This dict serves two purposes:
+        # This dict maps proxies from direct parent to proxies in current graph.
+        # It serves two purposes:
         # - Proxies are associated with VariableTrackers. If we see
         # the same VariableTracker twice (and it is a free variable),
         # then we want to use the same Proxy in the current subgraph to
@@ -2160,13 +2161,17 @@ class SubgraphTracer(fx.Tracer):
         # If that is the case, just return the already lifted Proxy.
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
+
+        # We first lift proxy to parent's input then lift to self's input. This enforeces the invariant
+        # that lifted_freevars always maps proxy in direct parent to proxy in current graph.
+        if self.parent is not None and proxy.tracer != self.parent:
+            proxy = self.parent.lift_tracked_freevar_to_input(proxy)
+
         example_value = proxy.node.meta["example_value"]
         new_proxy = self.create_graph_input(
             proxy.node.name, type(example_value), example_value
         )
         self.lifted_freevars[proxy] = new_proxy
-        if self.parent is not None and proxy.tracer != self.parent:
-            self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
 
     def maybe_lift_tracked_freevar_to_input(self, arg):
