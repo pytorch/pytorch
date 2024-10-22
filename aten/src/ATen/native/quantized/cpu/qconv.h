@@ -52,7 +52,7 @@ class QConvoneDNN final {
       int64_t act_zero_point,
       at::Tensor weight, // contains quantized values but not QTensor
       at::Tensor weight_scales,
-      at::Tensor weight_zero_points,      
+      at::Tensor weight_zero_points,
       at::Tensor accum, // contains quantized values but not QTensor
       std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
@@ -63,7 +63,7 @@ class QConvoneDNN final {
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
-      int64_t accum_zero_point,      
+      int64_t accum_zero_point,
       c10::string_view binary_attr,
       std::optional<at::Scalar> alpha,
       std::optional<c10::string_view> unary_attr,
@@ -76,7 +76,7 @@ class QConvoneDNN final {
       at::Tensor act_zero_point,
       at::Tensor weight, // contains quantized values but not QTensor
       at::Tensor weight_scales,
-      at::Tensor weight_zero_points,      
+      at::Tensor weight_zero_points,
       at::Tensor accum, // contains quantized values but not QTensor
       std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
@@ -87,7 +87,7 @@ class QConvoneDNN final {
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
-      int64_t accum_zero_point,      
+      int64_t accum_zero_point,
       c10::string_view binary_attr,
       std::optional<at::Scalar> alpha,
       std::optional<c10::string_view> unary_attr,

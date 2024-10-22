@@ -215,7 +215,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
     int64_t output_zero_point,
     const int32_t* output_dtype,
     double accum_scale,
-    int64_t accum_zero_point,    
+    int64_t accum_zero_point,
     const char* binary_attr,
     double* alpha,
     const char** unary_attr,

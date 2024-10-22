@@ -681,7 +681,7 @@ def _register_quantized_conv_binary_lowering(
             o_zero_point,
             output_dtype,
             accum_scale,
-            accum_zp,            
+            accum_zp,
             binary_unary_attr.binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,

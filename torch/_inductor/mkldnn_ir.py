@@ -179,7 +179,7 @@ def _prepare_convolution_fusion_create(
 
     if other is not None:
         other = cls.require_stride_order(other, req_stride_order)
-        inputs.append(other)
+        inputs += [other]
 
     kernel_layout = FixedLayout(
         x.get_device(),
@@ -195,7 +195,7 @@ def _prepare_convolution_fusion_create(
         inputs.append(bias)
     else:
         constant_args.insert(0, bias)
-    return inputs, constant_args, kernel_layout, req_stride_order
+    return inputs, constant_args, kernel_layout, req_stride_order, other
 
 
 def _prepare_linear_fusion_create(
@@ -317,7 +317,13 @@ class ConvolutionUnary(ExternKernelAlloc):
         scalars: Optional[List[Any]],
         algorithm,
     ):
-        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         constant_args = constant_args + [
@@ -392,6 +398,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             constant_args,
             kernel_layout,
             req_stride_order,
+            _,
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
@@ -481,6 +488,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args,
             _,
             req_stride_order,
+            _,
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
@@ -557,6 +565,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             kernel_layout,
+            _,
             _,
         ) = _prepare_convolution_fusion_create(
             cls,
@@ -657,7 +666,13 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     ):
         transposed = False
         output_padding = None
-        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             qx,
             qw,
@@ -767,14 +782,12 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: float,
-        x_zero_point: int,
-        qaccum: "TensorBox",
-        accum_scale,
-        accum_zero_point,
+        x_scale: "TensorBox",
+        x_zero_point: "TensorBox",
         qw: "TensorBox",  # packed_weight
         w_scale,
         w_zero_point,
+        qaccum: "TensorBox",
         bias: "TensorBox",
         stride: List[int],
         padding: List[int],
@@ -783,6 +796,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         output_scale: "TensorBox",
         output_zero_point: "TensorBox",
         output_dtype,
+        accum_scale,
+        accum_zero_point,
         binary_attr,
         alpha,
         unary_attr,
@@ -796,6 +811,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             kernel_layout,
             req_stride_order,
+            qaccum,
         ) = _prepare_convolution_fusion_create(
             cls,
             qx,
@@ -822,7 +838,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             output_zero_point,
             output_dtype,
             accum_scale,
-            accum_zero_point,            
+            accum_zero_point,
             binary_attr,
             alpha,
             unary_attr,
