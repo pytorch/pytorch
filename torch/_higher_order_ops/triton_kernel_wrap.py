@@ -1108,7 +1108,6 @@ class TritonHOPifier:
                 self.raise_unsupported("Grid can have at most rank 3")
 
         assert len(grids) != 0
-
         if isinstance(variable.kernel, JITFunction):
             constexprs = variable.kernel.constexprs
         else:
@@ -1131,7 +1130,6 @@ class TritonHOPifier:
                     combined_args_raw[arg_name] = variable.specialize_symbolic(
                         combined_args_raw[arg_name]
                     )
-
         return self.call_HOP(variable, grids, combined_args_raw, tx)
 
 
