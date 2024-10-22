@@ -835,9 +835,10 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(details3),
             )
 
-    def test_string_interning(self):
+    def test_stable_strings(self):
         """
-        Test that string interning doesn't affect the pickle dump.
+        Test that objects containing identical strings pickle the same
+        even if they are not the same id.
         """
         s1 = "string"
         s2 = "strin"
