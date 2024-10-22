@@ -332,7 +332,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         args.insert(
             0, f"convert_arrayref_tensor_to_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
-        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
