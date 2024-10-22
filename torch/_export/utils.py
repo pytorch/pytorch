@@ -25,6 +25,8 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
@@ -533,6 +535,35 @@ def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
+def apply_runtime_assertion_pass(gm, graph_signature):
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
+
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            shape_env = _get_shape_env_from_gm(gm)
+            if shape_env:
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+    # update output specs
+    gm.recompile()
+    graph_signature.user_outputs = _graph_output_names(gm)
+    return gm, graph_signature
+
+
 def nodes_first(
     nodes: List[torch.fx.Node], node_call_back=None
 ) -> Optional[torch.fx.Node]:
@@ -568,6 +599,15 @@ def node_replace_(old_node: torch.fx.Node, new_node: torch.fx.Node) -> None:
     old_node.replace_all_uses_with(new_node)
     old_node.users.clear()
     old_node.graph.erase_node(old_node)
+
+
+def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) -> None:
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
 
 def node_inline_(call_mod_node: torch.fx.Node) -> None:

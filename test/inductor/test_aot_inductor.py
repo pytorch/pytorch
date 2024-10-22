@@ -166,14 +166,7 @@ def code_check_count(
     target_str: str,
     target_count: int,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
-    ):
-        so_path = torch._export.aot_compile(model, example_inputs)
-
+    so_path = torch._export.aot_compile(model, example_inputs)
     with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
         src_code = cpp.read()
         FileCheck().check_count(
@@ -197,12 +190,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        model = Model()
-        self.check_model(model, example_inputs)
-        if self.use_minimal_arrayref_interface:
-            self.code_check_count(
-                model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
-            )
+        self.check_model(Model(), example_inputs)
 
     def test_small_constant(self):
         class Model(torch.nn.Module):
@@ -1266,6 +1254,30 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             CondModels.WithNonTensorPredicate(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_cond_symint_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
+        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        inputs = (input1, input2)
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        self.check_model_with_multiple_inputs(
+            M(),
             inputs,
             dynamic_shapes=dynamic_shapes,
         )
@@ -3944,7 +3956,6 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     device = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
     allow_stack_allocation = True
     use_minimal_arrayref_interface = True
 

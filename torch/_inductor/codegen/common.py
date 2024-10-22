@@ -342,14 +342,7 @@ def init_backend_registration():
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
-    cpp_wrapper_codegen = (
-        CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu
-    )
-    if get_scheduling_for_device("cpu") is None or (
-        # If config.allow_stack_allocation has changed, we need to re-register the backend
-        device_codegens["cpu"].cpp_wrapper_codegen is not None
-        and device_codegens["cpu"].cpp_wrapper_codegen != cpp_wrapper_codegen
-    ):
+    if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
             "cpp": CppScheduling,
             "halide": HalideScheduling,
@@ -359,7 +352,7 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            cpp_wrapper_codegen,
+            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -390,7 +383,7 @@ def init_backend_registration():
             device_scheduling = _get_custom_mod_func("Scheduling")
             wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
             cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
-            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:  # type: ignore[truthy-function]
+            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
                     device_scheduling,

@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+import threading
+from dataclasses import dataclass
+from logging import Logger
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -38,18 +41,95 @@ compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
 
-def snapshot_verbose_logging_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled(
-        "compiled_autograd_verbose"
-    )
+@dataclass
+class CompiledAutogradTLS:
+    next_ctx_id: int = 0
+    in_compiled_autograd_region: bool = False
+    compiler: Optional["AutogradCompilerInstance"] = None
+    vlogger: Optional[Logger] = None
 
 
-def cpp_verbose_log_fn(msg: str) -> None:
-    verbose_log.debug(msg)
+class TLSWrapper:
+    tls_key = "compiled_autograd_state"
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def _get_tls(self) -> CompiledAutogradTLS:
+        if hasattr(self._local, self.tls_key):
+            # first look in python
+            state = getattr(self._local, self.tls_key)
+        if torch._C._is_key_in_tls(self.tls_key):
+            # then look in cpp
+            state = torch._C._get_obj_in_tls(self.tls_key)
+        else:
+            # init new thread created outside of autograd
+            # TODO: what if context manager wrapped outside of thread?
+            setattr(self._local, self.tls_key, CompiledAutogradTLS())
+            state = getattr(self._local, self.tls_key)
+            torch._C._stash_obj_in_tls(self.tls_key, state)
+        return state
+
+    # queries on the object stored in TLS
+    def get(self, name):
+        return getattr(self._get_tls(), name)
+
+    def set_tls(self, **kwargs) -> Callable[[], None]:
+        priors: Dict[str, Any] = {}
+        for k, v in kwargs.items():
+            state = self._get_tls()
+            priors[k] = getattr(state, k)
+            setattr(state, k, v)
+
+        torch._C._dynamo.compiled_autograd.notify_autograd_engine()
+
+        def revert():
+            self.set_tls(**priors)
+
+        return revert
+
+    def enter_ctx(self) -> Callable[[], None]:
+        state = self._get_tls()
+        state.next_ctx_id += 1
+        id = state.next_ctx_id
+
+        def exit():
+            assert (
+                state is self._get_tls()
+            ), "Runtime must begin and end on the same thread"
+            assert state.next_ctx_id == id, (
+                "Error nesting compiled autograd context managers: "
+                "inner context managers must have shorter lifetime than the outer context manager"
+            )
+            state.next_ctx_id -= 1
+
+        return exit
+
+    def enter_compiled_region(self) -> Callable[[], None]:
+        state = self._get_tls()
+        prior = state.in_compiled_autograd_region
+        state.in_compiled_autograd_region = True
+        assert prior is False, "Nested compiled autograd regions are not supported"
+
+        def exit():
+            assert (
+                state is self._get_tls()
+            ), "Runtime must begin and end on the same thread"
+            assert state.in_compiled_autograd_region is True
+            state.in_compiled_autograd_region = prior
+
+        return exit
 
 
-def snapshot_cudagraph_enabled():
-    return torch._inductor.config.triton.cudagraphs
+local = TLSWrapper()
+
+
+def enabled() -> bool:
+    return local.get("compiler") is not None
+
+
+def in_compiled_autograd_region() -> bool:
+    return local.get("in_compiled_autograd_region")
 
 
 def maybe_clone(x):
@@ -311,7 +391,7 @@ class AutogradCompilerInstance:
         self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
-        if snapshot_cudagraph_enabled():
+        if torch._inductor.config.triton.cudagraphs:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
@@ -333,16 +413,15 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
-            global in_compiled_autograd_region
             try:
-                in_compiled_autograd_region = True
+                exit_compiled_region = local.enter_compiled_region()
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with disable():
                     return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
-                in_compiled_autograd_region = False
+                exit_compiled_region()
 
         return runtime_wrapper, self.compiler_fn(graph)
 
@@ -514,14 +593,8 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
-# state of the autograd engine dispatch, kept in sync by enable/disable context managers
-compiled_autograd_enabled = False
-
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
-
-# global flag to check if we are processing graphs produced from a compiled autograd graph
-in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
@@ -542,39 +615,42 @@ def enable(compiler_fn):
         # we need to lazily import it, because of circular dependencies
         import torch._inductor.cudagraph_trees
 
-        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-            functools.partial(AutogradCompilerInstance, compiler_fn)
+        exit_ctx = local.enter_ctx()
+        revert_tls = local.set_tls(
+            compiler=functools.partial(AutogradCompilerInstance, compiler_fn),
+            vlogger=verbose_log
+            if torch._logging._internal.log_state.is_artifact_enabled(
+                "compiled_autograd_verbose"
+            )
+            else None,
         )
-        if snapshot_verbose_logging_enabled():
-            torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-        global compiled_autograd_enabled
-        compiled_autograd_enabled = True
         try:
             with torch.autograd.set_multithreading_enabled(False):
                 yield
         finally:
-            if not prior:
-                compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+            revert_tls()
+            exit_ctx()
 
 
 @contextlib.contextmanager
 def disable():
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = False
+    exit_ctx = local.enter_ctx()
+    revert_tls = local.set_tls(
+        compiler=None,
+        vlogger=None,
+    )
     try:
         yield
     finally:
-        if prior:
-            compiled_autograd_enabled = True
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        revert_tls()
+        exit_ctx()
 
 
 # return to starting state of a new process
 def reset() -> None:
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = False
-    assert not in_compiled_autograd_region
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+    assert local.get("next_ctx_id") == 0
+    assert local.get("in_compiled_autograd_region") is False
+    local.set_tls(
+        compiler=None,
+        vlogger=None,
+    )

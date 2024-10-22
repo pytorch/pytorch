@@ -69,13 +69,17 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
+// see https://github.com/pytorch/pytorch/pull/34845
+static void throw_python_error() {
+  python_error err;
+  err.persist();
+  // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
+  throw err;
+}
+
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
-    // see https://github.com/pytorch/pytorch/pull/34845
-    python_error err;
-    err.persist();
-    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
-    throw err;
+    throw_python_error();
   }
   return pyresult;
 }
@@ -84,20 +88,56 @@ static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
 }
-
-// snapshot of python verbose logging toggle
-static PyObject* python_verbose_logger = nullptr;
-struct VerboseLogger {
-  static std::optional<VerboseLogger> maybe_create() {
-    if (python_verbose_logger == nullptr) {
-      return std::nullopt;
-    }
-    return VerboseLogger();
+struct PythonLogger {
+  PythonLogger() = delete;
+  explicit PythonLogger(PyObject* logger) : logger_(logger) {
+    TORCH_INTERNAL_ASSERT(logger_ != nullptr);
   }
 
-  void verbose_log_fn(std::string_view msg) const {
-    TORCH_CHECK(python_verbose_logger != nullptr);
-    check(PyObject_CallFunction(python_verbose_logger, "s", msg.data()));
+  enum Level : unsigned int {
+    DEBUG = 0,
+    INFO = 1,
+    WARNING = 2,
+    ERROR = 3,
+    CRITICAL = 4,
+    COUNT // Keep this as the last enum
+  };
+
+  // must be called while GIL is held
+  void log(Level level, std::string_view msg) const {
+    THPObjectPtr pymethod(PyUnicode_FromString(levelNames_[level].data()));
+    TORCH_INTERNAL_ASSERT(pymethod != nullptr);
+    THPObjectPtr pyfunc(PyObject_GetAttr(logger_, pymethod.get()));
+    if (pyfunc == nullptr) {
+      throw_python_error();
+    }
+    PyObject* result = PyObject_CallFunction(pyfunc.get(), "s", msg.data());
+    if (result == nullptr) {
+      throw_python_error();
+    }
+  }
+
+ private:
+  static constexpr std::array<std::string_view, COUNT> levelNames_ = {
+      "debug", // Level::DEBUG
+      "info", // Level::INFO
+      "warning", // Level::WARNING
+      "error", // Level::ERROR
+      "critical" // Level::CRITICAL
+  };
+
+  // Note: logger_ must stay valid for the lifetime of this object
+  PyObject* logger_;
+};
+
+struct VerboseLogger : public PythonLogger {
+  VerboseLogger(PyObject* vlogger) : PythonLogger(vlogger) {}
+
+  static std::optional<VerboseLogger> maybe_create(PyObject* vlogger) {
+    if (vlogger == Py_None) {
+      return std::nullopt;
+    }
+    return VerboseLogger(vlogger);
   }
 
   void log_node_check(
@@ -137,7 +177,7 @@ struct VerboseLogger {
       }
     }
     oss << "]";
-    verbose_log_fn(oss.str());
+    log(PythonLogger::DEBUG, oss.str());
   }
 
   void log_dynamic_shapes_check(size_t size_idx) const {
@@ -149,10 +189,10 @@ struct VerboseLogger {
     TORCH_CHECK(it != cumulative_sizes_per_node.end());
     size_t start_idx =
         it == cumulative_sizes_per_node.begin() ? 0 : std::prev(it)->first;
-    verbose_log_fn(
+    log(PythonLogger::DEBUG,
         "Cache miss due to changed shapes: marking size idx " +
-        std::to_string(size_idx - start_idx) + " of " + it->second +
-        " as dynamic");
+            std::to_string(size_idx - start_idx) + " of " + it->second +
+            " as dynamic");
   }
 
   // track which size index belongs to which node
@@ -324,8 +364,22 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
   }
 };
 
-static PyObject* the_autograd_compiler = nullptr;
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
+/* static */ PyTLSWrapper PyTLSWrapper::create() {
+  TORCH_INTERNAL_ASSERT(
+      at::impl::ThreadLocalPythonObjects::contains("compiled_autograd_state"));
+  PyObject* compiled_autograd_state =
+      check(at::impl::ThreadLocalPythonObjects::get("compiled_autograd_state")
+                ->ptr(getPyInterpreter()));
+  return PyTLSWrapper(compiled_autograd_state);
+}
+
+// Refer to fields in python class CompiledAutogradTLS
+// May return Py_None
+PyObject* PyTLSWrapper::get(std::string_view key) const {
+  return check(PyObject_GetAttrString(state, key.data()));
+}
+
+static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
@@ -343,28 +397,11 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
-  HANDLE_TH_ERRORS;
-  PyObject* logger = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &logger)) {
-    Py_RETURN_FALSE;
-  }
-
-  if (logger == Py_None) {
-    python_verbose_logger = nullptr;
-  } else {
-    python_verbose_logger = logger;
-  }
-  Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS;
-}
-
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
-    {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
+    {"notify_autograd_engine", notify_autograd_engine, METH_NOARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
-    {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -524,7 +561,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(PyTLSWrapper::create());
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -539,7 +576,8 @@ CacheNode* _compiled_autograd_impl(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   int i = 0;
-  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
+  std::optional<VerboseLogger> vlogger =
+      VerboseLogger::maybe_create(compiler_call.state.get("vlogger"));
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -598,6 +636,8 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
     // cache miss, need to capture FX graph
+    PyObject* the_autograd_compiler = compiler_call.state.get("compiler");
+    TORCH_INTERNAL_ASSERT(the_autograd_compiler != Py_None);
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
@@ -795,28 +835,16 @@ variable_list compiled_autograd(
   return outputs;
 }
 
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+static PyObject* notify_autograd_engine(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return nullptr;
-  }
-
-  PyObject* prior = the_autograd_compiler;
-  if (obj == Py_None) { // disable
-    the_autograd_compiler = nullptr; // decref not needed due to `prior`
+  PyTLSWrapper state = PyTLSWrapper::create();
+  PyObject* compiler = state.get("compiler");
+  if (compiler == Py_None) { // disable
     Engine::set_compiled_autograd(nullptr);
   } else { // enable
-    Py_INCREF(obj);
-    the_autograd_compiler = obj;
     Engine::set_compiled_autograd(&compiled_autograd);
   }
-
-  if (prior == nullptr) {
-    Py_RETURN_NONE;
-  } else {
-    return prior;
-  }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 

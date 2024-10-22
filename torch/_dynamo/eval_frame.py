@@ -58,7 +58,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
+from torch.export.dynamic_shapes import (
+    _combine_args,
+    _process_dynamic_shapes,
+    _RelaxedConstraint,
+)
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -1658,6 +1662,7 @@ def export(
                     for c in (constraints or ())
                     if (
                         c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
                         and c.constraint_range.vr.lower != c.constraint_range.vr.upper
                     )
                 }

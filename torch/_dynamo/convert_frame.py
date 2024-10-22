@@ -1121,6 +1121,7 @@ def _compile(
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
                 json.dumps(config_dict),
+                True,  # is_forward
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

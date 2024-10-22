@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,6 +26,7 @@ from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
     _process_dynamic_shapes,
+    _RelaxedConstraint,
     _tree_map_with_path,
 )
 from torch.export.graph_signature import CustomObjArgument
@@ -115,9 +116,11 @@ def fakify(
     assert mode.shape_env is not None
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
-            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
+            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
@@ -209,6 +212,7 @@ def make_fake_inputs(
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
+        relaxed_sources: Set[Source] = set()
         for constraint in constraints:
             torch.export.dynamic_shapes._process_equalities(
                 constraint,
@@ -218,12 +222,14 @@ def make_fake_inputs(
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
+                relaxed_sources,
             )
 
         equalities_inputs = EqualityConstraint(
             source_pairs=source_pairs,
             derived_equalities=derived_equalities,
             phantom_symbols=list(phantom_symbols.values()),
+            relaxed_sources=relaxed_sources,
             warn_only=False,
         )
         return (

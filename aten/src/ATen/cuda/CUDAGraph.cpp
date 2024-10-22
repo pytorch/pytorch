@@ -19,8 +19,7 @@ constexpr int kSynchronizeBusyWaitMillis = 10;
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  auto new_pool = c10::cuda::MemPool();
-  return new_pool.id();
+  return c10::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -115,8 +114,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   } else {
     // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    auto mempool = c10::cuda::MemPool({}, false);
-    mempool_id_ = mempool.id();
+    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 

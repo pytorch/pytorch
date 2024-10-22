@@ -1277,19 +1277,36 @@ def load(
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
 
+    true_values = ["1", "y", "yes", "true"]
+    # Add ability to force safe only or non-safe weight loads via environment variables
+    force_weights_only_load = (
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+    force_no_weights_only_load = (
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+
+    if force_weights_only_load and force_no_weights_only_load:
+        raise RuntimeError(
+            "Only one of `TORCH_FORCE_WEIGHTS_ONLY_LOAD` or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` "
+            "should be set, but both were set."
+        )
+    elif force_weights_only_load:
+        weights_only = True
+    elif force_no_weights_only_load:
+        if weights_only is None:
+            warnings.warn(
+                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
+                "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
+                UserWarning,
+                stacklevel=2,
+            )
+            weights_only = False
+
     if weights_only is None:
         weights_only, warn_weights_only = False, True
     else:
         warn_weights_only = False
-
-    # Add ability to force safe only weight loads via environment variable
-    if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
-        "1",
-        "y",
-        "yes",
-        "true",
-    ]:
-        weights_only = True
 
     if weights_only:
         if pickle_module is not None:

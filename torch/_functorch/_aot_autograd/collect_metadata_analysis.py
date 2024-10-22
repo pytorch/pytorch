@@ -704,7 +704,7 @@ from a multi-output view call"
         traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
             passed_indices = set(static_input_indices)
             static_input_indices = [
                 i

@@ -313,7 +313,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
     ):
-        if not compiled_autograd.compiled_autograd_enabled:
+        if not compiled_autograd.enabled():
             unimplemented("module-level backwards hooks require compiled autograd")
 
         def _in_graph_bw_hooks(bw_state: BackwardState):

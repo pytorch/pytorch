@@ -114,6 +114,7 @@ class TestFullyShardCompile(FSDPTest):
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
+    @skipIfRocm
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -151,6 +152,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
+    @skipIfRocm
     def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
@@ -254,7 +256,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"Unexpected number of `inductor.resize_storage_bytes_` ops (expected {resize_count}, got {actual_resize_count}) in graph: {graph}",  # noqa: B950
             )
 
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region():
             _check_count(fwd_copy_count, fwd_resize_count)  # fwd graph
         else:
             _check_count(bwd_copy_count, bwd_resize_count)  # bwd graph

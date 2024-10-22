@@ -33,9 +33,9 @@ else:
         import torch._dynamo.compiled_autograd as ca
 
         _compiled_autograd_enabled = (
-            ca.compiled_autograd_enabled
+            ca.enabled()
             or ca.compiled_autograd_enabled_force_eager
-            or ca.in_compiled_autograd_region
+            or ca.in_compiled_autograd_region()
         )
 
     def compiled_autograd_enabled():

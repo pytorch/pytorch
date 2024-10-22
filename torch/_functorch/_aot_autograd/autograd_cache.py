@@ -176,7 +176,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
