@@ -5,6 +5,7 @@ from typing import Dict, Iterable, Iterator, Union
 
 import torch
 import torch.distributed as dist
+from torch._utils import _get_device_module
 
 # The two imports below are not always available depending on the
 # USE_DISTRIBUTED compile flag. Make sure they raise import error
@@ -40,10 +41,9 @@ def average_parameters(
     flat_params = torch.cat([p.data.reshape(-1) for p in params_it1])
     flat_params /= dist.get_world_size(group_to_use)
     # Make sure the allreduce will not conflict with any other ongoing process group.
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    elif torch.xpu.is_available():
-        torch.xpu.synchronize()
+    params_device_type = flat_params.device.type
+    if params_device_type in ["cuda", "xpu"]:
+        _get_device_module(params_device_type).synchronize()
     dist.all_reduce(flat_params, group=group_to_use)
 
     offset = 0
