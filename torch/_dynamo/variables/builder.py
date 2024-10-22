@@ -3,6 +3,7 @@
 import abc
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -106,6 +107,7 @@ from ..utils import (
     istype,
     odict_values,
     proxy_args_kwargs,
+    range_iterator,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -153,6 +155,7 @@ from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -448,6 +451,7 @@ class VariableBuilder:
                 cls.wrap_listlike,
             ),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
@@ -1311,6 +1315,12 @@ class VariableBuilder:
         )
 
         return self.set_source_and_track_mutable(value, result)
+
+    def wrap_range_iterator(self, value: range_iterator):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        # Get all the values from the range iterator
+        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        return ListIteratorVariable(items, mutable_local=MutableLocal())
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
