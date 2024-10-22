@@ -222,7 +222,7 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (C10_UNUSED const auto i : c10::irange(options.num_layers())) {
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -288,7 +288,7 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 
 void TransformerDecoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (C10_UNUSED const auto i : c10::irange(options.num_layers())) {
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }
 
