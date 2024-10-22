@@ -264,7 +264,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
+#if defined(USE_ROCM)
+  // When hipBLASLt is not supported on the architecture,
+  // disable_addmm_cuda_lt will always be to set to true
+  static bool disable_addmm_cuda_lt =
+    !isSupportedHipLtROCmArch(self.device().index()) || getDisableAddmmCudaLt();
+#else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
+#endif
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
