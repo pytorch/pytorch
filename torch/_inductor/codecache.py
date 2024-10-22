@@ -510,7 +510,9 @@ def _reduce_fake_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetada
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+def _reduce_tensor(
+    t: Tensor,
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
