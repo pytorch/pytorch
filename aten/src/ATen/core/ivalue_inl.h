@@ -863,6 +863,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   Future& operator=(const Future&) = delete;
   Future& operator=(Future&&) = delete;
 
+  // Destructor
+  // Explicitly destroy events under device guard, otherwise it can lead to
+  // extra context being created on device 0.  Reason: python garbage collector
+  // calls this destructor, but python GC does not have a device context, so a
+  // "default" one (usually on device 0) could be created when we go down the
+  // line of event destroy.
+  ~Future() override {
+    while (!events_.empty()) {
+      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
+      events_.pop_back();
+    }
+  }
+
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -1758,8 +1771,8 @@ struct _fake_type {};
 template <class Elem>
 // TODO this is deprecated but we don't throw a warning because a lot of ops in
 // native_functions.yaml still return std::vector.
-// C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow
-// and deprecated. Please use torch::List<T> instead.")
+// [[deprecated("IValues based on std::vector<T> are potentially slow
+// and deprecated. Please use torch::List<T> instead.")]]
 std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
@@ -1895,8 +1908,8 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-C10_DEPRECATED_MESSAGE(
-    "IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
+[[deprecated(
+    "IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
