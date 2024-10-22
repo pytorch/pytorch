@@ -530,8 +530,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t = torch.rand(10, 10, device=device)
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
-        new_pg1 = c10d.new_group([0, 1], use_split=True)
-        new_pg2 = c10d.new_group([0, 1], use_split=True)
+        new_pg1 = c10d.new_group([0, 1])
+        new_pg2 = c10d.new_group([0, 1])
         t1 = torch.rand(10, 10, device=device)
         t2 = torch.rand(10, 10, device=device)
         new_pg1.allreduce(t1).wait()
@@ -554,8 +554,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
         # PG1 is an PG without comms initialized, since we don't call collective on it
-        new_pg1 = c10d.new_group([0, 1], use_split=True)
-        new_pg2 = c10d.new_group([0, 1], use_split=True)
+        new_pg1 = c10d.new_group([0, 1])
+        new_pg2 = c10d.new_group([0, 1])
         t2 = torch.rand(10, 10, device=device)
 
         new_pg2.allreduce(t2).wait()
@@ -727,7 +727,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # split doesn't happen unless the original process group has lazily
             # created communicators, so first verify we haven't split even when
             # making the new group and running an operation on the original pg.
-            ng = c10d.new_group(use_split=True)
+            ng = c10d.new_group()
             tensor = torch.tensor([self.rank]).cuda(device)
             pg.broadcast(tensor, 0)
             self.assertEqual(backend.comm_split_count(), 0)
@@ -751,7 +751,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         tensor = torch.full((1,), self.rank).cuda(device)
         original_tensor = tensor.clone()
-        ng = c10d.new_group([0], use_split=True)
+        ng = c10d.new_group([0])
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
@@ -871,7 +871,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Run an allreduce, comm should have already started initilizaing,
         # but allreduce is issued to CUDA STREAM only after the initialization is a success
         pg.allreduce(reduce_tensor).wait()
-        new_pg = c10d.new_group(use_split=True)
+        new_pg = c10d.new_group()
         # new pg's comm is initialized eagerly
         self.assertEqual(backend.comm_split_count(), 1)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)

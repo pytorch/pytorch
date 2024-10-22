@@ -1733,7 +1733,7 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
-    use_split=False,
+    use_split=True,
 ):
     """
     Create a new distributed process group.
@@ -4732,7 +4732,7 @@ def new_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=False,
+    use_split=True,
 ):
     """
     Create a new distributed group.
@@ -4823,7 +4823,7 @@ def _new_group_with_tag(
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=False,
+    use_split=True,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
