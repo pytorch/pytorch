@@ -336,7 +336,7 @@ inline PackedSequence pack_sequence(
     bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
   for (const auto i : c10::irange(sequences.size())) {
-    lengths[i] = sequences[i].size(0);
+    lengths[static_cast<int64_t>(i)] = sequences[i].size(0);
   }
   return pack_padded_sequence(
       at::pad_sequence(sequences),
