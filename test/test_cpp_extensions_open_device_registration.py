@@ -540,7 +540,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         """
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
-        default_protocol = torch.serialization.DEFAULT_PROTOCOL
 
         # Legacy data saved with _rebuild_device_tensor_from_numpy on f80ed0b8 via
 

@@ -3348,6 +3348,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
@@ -3363,6 +3364,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
@@ -3380,6 +3382,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm3(self):
         def fn(a, b):
