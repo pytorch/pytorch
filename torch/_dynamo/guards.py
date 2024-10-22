@@ -591,9 +591,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[
-            str, torch._C._dynamo.guards.GuardManager
-        ] = {}
+        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
+            {}
+        )
 
         self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
@@ -662,7 +662,8 @@ class GuardBuilder(GuardBuilderBase):
         # advantage of __dict__ versions to speed up guard checks.
         if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
             warnings.warn(
-                "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+."
+                "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
+                RuntimeWarning,
             )
             return None
         return example_value
