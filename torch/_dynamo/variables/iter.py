@@ -560,9 +560,4 @@ class FilterVariable(IteratorVariable):
         )
         codegen(self.fn)
         self.reconstruct_items(codegen)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_TUPLE", arg=2),
-                create_instruction("CALL_FUNCTION_EX", arg=0),
-            ]
-        )
+        codegen.extend_output(create_call_function(2, False))
