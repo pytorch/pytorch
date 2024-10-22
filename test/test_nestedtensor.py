@@ -1053,6 +1053,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
+        y.sum().backward()
 
         @torch._dynamo.disable
         def check(inputs, y):
