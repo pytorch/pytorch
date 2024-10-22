@@ -253,6 +253,11 @@ def set_stance(stance: str, force_backend=None):
             # will also not be compiled
             foo(...)
 
+        torch.compiler.set_stance("force_eager")
+        # will also not be compiled
+        foo(...)
+        torch.compiler.set_stance("default")
+
         # will be compiled
         foo(...)
 
