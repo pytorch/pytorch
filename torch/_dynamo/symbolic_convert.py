@@ -3337,12 +3337,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     and id(maybe_cell.original_cell)
                     not in self.output.root_tx.mutated_closure_cell_ids
                 ):
-                    # Why is the source name here unique?
-                    # mutated_closure_cell_ids is a per-frame
-                    # concept, and sources identify, e.g., particular
-                    # locals from the frame.  If you had two locals,
-                    # they'll get different source names, and therefore
-                    # differ here.
                     self.output.root_tx.mutated_closure_cell_ids.add(
                         id(maybe_cell.original_cell)
                     )
