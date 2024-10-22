@@ -1473,14 +1473,19 @@ class TritonKernel(SIMDKernel):
         Heuristic to set self.persistent_reduction and add guards
         if needed.
         """
-        if (
-            not (self.inside_reduction and config.triton.persistent_reductions)
-            or self.cooperative_reduction
-        ):
+        if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
+
+        if self.cooperative_reduction:
+            # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
+            xnumel, _ = self.numels
+            try:
+                threshold *= 32 // V.graph.sizevars.size_hint(xnumel)
+            except ValueError:
+                pass  # unbacked symint
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
@@ -2231,10 +2236,16 @@ class TritonKernel(SIMDKernel):
                     self.compute, result_var, masked_value, accumulator_index
                 )
             elif reduction_type == "welford_reduce":
-                # For persistent reductions, don't bother with
-                # welford's algorithm since it uses more registers, and
-                # taking two reductions doesn't increase memory usage.
-                result_var = self.welford_reduce_fallback(dtype, value)
+                if self.cooperative_reduction:
+                    # cooperative reductions require full welford for correctness
+                    result_var = self.welford_reduce(
+                        result_var, reduction_type, value, where_cond, acc_type
+                    )
+                else:
+                    # For persistent reductions, don't bother with
+                    # welford's algorithm since it uses more registers, and
+                    # taking two reductions doesn't increase memory usage.
+                    result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
@@ -2279,59 +2290,8 @@ class TritonKernel(SIMDKernel):
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
             elif is_welford_reduction(reduction_type):
-                accumulator = f"{result_var}_mean"
-                accumulator_m2 = f"{result_var}_m2"
-                accumulator_weight = f"{result_var}_weight"
-                self.body.writeline(
-                    f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-                self.body.writeline(
-                    f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-                self.body.writeline(
-                    f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-
-                if reduction_type == "welford_combine":
-                    mean, m2, weight = value
-                    self.compute.splice(
-                        f"""\
-                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
-                        {accumulator}, {accumulator_m2}, {accumulator_weight},
-                        {mean}, {m2}, {weight}
-                    )
-                    """
-                    )
-                else:
-                    assert reduction_type == "welford_reduce"
-                    self.compute.splice(
-                        f"""\
-                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
-                    )
-                    """
-                    )
-
-                self.compute.splice(
-                    f"""\
-                {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
-                {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
-                {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
-                """
-                )
-
-                result_mean = result_var
-                result_m2 = self.cse.newvar()
-                result_weight = self.cse.newvar()
-                result_var = self.welford_reduce_final_reduction(
-                    self.post_loop_combine,
-                    result_mean,
-                    result_m2,
-                    result_weight,
-                    accumulator,
-                    accumulator_m2,
-                    accumulator_weight,
-                    dim,
+                result_var = self.welford_reduce(
+                    result_var, reduction_type, value, where_cond, acc_type
                 )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
@@ -2416,6 +2376,61 @@ class TritonKernel(SIMDKernel):
             self.outside_loop_vars.add(result_var)
 
         return result_var
+
+    def welford_reduce(self, result_var, reduction_type, value, where_cond, acc_type):
+        """Helper to codegen a welford reduction"""
+        dim = self.triton_tensor_ndim() - 1
+        accumulator = f"{result_var}_mean"
+        accumulator_m2 = f"{result_var}_m2"
+        accumulator_weight = f"{result_var}_weight"
+        self.body.writeline(
+            f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        self.body.writeline(
+            f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        self.body.writeline(
+            f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        if reduction_type == "welford_combine":
+            mean, m2, weight = value
+            self.compute.splice(
+                f"""\
+                {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
+                    {accumulator}, {accumulator_m2}, {accumulator_weight},
+                    {mean}, {m2}, {weight}
+                )
+                """
+            )
+        else:
+            assert reduction_type == "welford_reduce"
+            self.compute.splice(
+                f"""\
+                {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
+                    {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
+                )
+                """
+            )
+        self.compute.splice(
+            f"""\
+            {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
+            {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
+            {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
+            """
+        )
+        result_mean = result_var
+        result_m2 = self.cse.newvar()
+        result_weight = self.cse.newvar()
+        return self.welford_reduce_final_reduction(
+            self.post_loop_combine,
+            result_mean,
+            result_m2,
+            result_weight,
+            accumulator,
+            accumulator_m2,
+            accumulator_weight,
+            dim,
+        )
 
     def welford_reduce_final_reduction(
         self,
