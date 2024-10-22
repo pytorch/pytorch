@@ -1150,7 +1150,9 @@ class SymNodeVariable(VariableTracker):
         if self._tensor_var is None:
             self._tensor_var = VariableTracker.build(
                 tx, torch.scalar_tensor
-            ).call_function(tx, [self], {})
+            ).call_function(
+                tx, [self], {"dtype": VariableTracker.build(tx, torch.float64)}
+            )
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
