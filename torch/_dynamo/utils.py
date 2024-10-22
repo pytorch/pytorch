@@ -356,6 +356,7 @@ def dynamo_timed(
                                 fail_reason,
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
+                                False,  # is_forward
                             )
                             record_compilation_metrics(metrics)
 
@@ -800,6 +801,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
     dynamo_config: Optional[str]
+    is_forward: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -811,6 +813,7 @@ class BwdCompilationMetrics:
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    is_forward: Optional[bool]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -3048,7 +3051,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
