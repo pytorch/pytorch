@@ -33,7 +33,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
-    def test_exporter_supports_constant_complex(self):
+    def test_constant_complex(self):
         class MulModule(torch.nn.Module):
             def forward(self, x):
                 y = 2 + 3j
