@@ -1066,6 +1066,57 @@ graph():
 
         TS2EPConverter(foo_script, inp).convert()
 
+    def test_dim_auto_and_dim(self):
+        # test basic Dims
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        inputs = (torch.randn(4, 4), torch.randn(4, 4))
+        shapes = {
+            "x": (Dim.AUTO, Dim("d1", min=3)),
+            "y": (Dim("d0", max=8), Dim.DYNAMIC),
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        x, y = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        self.assertEqual((s0 := x.meta["val"].shape[0]), y.meta["val"].shape[0])
+        self.assertEqual((s1 := x.meta["val"].shape[1]), y.meta["val"].shape[1])
+        vr0 = ep.range_constraints[s0.node.expr]
+        vr1 = ep.range_constraints[s1.node.expr]
+        self.assertEqual([vr0.upper, vr1.lower], [8, 3])
+
+        # test derived Dims
+        class Bar(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[1::3] + z
+
+        inputs = (torch.randn(4), torch.randn(13), torch.randn(4))
+        dx = Dim("dx", min=2, max=10)
+        shapes = {
+            "x": (dx,),
+            "y": (3 * dx + 1,),
+            "z": (Dim.AUTO,),
+        }
+        ep = export(Bar(), inputs, dynamic_shapes=shapes)
+        x, y, z = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        self.assertEqual((s0 := x.meta["val"].shape[0]), z.meta["val"].shape[0])
+        expr = y.meta["val"].shape[0]
+        free_symbols = expr.node.expr.free_symbols
+        self.assertEqual(len(free_symbols), 1)
+        self.assertEqual(next(iter(free_symbols)), s0.node.expr)
+
+        # test specialization still complains
+        inputs = (torch.randn(4), torch.randn(4))
+        shapes = {
+            "x": (Dim.STATIC,),
+            "y": (Dim("dy"),),
+        }
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
+        ):
+            export(Foo(), inputs, dynamic_shapes=shapes)
+
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -2553,18 +2604,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
 
-        dynamic_shapes = {
-            "x": {"k": {"k": [(dim,), (AUTO,)]}}
-        }  # mixing AUTO and Dims is not well supported.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            re.escape(
-                "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
-                "and can easily lead to constraint violation errors or obscure errors in torch.export."
-            ),
-        ):
-            export(M(), inputs, dynamic_shapes=dynamic_shapes)
-
         class N(torch.nn.Module):
             def forward(self, x):
                 return x["k"]["k1"][0] + x["k"]["k2"][0]
@@ -2574,6 +2613,46 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
+
+    @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    def test_unbacked_bindings_for_divisible_u_symint(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    return torch.ops.mylib.foo(a, b)
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a[b.item()]
+
+            @torch.library.register_fake("mylib::foo")
+            def foo_fake_impl(a, b):
+                ctx = torch.library.get_ctx()
+                u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
+                return torch.empty(u, a.shape[1], dtype=a.dtype)
+
+            ep = export(
+                M(),
+                (torch.randn(100, 4), torch.tensor(10)),
+            )
+            foo = [node for node in ep.graph.nodes if node.name == "foo"][0]
+            unbacked_bindings = foo.meta["unbacked_bindings"]
+            self.assertEqual(len(unbacked_bindings), 1)  # check binding is {u: path}
+            u = next(iter(unbacked_bindings.keys()))
+            self.assertEqual(
+                type(u).__name__, "Symbol"
+            )  # check binding is symbol, not expr
+            path = unbacked_bindings[u]
+            self.assertEqual(len(path), 3)  # check path is [size, 0, DivideByKey(10)]
+            self.assertEqual(type(path[2]).__name__, "DivideByKey")
+            self.assertEqual(path[2].divisor, 10)
 
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
