@@ -426,7 +426,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
   BINARY_SCALAR_3(remainder, Tensor, Scalar, Scalar_Tensor);
-  BINARY_POINTWISE(rrelu_with_noise);
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
