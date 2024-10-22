@@ -505,7 +505,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
+#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+#else
+    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
+    // `split_color` is pybinded to Python, so we need to define it. So we use
+    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
+    int split_color{-2};
+#endif
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };
@@ -533,7 +540,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
-  C10_DEPRECATED ProcessGroupNCCL(
+  [[deprecated]] ProcessGroupNCCL(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
