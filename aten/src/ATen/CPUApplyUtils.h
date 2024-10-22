@@ -68,7 +68,7 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(
       Tensor& tensor,
-      C10_UNUSED bool sort_strides = false)
+      [[maybe_unused]] bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
