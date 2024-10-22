@@ -1989,7 +1989,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
         )
     )
 
-    torch._check_value(
+    torch._assert_async(
         all(index < coefs[0] * shape[0] for index in indices),
         lambda: f"'indices' must be in range {[0, coefs[0] * shape[0] - 1]}, but got {indices} instead.",
     )
