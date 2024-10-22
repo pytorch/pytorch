@@ -706,7 +706,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
       // Self is the input tensor we are creating view of
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
       newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-      for (const auto C10_UNUSED i : c10::irange(size.size())) {
+      for ([[maybe_unused]] const auto i : c10::irange(size.size())) {
         newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
       }
       if (needsScatter) {

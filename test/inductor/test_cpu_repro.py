@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     slowTest,
+    TEST_MKL,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -210,6 +211,24 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
+
+    @config.patch(freezing=True)
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_mkl_linear(self):
+        dtypes = [torch.float32]
+        options = itertools.product([[2, 3, 10]], [2], [True, False], dtypes)
+        for input_shape, out_dim, bias, dtype in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod.to(dtype),
+                    (v.to(dtype),),
+                )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -4339,6 +4358,27 @@ class CPUReproTests(TestCase):
             ):
                 check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
 
+    @config.patch("cpp.simdlen", 256)
+    @requires_vectorization
+    def test_avx2_bool_constant_pad_nd(self):
+        # NOTE: I tried using (0, 12, 12) and removing the cpp.simdlen=256 override, but
+        # that didn't repro the issue.
+        result = torch.testing.make_tensor((0, 6, 6), dtype=torch.bool, device=torch.device('cpu'))
+        def fn(arg):
+            return torch.constant_pad_nd(arg, (1, 1, 1, 1, 1, 1))
+        self.common(fn, (result,))
+
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+        self.common(fn, (result,))
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
