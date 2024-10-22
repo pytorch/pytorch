@@ -6362,6 +6362,7 @@ def triton_kernel_wrap_(
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
+        tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
@@ -6469,6 +6470,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
