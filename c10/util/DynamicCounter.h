@@ -43,7 +43,15 @@ class DynamicCounterBackendIf {
   virtual void unregisterCounter(std::string_view key) = 0;
 };
 
-void C10_API
-    registerDynamicCounterBackend(std::unique_ptr<DynamicCounterBackendIf>);
+class DynamicCounterBackendFactoryIf {
+ public:
+  virtual ~DynamicCounterBackendFactoryIf() = default;
+
+  virtual std::unique_ptr<DynamicCounterBackendIf> create(
+      std::string_view key) = 0;
+};
+
+void C10_API registerDynamicCounterBackend(
+    std::unique_ptr<DynamicCounterBackendFactoryIf>);
 } // namespace detail
 } // namespace c10::monitor
