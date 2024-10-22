@@ -38,6 +38,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 def dynamo_assume_constant_result_global_function():
     return "test"
 
+
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
