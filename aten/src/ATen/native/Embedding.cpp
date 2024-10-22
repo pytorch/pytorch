@@ -81,7 +81,7 @@ Tensor embedding_sparse_backward(
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "embedding_backward: scale_grad_by_freq not supported with sparse gradients");
   }
 

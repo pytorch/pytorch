@@ -4308,34 +4308,31 @@ class TestSerialization(TestCase, SerializationMixin):
                 f.seek(0)
                 torch.load(f, weights_only=True)
 
-    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
-    @parametrize("compute_crc32", (True, False))
-    @parametrize("filename", (True, False))
-    def test_crc32_options(self, compute_crc32, filename):
-        # test both path and buffer case
-        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
-        sd = torch.nn.Linear(3, 5).state_dict()
-        with file_creation_func() as f:
+    @parametrize("force_weights_only", (True, False))
+    def test_weights_only_env_variables(self, force_weights_only):
+        env_var = "TORCH_FORCE_WEIGHTS_ONLY_LOAD" if force_weights_only else "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"
+        args = (
+            (pickle.UnpicklingError, "Weights only load failed")
+            if force_weights_only
+            else (UserWarning, "forcing weights_only=False")
+        )
+        ctx = self.assertRaisesRegex if force_weights_only else self.assertWarnsRegex
+        m = torch.nn.Linear(3, 5)
+        with TemporaryFileName() as f:
+            torch.save(m, f)
             try:
-                torch.serialization.set_crc32_options(compute_crc32)
-                torch.save(sd, f)
-                if not filename:
-                    f.seek(0)
-                sd_loaded = torch.load(f, weights_only=True)
-                self.assertEqual(sd_loaded, sd)
+                old_value = os.environ[env_var] if env_var in os.environ else None
+                os.environ[env_var] = "1"
+                # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
+                    m = torch.load(f, weights_only=not force_weights_only)
+                with ctx(*args):
+                    m = torch.load(f, weights_only=None)
             finally:
-                torch.serialization.set_crc32_options(True)
-
-            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
-            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
-
-            if not filename:
-                f.seek(0)
-            # zip_file.extractall() will raise BadZipFile if CRC32 is not populated
-            # we use the context manager to check whether CRC32 was populated
-            with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
-                with zipfile.ZipFile(f) as zip_file:
-                    zip_file.extractall(path=temp_dir)
+                if old_value is None:
+                    del os.environ[env_var]
+                else:
+                    os.environ[env_var] = old_value
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

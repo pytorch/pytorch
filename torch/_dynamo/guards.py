@@ -37,6 +37,7 @@ from typing import (
 from weakref import ReferenceType
 
 import torch
+import torch.overrides
 import torch.utils._device
 from torch._C._dynamo.guards import (
     check_obj_id,
@@ -294,7 +295,10 @@ class GuardManager:
 
 def from_numpy(a):
     # If not numpy array, piggy back on e.g. tensor guards to check type
-    return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
+    # Re-enable torch function since we disable it on leaf guards
+    # we need it to properly construct the tensor if a default device is set
+    with torch.overrides._enable_torch_function():
+        return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
 # For user stack printing
@@ -1845,6 +1849,7 @@ class GuardBuilder(GuardBuilderBase):
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
+            relaxed_sources: Set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -1855,6 +1860,7 @@ class GuardBuilder(GuardBuilderBase):
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
+                        relaxed_sources,
                     )
                 else:
                     log.warning("Untracked tensor used in export constraints")
@@ -1862,6 +1868,7 @@ class GuardBuilder(GuardBuilderBase):
                 source_pairs=source_pairs,
                 derived_equalities=derived_equalities,
                 phantom_symbols=list(phantom_symbols.values()),
+                relaxed_sources=relaxed_sources,
                 warn_only=False,
             )
         else:
@@ -2086,8 +2093,9 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        # See D64140537 for why we are checking for tuple.
         if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, enum.Enum
+            guarded_object, (enum.Enum, tuple)
         ):
             obj_ref = weakref.ref(guarded_object)
 
