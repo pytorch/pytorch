@@ -7,7 +7,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import config as inductor_config
-from ..codegen.common import WorkspaceArg
+from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
@@ -482,6 +482,18 @@ def get_workspace_size(
     return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
 
 
+def get_workspace_arg(num_sms: int, device: torch.device) -> WorkspaceArg:
+    """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
+    size = get_workspace_size(num_sms)
+    zero_mode = WorkspaceZeroMode.from_bool(False)
+    return WorkspaceArg(
+        count=size,
+        zero_mode=zero_mode,
+        device=device,
+        outer_name=WorkspaceArg.unique_name(),
+    )
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a: TensorBox,
@@ -526,12 +538,13 @@ def tuned_scaled_mm(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
                 input_nodes = (mat_a, mat_b, scale_a, scale_b)
-                workspace_bytes = get_workspace_size(kwargs["NUM_SMS"])
                 scaled_mm_device_tma_template.maybe_append_choice(
                     choices,
                     input_nodes=input_nodes,
                     layout=layout,
-                    workspace_arg=WorkspaceArg(workspace_bytes, False),
+                    workspace_arg=get_workspace_arg(
+                        kwargs["NUM_SMS"], mat_a.get_device()
+                    ),
                     **kwargs,
                 )
             else:
