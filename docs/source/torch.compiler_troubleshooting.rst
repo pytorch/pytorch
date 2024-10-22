@@ -928,6 +928,7 @@ When a comptime breakpoint is triggered, you can do the following:
 - Normal pdb commands like ``bt/u/d/n/s/r`` - you can go up the pdb stack to inspect more Dynamo internals
 
 .. code-block:: py
+
     import torch
     from torch._dynamo.comptime import comptime
 
