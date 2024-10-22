@@ -588,8 +588,8 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
-# global flag to check if we are processing graphs produced from a compiled autograd graph
-in_compiled_autograd_region = False
+# global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
+compiled_autograd_enabled_force_eager = False
 
 
 @contextlib.contextmanager
