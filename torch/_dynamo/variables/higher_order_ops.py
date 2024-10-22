@@ -858,8 +858,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "false_branch",
         )
 
-        print("true_graph")
-        print(true_graph)
         true_name = add_subgraph(
             tx,
             "cond_true",
