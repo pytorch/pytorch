@@ -71,7 +71,7 @@ template <typename scalar_t>
 inline void _rrelu_with_noise_cuda_train(
     Tensor& output,
     const Tensor& input_,
-    const Tensor& noise_,
+    Tensor& noise_,
     const Scalar& lower_,
     const Scalar& upper_,
     std::optional<Generator> generator) {
@@ -139,7 +139,7 @@ inline void _rrelu_with_noise_cuda_train(
 }
 
 Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -173,7 +173,7 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
 
 Tensor rrelu_with_noise_cuda(
     const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -184,7 +184,7 @@ Tensor rrelu_with_noise_cuda(
 
 Tensor& rrelu_with_noise_cuda_(
     Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,

@@ -6218,7 +6218,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
-    def test_rrelu_noise_mutation(self):
+    def test_rrelu_with_noise_mutation(self):
         def fn_functional(x):
             noise = torch.ones_like(x)
             result, noise_out = torch.ops.aten.rrelu_with_noise_functional(
@@ -6253,6 +6253,21 @@ class TestAOTModuleSimplified(AOTTestCase):
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
+
+
+#    def test_rrelu_with_noise_vmap(self):
+#        def fn(x):
+#            noise = torch.ones_like(x)
+#            result = torch.ops.aten.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+#            return result, noise
+#
+#        x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+#        ref_y, ref_noise = fn(x)
+#
+#        fn = torch.vmap(fn)
+#        vmap_y, vmap_noise = fn(x)
+#        self.assertEqual(ref_y, vmap_y)
+#        self.assertEqual(ref_noise, vmap_noise)
 
 
 # entries in here don't work and need to be fixed.
