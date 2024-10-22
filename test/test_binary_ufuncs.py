@@ -4447,6 +4447,18 @@ class TestBinaryUfuncs(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
+        # x NaN tensor - q tensor same size
+        x = torch.full((2, 3, 4), float('nan'), device=device)
+        q = make_tensor((2, 3, 4), dtype=q_dtype, device=device)
+        actual = torch.special.zeta(x, q)
+        self.assertTrue(torch.isnan(actual).all())
+
+        # x tensor - q NaN tensor same size
+        x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
+        q = torch.full((2, 3, 4), float('nan'), device=device)
+        actual = torch.special.zeta(x, q)
+        self.assertTrue(torch.isnan(actual).all())
+
     @onlyCUDA
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
