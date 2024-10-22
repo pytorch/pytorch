@@ -194,7 +194,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_float,
                 torch.sym_ite,
                 torch.sym_max,
-                torch.sum_sum,
+                torch.sym_sum,
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
