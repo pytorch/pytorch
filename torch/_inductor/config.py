@@ -934,6 +934,12 @@ class triton:
         os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
     )
 
+    # this option adds a hash suffix to the kernel names. it helps profiler to map kernels
+    # back to its source code
+    hash_in_kernel_names = (
+        os.environ.get("TORCHINDUCTOR_HASH_IN_KERNEL_NAMES", "0") == "1"
+    )
+
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)

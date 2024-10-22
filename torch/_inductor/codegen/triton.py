@@ -3157,6 +3157,8 @@ class TritonScheduling(SIMDScheduling):
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
+            if config.triton.hash_in_kernel_names:
+                kernel_name = f"{kernel_name}_{code_hash(src_code.strip())}"
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
