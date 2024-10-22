@@ -516,7 +516,7 @@ def count_calls(g: fx.Graph) -> int:
     return c
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 
@@ -2479,7 +2479,7 @@ class numpy_to_tensor_wrapper:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2503,7 +2503,7 @@ class numpy_method_wrapper:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2522,7 +2522,7 @@ class numpy_operator_wrapper:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -3097,7 +3097,7 @@ class Lit:
     def __init__(self, s):
         self.s = s
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.s
 
 
@@ -3184,6 +3184,34 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper functions below are to prevent __torch_function__
+# calls from happening in the middle of __torch_function__
+# compiled bytecode
+# They will be skipped which is the desired result
+def call_size(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.size(i)
+
+    return fn(x, i)
+
+
+def call_stride(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.stride(i)
+
+    return fn(x, i)
+
+
+def call_storage_offset(x):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x):
+        return x.storage_offset()
+
+    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
