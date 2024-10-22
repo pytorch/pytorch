@@ -35,7 +35,7 @@ at::Tensor cudnn_convolution(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor& cudnn_convolution_out(
@@ -49,7 +49,8 @@ at::Tensor& cudnn_convolution_out(
     bool deterministic,
     bool allow_tf32,
     Tensor& output_t) {
-  AT_ERROR("cudnn_convolution_out: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "cudnn_convolution_out: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_input(
@@ -63,7 +64,8 @@ at::Tensor cudnn_convolution_backward_input(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
@@ -78,7 +80,8 @@ at::Tensor cudnn_convolution_backward_weight(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
@@ -94,7 +97,9 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
     bool deterministic,
     bool allow_tf32,
     std::array<bool, 2> output_mask) {
-  AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false,
+      "cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose(
@@ -108,7 +113,9 @@ at::Tensor cudnn_convolution_transpose(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false,
+      "cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_input(
@@ -121,7 +128,8 @@ at::Tensor cudnn_convolution_transpose_backward_input(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
@@ -136,7 +144,8 @@ at::Tensor cudnn_convolution_transpose_backward_weight(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
@@ -153,7 +162,8 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
     bool deterministic,
     bool allow_tf32,
     std::array<bool, 2> output_mask) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
@@ -168,7 +178,8 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "raw_cudnn_convolution_forward_out: ATen not compiled with cuDNN support");
 }
 
@@ -183,7 +194,8 @@ void raw_cudnn_convolution_backward_input_out(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "raw_cudnn_convolution_backward_input_out: ATen not compiled with cuDNN support");
 }
 
@@ -198,7 +210,8 @@ void raw_cudnn_convolution_backward_weight_out(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "raw_cudnn_convolution_backward_weight_out: ATen not compiled with cuDNN support");
 }
 
@@ -210,7 +223,8 @@ Tensor cudnn_convolution_relu(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
-  AT_ERROR("cudnn_convolution_relu: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "cudnn_convolution_relu: ATen not compiled with cuDNN support");
 }
 
 Tensor cudnn_convolution_add_relu(
@@ -223,7 +237,9 @@ Tensor cudnn_convolution_add_relu(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
-  AT_ERROR("cudnn_convolution_add_relu: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false,
+      "cudnn_convolution_add_relu: ATen not compiled with cuDNN support");
 }
 
 #endif // AT_CUDNN_ENABLED
