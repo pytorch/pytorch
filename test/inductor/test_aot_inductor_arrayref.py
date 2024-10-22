@@ -69,6 +69,7 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_cond_nested": fail_minimal_arrayref_interface(),
     "test_cond_simple": fail_minimal_arrayref_interface(),
+    "test_cond_symint_input": fail_minimal_arrayref_interface(),
     "test_cond_use_buffers_from_outer_scope": fail_minimal_arrayref_interface(),
     "test_cond_with_multiple_outputs": fail_minimal_arrayref_interface(),
     "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
