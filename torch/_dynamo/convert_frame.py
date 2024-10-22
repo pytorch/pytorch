@@ -1086,7 +1086,7 @@ def _compile(
                     for key, value in d.items()
                 }
 
-            config_dict = handle_sets(config.shallow_copy_dict())
+            config_dict = handle_sets(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
