@@ -254,6 +254,10 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
       -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
   };
 
+  if (std::isnan(x) || std::isnan(q)) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+
   int i = 0;
   acc_t a, b, k, s, t, w;
   if (x == one) {
