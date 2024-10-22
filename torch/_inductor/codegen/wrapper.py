@@ -662,6 +662,9 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
+        if config.multiple_streams:
+            self.header.writeline(V.graph.device_ops.generate_stream_creation(V.graph.stream_graph.stream_pool, V.graph.stream_graph.DEFAULT_STREAM_ID))
+        
         
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
@@ -747,6 +750,7 @@ class PythonWrapperCodegen(CodeGen):
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
+        self.header.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -999,8 +1003,6 @@ class PythonWrapperCodegen(CodeGen):
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
-        if config.multiple_streams:
-            self.header.writeline(V.graph.device_ops.generate_stream_creation(V.graph.stream_graph.stream_pool))
 
         result = IndentedBuffer()
         result.splice(self.imports)

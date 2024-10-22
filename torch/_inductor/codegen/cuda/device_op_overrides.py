@@ -8,17 +8,20 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name):
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def generate_stream_creation(self, stream_pool):
+    def generate_stream_creation(self, stream_pool, default_stream_id):
         stream_creation_str = ""
         for index, num_used in enumerate(stream_pool):
-            if num_used > 0:
+            if num_used > 0 and index != default_stream_id:
                 stream_creation_str += (
                     f"stream{index}_raw = torch.cuda.Stream()\n"
                 )
                 stream_creation_str += (
                     f"stream{index} = stream{index}_raw.cuda_stream\n"
                 )
-        return stream_creation_str
+        # generate for default stream
+        default_stream_str = f"streamdata = torch._C._cuda_getCurrentStream({default_stream_id})\n"
+        default_stream_str += f"stream{default_stream_id}_raw = torch.cuda.Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])\n"
+        return stream_creation_str + default_stream_str
 
     def set_device(self, device_idx):
         return f"torch.cuda.set_device({device_idx})"
