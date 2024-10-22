@@ -857,12 +857,21 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if mod.cls_to_become is not None:
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
-        name = "_call_impl"
-        fn = getattr(self.value_type, name)
+
+        if mod.__call__ is not torch.nn.Module.__call__:
+            name = "__call__"
+            fn = getattr(self.value_type, name)
+        else:
+            name = "_call_impl"
+            fn = getattr(self.value_type, name)
 
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
-        if fn is torch.nn.Module._call_impl and "forward" not in mod.__dict__:
+        if (
+            mod.__call__ is torch.nn.Module.__call__
+            and mod._call_impl is torch.nn.Module._call_impl
+            and "forward" not in mod.__dict__
+        ):
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
