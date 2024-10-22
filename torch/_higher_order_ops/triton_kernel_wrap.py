@@ -46,12 +46,25 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
-    from torch.utils._triton import TritonKernelType
+    from torch.utils._triton import has_triton
 
     TritonMetaParamsType = Dict[str, int]
     TritonGridTupleType = Tuple[Union[int, sympy.Expr, SymInt], ...]
     TritonGridCallableType = Callable[[TritonMetaParamsType], Tuple[int, ...]]
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
+
+    if has_triton():
+        from triton.runtime.autotuner import Autotuner
+        from triton.runtime.jit import JITFunction
+    else:
+
+        class Autotuner:  # type: ignore[no-redef]
+            pass
+
+        class JITFunction:  # type: ignore[no-redef]
+            pass
+
+    TritonKernelType = Union[Autotuner, JITFunction]
 
 
 log = logging.getLogger("torch._dynamo")
@@ -1201,7 +1214,6 @@ class TritonHOPifier:
                 self.raise_unsupported("Grid can have at most rank 3")
 
         assert len(grids) != 0
-
         if isinstance(variable.kernel, JITFunction):
             constexprs = variable.kernel.constexprs
         else:
@@ -1224,7 +1236,6 @@ class TritonHOPifier:
                     combined_args_raw[arg_name] = variable.specialize_symbolic(
                         combined_args_raw[arg_name]
                     )
-
         return self.call_HOP(variable, grids, combined_args_raw, tx)
 
 
