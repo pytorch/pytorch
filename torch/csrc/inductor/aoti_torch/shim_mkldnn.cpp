@@ -9,6 +9,7 @@
 #endif
 #include <ATen/native/mkldnn/Conv.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/quantized/cpu/qconv.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 
 using namespace torch::aot_inductor;
@@ -359,6 +360,76 @@ aoti_torch_cpu__qlinear_pointwise_binary_tensor(
         unary_post_op,
         scalars_list,
         unary_post_op_algorithm);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    const int64_t* stride_args,
+    int64_t stride_len_,
+    const int64_t* padding_args,
+    int64_t padding_len_,
+    const int64_t* dilation_args,
+    int64_t dilation_len_,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    const char* attr,
+    const double** post_op_args,
+    int64_t post_op_args_len_,
+    const char** algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> scalars_list;
+    scalars_list.reserve(post_op_args_len_);
+    for (int64_t i = 0; i < post_op_args_len_; i++) {
+      scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
+    }
+
+    c10::List<int64_t> stride_list;
+    stride_list.reserve(stride_len_);
+    for (int64_t i = 0; i < stride_len_; i++) {
+      stride_list.emplace_back(stride_args[i]);
+    }
+
+    c10::List<int64_t> padding_list;
+    padding_list.reserve(padding_len_);
+    for (int64_t i = 0; i < padding_len_; i++) {
+      padding_list.emplace_back(padding_args[i]);
+    }
+
+    c10::List<int64_t> dilation_list;
+    stride_list.reserve(dilation_len_);
+    for (int64_t i = 0; i < dilation_len_; i++) {
+      dilation_list.emplace_back(dilation_args[i]);
+    }
+
+    auto tmp_result = at::native::QConvoneDNN::run_pointwise_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        pointer_to_optional<at::Tensor>(B),
+        stride_list,
+        padding_list,
+        dilation_list,
+        groups,
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        attr,
+        scalars_list,
+        pointer_to_optional<c10::string_view>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
