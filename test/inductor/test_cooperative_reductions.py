@@ -108,6 +108,11 @@ class CooperativeReductionTests(TestCase):
         self.run_and_check(fn, inps, expect_kernel_count=2)
 
 
+@config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
+class NoPersistCooperativeReductionTests(CooperativeReductionTests):
+    pass
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
