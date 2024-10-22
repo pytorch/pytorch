@@ -1266,7 +1266,7 @@ def fw_compiler_freezing(
         assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        preserved_indices_params_flat = set()
+        preserved_indices_params_flat = OrderedSet[int]()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
         current_offset = 0

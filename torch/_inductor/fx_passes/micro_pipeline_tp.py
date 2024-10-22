@@ -2,9 +2,10 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional, Set
+from typing import Any, cast, Dict, List, Optional
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims
 from ..pattern_matcher import (
@@ -40,8 +41,8 @@ def _filter_nodes_by_target(nodes: List[torch.fx.Node], target) -> List[torch.fx
     return [x for x in nodes if x.target == target]
 
 
-def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
-    ancestors = set()
+def _find_ancestors(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
+    ancestors = OrderedSet[torch.fx.Node]()
     ancestors.add(node)
     cur_nodes = [node]
     while len(cur_nodes) > 0:
@@ -52,7 +53,7 @@ def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
                     ancestors.add(inp)
                     new_nodes.append(inp)
         cur_nodes = new_nodes
-    return {node for node in ancestors if node.op != "placeholder"}
+    return OrderedSet(node for node in ancestors if node.op != "placeholder")
 
 
 def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
@@ -165,7 +166,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
     # Match in reverse to ensure longer patterns is prioritized
     all_gathers = []
-    visited_ag_nodes = set()
+    visited_ag_nodes = OrderedSet[torch.fx.Node]()
     for node in reversed(graph.nodes):
         for target, patterns in res_node_target_to_patterns.items():
             if node.target != target:
@@ -288,7 +289,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 @dataclass
 class _Matmul:
     nodes: List[torch.fx.Node]
-    arg_ancestor_nodes: Set[torch.fx.Node] = field(init=False)
+    arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
 
@@ -472,7 +473,7 @@ def _insert_fused_all_gather_matmul(
     gather_dim: int,
     group_name: str,
 ) -> torch.fx.Node:
-    mm_types = set(map(type, matmuls))
+    mm_types = OrderedSet(map(type, matmuls))
     assert len(mm_types) == 1
     mm_type = next(iter(mm_types))
     if mm_type == _Matmul:
@@ -556,7 +557,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
 
-    if len(matmuls) == 0 or len(set(map(type, matmuls))) != 1:
+    if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
     # Fuse the all_gather_tensor with the eligible matmuls
@@ -750,13 +751,15 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+) -> Dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
     Compute the ancestors for all nodes in a graph.
     """
-    node_to_ancestors = defaultdict(set)
+    node_to_ancestors = defaultdict(
+        OrderedSet[torch.fx.Node]
+    )  # type: ignore[var-annotated]
     for node in graph.nodes:
-        node_to_ancestors[node] = set(node.all_input_nodes)
+        node_to_ancestors[node] = OrderedSet(node.all_input_nodes)
         for dep in node.all_input_nodes:
             node_to_ancestors[node] |= node_to_ancestors[dep]
 
@@ -810,12 +813,12 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
         return node.target in [torch.ops.aten.mm.default]
 
     collective_to_overlapping_candidates = defaultdict(list)
-    available_nodes = set()
+    available_nodes = OrderedSet[torch.fx.Node]()
     collective_to_overlappable_nodes = _get_collective_to_overlappable_nodes(graph)
     for collective, overlappable_nodes in collective_to_overlappable_nodes.items():
         candidates = [x for x in overlappable_nodes if _is_compute_intensive(x)]
         collective_to_overlapping_candidates[collective] = candidates
-        available_nodes |= set(candidates)
+        available_nodes |= OrderedSet(candidates)
 
     unexposed_collectives = []
     for (

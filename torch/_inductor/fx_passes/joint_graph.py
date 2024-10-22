@@ -3,7 +3,7 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Union
 
 import torch
 import torch._guards
@@ -13,8 +13,8 @@ from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
-from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -52,7 +52,9 @@ def lazy_init():
 
 
 def remove_no_ops(
-    gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
+    gm: torch.fx.GraphModule,
+    zeros: OrderedSet[torch.fx.Node],
+    ones: OrderedSet[torch.fx.Node],
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         "Removes no-ops: (+ 0, - 0, * 1, / 1)"
@@ -345,8 +347,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         graph = gm.graph
 
-        zeros = set()
-        ones = set()
+        zeros = OrderedSet[Any]()
+        ones = OrderedSet[Any]()
 
         # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
         # so just constant-ify if a Tensor is unaliased

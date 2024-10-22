@@ -15,9 +15,10 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Set, Tuple
+from typing import Any, Container, Dict, List, Optional, Tuple
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
@@ -90,7 +91,7 @@ log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint],
+    hints: OrderedSet[AutotuneHint],
     size_hints,
     block_size: int,
     device_props: DeviceProperties,
@@ -274,7 +275,7 @@ class CachingAutotuner(KernelInterface):
                     "No valid triton configs. Report a fatal compilation error"
                 )
 
-            seen_configs = set(self.configs)
+            seen_configs = OrderedSet[Config](self.configs)
 
             device_prop = self.device_props
             warp_size = device_prop.warp_size
@@ -810,7 +811,7 @@ class CachingAutotuner(KernelInterface):
         return cloned_args, cloned_kwargs
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        return self.maybe_clone_args(set(), *args, **kwargs)
+        return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
@@ -1213,7 +1214,7 @@ def cached_autotune(
 
 def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
-    seen = set()
+    seen = OrderedSet[str]()
     pruned_configs = []
 
     for cfg in configs:
@@ -1463,7 +1464,7 @@ def pointwise(
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        inductor_meta.get("autotune_hints", set()),
+        inductor_meta.get("autotune_hints", OrderedSet()),
         size_hints,
         bs,
         triton_meta["device"],
