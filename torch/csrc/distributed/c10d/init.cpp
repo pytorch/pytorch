@@ -123,7 +123,7 @@ class IntrusivePtrNoGilDestructor {
   T* operator->() const noexcept {
     return impl_.get();
   }
-  C10_NODISCARD T* get() const noexcept {
+  [[nodiscard]] T* get() const noexcept {
     return impl_.get();
   }
   void reset() noexcept {
@@ -932,6 +932,10 @@ This class does not support ``__members__`` property.)");
       },
       py::arg("tensor"),
       py::arg("work"));
+
+  module.def("_get_work_registry_size", []() {
+    return ::c10d::get_work_registry_size();
+  });
 
   // Remove a group from the native registry
   module.def(
