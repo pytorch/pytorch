@@ -183,6 +183,7 @@ _SYM_INT_OPS = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
+    torch.sym_sum,
 }
 
 
