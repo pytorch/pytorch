@@ -252,10 +252,6 @@ allow_complex_guards_as_runtime_asserts = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
-# Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
-# false_fn produces code with identical guards.
-enforce_cond_guards_match = True
-
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
@@ -334,8 +330,7 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# If true, error if you torch.jit.trace over a dynamo-optimized function.
-# If false, silently suppress dynamo
+# This flag is ignored and maintained for backwards compatibility.
 error_on_nested_jit_trace = True
 
 # If true, error with a better message if we symbolically trace over a
@@ -425,9 +420,10 @@ cudagraph_backend_support_input_mutation = False
 # correctness of custom ops.
 only_allow_pt2_compliant_ops = False
 
+# This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
-# enable/disable dynamo tracing for `torch.func` transforms
+# This flag is ignored and maintained for backwards compatbility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
@@ -472,6 +468,11 @@ compiled_autograd = False
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: Dict[str, Any] = {}
 
+# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
+# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
+# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
+compiled_autograd_opaque_cpp_node = False
+
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
 # behavior, making it so that we infer that if an input is dynamic by
@@ -482,6 +483,9 @@ compiled_autograd_kwargs_override: Dict[str, Any] = {}
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
+
+# HACK: this is for testing custom ops profiling only
+_custom_ops_profile: Optional[Any] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
