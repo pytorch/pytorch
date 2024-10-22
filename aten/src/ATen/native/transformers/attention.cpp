@@ -18,6 +18,7 @@
 #include <c10/util/Logging.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
+#include <ATen/autocast_mode.h>
 
 #include <limits>
 #include <utility>
@@ -809,6 +810,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
+  auto autocast_state = at::autocast::is_autocast_enabled(query_.device().type());
+  if (!ctx.allowFP16BF16ReductionMathSDP()) {
+    // If a user wants to disable FP16 and BF16 Reduction we also want to
+    // disable autocast
+    at::autocast::set_autocast_enabled(query_.device().type(), false);
+  }
   auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
           (query_.scalar_type() == at::kHalf ||
            query_.scalar_type() == at::kBFloat16) &&
@@ -881,8 +888,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn = at::dropout(attn, dropout_p, true);
       }
     }
-
-    return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
+    auto out = at::matmul(attn, value_expanded).to(origin_dtype);
+    auto attn_scores = attn.to(origin_dtype);
+    if (!ctx.allowFP16BF16ReductionMathSDP()) {
+      // If a user wants to disable FP16 and BF16 Reduction we also want to
+      // disable autocast
+      at::autocast::set_autocast_enabled(query_.device().type(), autocast_state);
+    }
+    return std::make_tuple(std::move(out), std::move(attn_scores));
 }
 
 std::tuple<at::Tensor, at::Tensor>
