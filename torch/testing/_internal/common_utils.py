@@ -5391,18 +5391,14 @@ def remove_cpp_extensions_build_root():
 def scoped_load_inline(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        temp_dir = tempfile.TemporaryDirectory(delete=False)
-
         def load_inline(*args, **kwargs):
-            if kwargs.get("verbose", False):
-                print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
             assert "build_directory" not in kwargs
-            kwargs["build_directory"] = temp_dir.name
-            return cpp_extension.load_inline(*args, **kwargs)
+            with TemporaryDirectoryName() as temp_dir_name:
+                if kwargs.get("verbose", False):
+                    print(f'Using temporary extension directory {temp_dir_name}...', file=sys.stderr)
+                kwargs["build_directory"] = temp_dir_name
+                return cpp_extension.load_inline(*args, **kwargs)
 
-        try:
-            return func(*args, load_inline=load_inline, **kwargs)
-        finally:
-            temp_dir.cleanup()
+        return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
