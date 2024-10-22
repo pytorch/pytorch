@@ -41,6 +41,7 @@ from torch._export.utils import (
     apply_runtime_assertion_pass,
     placeholder_naming_pass,
     placeholder_prefixes,
+    _update_gm_meta_if_possible,
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
