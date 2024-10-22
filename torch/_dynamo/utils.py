@@ -910,11 +910,9 @@ class ChromiumEventLogger:
             return self.tls.stack
 
     def get_event_data(self) -> Dict[str, Any]:
-        if hasattr(self.tls, "event_data"):
-            return self.tls.event_data
-        else:
+        if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
-            return self.tls.event_data
+        return self.tls.event_data
 
     def __init__(self):
         self.tls = threading.local()
