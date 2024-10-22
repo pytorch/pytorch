@@ -1437,14 +1437,14 @@ static at::Tensor _quantized_convolution_onednn(
   bool has_binary_postop_add = has_binary_post_op && binary_attr.value() == "add";
 
   if (has_accum_postop_sum || has_binary_postop_add) {
-    TORCH_CHECK(accum.has_value(), "For post op sum, accum tensor should not be empty.");
+    TORCH_CHECK(accum.has_value(), "For post op sum or post op binary_add, accum tensor should not be empty.");
     TORCH_CHECK(
       accum.value().is_contiguous(
         kSpatialDim == 2
         ? c10::MemoryFormat::ChannelsLast
         : c10::MemoryFormat::ChannelsLast3d
       ),
-      "For post op sum, accum tensor must be contiguous."
+      "For post op sum or post op binary_add, accum tensor must be contiguous."
     );
     if (fp32_output || bfloat16_output) {
       TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
