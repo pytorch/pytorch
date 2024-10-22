@@ -34,7 +34,12 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.common import (
+    IndentedBuffer,
+    KernelTemplate,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -167,8 +172,9 @@ class TritonTemplateKernel(TritonKernel):
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
         # Some templates use extra global memory as a workspace
+        self.workspace_arg = workspace_arg
         if workspace_arg is not None:
-            self.args.workspace(workspace_arg.nbytes, workspace_arg.zero_fill)
+            self.args.workspace_args.append(workspace_arg)
 
         # The following attributes (body, template_mask, output_val) are all
         # used for triton kernel codegen.
@@ -564,12 +570,8 @@ class TritonTemplateKernel(TritonKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         # Handle workspace allocation
-        if self.args.workspace_arg is not None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
-            ws = self.args.workspace_arg
-            wrapper.generate_workspace_allocation(
-                ws.nbytes, current_device, ws.zero_fill
-            )
+        if self.workspace_arg is not None:
+            wrapper.generate_workspace_allocation(self.workspace_arg)
 
         if V.graph.cpp_wrapper:
             # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
@@ -599,8 +601,8 @@ class TritonTemplateKernel(TritonKernel):
                 gpu="cpu" not in V.graph.device_types,
             )
 
-        if self.args.workspace_arg is not None:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if self.workspace_arg is not None:
+            wrapper.generate_workspace_deallocation(self.workspace_arg)
 
 
 @functools.lru_cache(None)
@@ -1502,14 +1504,18 @@ class AlgorithmSelectorCache(PersistentCache):
                 ), "Expected all triton templates choices to have the same workspace arg."
                 workspace: WorkspaceArg = triton_templates_choices[0].workspace_arg
                 assert all(
-                    choice.workspace_arg == workspace
+                    WorkspaceArg.can_join(choice.workspace_arg, workspace)
                     for choice in triton_templates_choices
                 ), "All choices must have the same workspace argument."
-                size, zero_fill = workspace.nbytes, workspace.zero_fill
+                size, zero_mode = workspace.count, workspace.zero_mode
                 workspace_tensor = torch.empty_strided(
                     (size,), (1,), dtype=torch.uint8, device=out.device
                 )
-                if zero_fill:
+                assert zero_mode in (
+                    WorkspaceZeroMode.ZERO_ON_CALL,
+                    WorkspaceZeroMode.UNINITIALIZED,
+                )
+                if zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
                     workspace_tensor.zero_()
                 example_inputs.append(workspace_tensor)
 
