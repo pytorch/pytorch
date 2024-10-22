@@ -82,8 +82,8 @@ inline _PyFrameEvalFunction _debug_set_eval_frame(
 // (pdb) p args[1].some_attr
 // # etc.
 //
-// Implementation: set eval frame callback to default, call torch._dynamo.utils._breakpoint_for_c_dynamo,
-// reset eval frame callback.
+// Implementation: set eval frame callback to default, call
+// torch._dynamo.utils._breakpoint_for_c_dynamo, reset eval frame callback.
 #define INSPECT(...)                                                  \
   {                                                                   \
     PyThreadState* cur_tstate = PyThreadState_Get();                  \
