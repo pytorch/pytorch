@@ -12,6 +12,7 @@ import torch.autograd
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
@@ -62,7 +63,7 @@ decomposition_names = {
 core_decomposition_names = {
     overload_to_aten_name(k)
     for k in core_aten_decompositions()
-    if isinstance(k, torch._ops.OpOverload)
+    if isinstance(k, torch._ops.OpOverload) and not _is_cia_op(k)
 }
 _decomp_test_ops = [
     op
@@ -1230,9 +1231,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

@@ -340,7 +340,10 @@ def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, 
         )
 
         scalar_input = make_input(()).log()
-        scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        # FIXME(rec): scalar_target is unused, perhaps should be argument to FunctionInput?
+        scalar_target = (  # noqa: F841
+            make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        )
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(scalar_input, scalar_input),
@@ -3180,66 +3183,6 @@ rnn_gru_lstm_module_info_decorators = (
 
 # Start of module error inputs functions.
 
-def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    samples = [
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput("10", 20),
-                forward_input=FunctionInput(make_input(3, 10)),
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=TypeError,
-            error_regex=r"Expected int for in_features but got <class 'str'>"
-        ),
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(10, 20.7),
-                forward_input=FunctionInput(make_input(3, 10)),
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=TypeError,
-            error_regex=r"Expected int for out_features but got <class 'float'>"
-        ),
-    ]
-    return samples
-
-
-def module_error_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, training, **kwargs):
-    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    samples = [
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput("10", 20, 30),
-                forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=TypeError,
-            error_regex=r"Expected int for in1_features but got <class 'str'>"
-        ),
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(10, 20.7, 30),
-                forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=TypeError,
-            error_regex=r"Expected int for in2_features but got <class 'float'>"
-        ),
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(10, 20, "30"),
-                forward_input=FunctionInput(make_input(3, 10), make_input(3, 20)),
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=TypeError,
-            error_regex=r"Expected int for out_features but got <class 'str'>"
-        ),
-    ]
-    return samples
-
-
-
 def module_error_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = [
@@ -3892,14 +3835,12 @@ module_db: List[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
-               module_error_inputs_func=module_error_inputs_torch_nn_Linear,
                skips=(
                    # No channels_last support for Linear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.Bilinear,
                module_inputs_func=module_inputs_torch_nn_Bilinear,
-               module_error_inputs_func=module_error_inputs_torch_nn_Bilinear,
                decorators=[
                    DecorateInfo(
                        toleranceOverride({

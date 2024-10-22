@@ -109,6 +109,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -118,13 +119,16 @@ jobs:
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
-        if: ${{ inputs.aws-role-to-assume != '' }}
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
@@ -133,11 +137,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -147,6 +153,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -174,6 +181,7 @@ jobs:
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
@@ -195,6 +203,7 @@ jobs:
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
@@ -202,7 +211,21 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
         run: |
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            JENKINS_USER=
+            USED_IMAGE="${DOCKER_IMAGE_S390X}"
+
+            # since some steps are skipped on s390x, if they are necessary, run them here
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          else
+            JENKINS_USER="--user jenkins"
+            USED_IMAGE="${DOCKER_IMAGE}"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
+          # Used for JENKINS_USER, which can be empty
+          # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -225,10 +248,10 @@ jobs:
             --cap-add=SYS_PTRACE \
             --tty \
             --detach \
-            --user jenkins \
+            ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
+            "${USED_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
@@ -239,7 +262,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -249,7 +272,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3 for split build
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
@@ -257,8 +280,26 @@ jobs:
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
 
+      - name: Store PyTorch Build Artifacts for s390x
+        uses: actions/upload-artifact@v3
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        with:
+          name: ${{ inputs.build-environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
+      - name: Store PyTorch Build Artifacts for s390x for split build
+        uses: actions/upload-artifact@v3
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        with:
+          name: ${{ inputs.build-environment }}-experimental-split-build
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
@@ -270,4 +311,13 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+
+      - name: Cleanup docker
+        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true

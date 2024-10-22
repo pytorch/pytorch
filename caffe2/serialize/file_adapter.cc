@@ -3,11 +3,13 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include "caffe2/core/common.h"
 
-namespace caffe2::serialize {
+namespace caffe2 {
+namespace serialize {
 
-FileAdapter::RAIIFile::RAIIFile(const std::string& file_name)
-    : fp_(fopen(file_name.c_str(), "rb")) {
+FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
+  fp_ = fopen(file_name.c_str(), "rb");
   if (fp_ == nullptr) {
     auto old_errno = errno;
 #if defined(_WIN32) && (defined(__MINGW32__) || defined(_MSC_VER))
@@ -75,4 +77,5 @@ size_t FileAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
 
 FileAdapter::~FileAdapter() = default;
 
-} // namespace caffe2::serialize
+} // namespace serialize
+} // namespace caffe2

@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -164,7 +163,8 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            torch.is_inference_mode_enabled()
+            not mode.export
+            and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
             if out.is_base_tensor():
@@ -222,7 +222,7 @@ class FunctionalTensor(torch.Tensor):
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
@@ -303,12 +303,15 @@ class FunctionalTensor(torch.Tensor):
     long = _conversion_method_template(dtype=torch.int64)
 
     # TODO(sparse-team): fixes #133174 but can we do without the relay?
-    def to_dense(self):
+    def to_dense(self):  # type: ignore[override]
         return self.elem.to_dense()
 
     @property
     def layout(self):
         return self.elem.layout
+
+    def __bool__(self):
+        return bool(self.item())
 
 
 class FunctionalTensorMode(TorchDispatchMode):
@@ -419,16 +422,22 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return True
 
             # If we are here, it means we are seeing functional composite op.
-            # For pre-dispatch IR or export inference IR, we wont' decompose them
-            if (self.export or self.pre_dispatch) and func._can_decompose():
-                if func.namespace not in ["aten", "prim"]:
-                    # TODO (tmanlaibaatar) check if the op is PT2 compliant
-                    warnings.warn(
-                        f"At pre-dispatch tracing, we assume that any custom op marked with "
-                        f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                        f"Found {func} to be one such op."
-                    )
-                return False
+            # For pre-dispatch IR, we don't want to decompose this op
+            # For post-dispatch IR, we do want to decompose this op. it is fine
+            # to decompose here even if you want to preserve a CIA in post-dispatch export
+            # because we already override decompose behaviour so it will do the
+            # right thing.
+            if self.export:
+                if self.pre_dispatch:
+                    # If it is CIA custom op, we warn that we are assuming this op is indeed functional.
+                    if func.namespace not in ["aten", "prim"] and func._can_decompose():
+                        warnings.warn(
+                            f"At pre-dispatch tracing, we assume that any custom op marked with "
+                            f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
+                            f"Found {func} to be one such op."
+                        )
+                    return False
+                return True
 
             # in normal torch.compile IR, we decompose functional composite ops
             return True
@@ -471,6 +480,8 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
+            import torch._inductor.config as inductor_config
+
             if self.export or not inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize(func, args, kwargs)
             else:

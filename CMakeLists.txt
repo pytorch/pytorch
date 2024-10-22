@@ -305,7 +305,6 @@ if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(USE_VULKAN "Use Vulkan GPU backend" ON "ANDROID" OFF)
 endif()
 
-option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
 cmake_dependent_option(
@@ -343,19 +342,6 @@ cmake_dependent_option(USE_SYSTEM_UCC "Use system-wide UCC" OFF "USE_UCC" OFF)
 cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
-  USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-  "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-  USE_GLOO_WITH_OPENSSL
-  "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(USE_C10D_GLOO "USE C10D GLOO" ON
-                       "USE_DISTRIBUTED;USE_GLOO" OFF)
-cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
-                       "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
-                       OFF)
-cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
@@ -369,7 +355,7 @@ cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+    "USE_DISTRIBUTED AND NOT WIN32" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -470,6 +456,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+OPTION(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -488,6 +475,7 @@ if(USE_SYSTEM_LIBS)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
   endif()
+  set(USE_SYSTEM_NVTX ON)
 endif()
 
 # /Z7 override option When generating debug symbols, CMake default to use the
@@ -912,17 +900,20 @@ if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
 endif()
 
-if(USE_SLEEF_FOR_ARM_VEC256)
-  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
-endif()
-
 # Enable sleef on macOS with Apple silicon by default
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
+
+# Enable sleef on Arm(R) architecture by default (except Android)
+if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+  AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+endif()
+
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")
@@ -1081,11 +1072,23 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
-  string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-  string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+      message(Warning "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
+    endif()
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
+  else()
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  endif()
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
+  endif()
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)

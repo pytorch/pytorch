@@ -11,11 +11,11 @@ from typing import List, Tuple
 
 import torch
 import torch.library
-from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
-from torch._inductor.codegen.wrapper import WrapperCodeGen
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -39,7 +39,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
     check_model_gpu,
     CommonTemplate,
@@ -874,20 +874,20 @@ class TestInductorDynamic(TestCase):
             if call_count == 1:
                 # testing fn_1
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) is None
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) is None
                 ), "Should not be statically known on first call"
             elif call_count == 2:
                 # testing fn_2
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
                 ), "Should be limited to exactly 5 on second call due to multiple constraints"
             elif call_count == 2:
                 # testing fn_3
                 assert (
-                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                    PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
                 ), "Should be exactly 5 on third call"
 
-        class TestWrapperCodegen(WrapperCodeGen):
+        class TestWrapperCodegen(PythonWrapperCodegen):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
 
@@ -896,7 +896,7 @@ class TestInductorDynamic(TestCase):
                 return super().generate(is_inference, *args, **kwargs)
 
         if "cpu" not in device_codegens:
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
         orig_cpu_codegens = device_codegens["cpu"]
         try:
             register_backend_for_device(
@@ -936,6 +936,38 @@ class TestInductorDynamic(TestCase):
             return torch.zeros(y, device=device)
 
         f(torch.tensor([5] * 320))
+
+    def test_mark_unbacked_slice(self):
+        @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
+        def f(x):
+            return x.sum()
+
+        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        f(x)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_operations(self):
+        operations = {
+            "multiply": operator.mul,
+            "add": operator.add,
+            "subtract": operator.sub,
+            "divide": operator.truediv,
+        }
+
+        for name, op in operations.items():
+            with self.subTest(operation=name):
+
+                def fn(x, y):
+                    return op(x, y)
+
+                cnt = CompileCounterWithBackend("inductor")
+                fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+                x = torch.arange(3)
+                self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+                self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+                self.assertEqual(cnt.frame_count, 1)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

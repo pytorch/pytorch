@@ -14,8 +14,7 @@
 
 #include <ATen/native/cuda/CUDAJitLoops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
@@ -182,6 +181,6 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
   }
 }
 
-}}  // at::native
+}  // namespace at::native
 
 #endif // AT_USE_JITERATOR()
