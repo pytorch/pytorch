@@ -2,9 +2,7 @@
 
 #include <torch/nn/options/embedding.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
@@ -133,8 +131,7 @@ inline Tensor embedding_bag(
         input_.dim());
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int mode_enum;
+  int mode_enum = 0;
   if (std::holds_alternative<enumtype::kSum>(mode)) {
     mode_enum = 0;
   } else if (std::holds_alternative<enumtype::kMean>(mode)) {
@@ -206,6 +203,4 @@ inline Tensor embedding_bag(
       options.padding_idx());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -87,14 +87,14 @@ void i0e_kernel_cuda(TensorIteratorBase& iter) {
 CONSTEXPR_EXCEPT_WIN_CUDA char i1_name[] = "i1";
 void i1_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1_cuda", [&]() {
       jitted_gpu_kernel</*name=*/i1_name,
                         /*return_dtype=*/ scalar_t,
                         /*common_dtype=*/ scalar_t,
                         /*arity=*/ 1>(iter, i1_string);
     });
   #else
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return calc_i1(a);
       });
@@ -105,14 +105,14 @@ void i1_kernel_cuda(TensorIteratorBase& iter) {
 CONSTEXPR_EXCEPT_WIN_CUDA char i1e_name[] = "i1e";
 void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1e_cuda", [&]() {
       jitted_gpu_kernel</*name=*/i1e_name,
                         /*return_dtype=*/ scalar_t,
                         /*common_dtype=*/ scalar_t,
                         /*arity=*/ 1>(iter, i1e_string);
     });
   #else
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1e_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
         return calc_i1e(a);
       });

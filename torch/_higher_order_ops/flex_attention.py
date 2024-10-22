@@ -1,5 +1,5 @@
 import math
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,7 +11,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     UnsupportedAliasMutationException,
 )
-from torch._ops import HigherOrderOperator, OpOverload
+from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
@@ -19,7 +19,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
-from torch.overrides import TorchFunctionMode
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -67,96 +66,6 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
-
-
-@torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-def zeros_and_scatter(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-
-    for i, idx in enumerate(indices):
-        assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
-        indices[i] = idx.expand(vals.shape)
-
-    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
-
-
-@zeros_and_scatter.register_fake  # type: ignore[misc]
-def _(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    return torch.empty(shape, device=vals.device)
-
-
-@zeros_and_scatter.register_vmap  # type: ignore[misc]
-def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
-    if len(indices) > 1:
-        for i, idx in enumerate(indices):
-            # TODO: Don't use is_batchedtensor API, use in_dims instead.
-            if torch._C._functorch.is_batchedtensor(idx):
-                indices[i] = idx.unsqueeze(-1)
-
-    out = torch.ops.mylib.zeros_and_scatter(
-        shape,
-        indices,
-        val,
-    )
-    return out, None
-
-
-class ModIndex(torch.autograd.Function):
-    @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
-        return torch.ops.aten.index(x, indices)
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        x, indices = inputs
-        ctx.save_for_backward(*indices)
-        ctx.input_shape = x.shape
-
-    generate_vmap_rule = True
-
-    @staticmethod
-    def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
-        indices = ctx.saved_tensors
-        return (
-            torch.ops.mylib.zeros_and_scatter(
-                ctx.input_shape,
-                indices,
-                gradOut,
-            ),
-            None,
-        )
-
-
-mod_index = ModIndex.apply
-
-
-class TransformGetItemToIndex(TorchFunctionMode):
-    # This is needed since we want to support calling
-    # A[q_idx], where q_idx is a scalar tensor in score_mod.
-    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
-    # scalar and create a view. We do not want that behavior in this case, so we
-    # use this torchfunctionmode to override that behavior for score_mod
-    # wherever we're running it.
-    def __torch_function__(
-        self,
-        func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
-    ) -> object:
-        if func == torch.Tensor.__getitem__:
-            index_args = pytree.tree_leaves(args[1])
-            if all(isinstance(x, torch.Tensor) for x in index_args):
-                return mod_index(args[0], index_args)
-        return func(*args, **(kwargs or {}))
 
 
 class FlexAttentionHOP(HigherOrderOperator):
@@ -256,6 +165,8 @@ def _math_attention_inner(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
@@ -389,6 +300,8 @@ def trace_flex_attention(
     This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
     access this graph module in inductor to inline the score_mod function to the triton template.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention(
         query,
         key,
@@ -485,6 +398,8 @@ def flex_attention_functionalize(
     guard against any mutations in the score_mod function, to the other_buffers since those
     are free variables.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
@@ -791,6 +706,8 @@ def flex_attention_autograd(
     score_mod_other_buffers: Tuple[Tensor, ...] = (),
     mask_mod_other_buffers: Tuple[Tensor, ...] = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         input_requires_grad = any(t.requires_grad for t in (query, key, value))
         if torch.is_grad_enabled() and input_requires_grad:
@@ -843,12 +760,15 @@ def sdpa_dense_backward(
 ) -> Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
 ]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     # Get outputs before calling repeat interleave
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
     actual_grad_score_mod_captured = [
-        torch.empty_like(buffer) for buffer in score_mod_other_buffers
+        torch.empty_like(buffer) if buffer.requires_grad else None
+        for buffer in score_mod_other_buffers
     ]
 
     Bq, Bkv = query.size(0), key.size(0)
@@ -951,19 +871,18 @@ def sdpa_dense_backward(
     actual_grad_query.copy_(grad_query)
     actual_grad_key.copy_(grad_key)
     actual_grad_value.copy_(grad_value)
+    score_mod_other_buffer_grads = [
+        actual_grad.copy_(grad) if actual_grad is not None else actual_grad
+        for actual_grad, grad in zip(
+            actual_grad_score_mod_captured, grad_score_mod_captured
+        )
+    ]
 
     return (
         actual_grad_query,
         actual_grad_key,
         actual_grad_value,
-        tuple(
-            [
-                actual_grad.copy_(grad) if grad is not None else grad
-                for actual_grad, grad in zip(
-                    actual_grad_score_mod_captured, grad_score_mod_captured
-                )
-            ]
-        ),
+        tuple(score_mod_other_buffer_grads),
     )
 
 
@@ -987,6 +906,8 @@ def trace_flex_attention_backward(
     torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
 ]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention_backward(
         query,
         key,
@@ -1199,7 +1120,10 @@ def flex_attention_backward_fake_tensor_mode(
         grad_key = torch.empty_like(key)
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
-            [torch.empty_like(buffer) for buffer in score_mod_other_buffers]
+            [
+                torch.empty_like(buffer) if buffer.requires_grad else None
+                for buffer in score_mod_other_buffers
+            ]
         )
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 

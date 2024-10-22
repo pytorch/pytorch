@@ -19,6 +19,8 @@ API Reference
 .. autofunction:: is_enabled
 .. autofunction:: tuning_enable
 .. autofunction:: tuning_is_enabled
+.. autofunction:: record_untuned_enable
+.. autofunction:: record_untuned_is_enabled
 .. autofunction:: set_max_tuning_duration
 .. autofunction:: get_max_tuning_duration
 .. autofunction:: set_max_tuning_iterations
@@ -30,3 +32,4 @@ API Reference
 .. autofunction:: write_file_on_exit
 .. autofunction:: write_file
 .. autofunction:: read_file
+.. autofunction:: tune_gemm_in_file

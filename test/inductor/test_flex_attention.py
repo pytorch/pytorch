@@ -991,7 +991,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
     @common_utils.parametrize("dtype", test_dtypes)
-    def test_captured_buffers(self, dtype: torch.dtype):
+    def test_captured_buffers_req_grad(self, dtype: torch.dtype):
         head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
 
         def score_mod(score, b, h, m, n):
@@ -1346,8 +1346,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=True)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=False)
+        block_mask_a = torch.compile(create_block_mask)(causal_mask, 1, 1, 512, 512)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512)
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -2070,6 +2070,53 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
     @supported_platform
+    def test_block_mask_non_divisible(self):
+        seq = torch.arange(1023, device="cuda") // 128
+
+        def mod(b, h, q, kv):
+            return seq[q] == seq[kv]
+
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device="cuda")
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device="cuda")
+        self.run_test_with_call(
+            lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
+            Q_S=1023,
+            KV_S=1023,
+        )
+
+    @supported_platform
+    def test_head_bias_req_grad(self):
+        B, H, S, D = 1, 4, 256, 64
+        bias = torch.randn(H, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def head_bias(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[h]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        implicit_bias_sdpa_ref = implicit_bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold
+        implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            head_bias,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+    @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
@@ -2083,12 +2130,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score + bias_flex[q_idx + kv_idx]
 
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref[bias_indices]
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref[bias_indices]
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold[bias_indices]
+        implicit_bias_sdpa_gold = bias_sdpa_gold[bias_indices]
 
         self._test_learnable_bias_inner(
             B,
@@ -2097,10 +2144,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_1d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias:
@@ -2112,13 +2159,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx, kv_idx]
 
-        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold
+        implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
             B,
@@ -2127,10 +2173,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias + index multiple
@@ -2142,13 +2188,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx][kv_idx]
 
-        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold
+        implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
             B,
@@ -2157,10 +2202,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias + transposed:
@@ -2172,12 +2217,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d_transposed(score, b, h, q_idx, kv_idx):
             return score + bias_flex[kv_idx, q_idx]
 
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
             B,
@@ -2186,10 +2231,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d_transposed,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 3-dimensional bias + transposed
@@ -2203,12 +2248,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_3d_transposed(score, b, h, q_idx, kv_idx):
             return score + bias_flex[h, kv_idx, q_idx]
 
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
             B,
@@ -2217,10 +2262,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_3d_transposed,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
     def _test_learnable_bias_inner(
@@ -2231,10 +2276,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         D,
         score_mod,
         bias_flex,
-        implicit_bias_spda_ref,
-        bias_spda_ref,
-        implicit_bias_spda_gold,
-        bias_spda_gold,
+        implicit_bias_sdpa_ref,
+        bias_sdpa_ref,
+        implicit_bias_sdpa_gold,
+        bias_sdpa_gold,
     ):
         make_tensor = functools.partial(
             torch.ones,
@@ -2250,11 +2295,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q_flex, k_flex, v_flex = query_key_value_clones(q_ref, k_ref, v_ref)
 
         out_ref = torch.nn.functional.scaled_dot_product_attention(
-            q_ref, k_ref, v_ref, attn_mask=implicit_bias_spda_ref
+            q_ref, k_ref, v_ref, attn_mask=implicit_bias_sdpa_ref
         )
         out_ref.sum().backward()
         out_gold = torch.nn.functional.scaled_dot_product_attention(
-            q_gold, k_gold, v_gold, attn_mask=implicit_bias_spda_gold
+            q_gold, k_gold, v_gold, attn_mask=implicit_bias_sdpa_gold
         )
         out_gold.sum().backward()
         out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=score_mod)
@@ -2266,12 +2311,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (q_ref.grad, q_flex.grad, q_gold.grad),
             (k_ref.grad, k_flex.grad, k_gold.grad),
             (v_ref.grad, v_flex.grad, v_gold.grad),
-            (bias_spda_ref.grad, bias_flex.grad, bias_spda_gold.grad),
+            (bias_sdpa_ref.grad, bias_flex.grad, bias_sdpa_gold.grad),
         ]:
             ref_error = rmse(ref, gold)
             flex_error = rmse(flex, gold)
             self.assertTrue(
-                ref_error * 1.2 > flex_error,
+                ref_error * 1.2 >= flex_error,
                 f"{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
@@ -2769,10 +2814,14 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
+        seq = torch.arange(512, device="cuda") // 127
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        def mask_mod(b, h, q, kv):
+            return (q >= kv) & (seq[q] == seq[kv])
+
+        block_mask = torch.compile(create_block_mask, fullgraph=True)(
+            mask_mod, 1, 1, 512, 512
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
@@ -2783,21 +2832,21 @@ class TestBlockMask(InductorTestCase):
             return q >= kv
 
         torch._dynamo.reset()
-        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
 
         # automatic dynamic shapes triggered and recompilation.
-        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
         # no recompilation.
-        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
@@ -3074,23 +3123,21 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         offsets = length_to_offsets(lengths, device)
 
         document_causal_mask = generate_doc_mask_mod(offsets)
-        block_mask_compiled = create_block_mask(
+        block_mask_compiled = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
-        block_mask = create_block_mask(
+        block_mask = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
         self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
         self.assertEqual(
