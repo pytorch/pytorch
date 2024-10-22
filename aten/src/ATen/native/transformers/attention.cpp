@@ -85,6 +85,34 @@ DEFINE_DISPATCH(flash_attention_kernel);
 DEFINE_DISPATCH(flash_attention_backward_kernel);
 
 namespace {
+class AutocastGuard {
+public:
+    // Constructor: saves current state and optionally modifies it
+    AutocastGuard(at::DeviceType device_type, bool new_state)
+        : device_type_(device_type)
+        , original_state_(at::autocast::is_autocast_enabled(device_type)) {
+        // Only modify state if requested state is different from current
+        if (original_state_ != new_state) {
+            at::autocast::set_autocast_enabled(device_type_, new_state);
+        }
+    }
+
+    // Destructor: restores original state
+    ~AutocastGuard() {
+        // Only restore if current state differs from original
+        if (at::autocast::is_autocast_enabled(device_type_) != original_state_) {
+            at::autocast::set_autocast_enabled(device_type_, original_state_);
+        }
+    }
+
+    // Delete copy operations to prevent accidental copies
+    AutocastGuard(const AutocastGuard&) = delete;
+    AutocastGuard& operator=(const AutocastGuard&) = delete;
+
+private:
+    const at::DeviceType device_type_;
+    const bool original_state_;
+};
 
 Tensor gemm_nt(const Tensor& self, const Tensor& other) {
   if (self.is_nested()) {
@@ -810,12 +838,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
-  auto autocast_state = at::autocast::is_autocast_enabled(query_.device().type());
-  if (!ctx.allowFP16BF16ReductionMathSDP()) {
-    // If a user wants to disable FP16 and BF16 Reduction we also want to
-    // disable autocast
-    at::autocast::set_autocast_enabled(query_.device().type(), false);
-  }
+    // If FP16/BF16 reduction is disabled, temporarily disable autocast
+    const auto device_type = query_.device().type();
+    std::unique_ptr<AutocastGuard> guard;
+    if (!ctx.allowFP16BF16ReductionMathSDP()) {
+        guard = std::make_unique<AutocastGuard>(device_type, false);
+    }
   auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
           (query_.scalar_type() == at::kHalf ||
            query_.scalar_type() == at::kBFloat16) &&
@@ -888,13 +916,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn = at::dropout(attn, dropout_p, true);
       }
     }
-    auto out = at::matmul(attn, value_expanded).to(origin_dtype);
-    auto attn_scores = attn.to(origin_dtype);
-    if (!ctx.allowFP16BF16ReductionMathSDP()) {
-      // Restore autocast state
-      at::autocast::set_autocast_enabled(query_.device().type(), autocast_state);
-    }
-    return std::make_tuple(std::move(out), std::move(attn_scores));
+  return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
 }
 
 std::tuple<at::Tensor, at::Tensor>
