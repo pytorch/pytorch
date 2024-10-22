@@ -103,6 +103,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         packed_t=self.packed_t,
         meta_t=self.meta_t,
         compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=False,
     )
 
@@ -185,15 +187,17 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     if isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
         assert A.packed is not None
         row, col = B.shape
-        B_padded = A._pad_dense_input(B)
+        B_padded = A._pad_dense_input(B).contiguous()
         sparse_result = torch._cslt_sparse_mm(
             A.packed,
             B_padded,
             alpha=A_scale * B_scale,
             out_dtype=out_dtype,
             bias=bias,
-        )[:, :col]
-    elif isinstance(B, torch.sparse.SparseSemiStructuredTensor):
+        )
+        return sparse_result[:, :col]
+    else:
+        assert isinstance(B, torch.sparse.SparseSemiStructuredTensor)
         assert B.packed is not None
         row, col = A.shape
         A_padded = B._pad_dense_input(A)
@@ -203,5 +207,9 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
             alpha=A_scale * B_scale,
             out_dtype=out_dtype,
             bias=bias,
-        ).t()[:row, :]
-    return sparse_result
+            transpose_result=B.fuse_transpose_cusparselt,
+        )
+        sparse_result = (
+            sparse_result if B.fuse_transpose_cusparselt else sparse_result.t()
+        )
+        return sparse_result[:row, :]

@@ -534,10 +534,10 @@ def tuned_cslt_sparse_mm(
     bias=None,
     alpha=None,
     out_dtype=None,
+    transpose_result=False,
     alg_id=0,
     split_k=1,
     split_k_one_kernel=True,
-    transpose_result=False,
     layout=None,
 ):
     from torch._inductor.select_algorithm import AlgorithmSelectorCache, realize_inputs
@@ -552,12 +552,20 @@ def tuned_cslt_sparse_mm(
 
     from torch._inductor.ir import FixedLayout
 
-    layout = FixedLayout(
-        mat2.get_device(),
-        out_dtype if out_dtype else mat2.get_dtype(),
-        [m, n],
-        [n, 1],
-    )
+    if transpose_result:
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [n, m],
+            [m, 1],
+        )
+    else:
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [m, n],
+            [n, 1],
+        )
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is not None:
         bias = realize_inputs(bias)
