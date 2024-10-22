@@ -1125,10 +1125,22 @@ def bmm_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("mat2")
 
+
     if inp.dim() != 3:
         raise ValueError("bmm(): input must be 3D")
     if other.dim() != 3:
         raise ValueError("bmm(): mat2 must be 3D")
+
+    from torch.utils._triton import has_triton
+    if has_triton:
+        a = inp
+        b = other
+        from torch.nested._internal.triton_kernels.bmm import matmul
+        # TODO: Start inlining this into the kernel
+        c = []
+        for (ai, bi) in zip(a.unbind(), b.unbind()):
+            c.append(matmul(ai, bi))
+        return NestedTensor(torch.cat(c), **extract_kwargs(inp))
 
     return matmul_default(torch.ops.aten.matmul.default, inp, other)
 
