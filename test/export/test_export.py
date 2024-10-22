@@ -2575,6 +2575,46 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    def test_unbacked_bindings_for_divisible_u_symint(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    return torch.ops.mylib.foo(a, b)
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
+                return a[b.item()]
+
+            @torch.library.register_fake("mylib::foo")
+            def foo_fake_impl(a, b):
+                ctx = torch.library.get_ctx()
+                u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
+                return torch.empty(u, a.shape[1], dtype=a.dtype)
+
+            ep = export(
+                M(),
+                (torch.randn(100, 4), torch.tensor(10)),
+            )
+            foo = [node for node in ep.graph.nodes if node.name == "foo"][0]
+            unbacked_bindings = foo.meta["unbacked_bindings"]
+            self.assertEqual(len(unbacked_bindings), 1)  # check binding is {u: path}
+            u = next(iter(unbacked_bindings.keys()))
+            self.assertEqual(
+                type(u).__name__, "Symbol"
+            )  # check binding is symbol, not expr
+            path = unbacked_bindings[u]
+            self.assertEqual(len(path), 3)  # check path is [size, 0, DivideByKey(10)]
+            self.assertEqual(type(path[2]).__name__, "DivideByKey")
+            self.assertEqual(path[2].divisor, 10)
+
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
             def forward(self, x1, x2, x3, y):
