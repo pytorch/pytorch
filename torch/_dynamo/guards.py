@@ -18,6 +18,7 @@ import re
 import sys
 import textwrap
 import types
+import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
@@ -590,9 +591,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[
-            str, torch._C._dynamo.guards.GuardManager
-        ] = {}
+        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
+            {}
+        )
 
         self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
@@ -652,6 +653,20 @@ class GuardBuilder(GuardBuilderBase):
                 key_manager.add_equals_match_guard(
                     key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
+
+    @staticmethod
+    def _get_generic_dict_manager_example_value(example_value):
+        # due to a bug in 3.13.0 (introduced by https://github.com/python/cpython/pull/116115,
+        # reported in https://github.com/python/cpython/issues/125608,
+        # fixed by https://github.com/python/cpython/pull/125611), we cannot take
+        # advantage of __dict__ versions to speed up guard checks.
+        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+            warnings.warn(
+                "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
+                RuntimeWarning,
+            )
+            return None
+        return example_value
 
     def getattr_on_nn_module(
         self,
@@ -778,7 +793,7 @@ class GuardBuilder(GuardBuilderBase):
             # Guard Manager
             mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
                 source=mod_dict_source,
-                example_value=mod_dict,
+                example_value=self._get_generic_dict_manager_example_value(mod_dict),
                 guard_manager_enum=GuardManagerType.GUARD_MANAGER,
             )
 
@@ -1281,7 +1296,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
             source=mod_dict_source,
-            example_value=val.__dict__,
+            example_value=self._get_generic_dict_manager_example_value(val.__dict__),
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
@@ -2391,12 +2406,16 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": structured.from_traceback(guard.stack.summary())
-                    if guard.stack
-                    else None,
-                    "user_stack": structured.from_traceback(guard.user_stack)
-                    if guard.user_stack
-                    else None,
+                    "stack": (
+                        structured.from_traceback(guard.stack.summary())
+                        if guard.stack
+                        else None
+                    ),
+                    "user_stack": (
+                        structured.from_traceback(guard.user_stack)
+                        if guard.user_stack
+                        else None
+                    ),
                 }
             )
 
