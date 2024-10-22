@@ -163,7 +163,8 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            torch.is_inference_mode_enabled()
+            not mode.export
+            and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
             if out.is_base_tensor():

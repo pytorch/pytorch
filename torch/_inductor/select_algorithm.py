@@ -694,7 +694,7 @@ class TritonTemplate(KernelTemplate):
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
-        ), TritonTemplateKernel(
+        ), V.graph.set_current_device(layout.device), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
             workspace_arg=workspace_arg,
@@ -1011,7 +1011,7 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        if config.abi_compatible and self.choice.use_fallback_kernel:
+        if self.choice.use_fallback_kernel:
             assert (
                 self.choice.op_overload is not None
             ), "Please provide an op_overload to use ir.FallbackKernel"
