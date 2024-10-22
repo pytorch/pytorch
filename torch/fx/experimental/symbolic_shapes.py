@@ -1794,6 +1794,15 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
 
 @lru_cache(256)
 def safe_expand(r: _SympyT) -> _SympyT:
+    """
+    Expand the given symbolic expression by recursively rewriting product of
+    sums into sum of products (with the product being either a multiplication or
+    exponentiation).
+
+    NOTE: using this on an intermediate expression may prevent simplification
+    down the line, e.g., if we eagerly expand `(a + b)^2` into `a^2 + 2ab + b^2`,
+    we won't be able to simplify `(a^2 + 2ab + b^2) / (a + b)` as easily.
+    """
     if hasattr(r, "expand"):
         try:
             return _fast_expand(r)
@@ -3879,8 +3888,6 @@ class ShapeEnv:
         guess
 
         """
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -3919,8 +3926,6 @@ class ShapeEnv:
         source: Optional[Source] = None,
     ) -> Union[float, SymFloat]:
         """Create a SymFloat value from a symbolic expression"""
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -4808,7 +4813,7 @@ class ShapeEnv:
                 res = f"{source_ref(source)} == {sexpr}"
                 exprs.append(res)
                 if (s0 := self.source_to_var.get(srcname)) is not None:
-                    if source != (canonical_source := self.var_to_sources[s0][0]):
+                    if source != self.var_to_sources[s0][0]:
                         verbose_exprs.append(
                             f"{res}  # duck sizing added this equality because these "
                             f"variables had the same size {self.var_to_val[s0]} "
@@ -5399,6 +5404,7 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: _SympyT) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
+        expr = safe_expand(expr)
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
@@ -6140,7 +6146,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:
