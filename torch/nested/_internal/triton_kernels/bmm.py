@@ -149,13 +149,8 @@ def grouped_matmul_kernel(
 def group_gemm_fn(tensor_a, tensor_b):
     assert tensor_a.is_nested
     assert not tensor_b.is_nested
-    group_A = list(tensor_a.unbind())
-    # group_B = list(tensor_b.unbind())
-    device = torch.device('cuda')
     assert tensor_a.size(0) == tensor_b.size(0)
-    # assert len(group_A) == len(group_B)
     group_size = tensor_a.size(0)
-    # group_size = len(group_A)
 
     assert tensor_b.is_contiguous()
 
