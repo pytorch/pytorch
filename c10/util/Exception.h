@@ -658,12 +658,12 @@ namespace c10::detail {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        TORCH_WARN(__VA_ARGS__);                                          \
-        return true;                                                      \
-      }()
+#define _TORCH_WARN_ONCE(...)                                \
+  [[maybe_unused]] static const auto C10_ANONYMOUS_VARIABLE( \
+      torch_warn_once_) = [&] {                              \
+    TORCH_WARN(__VA_ARGS__);                                 \
+    return true;                                             \
+  }()
 
 #ifdef DISABLE_WARN
 #define TORCH_WARN_ONCE(...) ((void)0);
@@ -689,28 +689,28 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
-instead.")
+[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+instead.")]]
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERTM() {}
 
