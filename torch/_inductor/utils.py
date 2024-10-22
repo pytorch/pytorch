@@ -40,7 +40,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
@@ -477,7 +477,8 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
             try:
                 return self.{key}
             except AttributeError:
-                self.{key} = rv = fn(self)
+                rv = fn(self)
+                object.__setattr__(self, "{key}", rv)
                 return rv
         """.lstrip(),
         ctx,
@@ -2122,3 +2123,18 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
         and data.device == value.device
         and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
     )
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)
