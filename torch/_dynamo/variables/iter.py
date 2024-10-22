@@ -485,10 +485,15 @@ class MapVariable(ZipVariable):
         )
 
 
-class FilterVariable(ZipVariable):
+class FilterVariable(IteratorVariable):
     """
     Represents filter(fn, iterable)
     """
+
+    _nonvar_fields = {
+        "index",
+        *IteratorVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
@@ -496,28 +501,57 @@ class FilterVariable(ZipVariable):
         iterable: Union[List[VariableTracker], VariableTracker],
         **kwargs,
     ) -> None:
-        super().__init__(
-            [
-                iterable,
-            ],
-            **kwargs,
-        )
+        super().__init__(**kwargs)
         self.fn = fn
+        self.iterable = iterable
+        self.index = 0
 
     def python_type(self):
         return filter
 
     def has_unpack_var_sequence(self, tx) -> bool:
-        return False
+        return isinstance(self.iterable, list) or self.iterable.has_unpack_var_sequence(
+            tx
+        )
+
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        assert self.has_unpack_var_sequence(tx)
+        it = None
+        if isinstance(it, list):
+            it = self.iterable[self.index :]
+        else:
+            it = self.iterable.unpack_var_sequence(tx)
+        filtered = filter(self.fn, it)
+        return variables.TupleVariable(list(filtered))
 
     def next_variable(self, tx):
+        def _next():
+            old_index = self.index
+            if isinstance(self.iterable, list):
+                if old_index >= len(self.iterable):
+                    raise_observed_exception(StopIteration, tx)
+                return self.iterable[old_index]
+            else:
+                return self.iterable.next_variable(tx)
+
         # A do-while loop to find elements that make fn return true
         while True:
-            args = super().next_variable(tx)
-            assert len(args.items) == 1
-            res = self.fn.call_function(tx, args.items, {})
+            item = _next()
+            self.index += 1
+            res = self.fn.call_function(tx, [item], {})
+            # TODO: polyfills
             if res.is_python_constant() and res.as_python_constant():
-                return args.items[0]
+                return item
+
+    def reconstruct_items(self, codegen):
+        if isinstance(self.iterable, list):
+            remaining_items = self.iterable[self.index :]
+            codegen.foreach(remaining_items)
+            codegen.append_output(
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items))
+            )
+        else:
+            codegen(self.iterable)
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
@@ -528,7 +562,7 @@ class FilterVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
+                create_instruction("BUILD_TUPLE", arg=2),
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
