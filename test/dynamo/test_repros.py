@@ -6170,6 +6170,33 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(ref, res)
 
+    def test_listcomp(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._num = 4
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, x):
+                values = [i * torch.cos(x) for i in range(self._num)]
+                return sum(values)
+
+        mod = Module()
+
+        def fn(x):
+            return mod(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        # Ensure that the listcomp is fully compiled
+        self.assertEqual(cnt.op_count, 8)
+
 
 instantiate_parametrized_tests(ReproTests)
 
