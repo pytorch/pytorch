@@ -552,9 +552,9 @@ def _is_valid_quantized_op_binary_optimization_pattern(
 ):
     # Check if it's a valid Binary Pattern for qconv2d and qlinear:
     # * qop_pointwise should only has one users
-    # * If extra_input_from_dequant is True, extra input of binary node should come from dequant pattern
+    # * If extra_input_from_dequant is True and the two inputs of binary node have the same shape,
+    #   extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
-    # * the two inputs of binary node should have the same shape
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
@@ -573,15 +573,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
                     extra_input_of_binary_node = arg
                     break
             assert extra_input_of_binary_node is not None
-            # Extra input of binary node comes from dequant pattern
-            if extra_input_from_dequant and (
-                (not isinstance(extra_input_of_binary_node, torch.fx.Node))
-                or (
-                    extra_input_of_binary_node.target
-                    != quantized_decomposed.dequantize_per_tensor.default
-                )
-            ):
-                return False
 
         # the two inputs of binary node should have attribute "meta" and should be tensors
         if not (
@@ -590,6 +581,23 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         ) or not (
             hasattr(binary_node_inputs[1], "meta")
             and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+        ):
+            return False
+
+        # Extra input of binary node comes from dequant pattern
+        if (
+            (
+                binary_node_inputs[0].meta["val"].size()
+                == binary_node_inputs[1].meta["val"].size()
+            )
+            and extra_input_from_dequant
+            and (
+                (not isinstance(extra_input_of_binary_node, torch.fx.Node))
+                or (
+                    extra_input_of_binary_node.target
+                    != quantized_decomposed.dequantize_per_tensor.default
+                )
+            )
         ):
             return False
 
