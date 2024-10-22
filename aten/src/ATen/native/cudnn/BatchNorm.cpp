@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     bool training,
     double exponential_average_factor,
     double epsilon) {
-  AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
@@ -38,13 +38,15 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const std::optional<Tensor>& save_var_opt,
     double epsilon,
     const Tensor& reservedSpace) {
-  AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
 }
 
