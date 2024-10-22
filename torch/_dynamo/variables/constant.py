@@ -82,11 +82,8 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
-
-    def __repr__(self):
-        return str(self)
 
     def as_python_constant(self):
         return self.value
@@ -229,7 +226,7 @@ class EnumVariable(VariableTracker):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
     def as_python_constant(self):

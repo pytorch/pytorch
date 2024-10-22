@@ -213,7 +213,7 @@ def aot_dispatch_base_graph(
             )
 
         trace_structured(
-            "aot_forward_graph",
+            "aot_inference_graph",
             payload_fn=lambda: fw_module.print_readable(
                 print_output=False, include_stride=True, include_device=True
             ),
