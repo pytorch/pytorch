@@ -1775,7 +1775,7 @@ class SubgraphTracer(fx.Tracer):
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
-        # This dict maps proxies from direct parent to proxies in current graph.
+        # This dict maps proxies in outer graphs to placeholders in current graph.
         # It serves two purposes:
         # - Proxies are associated with VariableTrackers. If we see
         # the same VariableTracker twice (and it is a free variable),
@@ -2133,10 +2133,11 @@ class SubgraphTracer(fx.Tracer):
         if isinstance(maybe_lifted_proxy, torch.fx.Proxy):
             return maybe_lifted_proxy
 
-        # We first lift proxy to parent's input then lift to self's input. This enforeces the invariant
-        # that lifted_freevars always maps proxy in direct parent to proxy in current graph.
-        if self.parent is not None and proxy.tracer != self.parent:
-            proxy = self.parent.lift_tracked_freevar_to_input(proxy)
+        # We first lift proxy to parent's graph then lift to current grpah's input
+        # so that when we bind symints of the sizes in current graph, those symints
+        # would already be lifted as inputs to parent graph.
+        if proxy.tracer != self.parent:
+            self.parent.lift_tracked_freevar_to_input(proxy)
 
         example_value = proxy.node.meta["example_value"]
         new_proxy = self.create_graph_input(
