@@ -2740,7 +2740,7 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_contents: Set[str]
+    mutated_closure_cell_ids: Set[int]
 
     @staticmethod
     def current_tx() -> "InstructionTranslator":
@@ -2768,7 +2768,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_contents: Set[str],
+        mutated_closure_cell_ids: Set[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2813,7 +2813,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            self.mutated_closure_cell_ids = mutated_closure_cell_ids
             if self.export:
                 assert (
                     self.one_graph
@@ -3333,17 +3333,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 if (
                     maybe_cell is not None
-                    and maybe_cell.source.name()
-                    not in self.output.root_tx.mutated_closure_cell_contents
+                    and hasattr(maybe_cell, "original_cell")
+                    and id(maybe_cell.original_cell)
+                    not in self.output.root_tx.mutated_closure_cell_ids
                 ):
                     # Why is the source name here unique?
-                    # mutated_closure_cell_contents is a per-frame
+                    # mutated_closure_cell_ids is a per-frame
                     # concept, and sources identify, e.g., particular
                     # locals from the frame.  If you had two locals,
                     # they'll get different source names, and therefore
                     # differ here.
-                    self.output.root_tx.mutated_closure_cell_contents.add(
-                        maybe_cell.source.name()
+                    self.output.root_tx.mutated_closure_cell_ids.add(
+                        id(maybe_cell.original_cell)
                     )
                     raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")
