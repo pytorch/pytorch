@@ -10,6 +10,10 @@
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cstdint>
+#include <unordered_map>
+#include <set>
+#include <mutex>
+#include <string_view>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -25,6 +29,46 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
+#ifdef USE_ROCM
+const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtDataTypes = {
+    {HIP_R_8I, HIPSPARSELT_R_8I},
+    {HIP_R_16F, HIPSPARSELT_R_16F},
+    {HIP_R_16BF, HIPSPARSELT_R_16BF},
+};
+
+std::mutex g_hipSparseLtSupportCacheMutex;
+static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
+const static std::unordered_set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+
+static bool isHipSparseLtSupported(int idx) {
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        auto it = g_hipSparseLtSupportCache.find(idx);
+        if (it != g_hipSparseLtSupportCache.end()) {
+            return it->second;
+        }
+    }
+
+    bool result = false;
+    try {
+        auto prop = at::cuda::getDeviceProperties(idx);
+        std::string_view gcnArchName(prop->gcnArchName);
+        size_t colonPos = gcnArchName.find(':');
+        std::string_view baseArch = (colonPos != std::string_view::npos) ? gcnArchName.substr(0, colonPos) : gcnArchName;
+        result = (supported_archs.count(std::string(baseArch)) > 0);
+    } catch (const std::exception&) {
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        g_hipSparseLtSupportCache[idx] = result;
+    }
+
+    return result;
+}
+#endif
+
+
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
     if (!handle_initialized){
@@ -35,6 +79,13 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
     auto compression_factor = 9;
+#ifdef USE_ROCM
+    int device_index = at::cuda::current_device();
+    TORCH_CHECK(isHipSparseLtSupported(device_index),
+                "hipSPARSELt is not supported on this device. ",
+                "Supported architectures are: gfx940, gfx941, gfx942, gfx1200, gfx1201. ",
+                "Also, ROCm version must be >= 6.2.0");
+#endif
 
     switch(
         sparse_input.scalar_type()
@@ -50,9 +101,11 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::BFloat16:
             type = CUDA_R_16BF;
             break;
+#ifndef USE_ROCM
         case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
+#endif
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
         case at::ScalarType::Float8_e4m3fn:
             type = CUDA_R_8F_E4M3;
@@ -71,10 +124,22 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         &sparse_input_descriptor,
         sparse_input.size(0),
         sparse_input.size(1),
+    #ifdef USE_ROCM
+        sparse_input.size(0),
+    #else
         sparse_input.size(1),
+    #endif
         16,
+    #ifdef USE_ROCM
+        sparseLtDataTypes.at(type),
+    #else
         type,
+    #endif
+    #ifdef USE_ROCM
+        CUSPARSE_ORDER_COL,
+    #else
         CUSPARSE_ORDER_ROW,
+    #endif
         CUSPARSELT_SPARSITY_50_PERCENT));
 
     // compress input
@@ -134,6 +199,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
 
   switch(compressed_A.scalar_type())
   {
+
     case at::ScalarType::Char:
         input_type = CUDA_R_8I;
         output_type = CUDA_R_8I;
@@ -143,7 +209,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
@@ -156,11 +222,14 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
-    case at::ScalarType::Float:
+    case at::ScalarType::Float: 
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
         C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
+        #ifdef USE_ROCM
+        TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
+        #endif
         break;
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
@@ -266,10 +335,22 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &sparse_input_descriptor,
       m,
       k,
+#ifdef USE_ROCM
+      m,
+#else
       k,
+#endif
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(input_type),
+#else
       input_type,
+#endif
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL,
+#else
       CUSPARSE_ORDER_ROW,
+#endif
       CUSPARSELT_SPARSITY_50_PERCENT));
 
   // initialize dense input descriptor
@@ -279,10 +360,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &dense_input_descriptor,
       (dense_B.is_contiguous()) ? k : n,
       (dense_B.is_contiguous()) ? n : k,
+#ifdef USE_ROCM
+      (dense_B.is_contiguous()) ? k : n,
+#else
       (dense_B.is_contiguous()) ? n : k,
+#endif
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(input_type),
+#else
       input_type,
-      CUSPARSE_ORDER_ROW));
+#endif
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL
+#else
+      CUSPARSE_ORDER_ROW
+#endif
+      ));
 
   // create result tensor
   auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
@@ -295,10 +389,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       &res_descriptor,
       m,
       n,
+#ifdef USE_ROCM
+      m,
+#else
       (transpose_result) ? m: n,
+#endif
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(output_type),
+#else
       output_type,
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
+#endif
+#ifdef USE_ROCM
+      CUSPARSE_ORDER_COL
+#else
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW
+#endif
+      ));
 
   // For float8, need fp16 C_descriptor, can't use FP8 for this matrix
   cusparseLtMatDescriptor_t C_descriptor;
@@ -309,7 +416,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       n,
       (transpose_result) ? m: n,
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(C_type),
+#else
       C_type,
+#endif
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // initialize matmul
