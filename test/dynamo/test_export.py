@@ -3268,7 +3268,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             TypeError,
-            r".*false_fn\(\) missing 1 required positional argument: 'x'",
+            r"false_fn\(\) missing 1 required positional argument: 'x'",
         ):
             f(*example_inputs)
 
