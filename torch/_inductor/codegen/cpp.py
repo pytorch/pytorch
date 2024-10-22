@@ -1487,12 +1487,14 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
+
         def maskify_or_vecify(code):
             return (
                 f"{V.kernel._get_mask_type()}::from({code})"
                 if dtype == torch.bool
                 else f"{V.kernel._get_vec_type(dtype)}({code})"
             )
+
         if result.is_vec:
             body_code_vec = body_code
         else:
