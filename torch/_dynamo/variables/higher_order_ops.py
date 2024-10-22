@@ -579,9 +579,7 @@ def speculate_subgraph(
                         idx += 1
                     graph.lint()
 
-                print("before graph", graph)
                 move_lifted_freevars_phs_to_end(graph, lifted_freevars)
-                print("after graph", graph)
 
                 return (
                     (output, treespec),
