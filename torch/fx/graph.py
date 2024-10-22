@@ -1053,6 +1053,7 @@ class Graph:
 
             to_erase (Node): The ``Node`` to erase from the ``Graph``.
         """
+
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
