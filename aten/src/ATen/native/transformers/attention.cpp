@@ -891,8 +891,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     auto out = at::matmul(attn, value_expanded).to(origin_dtype);
     auto attn_scores = attn.to(origin_dtype);
     if (!ctx.allowFP16BF16ReductionMathSDP()) {
-      // If a user wants to disable FP16 and BF16 Reduction we also want to
-      // disable autocast
+      // Restore autocast state
       at::autocast::set_autocast_enabled(query_.device().type(), autocast_state);
     }
     return std::make_tuple(std::move(out), std::move(attn_scores));
