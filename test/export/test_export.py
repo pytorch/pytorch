@@ -2617,25 +2617,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define(
-                "foo(Tensor a, Tensor b) -> (Tensor)",
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
                 tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
             )
 
             class M(torch.nn.Module):
                 def forward(self, a, b):
                     return torch.ops.mylib.foo(a, b)
 
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
             def foo_impl(a, b):
                 return a[b.item()]
 
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_fake_impl(a, b):
                 ctx = torch.library.get_ctx()
                 u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
                 return torch.empty(u, a.shape[1], dtype=a.dtype)
 
-            lib.impl("foo", foo_impl, "CPU")
-            lib._register_fake("foo", foo_fake_impl)
             ep = export(
                 M(),
                 (torch.randn(100, 4), torch.tensor(10)),
