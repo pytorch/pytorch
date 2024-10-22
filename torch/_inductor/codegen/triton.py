@@ -1996,7 +1996,6 @@ class TritonKernel(SIMDKernel):
         """
         Reshape to RBLOCK, collapsing all reduction dims.
         """
-        # TODO refactor ndim calculations to reduce duplication among other reductions
         target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
         initial_shape = self.dense_size_list()
         target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
