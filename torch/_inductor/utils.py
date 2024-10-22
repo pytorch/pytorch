@@ -40,7 +40,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
@@ -88,7 +88,7 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
-InputType = Union[torch.Tensor, int]
+InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 
 GPU_ALIGN_BYTES = 16
@@ -1970,7 +1970,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     return result, s
 
 
-def shape_env_from_inputs(inputs: List[torch.Tensor]):
+def shape_env_from_inputs(inputs: Sequence[InputType]):
     shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
@@ -2024,9 +2024,9 @@ def copy_misaligned_inputs(
 
 
 def remove_unaligned_input_idxs(
-    inputs: List[InputType],
+    inputs: Sequence[InputType],
     static_input_idxs: Sequence[int],
-):
+) -> Sequence[int]:
     """
     We require all inputs to be aligned, so introduce a copy for any
     that aren't.
@@ -2123,3 +2123,18 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
         and data.device == value.device
         and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
     )
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)
