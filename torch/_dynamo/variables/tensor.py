@@ -1128,6 +1128,20 @@ class SymNodeVariable(VariableTracker):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 
+        def _is_unbacked_symbol(s):
+            from torch.fx.experimental.symbolic_shapes import (
+                free_unbacked_symbols,
+                is_symbolic,
+            )
+
+            return (
+                is_symbolic(s)
+                and isinstance(s.node.expr, sympy.Symbol)
+                and len(free_unbacked_symbols(s.node.expr)) > 0
+            )
+
+        if _is_unbacked_symbol(sym_num):
+            tx.output.track_unbacked_symbols(sym_num, proxy)
         return SymNodeVariable(proxy, sym_num, **options)
 
     def __init__(self, proxy, sym_num, **kwargs) -> None:

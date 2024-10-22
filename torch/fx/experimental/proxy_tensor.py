@@ -1370,9 +1370,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType
     ) -> Proxy:
         n_args = tuple(
-            get_proxy_slot(a, self.tracer).force().node
-            if isinstance(a, py_sym_types)
-            else a
+            (
+                get_proxy_slot(a, self.tracer).force().node
+                if isinstance(a, py_sym_types)
+                else a
+            )
             for a in args
         )
 

@@ -6,7 +6,7 @@ import inspect
 import itertools
 import logging
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -535,6 +535,53 @@ def speculate_subgraph(
                 graph = tx.output.graph
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
+
+                # NOTE: [HigherOrderOperator subgraph input ordering]
+                # The input ordering of the higher order ops is determined by the order of
+                # the creatation of the placehoder:
+                # Mannually created inputs is before speculataion in validate_args_and_maybe_create_graph_inputs.
+                # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
+                # their ordering is determined by the time they are lifted: earlier lifted ones precede later
+                # lifted ones.
+                def move_lifted_freevars_phs_to_end(
+                    graph: torch.fx.Graph, lifted_freevars: Tuple[torch.fx.Node]
+                ):
+                    lifted_phs = tuple(
+                        [parent_p, child_p]
+                        for parent_p, child_p in lifted_freevars.items()
+                    )
+                    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
+
+                    # No need to reorder when graph doesn't have args or doesn't
+                    # have lifted freevars.
+                    if len(prev_phs) == 0 or len(lifted_phs) == 0:
+                        return
+
+                    # lifted_freevars are guaranteed to ordered by their appearance
+                    # in graph's placeholders, so we could maintain an idx to match
+                    # lifted phs with the corresponding prev phs.
+                    idx = 0
+                    first_non_ph = prev_phs[-1].next
+                    for n in prev_phs:
+                        if idx >= len(lifted_phs):
+                            break
+
+                        parent_p, child_p = lifted_phs[idx]
+                        if n is not child_p.node:
+                            continue
+
+                        with graph.inserting_before(first_non_ph):
+                            new_ph = graph.node_copy(n)
+                        n.replace_all_uses_with(new_ph)
+                        graph.erase_node(n)
+                        new_ph.name = n.name
+                        child_p.node = new_ph
+                        idx += 1
+                    graph.lint()
+
+                print("before graph", graph)
+                move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+                print("after graph", graph)
 
                 return (
                     (output, treespec),
@@ -1073,11 +1120,15 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     VariableTracker.build(
                         tx,
-                        leaf.size
-                        if leaf.size is not None
-                        else BuiltinVariable(getattr)
-                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        .items,
+                        (
+                            leaf.size
+                            if leaf.size is not None
+                            else BuiltinVariable(getattr)
+                            .call_function(
+                                tx, [leaf, ConstantVariable.create("shape")], {}
+                            )
+                            .items
+                        ),
                     ),
                 ),
                 kwargs={
@@ -2260,6 +2311,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx.output,
             parent=tx.output.current_tracer,
             source_target="autograd.Function",
+            level=tx.output.current_tracer.level + 1,
         )
 
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
@@ -2298,6 +2350,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx.output,
             parent=fwd_tracer,
             source_target="autograd.Function",
+            level=fwd_tracer.level + 1,
         )
 
         # Speculate subgraph on the backward. We make the
