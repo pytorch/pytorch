@@ -52,6 +52,37 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
+#define PROFILE
+#ifdef PROFILE
+// Global variable to track indentation level
+int profiling_indent_level = 0;
+
+// Helper macro to increase the indentation level
+#define INCREASE_INDENT() profiling_indent_level++
+
+// Helper macro to decrease the indentation level
+#define DECREASE_INDENT() profiling_indent_level--
+
+// Macro to generate indentation spaces based on the current indent level
+#define INDENT() std::cout << std::string(profiling_indent_level * 2, ' ')
+
+#define START_PROFILING(name) \
+    auto start_time_##name##_var = std::chrono::high_resolution_clock::now(); \
+    INDENT() << #name << " start" << std::endl; \
+    INCREASE_INDENT()
+
+#define END_PROFILING(name) \
+    DECREASE_INDENT(); \
+    auto end_time_##name##_var = std::chrono::high_resolution_clock::now(); \
+    auto duration_##name##_var = std::chrono::duration_cast<std::chrono::microseconds>(end_time_##name##_var - start_time_##name##_var).count(); \
+    INDENT() << #name << " end (" << duration_##name##_var << " us)" << std::endl;
+
+#else
+// If profiling is not enabled, define empty macros
+#define START_PROFILING(name)
+#define END_PROFILING(name)
+#endif
+
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -559,6 +590,9 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
+  START_PROFILING(_compiled_autograd_impl);
+  START_PROFILING(hot_path);
+  START_PROFILING(setup_worklist);
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(PyTLSWrapper::create());
@@ -578,14 +612,20 @@ CacheNode* _compiled_autograd_impl(
   int i = 0;
   std::optional<VerboseLogger> vlogger =
       VerboseLogger::maybe_create(compiler_call.state.get("vlogger"));
+  END_PROFILING(setup_worklist);
   while (!worklist.empty()) {
+    START_PROFILING(process_worklist_item);
+    START_PROFILING(lookup_node_call);
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     calls.emplace_back(&call);
+    END_PROFILING(lookup_node_call);
 
     { // update cache and gather args into `compiler_call`
+      START_PROFILING(collect_node);
       CompiledNodeArgs node_args(compiler_call, call);
+      std::cout << "node: " << fn->name() << std::endl;
       node_args.collect(call);
       if (vlogger.has_value()) {
         compiler_call.set_active_node_call_idx(i);
@@ -608,8 +648,10 @@ CacheNode* _compiled_autograd_impl(
             i);
       }
       cache = cache->lookup(key);
+      END_PROFILING(collect_node);
     }
 
+    START_PROFILING(collect_edges);
     for (const auto& edge : fn->next_edges()) {
       if (!edge.is_valid()) {
         continue;
@@ -630,11 +672,15 @@ CacheNode* _compiled_autograd_impl(
         worklist.emplace_back(edge.function);
       }
     }
+    END_PROFILING(collect_edges);
     i++;
+    END_PROFILING(process_worklist_item);
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
+    END_PROFILING(hot_path);
+
     // cache miss, need to capture FX graph
     PyObject* the_autograd_compiler = compiler_call.state.get("compiler");
     TORCH_INTERNAL_ASSERT(the_autograd_compiler != Py_None);
@@ -760,7 +806,10 @@ CacheNode* _compiled_autograd_impl(
         PyCallable_Check(cache->compiled_fn),
         "Expected end_capture to return compiled_fn");
     state.debug_asserts();
-  } // End cache miss region
+    // End cache miss region
+  } else {
+    END_PROFILING(hot_path);
+  }
 
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
@@ -774,6 +823,7 @@ CacheNode* _compiled_autograd_impl(
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
+  END_PROFILING(_compiled_autograd_impl);
   return cache;
 }
 
@@ -795,11 +845,15 @@ struct LockGuardWithErrorLogs {
   std::mutex& mtx_;
 };
 
+int call_count = 0;
+
 variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
+  std::cout << "compiled_autograd call id: " << call_count++ << std::endl;
+  START_PROFILING(compiled_autograd);
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
@@ -832,6 +886,7 @@ variable_list compiled_autograd(
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  END_PROFILING(compiled_autograd);
   return outputs;
 }
 
