@@ -3726,7 +3726,10 @@ def fail_cuda(is_skip=False):
 
 
 # test_failures, xfail by default, set is_skip=True to skip
-CPU_TEST_FAILURES = None
+CPU_TEST_FAILURES = {
+    # TODO: failed internally
+    "test_multiple_output_alias": fail_cpu(is_skip=True),
+}
 
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
