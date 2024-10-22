@@ -4413,6 +4413,20 @@ class CPUReproTests(TestCase):
 
         self.common(fn, (result,))
 
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+
+        self.common(fn, (result,))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
