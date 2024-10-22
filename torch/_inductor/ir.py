@@ -6,7 +6,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import sys
 import textwrap
 import traceback
 from contextlib import nullcontext
@@ -84,6 +83,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    ir_dataclass,
     is_dynamic,
     is_gpu,
     sympy_dot,
@@ -107,23 +107,6 @@ _IntLike: TypeAlias = Union[int, Expr]
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-from typing_extensions import dataclass_transform
-
-
-@dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls, frozen=frozen)
-
-    if cls is None:
-        return wrap
-    return wrap(cls)
-
 
 """ [Note: Inductor IR]
 
@@ -4831,11 +4814,13 @@ class ExternKernel(InputsKernel):
                         x,
                         freeze=True,
                         want_contiguous=False,
-                        stride_order=get_stride_order(
-                            V.graph.sizevars.size_hints(x.get_layout().stride)
-                        )
-                        if is_stride_order_storage_and_layout(x, order)
-                        else order,
+                        stride_order=(
+                            get_stride_order(
+                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                            )
+                            if is_stride_order_storage_and_layout(x, order)
+                            else order
+                        ),
                         allow_padding=allow_padding,
                     )
                     return x
@@ -5403,9 +5388,25 @@ class UserDefinedTritonKernel(ExternKernel):
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
+        """
+        Filter out None args.
+
+        see https://github.com/pytorch/pytorch/issues/115344
+
+        Two cases for a None arg:
+        1. The arg is already tl.constexpr, so leave it in
+        2. The arg is not tl.constexpr so we have to remove it
+        """
+        constexpr_indices_set = set(constexpr_indices)
+        raw_args = [
+            arg
+            for idx, arg in enumerate(raw_args)
+            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
+        ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
+
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
@@ -5447,6 +5448,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, configs = self.get_kernel_and_configs()
+
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args

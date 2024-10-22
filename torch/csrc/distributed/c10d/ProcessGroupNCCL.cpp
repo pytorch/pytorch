@@ -720,6 +720,9 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -1569,12 +1572,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
   LOG(ERROR) << errorMsg;
 
-  auto& cpp_dumper = get_cpp_trace_dumper();
-  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces:";
-    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
-  }
-
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
@@ -1590,6 +1587,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         true);
   }
 
+  auto& cpp_dumper = get_cpp_trace_dumper();
+  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
+    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
+    cpp_dumper.value()(
+        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
+    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
+  }
+
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
     auto kGilCheckTimeout = std::chrono::milliseconds(300);
@@ -1599,10 +1604,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           futStatus != std::future_status::deferred,
           "Expected the future to have been launched eagerly.");
       LOG(ERROR)
+          << logPrefix()
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
     LOG(INFO)
+        << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
@@ -2319,9 +2326,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
-    TORCH_CHECK(
-        options_->split_color != 0,
-        "Must specify a non-zero color when splitting");
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
@@ -2329,6 +2333,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     if (dit != other_comms.end()) {
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
+        LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
+                  << parentComm->repr();
         ncclComm = NCCLComm::split(
             parentComm.get(),
             options_->split_color,
@@ -2784,6 +2790,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   avoidRecordStreams |= avoidRecordStreams_;
   nanCheck &= enableNanCheck_;
 
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2794,7 +2805,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
   op_id_++;
 
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -2835,8 +2845,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
     for (const auto& input : inputs) {
@@ -2962,6 +2970,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     bool avoidRecordStreams) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
+
+  // Currently, the API permits one scenario where inputs.size() and
+  // outputs.size() are > 0.
+  // 1. If the call was a _coalesced call, all inputs must be on the same
+  // device.
+  //    The group of nccl calls applies the collective separately to each input,
+  //    but the group as a whole should be efficient, and might even execute as
+  //    a single fused kernel.
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2976,14 +2997,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // op_id_ once per indvidual operation within the group
   op_id_++;
 
-  // Currently, the API permits one scenario where inputs.size() and
-  // outputs.size() are > 0.
-  // 1. If the call was a _coalesced call, all inputs must be on the same
-  // device.
-  //    The group of nccl calls applies the collective separately to each input,
-  //    but the group as a whole should be efficient, and might even execute as
-  //    a single fused kernel.
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -3025,8 +3038,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -3182,6 +3193,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
   bool isSendRecvSelf = false;
@@ -3302,9 +3315,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         pgStatus_,
         /*isP2P=*/true);
   }
-
-  // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
