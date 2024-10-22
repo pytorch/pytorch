@@ -227,7 +227,7 @@ class MetaTracer(torch.fx.Tracer):
     def path_of_module(self, mod: torch.nn.Module) -> str:
         try:
             return super().path_of_module(mod)
-        except NameError as e:
+        except NameError:
             if self.allow_insert_stateless_mods and len(list(mod.parameters())) == 0 and len(list(mod.buffers())) == 0:
                 path = self._insert_module_as_submodule(mod)
                 self.prev_module = path

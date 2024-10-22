@@ -159,7 +159,7 @@ class VecMask {
   }
 
   template <typename U>
-  static VecMask<T, N> from(U* b, int16_t count) {
+  static VecMask<T, N> from(U* b, int count) {
     using int_t = int_same_size_t<T>;
     __at_align__ T mask[count];
 #ifndef __msvc_cl__

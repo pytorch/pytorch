@@ -12,8 +12,7 @@
 #include <c10/util/OptionalArrayRef.h>
 #include <optional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Similar to c10::scope_exit but with a status.
 // TODO(alanwaketan): Consolidate it with c10::scope_exit.
@@ -118,9 +117,8 @@ std::optional<std::vector<T>> ToOptionalVector(
 }
 
 template <typename T>
-typename std::underlying_type<T>::type GetEnumValue(T value) {
-  return static_cast<typename std::underlying_type<T>::type>(value);
+std::underlying_type_t<T> GetEnumValue(T value) {
+  return static_cast<std::underlying_type_t<T>>(value);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

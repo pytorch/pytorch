@@ -190,8 +190,12 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
 
 def update(op, device_name, version, key, value):
     """Update the db of op parameters."""
-    # avoid storing possible optimization failures:
-    assert value, (op, device_name, version, key, value)
+    # skip storing possible optimization failures:
+    if not value:
+        warnings.warn(
+            f"skipping empty value for {op}: {device_name=} {version=} {key=}"
+        )
+        return
     if (op, device_name, version) in _operation_device_version_data:
         if _operation_device_version_data[op, device_name, version].get(key) == value:
             return
@@ -375,7 +379,6 @@ def minimize(
             minimizer_key = (
                 initial_key if initial_key in minimizer_keys else min(minimizer_keys)
             )
-            minimizer_target = all_values[minimizer_key]
             parameters = from_key(minimizer_key, parameters)
             speedup_incr = (1 - minimal_target / reference_target) * 100
             if speedup_incr < 0:
@@ -507,9 +510,7 @@ def optimize_scatter_mm(
         def test_func():
             return bsr_scatter_mm(bsr, dense, indices_data=indices_data)
 
-        ms_min = triton.testing.do_bench(
-            test_func, warmup=500, rep=100, fast_flush=False
-        )
+        ms_min = triton.testing.do_bench(test_func, warmup=500, rep=100)
 
         return ms_min
 
@@ -553,7 +554,7 @@ def optimize_scatter_mm(
             return value
         return next_value
 
-    meta, speedup, timing, sensitivity_message = minimize(
+    meta, speedup, timing, _sensitivity_message = minimize(
         bench, initial_meta, reference_meta, step_meta_parameter
     )
     if initial_meta is not reference_meta and initial_meta == meta and not force:
@@ -601,6 +602,8 @@ def tune_bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
+    left_alpha=None,
+    right_alpha=None,
     out=None,
     store=False,
     verbose=False,
@@ -660,10 +663,18 @@ def tune_bsr_dense_addmm(
     def bench(meta, input=input, bsr=bsr, dense=dense, alpha=alpha, out=out):
         def test_func():
             return bsr_dense_addmm(
-                input, bsr, dense, beta=beta, alpha=alpha, meta=meta, out=out
+                input,
+                bsr,
+                dense,
+                beta=beta,
+                alpha=alpha,
+                left_alpha=left_alpha,
+                right_alpha=right_alpha,
+                meta=meta,
+                out=out,
             )
 
-        return triton.testing.do_bench(test_func, warmup=500, rep=100, fast_flush=False)
+        return triton.testing.do_bench(test_func, warmup=500, rep=100)
 
     # The step function that increments a specified meta parameter:
     def step_meta_parameter(name, value, direction, meta, M=M, N=N, K=K, BM=BM, BK=BK):
@@ -725,6 +736,8 @@ def optimize_bsr_dense_addmm(
     bk,
     beta=1,
     alpha=1,
+    use_left_alpha=False,
+    use_right_alpha=False,
     dtype=torch.float16,
     device="cuda",
     sparsity=0.5,
@@ -738,12 +751,18 @@ def optimize_bsr_dense_addmm(
     ).to_sparse_bsr((bm, bk))
     dense = make_tensor(k, n, dtype=dtype, device=device)
     input = make_tensor(m, n, dtype=dtype, device=device)
+    left_alpha = make_tensor(m, dtype=dtype, device=device) if use_left_alpha else None
+    right_alpha = (
+        make_tensor(n, dtype=dtype, device=device) if use_right_alpha else None
+    )
     tune_bsr_dense_addmm(
         input,
         bsr,
         dense,
         beta=beta,
         alpha=alpha,
+        left_alpha=left_alpha,
+        right_alpha=right_alpha,
         store=True,
         force=force,
         verbose=verbose,
@@ -766,10 +785,12 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
         65536,
         131072,
         50432,
+        65792,
     ]
     sizes3_lst = [3 * sz for sz in [64, 128] + sizes_lst if sz <= 2048]
     shapes_lst = [(sz, sz) for sz in sizes_lst[:-4] + sizes3_lst]
     shapes_lst.extend([(3072, 768), (768, 3072)])
+    shapes_lst.extend([(5120, 1280), (1280, 5120)])
     if dtype is torch.int8:
         # triton does not support smaller blocks than 32
         blocksize_lst = [(32, 32), (64, 64), (128, 128), (256, 256)]
@@ -811,7 +832,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     raise NotImplementedError(op)
         except KeyboardInterrupt:
             break
-        except Exception as msg:
+        except Exception:
             dump()
             raise
     dump()
@@ -866,9 +887,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                         else:
                             raise NotImplementedError(op)
 
-                        ms_min = triton.testing.do_bench(
-                            test_func, warmup=500, rep=100, fast_flush=False
-                        )
+                        ms_min = triton.testing.do_bench(test_func, warmup=500, rep=100)
 
                         return ms_min
 
@@ -990,6 +1009,12 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (256, 256, 65536, 64, 64, True, False, True): (1, 512, 1, 4),
         (256, 256, 65536, 128, 128, False, True, True): (2, 512, 1, 16),
         (256, 256, 65536, 128, 128, True, False, True): (1, 512, 1, 4),
+        (256, 256, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (256, 256, 65792, 32, 32, True, False, True): (1, 514, 1, 4),
+        (256, 256, 65792, 64, 64, False, True, True): (1, 1028, 1, 8),
+        (256, 256, 65792, 64, 64, True, False, True): (4, 257, 1, 4),
+        (256, 256, 65792, 128, 128, False, True, True): (2, 514, 1, 16),
+        (256, 256, 65792, 128, 128, True, False, True): (3, 514, 1, 4),
         (256, 256, 131072, 32, 32, False, True, True): (1, 2048, 1, 8),
         (256, 256, 131072, 32, 32, True, False, True): (2, 1024, 1, 4),
         (256, 256, 131072, 64, 64, False, True, True): (1, 2048, 1, 8),
@@ -1108,6 +1133,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (512, 512, 65536, 128, 128, True, False, True): (1, 512, 1, 4),
         (512, 512, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (512, 512, 65536, 256, 256, True, False, True): (1, 256, 1, 32),
+        (512, 512, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (512, 512, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (512, 512, 65792, 64, 64, False, True, True): (1, 1028, 1, 8),
+        (512, 512, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (512, 512, 65792, 128, 128, False, True, True): (4, 514, 1, 16),
+        (512, 512, 65792, 128, 128, True, False, True): (1, 514, 1, 4),
+        (512, 512, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (512, 512, 65792, 256, 256, True, False, True): (2, 257, 1, 32),
         (512, 512, 131072, 32, 32, False, True, True): (1, 2048, 1, 8),
         (512, 512, 131072, 32, 32, True, False, True): (1, 1024, 3, 2),
         (512, 512, 131072, 64, 64, False, True, True): (1, 2048, 1, 8),
@@ -1336,6 +1369,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 65536, 128, 128, True, False, True): (4, 512, 3, 4),
         (1024, 1024, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (1024, 1024, 65536, 256, 256, True, False, True): (1, 256, 1, 32),
+        (1024, 1024, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (1024, 1024, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (1024, 1024, 65792, 64, 64, False, True, True): (2, 514, 1, 4),
+        (1024, 1024, 65792, 64, 64, True, False, True): (4, 257, 3, 4),
+        (1024, 1024, 65792, 128, 128, False, True, True): (2, 514, 1, 16),
+        (1024, 1024, 65792, 128, 128, True, False, True): (2, 514, 2, 4),
+        (1024, 1024, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (1024, 1024, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (1024, 1024, 131072, 32, 32, False, True, True): (1, 2048, 1, 8),
         (1024, 1024, 131072, 32, 32, True, False, True): (1, 1024, 3, 2),
         (1024, 1024, 131072, 64, 64, False, True, True): (2, 1024, 1, 4),
@@ -1344,6 +1385,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 131072, 128, 128, True, False, True): (1, 1024, 3, 4),
         (1024, 1024, 131072, 256, 256, False, True, True): (1, 512, 1, 32),
         (1024, 1024, 131072, 256, 256, True, False, True): (1, 512, 1, 32),
+        (1280, 5120, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (1280, 5120, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (1280, 5120, 65792, 64, 64, False, True, True): (1, 1028, 1, 8),
+        (1280, 5120, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (1280, 5120, 65792, 128, 128, False, True, True): (2, 514, 1, 16),
+        (1280, 5120, 65792, 128, 128, True, False, True): (1, 514, 3, 4),
+        (1280, 5120, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (1280, 5120, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (1536, 1536, 256, 32, 32, False, True, True): (1, 8, 1, 4),
         (1536, 1536, 256, 32, 32, True, False, True): (2, 8, 1, 8),
         (1536, 1536, 256, 64, 64, False, True, True): (4, 4, 1, 16),
@@ -1496,6 +1545,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (2048, 2048, 65536, 128, 128, True, False, True): (1, 512, 2, 4),
         (2048, 2048, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (2048, 2048, 65536, 256, 256, True, False, True): (4, 256, 1, 32),
+        (2048, 2048, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (2048, 2048, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (2048, 2048, 65792, 64, 64, False, True, True): (1, 514, 1, 4),
+        (2048, 2048, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (2048, 2048, 65792, 128, 128, False, True, True): (1, 514, 1, 8),
+        (2048, 2048, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
+        (2048, 2048, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (2048, 2048, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (2048, 2048, 131072, 32, 32, False, True, True): (1, 2048, 1, 8),
         (2048, 2048, 131072, 32, 32, True, False, True): (1, 1024, 3, 2),
         (2048, 2048, 131072, 64, 64, False, True, True): (1, 1024, 1, 4),
@@ -1744,6 +1801,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 65536, 128, 128, True, False, True): (1, 512, 3, 4),
         (4096, 4096, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (4096, 4096, 65536, 256, 256, True, False, True): (4, 256, 1, 32),
+        (4096, 4096, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (4096, 4096, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (4096, 4096, 65792, 64, 64, False, True, True): (1, 1028, 1, 8),
+        (4096, 4096, 65792, 64, 64, True, False, True): (1, 514, 3, 2),
+        (4096, 4096, 65792, 128, 128, False, True, True): (1, 514, 1, 8),
+        (4096, 4096, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
+        (4096, 4096, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (4096, 4096, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (4096, 4096, 131072, 32, 32, False, True, True): (1, 2048, 1, 8),
         (4096, 4096, 131072, 32, 32, True, False, True): (1, 1024, 3, 2),
         (4096, 4096, 131072, 64, 64, False, True, True): (1, 2048, 1, 8),
@@ -1752,6 +1817,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 131072, 128, 128, True, False, True): (1, 1024, 3, 4),
         (4096, 4096, 131072, 256, 256, False, True, True): (1, 512, 1, 32),
         (4096, 4096, 131072, 256, 256, True, False, True): (4, 512, 1, 32),
+        (5120, 1280, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (5120, 1280, 65792, 32, 32, True, False, True): (1, 514, 1, 2),
+        (5120, 1280, 65792, 64, 64, False, True, True): (1, 514, 1, 4),
+        (5120, 1280, 65792, 64, 64, True, False, True): (1, 514, 2, 2),
+        (5120, 1280, 65792, 128, 128, False, True, True): (1, 514, 1, 8),
+        (5120, 1280, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
+        (5120, 1280, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (5120, 1280, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (6144, 6144, 256, 32, 32, False, True, True): (2, 4, 1, 8),
         (6144, 6144, 256, 32, 32, True, False, True): (2, 1, 4, 4),
         (6144, 6144, 256, 64, 64, False, True, True): (1, 4, 1, 8),
@@ -1904,6 +1977,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (8192, 8192, 65536, 128, 128, True, False, True): (4, 512, 3, 4),
         (8192, 8192, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (8192, 8192, 65536, 256, 256, True, False, True): (4, 256, 1, 32),
+        (8192, 8192, 65792, 32, 32, False, True, True): (4, 1028, 1, 8),
+        (8192, 8192, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (8192, 8192, 65792, 64, 64, False, True, True): (4, 1028, 1, 8),
+        (8192, 8192, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (8192, 8192, 65792, 128, 128, False, True, True): (4, 514, 1, 16),
+        (8192, 8192, 65792, 128, 128, True, False, True): (2, 514, 3, 4),
+        (8192, 8192, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (8192, 8192, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (8192, 8192, 131072, 32, 32, False, True, True): (4, 2048, 1, 8),
         (8192, 8192, 131072, 32, 32, True, False, True): (4, 1024, 3, 2),
         (8192, 8192, 131072, 64, 64, False, True, True): (4, 1024, 1, 4),
@@ -1984,6 +2065,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (16384, 16384, 65536, 128, 128, True, False, True): (4, 512, 3, 4),
         (16384, 16384, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
         (16384, 16384, 65536, 256, 256, True, False, True): (4, 256, 1, 32),
+        (16384, 16384, 65792, 32, 32, False, True, True): (4, 1028, 1, 8),
+        (16384, 16384, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (16384, 16384, 65792, 64, 64, False, True, True): (2, 514, 1, 4),
+        (16384, 16384, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (16384, 16384, 65792, 128, 128, False, True, True): (2, 514, 1, 16),
+        (16384, 16384, 65792, 128, 128, True, False, True): (2, 514, 3, 4),
+        (16384, 16384, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (16384, 16384, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
         (16384, 16384, 131072, 32, 32, False, True, True): (4, 1024, 1, 8),
         (16384, 16384, 131072, 32, 32, True, False, True): (4, 512, 3, 4),
         (16384, 16384, 131072, 64, 64, False, True, True): (4, 1024, 1, 4),
@@ -1992,6 +2081,78 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (16384, 16384, 131072, 128, 128, True, False, True): (4, 1024, 3, 4),
         (16384, 16384, 131072, 256, 256, False, True, True): (4, 512, 1, 32),
         (16384, 16384, 131072, 256, 256, True, False, True): (4, 512, 1, 32),
+        (32768, 32768, 256, 32, 32, False, True, True): (4, 4, 1, 8),
+        (32768, 32768, 256, 32, 32, True, False, True): (1, 2, 4, 2),
+        (32768, 32768, 256, 64, 64, False, True, True): (2, 2, 1, 4),
+        (32768, 32768, 256, 64, 64, True, False, True): (2, 1, 3, 4),
+        (32768, 32768, 256, 128, 128, False, True, True): (4, 2, 1, 8),
+        (32768, 32768, 256, 128, 128, True, False, True): (4, 2, 3, 4),
+        (32768, 32768, 256, 256, 256, False, True, True): (1, 1, 1, 32),
+        (32768, 32768, 256, 256, 256, True, False, True): (1, 1, 1, 32),
+        (32768, 32768, 512, 32, 32, False, True, True): (4, 8, 1, 8),
+        (32768, 32768, 512, 32, 32, True, False, True): (1, 4, 3, 2),
+        (32768, 32768, 512, 64, 64, False, True, True): (4, 4, 1, 4),
+        (32768, 32768, 512, 64, 64, True, False, True): (4, 2, 3, 4),
+        (32768, 32768, 512, 128, 128, False, True, True): (1, 2, 1, 8),
+        (32768, 32768, 512, 128, 128, True, False, True): (4, 4, 3, 4),
+        (32768, 32768, 512, 256, 256, False, True, True): (1, 2, 1, 32),
+        (32768, 32768, 512, 256, 256, True, False, True): (2, 2, 1, 32),
+        (32768, 32768, 1024, 32, 32, False, True, True): (4, 16, 1, 8),
+        (32768, 32768, 1024, 32, 32, True, False, True): (1, 8, 4, 2),
+        (32768, 32768, 1024, 64, 64, False, True, True): (4, 8, 1, 4),
+        (32768, 32768, 1024, 64, 64, True, False, True): (4, 4, 3, 4),
+        (32768, 32768, 1024, 128, 128, False, True, True): (1, 4, 1, 8),
+        (32768, 32768, 1024, 128, 128, True, False, True): (4, 8, 3, 4),
+        (32768, 32768, 1024, 256, 256, False, True, True): (1, 4, 1, 32),
+        (32768, 32768, 1024, 256, 256, True, False, True): (1, 4, 1, 32),
+        (32768, 32768, 2048, 32, 32, False, True, True): (2, 32, 1, 8),
+        (32768, 32768, 2048, 32, 32, True, False, True): (1, 16, 4, 2),
+        (32768, 32768, 2048, 64, 64, False, True, True): (2, 16, 1, 4),
+        (32768, 32768, 2048, 64, 64, True, False, True): (4, 8, 3, 4),
+        (32768, 32768, 2048, 128, 128, False, True, True): (1, 8, 1, 8),
+        (32768, 32768, 2048, 128, 128, True, False, True): (4, 16, 3, 4),
+        (32768, 32768, 2048, 256, 256, False, True, True): (1, 8, 1, 32),
+        (32768, 32768, 2048, 256, 256, True, False, True): (4, 8, 1, 32),
+        (32768, 32768, 4096, 32, 32, False, True, True): (2, 64, 1, 8),
+        (32768, 32768, 4096, 32, 32, True, False, True): (2, 32, 3, 2),
+        (32768, 32768, 4096, 64, 64, False, True, True): (2, 32, 1, 4),
+        (32768, 32768, 4096, 64, 64, True, False, True): (2, 16, 3, 4),
+        (32768, 32768, 4096, 128, 128, False, True, True): (1, 16, 1, 8),
+        (32768, 32768, 4096, 128, 128, True, False, True): (2, 32, 3, 4),
+        (32768, 32768, 4096, 256, 256, False, True, True): (1, 16, 1, 32),
+        (32768, 32768, 4096, 256, 256, True, False, True): (4, 16, 1, 32),
+        (32768, 32768, 8192, 32, 32, False, True, True): (2, 128, 1, 8),
+        (32768, 32768, 8192, 32, 32, True, False, True): (2, 64, 3, 2),
+        (32768, 32768, 8192, 64, 64, False, True, True): (2, 64, 1, 4),
+        (32768, 32768, 8192, 64, 64, True, False, True): (2, 32, 3, 4),
+        (32768, 32768, 8192, 128, 128, False, True, True): (1, 32, 1, 8),
+        (32768, 32768, 8192, 128, 128, True, False, True): (4, 64, 3, 4),
+        (32768, 32768, 8192, 256, 256, False, True, True): (1, 32, 1, 32),
+        (32768, 32768, 8192, 256, 256, True, False, True): (4, 32, 1, 32),
+        (32768, 32768, 16384, 32, 32, False, True, True): (2, 256, 1, 8),
+        (32768, 32768, 16384, 32, 32, True, False, True): (2, 128, 4, 2),
+        (32768, 32768, 16384, 64, 64, False, True, True): (2, 128, 1, 4),
+        (32768, 32768, 16384, 64, 64, True, False, True): (4, 64, 3, 4),
+        (32768, 32768, 16384, 128, 128, False, True, True): (1, 64, 1, 8),
+        (32768, 32768, 16384, 128, 128, True, False, True): (4, 128, 3, 4),
+        (32768, 32768, 16384, 256, 256, False, True, True): (1, 64, 1, 32),
+        (32768, 32768, 16384, 256, 256, True, False, True): (2, 64, 1, 32),
+        (32768, 32768, 32768, 32, 32, False, True, True): (2, 512, 1, 8),
+        (32768, 32768, 32768, 32, 32, True, False, True): (4, 256, 3, 2),
+        (32768, 32768, 32768, 64, 64, False, True, True): (1, 256, 1, 4),
+        (32768, 32768, 32768, 64, 64, True, False, True): (2, 128, 3, 4),
+        (32768, 32768, 32768, 128, 128, False, True, True): (1, 128, 1, 8),
+        (32768, 32768, 32768, 128, 128, True, False, True): (2, 256, 3, 4),
+        (32768, 32768, 32768, 256, 256, False, True, True): (1, 128, 1, 32),
+        (32768, 32768, 32768, 256, 256, True, False, True): (1, 128, 1, 32),
+        (32768, 32768, 65536, 32, 32, False, True, True): (2, 512, 1, 8),
+        (32768, 32768, 65536, 32, 32, True, False, True): (3, 512, 4, 2),
+        (32768, 32768, 65536, 64, 64, False, True, True): (1, 512, 1, 4),
+        (32768, 32768, 65536, 64, 64, True, False, True): (2, 512, 3, 2),
+        (32768, 32768, 65536, 128, 128, False, True, True): (1, 256, 1, 8),
+        (32768, 32768, 65536, 128, 128, True, False, True): (2, 512, 3, 4),
+        (32768, 32768, 65536, 256, 256, False, True, True): (1, 256, 1, 32),
+        (32768, 32768, 65536, 256, 256, True, False, True): (1, 256, 1, 32),
     },
     ("_int_bsr_dense_addmm", "NVIDIA A100-SXM4-80GB", (0, torch.int8, 0.56)): {
         (192, 192, 256, 64, 64, False, True, True): (3, 4, 3, 32),
@@ -2074,6 +2235,8 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (256, 256, 32768, 256, 256, True, False, True): (1, 128, 1, 4),
         (256, 256, 65536, 256, 256, False, True, True): (1, 4, 1, 1),
         (256, 256, 65536, 256, 256, True, False, True): (1, 128, 1, 4),
+        (256, 256, 65792, 256, 256, False, True, True): (1, 128, 2, 16),
+        (256, 256, 65792, 256, 256, True, False, True): (1, 16, 3, 4),
         (256, 256, 131072, 256, 256, False, True, True): (1, 512, 1, 4),
         (256, 256, 131072, 256, 256, True, False, True): (1, 512, 1, 2),
     },
@@ -2802,6 +2965,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 131072, 64, 64, True, False, True): (2, 1024, 3, 4),
         (1024, 1024, 131072, 128, 128, False, True, True): (4, 1024, 1, 4),
         (1024, 1024, 131072, 128, 128, True, False, True): (4, 1024, 1, 4),
+        (1280, 5120, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (1280, 5120, 65792, 16, 16, True, False, True): (5, 257, 4, 1),
+        (1280, 5120, 65792, 32, 32, False, True, True): (1, 514, 1, 8),
+        (1280, 5120, 65792, 32, 32, True, False, True): (2, 257, 3, 4),
+        (1280, 5120, 65792, 64, 64, False, True, True): (1, 514, 3, 4),
+        (1280, 5120, 65792, 64, 64, True, False, True): (1, 257, 3, 4),
+        (1280, 5120, 65792, 128, 128, False, True, True): (1, 514, 3, 8),
+        (1280, 5120, 65792, 128, 128, True, False, True): (2, 514, 3, 8),
         (1536, 1536, 256, 16, 16, False, True, True): (1, 4, 6, 2),
         (1536, 1536, 256, 16, 16, True, False, True): (3, 4, 5, 2),
         (1536, 1536, 256, 32, 32, False, True, True): (2, 4, 3, 4),
@@ -3210,6 +3381,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 131072, 64, 64, True, False, True): (3, 1024, 3, 4),
         (4096, 4096, 131072, 128, 128, False, True, True): (1, 1024, 1, 4),
         (4096, 4096, 131072, 128, 128, True, False, True): (1, 1024, 1, 4),
+        (5120, 1280, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (5120, 1280, 65792, 16, 16, True, False, True): (11, 257, 4, 1),
+        (5120, 1280, 65792, 32, 32, False, True, True): (1, 257, 1, 4),
+        (5120, 1280, 65792, 32, 32, True, False, True): (5, 257, 3, 4),
+        (5120, 1280, 65792, 64, 64, False, True, True): (1, 514, 1, 4),
+        (5120, 1280, 65792, 64, 64, True, False, True): (5, 257, 2, 4),
+        (5120, 1280, 65792, 128, 128, False, True, True): (3, 514, 1, 4),
+        (5120, 1280, 65792, 128, 128, True, False, True): (7, 514, 2, 4),
         (6144, 6144, 256, 16, 16, False, True, True): (1, 2, 1, 4),
         (6144, 6144, 256, 16, 16, True, False, True): (3, 1, 4, 4),
         (6144, 6144, 256, 32, 32, False, True, True): (3, 2, 1, 8),
@@ -3830,6 +4009,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (256, 256, 65536, 64, 64, True, False, True): (5, 512, 1, 4),
         (256, 256, 65536, 128, 128, False, True, True): (3, 512, 1, 4),
         (256, 256, 65536, 128, 128, True, False, True): (1, 512, 1, 4),
+        (256, 256, 65792, 16, 16, False, True, True): (2, 257, 1, 4),
+        (256, 256, 65792, 16, 16, True, False, True): (1, 257, 3, 2),
+        (256, 256, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (256, 256, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (256, 256, 65792, 64, 64, False, True, True): (2, 514, 1, 4),
+        (256, 256, 65792, 64, 64, True, False, True): (2, 514, 2, 4),
+        (256, 256, 65792, 128, 128, False, True, True): (3, 514, 1, 4),
+        (256, 256, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
         (256, 256, 131072, 16, 16, False, True, True): (1, 512, 3, 1),
         (256, 256, 131072, 16, 16, True, False, True): (1, 512, 3, 2),
         (256, 256, 131072, 32, 32, False, True, True): (2, 1024, 3, 2),
@@ -3978,6 +4165,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (512, 512, 65536, 64, 64, True, False, True): (1, 512, 3, 4),
         (512, 512, 65536, 128, 128, False, True, True): (7, 512, 1, 4),
         (512, 512, 65536, 128, 128, True, False, True): (5, 512, 1, 4),
+        (512, 512, 65792, 16, 16, False, True, True): (2, 257, 1, 4),
+        (512, 512, 65792, 16, 16, True, False, True): (1, 257, 3, 4),
+        (512, 512, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (512, 512, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (512, 512, 65792, 64, 64, False, True, True): (4, 514, 1, 4),
+        (512, 512, 65792, 64, 64, True, False, True): (4, 257, 2, 4),
+        (512, 512, 65792, 128, 128, False, True, True): (5, 514, 1, 4),
+        (512, 512, 65792, 128, 128, True, False, True): (4, 514, 2, 4),
         (512, 512, 131072, 16, 16, False, True, True): (1, 512, 3, 1),
         (512, 512, 131072, 16, 16, True, False, True): (1, 512, 3, 1),
         (512, 512, 131072, 32, 32, False, True, True): (1, 1024, 3, 2),
@@ -4234,6 +4429,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 65536, 64, 64, True, False, True): (1, 512, 3, 4),
         (1024, 1024, 65536, 128, 128, False, True, True): (10, 512, 1, 4),
         (1024, 1024, 65536, 128, 128, True, False, True): (4, 512, 1, 4),
+        (1024, 1024, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (1024, 1024, 65792, 16, 16, True, False, True): (10, 257, 4, 1),
+        (1024, 1024, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (1024, 1024, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (1024, 1024, 65792, 64, 64, False, True, True): (2, 514, 1, 4),
+        (1024, 1024, 65792, 64, 64, True, False, True): (2, 257, 2, 4),
+        (1024, 1024, 65792, 128, 128, False, True, True): (6, 514, 1, 4),
+        (1024, 1024, 65792, 128, 128, True, False, True): (2, 514, 2, 4),
         (1024, 1024, 131072, 16, 16, False, True, True): (11, 512, 3, 2),
         (1024, 1024, 131072, 16, 16, True, False, True): (11, 512, 3, 2),
         (1024, 1024, 131072, 32, 32, False, True, True): (7, 1024, 3, 2),
@@ -4242,6 +4445,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 131072, 64, 64, True, False, True): (4, 1024, 3, 4),
         (1024, 1024, 131072, 128, 128, False, True, True): (12, 1024, 1, 4),
         (1024, 1024, 131072, 128, 128, True, False, True): (4, 1024, 1, 4),
+        (1280, 5120, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (1280, 5120, 65792, 16, 16, True, False, True): (5, 257, 4, 1),
+        (1280, 5120, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (1280, 5120, 65792, 32, 32, True, False, True): (2, 257, 3, 4),
+        (1280, 5120, 65792, 64, 64, False, True, True): (1, 514, 3, 4),
+        (1280, 5120, 65792, 64, 64, True, False, True): (2, 257, 3, 4),
+        (1280, 5120, 65792, 128, 128, False, True, True): (1, 514, 3, 8),
+        (1280, 5120, 65792, 128, 128, True, False, True): (1, 514, 3, 8),
         (1536, 1536, 256, 16, 16, False, True, True): (5, 4, 4, 2),
         (1536, 1536, 256, 16, 16, True, False, True): (3, 4, 5, 2),
         (1536, 1536, 256, 32, 32, False, True, True): (2, 4, 4, 4),
@@ -4402,6 +4613,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (2048, 2048, 65536, 64, 64, True, False, True): (9, 512, 3, 4),
         (2048, 2048, 65536, 128, 128, False, True, True): (5, 512, 1, 4),
         (2048, 2048, 65536, 128, 128, True, False, True): (1, 512, 1, 4),
+        (2048, 2048, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (2048, 2048, 65792, 16, 16, True, False, True): (7, 257, 4, 1),
+        (2048, 2048, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (2048, 2048, 65792, 32, 32, True, False, True): (7, 257, 3, 4),
+        (2048, 2048, 65792, 64, 64, False, True, True): (1, 514, 3, 4),
+        (2048, 2048, 65792, 64, 64, True, False, True): (1, 257, 2, 4),
+        (2048, 2048, 65792, 128, 128, False, True, True): (3, 514, 1, 4),
+        (2048, 2048, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
         (2048, 2048, 131072, 16, 16, False, True, True): (9, 512, 3, 2),
         (2048, 2048, 131072, 16, 16, True, False, True): (9, 512, 4, 4),
         (2048, 2048, 131072, 32, 32, False, True, True): (7, 512, 3, 4),
@@ -4658,6 +4877,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 65536, 64, 64, True, False, True): (1, 512, 3, 4),
         (4096, 4096, 65536, 128, 128, False, True, True): (3, 512, 1, 4),
         (4096, 4096, 65536, 128, 128, True, False, True): (1, 512, 1, 4),
+        (4096, 4096, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (4096, 4096, 65792, 16, 16, True, False, True): (5, 257, 4, 1),
+        (4096, 4096, 65792, 32, 32, False, True, True): (1, 257, 1, 4),
+        (4096, 4096, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (4096, 4096, 65792, 64, 64, False, True, True): (1, 514, 3, 4),
+        (4096, 4096, 65792, 64, 64, True, False, True): (1, 257, 2, 4),
+        (4096, 4096, 65792, 128, 128, False, True, True): (3, 514, 1, 4),
+        (4096, 4096, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
         (4096, 4096, 131072, 16, 16, False, True, True): (4, 512, 3, 4),
         (4096, 4096, 131072, 16, 16, True, False, True): (5, 512, 4, 4),
         (4096, 4096, 131072, 32, 32, False, True, True): (1, 512, 4, 8),
@@ -4666,6 +4893,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 131072, 64, 64, True, False, True): (1, 512, 2, 4),
         (4096, 4096, 131072, 128, 128, False, True, True): (3, 1024, 1, 4),
         (4096, 4096, 131072, 128, 128, True, False, True): (1, 1024, 1, 4),
+        (5120, 1280, 65792, 16, 16, False, True, True): (1, 257, 1, 4),
+        (5120, 1280, 65792, 16, 16, True, False, True): (7, 257, 4, 1),
+        (5120, 1280, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (5120, 1280, 65792, 32, 32, True, False, True): (5, 257, 3, 4),
+        (5120, 1280, 65792, 64, 64, False, True, True): (1, 514, 1, 4),
+        (5120, 1280, 65792, 64, 64, True, False, True): (5, 257, 2, 4),
+        (5120, 1280, 65792, 128, 128, False, True, True): (3, 514, 1, 4),
+        (5120, 1280, 65792, 128, 128, True, False, True): (4, 514, 2, 4),
         (6144, 6144, 256, 16, 16, False, True, True): (1, 2, 1, 4),
         (6144, 6144, 256, 16, 16, True, False, True): (1, 1, 4, 4),
         (6144, 6144, 256, 32, 32, False, True, True): (3, 2, 1, 8),
@@ -4823,6 +5058,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (8192, 8192, 65536, 64, 64, True, False, True): (4, 256, 3, 8),
         (8192, 8192, 65536, 128, 128, False, True, True): (6, 512, 1, 4),
         (8192, 8192, 65536, 128, 128, True, False, True): (4, 512, 1, 4),
+        (8192, 8192, 65792, 16, 16, False, True, True): (1, 257, 1, 1),
+        (8192, 8192, 65792, 16, 16, True, False, True): (3, 257, 4, 1),
+        (8192, 8192, 65792, 32, 32, False, True, True): (2, 257, 1, 4),
+        (8192, 8192, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (8192, 8192, 65792, 64, 64, False, True, True): (2, 514, 3, 4),
+        (8192, 8192, 65792, 64, 64, True, False, True): (1, 257, 3, 4),
+        (8192, 8192, 65792, 128, 128, False, True, True): (2, 514, 1, 4),
+        (8192, 8192, 65792, 128, 128, True, False, True): (2, 514, 3, 8),
         (8192, 8192, 131072, 16, 16, False, True, True): (4, 512, 4, 4),
         (8192, 8192, 131072, 16, 16, True, False, True): (3, 512, 4, 4),
         (8192, 8192, 131072, 32, 32, False, True, True): (2, 512, 4, 8),
@@ -4983,6 +5226,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (16384, 16384, 65536, 64, 64, True, False, True): (1, 256, 3, 8),
         (16384, 16384, 65536, 128, 128, False, True, True): (4, 512, 2, 8),
         (16384, 16384, 65536, 128, 128, True, False, True): (4, 512, 1, 4),
+        (16384, 16384, 65792, 16, 16, False, True, True): (1, 257, 1, 1),
+        (16384, 16384, 65792, 16, 16, True, False, True): (1, 257, 4, 1),
+        (16384, 16384, 65792, 32, 32, False, True, True): (1, 257, 1, 4),
+        (16384, 16384, 65792, 32, 32, True, False, True): (1, 257, 3, 4),
+        (16384, 16384, 65792, 64, 64, False, True, True): (2, 514, 3, 4),
+        (16384, 16384, 65792, 64, 64, True, False, True): (1, 257, 3, 4),
+        (16384, 16384, 65792, 128, 128, False, True, True): (2, 514, 3, 8),
+        (16384, 16384, 65792, 128, 128, True, False, True): (2, 514, 3, 8),
         (16384, 16384, 131072, 16, 16, False, True, True): (1, 512, 4, 4),
         (16384, 16384, 131072, 16, 16, True, False, True): (1, 512, 3, 2),
         (16384, 16384, 131072, 32, 32, False, True, True): (1, 512, 4, 8),
@@ -5058,6 +5309,77 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (24576, 24576, 65536, 16, 16, False, True, True): (2, 512, 1, 2),
         (24576, 24576, 65536, 16, 16, True, False, True): (1, 256, 4, 4),
         (32768, 32768, 256, 16, 16, False, True, True): (4, 2, 1, 2),
+        (32768, 32768, 256, 16, 16, True, False, True): (2, 2, 5, 4),
+        (32768, 32768, 256, 32, 32, False, True, True): (4, 2, 4, 2),
+        (32768, 32768, 256, 32, 32, True, False, True): (1, 1, 4, 8),
+        (32768, 32768, 256, 64, 64, False, True, True): (2, 2, 3, 4),
+        (32768, 32768, 256, 64, 64, True, False, True): (1, 1, 3, 8),
+        (32768, 32768, 256, 128, 128, False, True, True): (2, 2, 3, 8),
+        (32768, 32768, 256, 128, 128, True, False, True): (2, 2, 3, 8),
+        (32768, 32768, 512, 16, 16, False, True, True): (2, 2, 1, 4),
+        (32768, 32768, 512, 16, 16, True, False, True): (2, 2, 4, 2),
+        (32768, 32768, 512, 32, 32, False, True, True): (1, 2, 3, 4),
+        (32768, 32768, 512, 32, 32, True, False, True): (1, 2, 4, 8),
+        (32768, 32768, 512, 64, 64, False, True, True): (4, 4, 3, 4),
+        (32768, 32768, 512, 64, 64, True, False, True): (1, 2, 3, 4),
+        (32768, 32768, 512, 128, 128, False, True, True): (4, 4, 3, 8),
+        (32768, 32768, 512, 128, 128, True, False, True): (4, 4, 3, 8),
+        (32768, 32768, 1024, 16, 16, False, True, True): (2, 4, 1, 1),
+        (32768, 32768, 1024, 16, 16, True, False, True): (1, 4, 4, 2),
+        (32768, 32768, 1024, 32, 32, False, True, True): (2, 4, 1, 4),
+        (32768, 32768, 1024, 32, 32, True, False, True): (1, 4, 3, 4),
+        (32768, 32768, 1024, 64, 64, False, True, True): (4, 8, 3, 4),
+        (32768, 32768, 1024, 64, 64, True, False, True): (1, 4, 3, 4),
+        (32768, 32768, 1024, 128, 128, False, True, True): (4, 8, 3, 8),
+        (32768, 32768, 1024, 128, 128, True, False, True): (4, 8, 3, 8),
+        (32768, 32768, 2048, 16, 16, False, True, True): (1, 8, 1, 4),
+        (32768, 32768, 2048, 16, 16, True, False, True): (1, 8, 4, 4),
+        (32768, 32768, 2048, 32, 32, False, True, True): (2, 8, 1, 4),
+        (32768, 32768, 2048, 32, 32, True, False, True): (1, 8, 3, 4),
+        (32768, 32768, 2048, 64, 64, False, True, True): (4, 16, 3, 4),
+        (32768, 32768, 2048, 64, 64, True, False, True): (1, 8, 3, 4),
+        (32768, 32768, 2048, 128, 128, False, True, True): (4, 16, 3, 8),
+        (32768, 32768, 2048, 128, 128, True, False, True): (2, 16, 3, 8),
+        (32768, 32768, 4096, 16, 16, False, True, True): (1, 16, 1, 4),
+        (32768, 32768, 4096, 16, 16, True, False, True): (1, 16, 4, 4),
+        (32768, 32768, 4096, 32, 32, False, True, True): (2, 16, 1, 4),
+        (32768, 32768, 4096, 32, 32, True, False, True): (1, 16, 3, 4),
+        (32768, 32768, 4096, 64, 64, False, True, True): (2, 32, 3, 4),
+        (32768, 32768, 4096, 64, 64, True, False, True): (1, 16, 3, 4),
+        (32768, 32768, 4096, 128, 128, False, True, True): (4, 32, 3, 8),
+        (32768, 32768, 4096, 128, 128, True, False, True): (4, 32, 3, 8),
+        (32768, 32768, 8192, 16, 16, False, True, True): (1, 32, 1, 4),
+        (32768, 32768, 8192, 16, 16, True, False, True): (2, 64, 4, 1),
+        (32768, 32768, 8192, 32, 32, False, True, True): (2, 32, 1, 4),
+        (32768, 32768, 8192, 32, 32, True, False, True): (1, 32, 3, 4),
+        (32768, 32768, 8192, 64, 64, False, True, True): (2, 64, 3, 4),
+        (32768, 32768, 8192, 64, 64, True, False, True): (1, 32, 3, 4),
+        (32768, 32768, 8192, 128, 128, False, True, True): (4, 64, 3, 8),
+        (32768, 32768, 8192, 128, 128, True, False, True): (2, 64, 3, 8),
+        (32768, 32768, 16384, 16, 16, False, True, True): (1, 64, 1, 4),
+        (32768, 32768, 16384, 16, 16, True, False, True): (1, 64, 4, 1),
+        (32768, 32768, 16384, 32, 32, False, True, True): (2, 64, 1, 4),
+        (32768, 32768, 16384, 32, 32, True, False, True): (1, 64, 3, 4),
+        (32768, 32768, 16384, 64, 64, False, True, True): (2, 128, 3, 4),
+        (32768, 32768, 16384, 64, 64, True, False, True): (1, 64, 3, 4),
+        (32768, 32768, 16384, 128, 128, False, True, True): (4, 128, 3, 8),
+        (32768, 32768, 16384, 128, 128, True, False, True): (2, 128, 3, 8),
+        (32768, 32768, 32768, 16, 16, False, True, True): (1, 128, 1, 4),
+        (32768, 32768, 32768, 16, 16, True, False, True): (1, 128, 4, 1),
+        (32768, 32768, 32768, 32, 32, False, True, True): (2, 128, 1, 4),
+        (32768, 32768, 32768, 32, 32, True, False, True): (1, 128, 3, 4),
+        (32768, 32768, 32768, 64, 64, False, True, True): (2, 256, 3, 4),
+        (32768, 32768, 32768, 64, 64, True, False, True): (1, 128, 3, 4),
+        (32768, 32768, 32768, 128, 128, False, True, True): (2, 256, 3, 8),
+        (32768, 32768, 32768, 128, 128, True, False, True): (4, 256, 3, 8),
+        (32768, 32768, 65536, 16, 16, False, True, True): (1, 256, 1, 4),
+        (32768, 32768, 65536, 16, 16, True, False, True): (1, 256, 4, 1),
+        (32768, 32768, 65536, 32, 32, False, True, True): (1, 256, 3, 4),
+        (32768, 32768, 65536, 32, 32, True, False, True): (1, 256, 3, 4),
+        (32768, 32768, 65536, 64, 64, False, True, True): (1, 512, 3, 4),
+        (32768, 32768, 65536, 64, 64, True, False, True): (1, 256, 3, 4),
+        (32768, 32768, 65536, 128, 128, False, True, True): (4, 512, 1, 4),
+        (32768, 32768, 65536, 128, 128, True, False, True): (2, 512, 3, 8),
     },
     ("bsr_dense_addmm", "NVIDIA A100-SXM4-80GB", (0, torch.float16, 0.56)): {
         (192, 192, 256, 64, 64, False, True, True): (1, 4, 3, 4),
@@ -5830,6 +6152,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (1024, 1024, 131072, 64, 64, True, False, True): (1, 2048, 2, 4),
         (1024, 1024, 131072, 128, 128, False, True, True): (1, 1024, 1, 32),
         (1024, 1024, 131072, 128, 128, True, False, True): (1, 1024, 1, 32),
+        (1280, 5120, 65792, 16, 16, False, True, True): (1, 1028, 3, 1),
+        (1280, 5120, 65792, 16, 16, True, False, True): (1, 257, 3, 4),
+        (1280, 5120, 65792, 32, 32, False, True, True): (1, 514, 3, 4),
+        (1280, 5120, 65792, 32, 32, True, False, True): (1, 514, 3, 4),
+        (1280, 5120, 65792, 64, 64, False, True, True): (2, 1028, 3, 4),
+        (1280, 5120, 65792, 64, 64, True, False, True): (1, 1028, 3, 4),
+        (1280, 5120, 65792, 128, 128, False, True, True): (2, 514, 2, 32),
+        (1280, 5120, 65792, 128, 128, True, False, True): (1, 514, 2, 32),
         (1536, 1536, 256, 16, 16, False, True, True): (5, 4, 3, 2),
         (1536, 1536, 256, 16, 16, True, False, True): (2, 2, 3, 4),
         (1536, 1536, 256, 32, 32, False, True, True): (1, 8, 2, 4),
@@ -6238,6 +6568,14 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (4096, 4096, 131072, 64, 64, True, False, True): (2, 2048, 2, 4),
         (4096, 4096, 131072, 128, 128, False, True, True): (4, 1024, 1, 32),
         (4096, 4096, 131072, 128, 128, True, False, True): (4, 1024, 1, 32),
+        (5120, 1280, 65792, 16, 16, False, True, True): (2, 1028, 3, 1),
+        (5120, 1280, 65792, 16, 16, True, False, True): (1, 257, 3, 4),
+        (5120, 1280, 65792, 32, 32, False, True, True): (1, 514, 3, 4),
+        (5120, 1280, 65792, 32, 32, True, False, True): (1, 514, 3, 4),
+        (5120, 1280, 65792, 64, 64, False, True, True): (1, 1028, 3, 4),
+        (5120, 1280, 65792, 64, 64, True, False, True): (5, 1028, 3, 4),
+        (5120, 1280, 65792, 128, 128, False, True, True): (1, 514, 1, 32),
+        (5120, 1280, 65792, 128, 128, True, False, True): (4, 514, 2, 32),
         (6144, 6144, 256, 16, 16, False, True, True): (2, 2, 3, 4),
         (6144, 6144, 256, 16, 16, True, False, True): (2, 2, 3, 4),
         (6144, 6144, 256, 32, 32, False, True, True): (2, 4, 3, 4),
@@ -6520,6 +6858,24 @@ _operation_device_version_data: Dict[Any, Dict] = {
         (384, 384, 65536, 128, 128, True, False, True): (3, 512, 1, 32),
         (384, 384, 131072, 128, 128, False, True, True): (1, 1024, 1, 32),
         (384, 384, 131072, 128, 128, True, False, True): (3, 1024, 1, 32),
+    },
+    ("bsr_dense_addmm", "NVIDIA A100-SXM4-80GB", (0, torch.int8, 0.5)): {
+        (1280, 5120, 65792, 32, 32, False, True, True): (1, 1028, 1, 8),
+        (1280, 5120, 65792, 32, 32, True, False, True): (1, 514, 3, 2),
+        (1280, 5120, 65792, 64, 64, False, True, True): (2, 514, 1, 4),
+        (1280, 5120, 65792, 64, 64, True, False, True): (1, 514, 3, 2),
+        (1280, 5120, 65792, 128, 128, False, True, True): (2, 514, 1, 8),
+        (1280, 5120, 65792, 128, 128, True, False, True): (1, 514, 2, 4),
+        (1280, 5120, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (1280, 5120, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
+        (5120, 1280, 65792, 32, 32, False, True, True): (3, 1028, 1, 8),
+        (5120, 1280, 65792, 32, 32, True, False, True): (1, 514, 1, 2),
+        (5120, 1280, 65792, 64, 64, False, True, True): (1, 514, 1, 4),
+        (5120, 1280, 65792, 64, 64, True, False, True): (2, 514, 2, 2),
+        (5120, 1280, 65792, 128, 128, False, True, True): (2, 514, 1, 8),
+        (5120, 1280, 65792, 128, 128, True, False, True): (2, 514, 2, 4),
+        (5120, 1280, 65792, 256, 256, False, True, True): (1, 257, 1, 32),
+        (5120, 1280, 65792, 256, 256, True, False, True): (1, 257, 1, 32),
     },
     ("scatter_mm", "NVIDIA A100-SXM4-80GB", (0, torch.bfloat16, 0.5)): {
         (256, 256, 256, 16, 16): (1, 1, 16, 16, 1, 2),
@@ -7382,6 +7738,6 @@ if __name__ == "__main__":
     for dtype in [torch.int8]:
         for op in ["_int_bsr_dense_addmm"]:
             main(op=op, force=False, dtype=dtype)
-    for dtype in [torch.float16, torch.bfloat16, torch.float32]:
+    for dtype in [torch.float16, torch.bfloat16, torch.float32, torch.int8]:
         for op in ["bsr_dense_addmm"]:
             main(op=op, force=False, dtype=dtype)

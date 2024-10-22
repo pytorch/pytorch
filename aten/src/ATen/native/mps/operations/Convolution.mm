@@ -167,12 +167,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
 
   // TODO: MPS convolution kernel currently does not support output channels > 2^16
   for (auto elem : output_t.sizes()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        elem <= (1 << 16),
-        "Output channels > 65536 not supported at the MPS device. ",
-        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
-        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
-        "on MPS.");
+    TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
   }
 
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
@@ -378,12 +373,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
 
   // TODO: MPS convolution kernel currently does not support output channels > 2^16
   for (auto elem : grad_output_t.sizes()) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        elem <= (1 << 16),
-        "Output channels > 65536 not supported at the MPS device. ",
-        "As a temporary fix, you can set the environment variable `PYTORCH_ENABLE_MPS_FALLBACK=1` ",
-        "to use the CPU as a fallback for this op. WARNING: this will be slower than running natively ",
-        "on MPS.");
+    TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
   }
 
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
