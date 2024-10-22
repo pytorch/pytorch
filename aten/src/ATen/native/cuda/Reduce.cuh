@@ -1091,16 +1091,22 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-#ifdef USE_ROCM
-  // AMD gpus perform better with fewer thread blocks
-  constexpr int min_values_per_thread = 128;
-  constexpr int max_values_per_thread = 1024;
-#else
   constexpr int min_values_per_thread = 16;
   constexpr int max_values_per_thread = 256;
+
+  const int warp_split_threshold =
+      std::min<int>(block_height * 16, max_values_per_thread);
+  const int num_mp =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  bool force_splitting_output = false;
+#ifdef USE_ROCM
+  force_splitting_output = iter.ndim() == 2 &&
+      reduction_on_fastest_striding_dimension &&
+      config.values_per_thread() < 1024 && num_mp < 100;
 #endif
 
-  if (config.values_per_thread() >= block_height * min_values_per_thread || config.values_per_thread() >= max_values_per_thread) {
+  if (!force_splitting_output &&
+      config.values_per_thread() >= warp_split_threshold) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1110,8 +1116,18 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
-  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  int max_threads_per_mp =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+#ifdef USE_ROCM
+  // Control the number of threadblocks by adjusting the maximum number of
+  // threads per multi-processor. These numbers better reflect the maximum
+  // theoretical achievable threads per MP for the reduction operation.
+  if (iter.ndim() == 1)
+    max_threads_per_mp = 512;
+  if (iter.ndim() == 2)
+    max_threads_per_mp = 256;
+#endif
+  const int blocks_per_sm = max_threads_per_mp / config.num_threads;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
   if (config.input_mult[1] != 0 && config.values_per_thread() >= max_values_per_thread && grid <= target_grid_size) {
@@ -1128,6 +1144,23 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+#ifdef USE_ROCM
+    // In cases where a number of threadblocks along the y direction of the grid
+    // is needed then make sure they are reduced to the number of MPs. For
+    // smaller sizes, use half the number of MPs. For smaller sizes than half
+    // the number of MPs use the original value unless the value is less than 16
+    // blocks in which case it is more profitable to use just 1 block.
+    if (config.ctas_per_output > num_mp)
+      if (num_mp < 128)
+        config.ctas_per_output =
+            num_mp * (config.ctas_per_output > 512 ? 4 : 2);
+      else
+        config.ctas_per_output = num_mp;
+    else if (config.ctas_per_output > div_up(num_mp, 2))
+      config.ctas_per_output = div_up(num_mp, 2);
+    else if (config.ctas_per_output < 16)
+      config.ctas_per_output = 1;
+#endif
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
