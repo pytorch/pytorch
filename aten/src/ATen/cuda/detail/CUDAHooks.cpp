@@ -84,7 +84,7 @@ struct _Initializer {
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-void CUDAHooks::initCUDA() const {
+void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
@@ -103,7 +103,7 @@ void CUDAHooks::initCUDA() const {
 #endif
 }
 
-const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
@@ -300,7 +300,7 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
 }
 
@@ -408,7 +408,7 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  AT_ERROR(
+  TORCH_CHECK(false,
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
 }

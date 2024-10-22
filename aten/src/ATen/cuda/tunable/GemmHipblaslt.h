@@ -310,7 +310,7 @@ static hipblasOperation_t _hipblasOpFromChar(char op) {
     case 'C':
       return HIPBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_hipblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -323,7 +323,7 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
     case HIPBLAS_OP_C:
       return 'C';
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
