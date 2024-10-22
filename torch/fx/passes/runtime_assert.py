@@ -520,10 +520,10 @@ def insert_deferred_runtime_asserts(
                 # effort basis should do.
                 #
                 # The second issue is a preexisting one. It can be mitigated
-                # with a normalisation algorithm. In general, it may also
+                # with a normalization algorithm. In general, it may also
                 # be on a best effort basis, but since our grammar is not
                 # terribly difficult, chances are we could even fully
-                # normalise SymPy expressions... who knows.
+                # normalize SymPy expressions... who knows.
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 
