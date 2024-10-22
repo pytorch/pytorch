@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import cast, Sequence
+from typing import cast, TYPE_CHECKING
 
 from torchgen import local
 from torchgen.api import cpp
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import IDENT_REGEX
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Represents a saved attribute involved in backward calculation.

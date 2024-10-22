@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.translate import translate
 from torchgen.api.types import DispatcherSignature
@@ -20,6 +20,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def is_tensor(typ: Type) -> bool:
