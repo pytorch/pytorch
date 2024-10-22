@@ -607,7 +607,7 @@ def aot_dispatch_autograd(
                 payload_fn=lambda: bw_module_str,
             )
 
-        with track_graph_compiling(aot_config, "forward"):
+        with track_graph_compiling(aot_config, "forward"), torch._C._DisableAutocast():
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
             adjusted_flat_args = joint_inputs[0]
@@ -672,7 +672,7 @@ def aot_dispatch_autograd(
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards
-        with track_graph_compiling(aot_config, "backward"):
+        with track_graph_compiling(aot_config, "backward"), torch._C._DisableAutocast():
             placeholder_list = fx_placeholder_vals(bw_module)
 
             forward_saved_for_backwards_strides = None
