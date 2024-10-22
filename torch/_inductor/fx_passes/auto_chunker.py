@@ -8,9 +8,11 @@ from torch.utils import _pytree
 import operator
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+import logging
 
 
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 
 def _is_permuted(use_node, source_node):
@@ -44,28 +46,6 @@ def _compute_tensor_size(*args, **kwargs):
             continue
         tot += fake_tensor.numel() * fake_tensor.dtype.itemsize
     return tot
-
-
-def _collect_source_nodes(graph: torch.fx.Graph) -> Sequence[torch.fx.Node]:
-    source_nodes = []
-    for nd in graph.nodes:
-        # Only chunk a small set of source nodes like matmul for now
-        if nd.op != "call_function" or nd.target != aten.mm.default:
-            continue
-
-        input_size = _compute_tensor_size(nd.args, nd.kwargs)
-        output_size = _compute_tensor_size(nd)
-
-        # We chunk the first input on the batch dimension.
-        # This is the rule targeting matmul but may work good enough in general.
-        if (
-            _compute_tensor_size(nd.args[:1]) > config.AutoChunker.input_threshold
-            and output_size / input_size > config.AutoChunker.amplify_threshold
-        ):
-            source_nodes.append((nd.args[0], output_size / input_size))
-
-    source_nodes = sorted(source_nodes, key=lambda x: x[1], reverse=True)
-    return tuple(map(lambda x: x[0], source_nodes))
 
 
 def _collect_reachable_nodes(
@@ -362,7 +342,7 @@ class AutoChunker:
 
         for mm_nd in self.matmuls_in_bwd:
             if _is_permuted(mm_nd.args[0], self.matmul_input) or _is_permuted(
-                mm_nd.args[1].self.matmul_input
+                mm_nd.args[1], self.matmul_input
             ):
                 return mm_nd
         raise RuntimeError("Can not find the node computing graident of matmul weight")
@@ -387,7 +367,7 @@ class AutoChunker:
     @cache_on_self
     def first_bwd_node_index(self):
         """
-        Assume the first bwd node is the first node that accesss `gradient_output`
+        Assume the first bwd node is the first node that accesss `tangent`
         """
         for idx, nd in enumerate(self.gm.graph.nodes):
             if any(
@@ -427,80 +407,106 @@ class AutoChunker:
         assert len(tangents) == 1
         return tangents[0]
 
-    def has_single_scalar_gradient(self):
-        gradient_inputs = []
+    def has_single_scalar_gradient_output(self):
+        gradients = []
         for nd in self.gm.graph.nodes:
             if nd.op == "placeholder" and "tangent" in nd.name:
-                gradient_inputs.append(nd)
+                gradients.append(nd)
 
-        if len(gradient_inputs) != 1:
+        if len(gradients) != 1:
             return False
 
-        gradient_input = gradient_inputs[0]
+        gradient = gradients[0]
 
-        if (fake_tensor := _get_fake_tensor_from_node(gradient_input)) is None:
+        if (fake_tensor := _get_fake_tensor_from_node(gradient)) is None:
             return False
 
         return fake_tensor.numel() == 1
+
+    def _collect_source_nodes(self) -> Sequence[torch.fx.Node]:
+        r"""
+        Find all candidate nodes for chunking in the forward part of the
+        graph.
+
+        The candidates are sorted in decreasing order of the amplification
+        ratio.
+        """
+        source_nodes = []
+        for nd in self.node_list[: self.last_fwd_node_index + 1]:
+            # Only chunk a small set of source nodes like matmul for now
+            if nd.op != "call_function" or nd.target != aten.mm.default:
+                continue
+    
+            input_size = _compute_tensor_size(nd.args, nd.kwargs)
+            output_size = _compute_tensor_size(nd)
+    
+            # We chunk the first input on the batch dimension.
+            # This is the rule targeting matmul but may work good enough in general.
+            if (
+                _compute_tensor_size(nd.args[:1]) > config.AutoChunker.input_size_threshold
+                and output_size / input_size > config.AutoChunker.amplify_ratio_threshold
+            ):
+                source_nodes.append((nd.args[0], output_size / input_size))
+    
+        source_nodes = sorted(source_nodes, key=lambda x: x[1], reverse=True)
+        return tuple(map(lambda x: x[0], source_nodes))
+
 
     def chunk_batch_dimension(self):
         """
         Chunk input tensor for operations that amplifies the tensor size significantly.
         Only chunk across the batch dimension of the tensor.
 
-        Currently only apply chunk once. But it can be enhanced to apply chunking
-        multiple times.
-
         self.gm is transformed inplace.
         """
 
-        if not self.has_single_scalar_gradient():
-            print("The graph does not have a single scalar gradient")
+        log.debug("Joint graph before chunking:\n%s", self.gm.print_readable(False))
+
+        if not self.has_single_scalar_gradient_output():
+            log.debug("The graph does not have a single scalar gradient.")
             return
 
         gm = self.gm
         graph = gm.graph
-        source_nodes = _collect_source_nodes(graph)
-        print(f"{source_nodes=}")
+
+        source_nodes = self._collect_source_nodes()
+
+        log.debug("source_nodes: %s", source_nodes)
+
         if len(source_nodes) == 0:
             return
 
-        self.source_node = source_nodes[0]  # pick the first one
+        # Pick the one with the largest amplification factor for now.
+        # But an alternative reasonable strategy is to pick the one
+        # closest to the bwd part
+        self.source_node = source_nodes[0]
 
-        # We should not propagate pass gradient of matmul input/weight since
+        # We should not propagate beyond gradient of matmul input/weight since
         # we will 'un-chunk' them. The downstream nodes don't see the effect
         # of chunking.
         reachable_nodes = _collect_reachable_nodes(
             self.source_node, {self.gradient_matmul_input, self.gradient_matmul_weight}
         )
-        print(f"{reachable_nodes=}")
 
-        print(f"{self.gradient_outputs=}")
-        print(f"{self.last_fwd_node_index=}")
+        log.debug("Reachable nodes before specifically considering bwd: %s", reachable_nodes)
+        log.debug("matmul input: %s", self.matmul_input)
+        log.debug("matmul weight: %s", self.matmul_weight)
+        log.debug("gradient matmul input: %s", self.gradient_matmul_input)
+        log.debug("gradient matmul weight %s", self.gradient_matmul_weight)
 
-        print(f"{self.matmul_input=}")
-        print(f"{self.matmul_weight=}")
-        print(f"{self.gradient_matmul_input=}")
-        print(f"{self.gradient_matmul_weight=}")
-
-        if len(self.gradient_outputs) != 1:
+        if self.last_fwd_node not in reachable_nodes:
+            log.debug("We can only chunk all the way to the end of the fwd graph.")
             return
 
-        tangent = self.gradient_outputs[0]
-        if tangent.meta["val"].numel() != 1:
-            return
-        
-        extra_reachable_nodes = []
-        if self.last_fwd_node in reachable_nodes:
-            # the last fwd node is affected by chunking.
-            # Assume the first bwd node is for computing the gradient of the
-            # last fwd node.
-            # Then the first bwd node should also be affected by chunking.
 
-            extra_reachable_nodes = _collect_reachable_nodes(
-                self.first_bwd_node,
-                {self.gradient_matmul_input, self.gradient_matmul_weight},
-            )
+        # the last fwd node is affected by chunking.
+        # Assume the first bwd node is for computing the gradient of the
+        # last fwd node.
+        # Then the first bwd node should also be affected by chunking.
+        extra_bwd_reachable_nodes = _collect_reachable_nodes(
+            self.first_bwd_node,
+            {self.gradient_matmul_input, self.gradient_matmul_weight},
+        )
 
         def _merge_reachable_nodes(lhs, rhs):
             """
@@ -515,14 +521,14 @@ class AutoChunker:
 
             return sorted(out, key=lambda nd: node_to_idx[nd])
 
-        nodes_to_chunk = _merge_reachable_nodes(reachable_nodes, extra_reachable_nodes)
+        nodes_to_chunk = _merge_reachable_nodes(reachable_nodes, extra_bwd_reachable_nodes)
 
-        print(f"{nodes_to_chunk=}")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("nodes_to_chunk=%s", nodes_to_chunk)
+            log.debug("\n>>>>>>>>>>")
+            for nd in nodes_to_chunk:
+                log.debug(nd.format_node())
+            log.debug("<<<<<<<<<<\n")
 
-        print("\n>>>>>>>>>>")
-        for nd in nodes_to_chunk:
-            print(nd.format_node())
-        print("<<<<<<<<<<\n")
-
-        with self.gm.graph.inserting_before(nodes_to_chunk[-1]):
+        with self.gm.graph.inserting_before(nodes_to_chunk[-1].next):
             AutoChunkerTransform(self, nodes_to_chunk)

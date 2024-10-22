@@ -10,7 +10,7 @@ USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
 
 @config.patch("AutoChunker.enable", True)
 class AutoChunkerTest(TestCase):
-    def common_matmul_test(self, has_softmax):
+    def common_matmul_test(self, has_softmax, use_bias=False):
         M, K, N = 1024, 16, 1024
 
         if USE_LARGE_INPUT:
@@ -25,23 +25,27 @@ class AutoChunkerTest(TestCase):
         weight = torch.randn(
             K, N, dtype=dtype, requires_grad=True, device="cuda"
         )
+        bias = torch.randn(N, dtype=dtype, requires_grad=True, device="cuda")
 
-        def f(_input, weight):
+        def f(_input, weight, bias):
             out = (_input * 2) @ weight
+            if use_bias:
+                out = out + bias
             if has_softmax:
                 out = out.softmax(dim=-1)
             _sum = out.sum()
             _sum.backward()
             return _sum
 
-        expect = (f(_input, weight), _input.grad, weight.grad)
+        expect = (f(_input, weight, bias), _input.grad, weight.grad, bias.grad if use_bias else None)
 
         _input.grad = None
         weight.grad =None
+        bias.grad = None
 
         torch.cuda.reset_peak_memory_stats()
         opt_f = torch.compile(f)
-        actual = (opt_f(_input, weight), _input.grad, weight.grad)
+        actual = (opt_f(_input, weight, bias), _input.grad, weight.grad, bias.grad if use_bias else None)
         peak_memory = torch.cuda.max_memory_allocated()
 
         print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
@@ -64,6 +68,10 @@ class AutoChunkerTest(TestCase):
     @config.patch("AutoChunker.num_chunk", 4)
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
+
+    @config.patch("AutoChunker.num_chunk", 2)
+    def test_linear_softmax(self):
+        self.common_matmul_test(has_softmax=True, use_bias=True)
 
 
 if __name__ == "__main__":

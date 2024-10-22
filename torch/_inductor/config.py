@@ -780,11 +780,11 @@ class AutoChunker:
     enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
 
     # If an op has too small input tensors, we skip chunking it.
-    input_threshold = 1024
+    input_size_threshold = 1024
 
     # Apply auto chunker if an op amplifies input by more than amplify_threshold
     # times.
-    amplify_threshold = 16
+    amplify_ratio_threshold = 16
 
     num_chunk = None  # If not None, use this to force number of chunks
 
