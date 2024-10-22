@@ -4137,42 +4137,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             decomp_table
         )
 
-        # The difference seems fine because export_for_training catches const tensor little differently.
-        # Training IR produces:
-        # graph():
-        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        #     %x : [num_users=1] = placeholder[target=x]
-        #     %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        #     %detach_ : [num_users=1] = call_function[target=torch.ops.aten.detach_.default](args = (%lift_fresh_copy,), kwargs = {})
-        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach_, Fail), kwargs = {})
-        #     return (x,)
-        #
-        # Retracing:
-        # graph():
-        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        #     %x : [num_users=1] = placeholder[target=x]
-        #     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        #     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
-        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach, Fail), kwargs = {})
-        #     return (x,)
-        # The difference comes from the fact that prim has registration for aten.detach while not for aten.detach_.
-        # The diference in retracing comes from the fact that we retrace at pre-dispatch level while the usual flow
-        # traces to post-dispatch.
-        if is_retracebility_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep.graph_module.code).strip(),
-                """\
-def forward(self, c_lifted_tensor_0, x):
-    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
-    view_of = torch.ops.prims.view_of.default(clone);  clone = None
-    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
-    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
-    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
-    return (x,)""",
-            )
-
-        else:
-            self.assertExpectedInline(
+        self.assertExpectedInline(
                 str(ep.graph_module.code).strip(),
                 """\
 def forward(self, c_lifted_tensor_0, x):
@@ -5531,6 +5496,9 @@ graph():
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+
+        # To reflect retracibility issue
+        _ = export(export(M2(), inps).module())
 
     def test_nested_module_with_parameter(self):
         class M1(torch.nn.Module):
