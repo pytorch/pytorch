@@ -198,7 +198,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
+  TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(

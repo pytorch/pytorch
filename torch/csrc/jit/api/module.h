@@ -543,7 +543,7 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      for (C10_UNUSED const value_type& _ : *(this)) {
+      for ([[maybe_unused]] const value_type& _ : *(this)) {
         ++*size_;
       }
     }
