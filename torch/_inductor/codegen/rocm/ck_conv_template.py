@@ -427,11 +427,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         self.groups = groups
         self.n_spatial_dimensions = n_spatial_dimensions
 
-<<<<<<< HEAD
-    def filter_op(self, op: "CKGroupedConvFwdOp") -> bool:
-=======
     def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
->>>>>>> origin/main
         metas = [
             T.get_layout()
             for T in [*self.input_nodes, self.output_node]
@@ -468,10 +464,6 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         filtered_instances = list(
             filter(lambda op: self.filter_op(op), unfiltered_instances)
         )
-<<<<<<< HEAD
-        # import pdb; pdb.set_trace()
-=======
->>>>>>> origin/main
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -490,11 +482,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-<<<<<<< HEAD
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> Tuple[str, str]:
-=======
     def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> Tuple[str, str]:  # type: ignore[name-defined]
->>>>>>> origin/main
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
@@ -524,11 +512,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-<<<<<<< HEAD
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGroupedConvFwdOp", **kwargs) -> str:  # type: ignore[override]
-=======
     def render(self, kernel: ROCmTemplateKernel, op: "CKGroupedConvFwdOp", **kwargs) -> str:  # type: ignore[override, name-defined]
->>>>>>> origin/main
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
@@ -551,11 +535,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 names_str="input, weight, bias, output"
                 if Bias is not None
                 else "input, weight, output",
-<<<<<<< HEAD
-                size_args=[f"int32_t {arg}" for arg in []],
-=======
                 size_args=[],
->>>>>>> origin/main
             ),
             n_d_tensors=1 if Bias is not None else 0,
             n_dim_spatial=self.n_spatial_dimensions,
