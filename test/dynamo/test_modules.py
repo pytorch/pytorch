@@ -1613,6 +1613,37 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
+    def test_lazy_module_speculation_log_divergence(self):
+        class ModWithOneLazyLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer = torch.nn.LazyLinear(8)
+
+            def forward(self, x):
+                return self.layer(x)
+
+        # This allows us to restart tracing without clearing speculation log
+        def id_and_graph_break(x):
+            torch._dynamo.graph_break()
+            return x
+
+        @torch.compile()
+        def test(mod, x):
+            res = mod(x)
+            # Speculation log must not diverge in the 2nd round of tracing,
+            # after we've initialized the `LazyLinear` into a `Linear` in the
+            # 1st round.
+            res2 = id_and_graph_break(res)
+            return res
+
+        x = torch.ones(10, 3)
+        mod = ModWithOneLazyLinear()
+        actual_res = test(mod, x)
+        expect_res = mod(x)
+        self.assertTrue(torch.allclose(expect_res, actual_res))
+
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self) -> None:
