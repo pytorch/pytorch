@@ -251,11 +251,7 @@ def _reduce_tensor(tensor):
     """
     return (
         _ident,
-        (
-            extract_tensor_metadata_for_cache_key(
-                FxGraphCachePickler._device_map, tensor
-            ),
-        ),
+        extract_tensor_metadata_for_cache_key(tensor),
     )
 
 
