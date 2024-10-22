@@ -394,15 +394,31 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     AT_CUDA_CHECK(cudaGraphNodeGetType(node, &type));
 
     if (type == cudaGraphNodeTypeKernel) {
-      cudaKernelNodeParams nodeParams;
-      AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node, &nodeParams));
-      cudaFunction_t func;
-      AT_CUDA_CHECK(cudaGetFuncBySymbol(&func, nodeParams.func));
+      CUDA_KERNEL_NODE_PARAMS driver_node_params;
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
+              node, &driver_node_params));
+      // Runtime API has a problem with the triton kernels loaded by
+      // cuModuleLoadData.  It tries to convert the CUfunc to a void*
+      // by looking up the entrypoint that the driver API normally
+      // generates for a CUDA kernel. However, there is no such entry
+      // point for kernel loaded via the cuModuleLoad* APIs IIUC. We
+      // just convert back to a CUfunc/cudaFunction_t anyway, so using
+      // the driver API is fine here.
+
+      // cudaKernelNodeParams nodeParams;
+      // AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node, &nodeParams));
+      // AT_CUDA_CHECK(cudaGetFuncBySymbol(&func, nodeParams.func));
+
+      cudaFunction_t func = driver_node_params.func;
 
       const char* func_name;
-      globalContext().getNVRTC().cuFuncGetName(&func_name, func);
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuFuncGetName(&func_name, func));
 
-      TORCH_CHECK(nodeParams.kernelParams && !nodeParams.extra, "Kernel launches that use `extra` instead of `kernelParams` are not supported");
+      TORCH_CHECK(
+          driver_node_params.kernelParams && !driver_node_params.extra,
+          "Kernel launches that use `extra` instead of `kernelParams` are not supported");
 
       size_t param_index = 0;
       size_t param_offset;
@@ -411,8 +427,8 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
                  func, param_index, &param_offset, &param_size) !=
              CUDA_ERROR_INVALID_VALUE) {
         char** arg1_speculative_pointer =
-            (char**)nodeParams.kernelParams[param_index];
-        
+            (char**)driver_node_params.kernelParams[param_index];
+
         // ABI guarantees that pointers have 8-byte alignment
         for (size_t address_start = 0; param_size - address_start >= 8;
              address_start += 8) {
@@ -586,6 +602,7 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   cudaGraphKernelNodeUpdate* deviceUpdates = (cudaGraphKernelNodeUpdate*) allocator->raw_alloc_with_stream(totalUpdatesSize, stream);
   AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, totalUpdatesSize, cudaMemcpyHostToDevice, stream));
   AT_CUDA_CHECK(cudaLaunchHostFunc(stream, hostMemoryFreeCallback, hostUpdates)); // free once the memcpy is done
+  // does this need to be done repeatedly? Or only once?
   AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, stream));
   dynamic_graph_updater(deviceUpdates, kernel_param_updates_.size());
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
