@@ -70,7 +70,7 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (C10_UNUSED const auto j : c10::irange(n)) {
+  for ([[maybe_unused]] const auto j : c10::irange(n)) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -129,13 +129,13 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
+inline std::enable_if_t<i == sizeof...(tuple_t), std::size_t>
 for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
+inline std::enable_if_t<i < sizeof...(tuple_t), std::size_t>
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
