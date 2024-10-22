@@ -46,7 +46,10 @@ class InPlaceCompilationTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_state_dict_save(self):
@@ -58,7 +61,8 @@ class InPlaceCompilationTests(TestCase):
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(
-                torch.load(os.path.join(tmpdirname, "model.pt"))
+                # weights_only=False as this is a legacy use case that loads a module
+                torch.load(os.path.join(tmpdirname, "model.pt"), weights_only=False)
             )
             loaded_model(torch.randn(1, 10))
 
