@@ -134,6 +134,11 @@ extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info
 // potrs
 #if defined(_WIN32) && defined(_M_ARM64)
 
+// The functions zpotrs, cpotrs, dpotrs, and spotrs are not directly available in LAPACKE on Windows on ARM, 
+// so we need to have wrapper functions to call them.
+// The issue on ARM platform can be found below:
+// https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
+
 #define LAPACK_COL_MAJOR 102
 #define LAPACK_ROW_MAJOR 101
 
@@ -315,6 +320,12 @@ extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 
 // ormqr
 #if defined(_WIN32) && defined(_M_ARM64)
+
+// The functions zunmqr, cunmqr, dormqr, and sormqr are not directly available in LAPACKE on Windows on ARM, 
+// so we need to have wrapper functions to call them.
+// The issue on ARM platform can be found below:
+// https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
+
 extern "C" int LAPACKE_zunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<double> *a, int lda, const std::complex<double> *tau, std::complex<double> *c, int ldc, std::complex<double> *work, int lwork);
 extern "C" int LAPACKE_cunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<float> *a, int lda, const std::complex<float> *tau, std::complex<float> *c, int ldc, std::complex<float> *work, int lwork);
 extern "C" int LAPACKE_dormqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const double *a, int lda, const double *tau, double *c, int ldc, double *work, int lwork);
