@@ -1122,24 +1122,28 @@ namespace {
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float scale = generator_sc.get();
-            float inv_scale = 1.0f / static_cast<float>(scale);
-            auto zero_point_val = generator_zp.get();
-            int index = 0;
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                //generate vals
-                for (auto& v : unit_float_vec) {
-                    v = gen.get();
-                    expected_qint_vals[index] = quantize_val<underlying>(scale, zero_point_val, v);
-                    index++;
-                }
-                float_ret[j] = vfloat::loadu(unit_float_vec);
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float scale = generator_sc.get();
+          float inv_scale = 1.0f / static_cast<float>(scale);
+          auto zero_point_val = generator_zp.get();
+          int index = 0;
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            // generate vals
+            for (auto& v : unit_float_vec) {
+              v = gen.get();
+              expected_qint_vals[index] =
+                  quantize_val<underlying>(scale, zero_point_val, v);
+              index++;
             }
-            auto expected = vec::loadu(expected_qint_vals);
-            auto actual = vec::quantize(float_ret, scale, zero_point_val, inv_scale);
-            if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
-        } //trials;
+            float_ret[j] = vfloat::loadu(unit_float_vec);
+          }
+          auto expected = vec::loadu(expected_qint_vals);
+          auto actual =
+              vec::quantize(float_ret, scale, zero_point_val, inv_scale);
+          if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual)
+                  .check())
+            return;
+        } // trials;
     }
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     // This test case aims to test at::vec::QuantizeAvx512 and
@@ -1168,7 +1172,7 @@ namespace {
       float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
       float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
       ValueGen<float> gen(minv, maxv, seed.add(2));
-      for (C10_UNUSED const auto i : c10::irange(trials)) {
+      for ([[maybe_unused]] const auto i : c10::irange(trials)) {
         float scale = generator_sc.get();
         float inv_scale = 1.0f / static_cast<float>(scale);
         auto zero_point_val = generator_zp.get();
@@ -1227,35 +1231,36 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float scale = generator_sc.get();
-            int32_t zero_point_val = generator.get();
-            float scale_zp_premul = -(scale * zero_point_val);
-            vfloat vf_scale = vfloat{ scale };
-            vfloat vf_zp = vfloat{ static_cast<float>(zero_point_val) };
-            vfloat vf_scale_zp = vfloat{ scale_zp_premul };
-            //generate vals
-            for (auto& x : qint_vals) {
-                x = generator.get();
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float scale = generator_sc.get();
+          int32_t zero_point_val = generator.get();
+          float scale_zp_premul = -(scale * zero_point_val);
+          vfloat vf_scale = vfloat{scale};
+          vfloat vf_zp = vfloat{static_cast<float>(zero_point_val)};
+          vfloat vf_scale_zp = vfloat{scale_zp_premul};
+          // generate vals
+          for (auto& x : qint_vals) {
+            x = generator.get();
+          }
+          // get expected
+          int index = 0;
+          auto qint_vec = vec::loadu(qint_vals);
+          auto actual_float_ret =
+              qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            for (auto& v : unit_exp_vals) {
+              v = dequantize_val(scale, zero_point_val, qint_vals[index]);
+              index++;
             }
-            //get expected
-            int index = 0;
-            auto qint_vec = vec::loadu(qint_vals);
-            auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                for (auto& v : unit_exp_vals) {
-                    v = dequantize_val(scale, zero_point_val, qint_vals[index]);
-                    index++;
-                }
-                vfloat expected = vfloat::loadu(unit_exp_vals);
-                const auto& actual = actual_float_ret[j];
+            vfloat expected = vfloat::loadu(unit_exp_vals);
+            const auto& actual = actual_float_ret[j];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
                 if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check(false, true, 1.e-3f)) return;
 #else
                 if (AssertVectorized<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
 #endif
             }
-        } //trials;
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, ReQuantizeFromInt) {
         using vec = TypeParam;
@@ -1274,25 +1279,29 @@ namespace {
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            float multiplier = 1.f / (generator_sc.get());
-            auto zero_point_val = generator.get();
-            int index = 0;
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                //generate vals
-                for (auto& v : unit_int_vec) {
-                    v = c10::qint32(generator.get());
-                    expected_qint_vals[index] = requantize_from_int<underlying>(multiplier, zero_point_val, v.val_);
-                    index++;
-                }
-                int_ret[j] = vqint::loadu(unit_int_vec);
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          float multiplier = 1.f / (generator_sc.get());
+          auto zero_point_val = generator.get();
+          int index = 0;
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            // generate vals
+            for (auto& v : unit_int_vec) {
+              v = c10::qint32(generator.get());
+              expected_qint_vals[index] = requantize_from_int<underlying>(
+                  multiplier, zero_point_val, v.val_);
+              index++;
             }
-            auto expected = vec::loadu(expected_qint_vals);
-            auto actual = vec::requantize_from_int(int_ret, multiplier, zero_point_val);
-            if (AssertVectorized<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) {
-                return;
-            }
-        } //trials;
+            int_ret[j] = vqint::loadu(unit_int_vec);
+          }
+          auto expected = vec::loadu(expected_qint_vals);
+          auto actual =
+              vec::requantize_from_int(int_ret, multiplier, zero_point_val);
+          if (AssertVectorized<vec>(
+                  NAME_INFO(ReQuantizeFromInt), seed, expected, actual)
+                  .check()) {
+            return;
+          }
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, WideningSubtract) {
         using vec = TypeParam;
@@ -1311,30 +1320,33 @@ namespace {
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
-        for (C10_UNUSED const auto i : c10::irange(trials)) {
-            //generate vals
-            for (int j = 0; j < vec::size(); j++) {
-                qint_vals[j] = generator.get();
-                qint_b[j] = generator.get();
-                if constexpr (std::is_same_v<underlying, int>) {
-                    //filter overflow cases
-                    filter_sub_overflow(qint_vals[j], qint_b[j]);
-                }
+        for ([[maybe_unused]] const auto i : c10::irange(trials)) {
+          // generate vals
+          for (int j = 0; j < vec::size(); j++) {
+            qint_vals[j] = generator.get();
+            qint_b[j] = generator.get();
+            if constexpr (std::is_same_v<underlying, int>) {
+              // filter overflow cases
+              filter_sub_overflow(qint_vals[j], qint_b[j]);
             }
-            int index = 0;
-            auto qint_vec = vec::loadu(qint_vals);
-            auto qint_vec_b = vec::loadu(qint_b);
-            auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                for (auto& v : unit_exp_vals) {
-                    v = widening_subtract(qint_vals[index], qint_b[index]);
-                    index++;
-                }
-                auto expected = vqint::loadu(unit_exp_vals);
-                const auto& actual = actual_int_ret[j];
-                if (AssertVectorized<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
+          }
+          int index = 0;
+          auto qint_vec = vec::loadu(qint_vals);
+          auto qint_vec_b = vec::loadu(qint_b);
+          auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
+          for (int j = 0; j < vec::float_num_vecs(); j++) {
+            for (auto& v : unit_exp_vals) {
+              v = widening_subtract(qint_vals[index], qint_b[index]);
+              index++;
             }
-        } //trials;
+            auto expected = vqint::loadu(unit_exp_vals);
+            const auto& actual = actual_int_ret[j];
+            if (AssertVectorized<vqint>(
+                    NAME_INFO(WideningSubtract), seed, expected, actual)
+                    .check())
+              return;
+          }
+        } // trials;
     }
     TYPED_TEST(QuantizationTests, Relu) {
         using vec = TypeParam;
