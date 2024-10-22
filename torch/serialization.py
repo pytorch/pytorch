@@ -53,8 +53,6 @@ __all__ = [
     "load",
     "StorageType",
     "LoadEndianness",
-    "get_crc32_options",
-    "set_crc32_options",
     "get_default_load_endianness",
     "set_default_load_endianness",
     "get_default_mmap_options",
@@ -66,7 +64,6 @@ __all__ = [
     "skip_data",
 ]
 
-IS_FBCODE = not hasattr(torch.version, "git_version")
 
 DEFAULT_PROTOCOL = 2
 
@@ -168,34 +165,6 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
-
-
-_compute_crc32: bool = True
-
-
-def get_crc32_options() -> bool:
-    """
-    Get whether :func:`torch.save` computes and writes crc32 for each record.
-
-    Defaults to ``True``.
-    """
-    return _compute_crc32
-
-
-def set_crc32_options(compute_crc32: bool):
-    """
-    Set whether :func:`torch.save` computes and writes crc32 for each record.
-
-    .. note::
-        Setting this to ``False`` may make unzipping of the ``torch.save`` output
-        fail or warn due to corrupted CRC32. However ``torch.load`` will be
-        able to load the file.
-
-    Args:
-        compute_crc32 (bool): set crc32 compuation flag
-    """
-    global _compute_crc32
-    _compute_crc32 = compute_crc32
 
 
 _default_mmap_options: int = MAP_PRIVATE
@@ -713,11 +682,9 @@ class _open_zipfile_writer_file(_opener):
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
-            super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
-            )
+            super().__init__(torch._C.PyTorchFileWriter(self.file_stream))
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
+            super().__init__(torch._C.PyTorchFileWriter(self.name))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -733,7 +700,7 @@ class _open_zipfile_writer_buffer(_opener):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
+        super().__init__(torch._C.PyTorchFileWriter(buffer))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -839,7 +806,7 @@ def save(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True)
 
     Saves an object to a disk file.
 
@@ -1160,7 +1127,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: Optional[bool] = not IS_FBCODE,
+    weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
     **pickle_load_args: Any,
 ) -> Any:
@@ -1169,7 +1136,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1310,19 +1277,36 @@ def load(
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
 
+    true_values = ["1", "y", "yes", "true"]
+    # Add ability to force safe only or non-safe weight loads via environment variables
+    force_weights_only_load = (
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+    force_no_weights_only_load = (
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+
+    if force_weights_only_load and force_no_weights_only_load:
+        raise RuntimeError(
+            "Only one of `TORCH_FORCE_WEIGHTS_ONLY_LOAD` or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` "
+            "should be set, but both were set."
+        )
+    elif force_weights_only_load:
+        weights_only = True
+    elif force_no_weights_only_load:
+        if weights_only is None:
+            warnings.warn(
+                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
+                "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
+                UserWarning,
+                stacklevel=2,
+            )
+            weights_only = False
+
     if weights_only is None:
         weights_only, warn_weights_only = False, True
     else:
         warn_weights_only = False
-
-    # Add ability to force safe only weight loads via environment variable
-    if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
-        "1",
-        "y",
-        "yes",
-        "true",
-    ]:
-        weights_only = True
 
     if weights_only:
         if pickle_module is not None:
@@ -1526,7 +1510,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             tar.extract("storages", path=tmpdir)
             with open(os.path.join(tmpdir, "storages"), "rb", 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
-                for i in range(num_storages):
+                for _ in range(num_storages):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
                     dtype = storage_type._dtype
@@ -1560,7 +1544,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 num_tensors = pickle_module.load(f, **pickle_load_args)
                 for _ in range(num_tensors):
                     args = pickle_module.load(f, **pickle_load_args)
-                    key, storage_id, original_tensor_type = args
+                    key, storage_id, _original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     (ndim,) = struct.unpack("<i", f.read(4))
                     # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
