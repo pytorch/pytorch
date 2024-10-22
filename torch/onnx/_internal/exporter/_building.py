@@ -266,7 +266,7 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
-        arg = [arg.real, arg.imag]
+        arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):
         # Make the arg hashable
