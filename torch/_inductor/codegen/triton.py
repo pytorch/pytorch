@@ -50,7 +50,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..runtime.benchmarking import benchmarker
-from ..runtime.hints import GPU_BARRIER_STATE_LEN, ReductionHint, TRITON_MAX_BLOCK
+from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
@@ -1427,7 +1427,7 @@ class TritonKernel(SIMDKernel):
                 tree.grid_dim += 1
 
         xnumel, rnumel = self.numels
-        self.semaphores_name = self.args.semaphores(xnumel * GPU_BARRIER_STATE_LEN)
+        self.semaphores_name = self.args.semaphores(xnumel)
         self.cooperative_reduction_workspace_cache = CooperativeReductionWorkspaceCache(
             self.args
         )
@@ -2766,7 +2766,6 @@ class TritonKernel(SIMDKernel):
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store
         ):
-            assert GPU_BARRIER_STATE_LEN == 1
             sem_ptr = f"{self.semaphores_name} + tl.program_id(1)"
             self.body.splice(
                 f"""
