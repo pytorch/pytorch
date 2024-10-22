@@ -197,19 +197,3 @@ def matmul(a, b, activation=""):
         ACTIVATION=activation  #
     )
     return c
-
-
-@torch.library.custom_op("nestedtensor::bmm", mutates_args=())
-def bmm_triton(a, b):
-    assert a.dim() == 3
-    assert b.dim() == 3
-    assert a.is_nested
-    assert not b.is_nested
-    assert a.device == b.device
-    assert a.is_cuda
-    assert b.is_cuda
-
-    a_values = a.values()
-    a_offsets = a.offsets()
-
-
