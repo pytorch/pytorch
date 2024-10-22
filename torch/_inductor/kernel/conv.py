@@ -473,10 +473,7 @@ def convolution(
     transposed: bool,
     output_padding: List[int],
     groups: int,
-    *,
-    layout=None
 ):
-    # import pdb; pdb.set_trace()
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -563,9 +560,7 @@ def convolution(
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
-    # import pdb; pdb.set_trace()
-    if layout is None:
-        layout = conv_layout(x, weight, None, **kwargs)
+    layout = conv_layout(x, weight, None, **kwargs)
     ordered_kwargs_for_cpp_kernel = [
         "stride",
         "padding",
@@ -662,8 +657,6 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-
-    # import pdb; pdb.set_trace()
 
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
