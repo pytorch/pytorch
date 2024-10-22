@@ -7,7 +7,7 @@ import inspect
 import itertools
 import math
 import operator
-from contextlib import nullcontext
+import warnings
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -193,8 +193,6 @@ def _adjust_num_blocks_and_indices(
     new_num_rows: int,
     new_num_cols: int,
 ):
-    num_rows = indices.shape[-2]
-    num_columns = indices.shape[-1]
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
@@ -656,6 +654,19 @@ def _convert_mask_to_block_mask(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
+
+    def padding_needed_for_multiple(x, multiple):
+        return _round_up_to_multiple(x, multiple) - x
+
+    mask = torch.nn.functional.pad(
+        mask,
+        (
+            0,
+            padding_needed_for_multiple(mask.shape[-1], KV_BLOCK_SIZE),
+            0,
+            padding_needed_for_multiple(mask.shape[-2], Q_BLOCK_SIZE),
+        ),
+    )
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0
@@ -754,7 +765,6 @@ def create_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    _compile: bool = False,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -777,15 +787,9 @@ def create_mask(
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
     n = torch.arange(0, KV_LEN, device=device)
-    # TODO: fix this
-    # Lack instantiation support for __torch_function__ mode support under compile
-    if _compile:
-        ctx = nullcontext()
-    else:
-        ctx = TransformGetItemToIndex()  # type: ignore[assignment]
     mod_type = _get_mod_type(mod_fn)
 
-    with ctx:
+    with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
             score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,))  # first input is score
@@ -799,30 +803,6 @@ def create_mask(
             return mask
         else:
             raise AssertionError
-
-
-def _create_block_mask_inner(
-    mask_mod: Callable,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device: str,
-    Q_BLOCK_SIZE: int,
-    KV_BLOCK_SIZE: int,
-):
-    r"""Work around for being unable to instantiate __torch_function__ mode under compile.
-    `create_block_mask` will compile this inner function and wrap the call to this
-    with the __torch_function__ mode.
-    """
-    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device, _compile=True)
-    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
-        mask_tensor,
-        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
-        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
-        separate_full_blocks=True,
-    )
-    return partial_block_mask, full_block_mask
 
 
 def create_block_mask(
@@ -849,7 +829,6 @@ def create_block_mask(
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
         BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
-        _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -870,7 +849,6 @@ def create_block_mask(
     assert (
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
-    inner_func = _create_block_mask_inner
     if B is None:
         B = 1
     if H is None:
@@ -881,20 +859,25 @@ def create_block_mask(
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
-    if Q_LEN < 128:
-        Q_BLOCK_SIZE = Q_LEN
-    else:
-        Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
-    KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True)
-    with TransformGetItemToIndex():
-        partial_block_mask, full_block_mask = inner_func(
-            mask_mod, B, H, Q_LEN, KV_LEN, device, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+        warnings.warn(
+            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
+            DeprecationWarning,
         )
-        block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+        return torch.compile(create_block_mask)(
+            mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
         )
+
+    mask_tensor = create_mask(mask_mod, B, H, Q_LEN, KV_LEN, device)
+    partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
+        mask_tensor,
+        Q_BLOCK_SIZE=Q_BLOCK_SIZE,
+        KV_BLOCK_SIZE=KV_BLOCK_SIZE,
+        separate_full_blocks=True,
+    )
+    block_mask = _create_sparse_block_from_block_mask(
+        (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+    )
     return block_mask
 
 

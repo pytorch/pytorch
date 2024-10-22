@@ -141,6 +141,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
     UserFunctionVariable,
@@ -195,6 +196,7 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
@@ -525,7 +527,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton, has_triton_tma
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -536,6 +538,19 @@ class VariableBuilder:
                 pass
 
             class Autotuner:
+                pass
+
+        if has_triton_tma():
+            from triton.tools.experimental_descriptor import (
+                create_1d_tma_descriptor,
+                create_2d_tma_descriptor,
+            )
+        else:
+
+            def create_1d_tma_descriptor():
+                pass
+
+            def create_2d_tma_descriptor():
                 pass
 
         # Handle exact type() match
@@ -967,6 +982,10 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif value is create_1d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=1)
+        elif value is create_2d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=2)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1769,8 +1788,8 @@ class VariableBuilder:
                                 "name": name,
                                 "dim_changed": "scalar",
                                 "reason": "scalar change",
-                                "cached": frame_state_entry.scalar,
-                                "new": value,
+                                "cached": str(frame_state_entry.scalar),
+                                "new": str(value),
                             },
                         )
                         if self.source.guard_source().is_unspecialized_nn_module():
@@ -2336,12 +2355,16 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
@@ -2486,8 +2509,8 @@ def _automatic_dynamic(
                             "name": name,
                             "dim_changed": "all",
                             "reason": "dimensionality change",
-                            "cached": frame_state_entry.size,
-                            "new": size,
+                            "cached": str(frame_state_entry.size),
+                            "new": str(size),
                         },
                     )
                     frame_state_entry.size = None
@@ -2514,8 +2537,8 @@ def _automatic_dynamic(
                                     "name": name,
                                     "dim_changed": i,
                                     "reason": "size change",
-                                    "cached": dim,
-                                    "new": size[i],
+                                    "cached": str(dim),
+                                    "new": str(size[i]),
                                 },
                             )
                             frame_state_entry.size[i] = None
@@ -2555,8 +2578,8 @@ def _automatic_dynamic(
                                         "name": name,
                                         "dim_changed": i,
                                         "reason": "stride change",
-                                        "cached": dim,
-                                        "new": stride[i],
+                                        "cached": str(dim),
+                                        "new": str(stride[i]),
                                     },
                                 )
                                 frame_state_entry.stride[i] = None
@@ -2604,8 +2627,12 @@ def _automatic_dynamic(
         else:
             dim2constraint[dim] = constraint_range, name
 
+    from torch.export.dynamic_shapes import _RelaxedConstraint
+
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
             if constraint.t_id == t_id:
                 update_dim2constraint(
                     constraint.dim, constraint.constraint_range, constraint.name
