@@ -5,6 +5,7 @@ from typing import List
 
 from .token_line import TokenLine
 
+
 OMIT_COMMENT = "# noqa: set_linter"
 
 """

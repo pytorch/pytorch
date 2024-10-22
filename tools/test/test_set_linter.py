@@ -1,11 +1,12 @@
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
-from typing import List, Set, Tuple
+from typing import List, Tuple
 
 import pytest
 from tools.linter.adapters.set_linter.fix_set_tokens import fix_set_tokens
 from tools.linter.adapters.set_linter.python_file import OmittedLines, PythonFile
+
 
 TESTDATA = Path(__file__).parent / "set_linter_testdata"
 
