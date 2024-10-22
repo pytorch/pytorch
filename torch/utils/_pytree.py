@@ -436,6 +436,9 @@ def is_namedtuple_class(cls: type) -> bool:
     )
 
 
+is_namedtuple_class.__torch_dynamo_can_constant_fold_through__ = True  # type: ignore[attr-defined]
+
+
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
 def is_namedtuple_instance(obj: object) -> bool:
     """Return whether the object is an instance of namedtuple."""
@@ -490,6 +493,9 @@ def is_structseq_class(cls: type) -> bool:
         # Check the type does not allow subclassing
         and not bool(cls.__flags__ & Py_TPFLAGS_BASETYPE)  # only works for CPython
     )
+
+
+is_structseq_class.__torch_dynamo_can_constant_fold_through__ = True  # type: ignore[attr-defined]
 
 
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
