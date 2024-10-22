@@ -2751,16 +2751,12 @@ class TritonKernel(SIMDKernel):
         if self.cooperative_reduction and (
             self.post_loop_combine or self.post_loop_store
         ):
-            assert GPU_BARRIER_STATE_LEN >= 2
-            sem_ptr = (
-                f"{self.semaphores_name} + ({GPU_BARRIER_STATE_LEN} * tl.program_id(1) + "
-                # ping pong between two barrier semaphores
-                f"{self.cooperative_reduction_workspace_cache.loop_count % 2})"
-            )
+            assert GPU_BARRIER_STATE_LEN == 1
+            sem_ptr = f"{self.semaphores_name} + tl.program_id(1)"
             self.body.splice(
                 f"""
                 if RSPLIT > 1:
-                    triton_helpers.gpu_barrier({sem_ptr}, RSPLIT, True)
+                    triton_helpers.x_grid_barrier({sem_ptr})
                 """,
                 strip=True,
             )

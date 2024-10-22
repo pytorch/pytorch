@@ -15,7 +15,7 @@ TRITON_MAX_BLOCK = {
 TRITON_MAX_RSPLIT = 64
 
 # this must match triton_helpers.gpu_barrier
-GPU_BARRIER_STATE_LEN = 2
+GPU_BARRIER_STATE_LEN = 1
 
 
 class ReductionHint(Enum):
