@@ -973,7 +973,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(32, 32, kernel_size=3, stride=1, bias=use_bias)
+                self.conv = torch.nn.Conv2d(
+                    32, 32, kernel_size=3, stride=1, bias=use_bias
+                )
 
             def forward(self, x1, x2):
                 return torch.add(self.conv(x1), x2)
