@@ -36,7 +36,7 @@ expecttest==0.2.1
 #Pinned versions: 0.2.1
 #test that import:
 
-fbscribelogger==0.1.6
+fbscribelogger==0.1.7rc0
 #Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
