@@ -2,6 +2,9 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
+from sympy import Symbol
+
+from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...autotune_process import CUDABenchmarkRequest
@@ -73,7 +76,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         Generates code to check that a node is not null.
         """
-
         if node is None:
             return ""
 
@@ -121,7 +123,6 @@ class CUDATemplateKernel(CUDAKernel):
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
-
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
@@ -146,9 +147,26 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        signature = (
-            f"int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+
+        def collect_symbolic_size_and_strides(inp) -> List[str]:
+            if inp is None:
+                return set()
+            sizes = inp.get_size()
+            strides = inp.get_stride()
+            from torch.fx.experimental.symbolic_shapes import free_symbols
+
+            symbols = free_symbols(sizes + strides)
+            return {cexpr(self.rename_indexing(symbol)) for symbol in symbols}
+
+        from functools import reduce
+
+        symbolics = reduce(
+            lambda a, b: a | b,
+            map(lambda b: collect_symbolic_size_and_strides(b), inputs + outputs),
         )
+        size_args = [f"size_t {s}" for s in sorted(symbolics, key=str)]
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -183,11 +201,14 @@ class CUDATemplateKernel(CUDAKernel):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
-                call_args[i] = (
-                    call_args[i]
-                    if V.graph.cpp_wrapper
-                    else f"c_void_p({call_args[i]}.data_ptr())"
-                )
+                if isinstance(arg_types[i], torch_dtype):
+                    call_args[i] = (
+                        call_args[i]
+                        if V.graph.cpp_wrapper
+                        else f"c_void_p({call_args[i]}.data_ptr())"
+                    )
+                elif issubclass(arg_types[i], Symbol):
+                    call_args[i] = call_args[i]
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.

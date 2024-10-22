@@ -157,6 +157,46 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_rerun_with_different_shapes(self):
+        """
+        Compile with one shape, then re-run with different input shapes
+        """
+        max_autotune_gemm_backends = "CUTLASS"
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 512).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y = model(a, b)
+            compiled = torch.compile(model, dynamic=True)
+            Y_compiled = compiled(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+            x = torch.randn(256, 32).cuda().half()
+            y = torch.randn(32, 256).cuda().half()
+            Y = model(x, y)
+            Y_compiled = compiled(x, y)
+            torch.testing.assert_close(Y_compiled, Y)
+
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
