@@ -657,6 +657,8 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  INSPECT(locals);
+
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;
   const char* trace_annotation = "";
@@ -820,6 +822,10 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
+static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
+  return eval_frame_callback_get();
+}
+
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
   if (!PyCode_Check(code)) {
     DEBUG_TRACE0("arg error");
@@ -863,10 +869,19 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
 }
 
 // Debugging function for GNU C only.
-// Used to set gdb breakpoints in hot CPython sites.
-// e.g you want to breakpoint on CALL after generating dynamo bytecode.
-// Call raise_sigtrap right before the dynamo bytecode is run, then
-// you can set a breakpoint in gdb.
+// Used to set gdb breakpoints in hot CPython sites from Python.
+// Code example:
+//
+// def foo(x):
+//     x = x + 1
+//     torch._dynamo.eval_frame.raise_sigtrap()
+//     # (gdb) b bytecodes.c:1234 (whatever line CALL is handled)
+//     x = torch.sin(x)  # gdb breakpoint hit when sin is called
+//
+// In this example, we want to breakpoint on CALL in bytecodes.c only when
+// running foo. Otherwise, we would need to breakpoint before running the program,
+// and that breakpoint would be hit every time Python makes a function call,
+// leading to a spammy debugging experience.
 static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
 #ifdef __GNUC__
   raise(SIGTRAP);
@@ -876,6 +891,7 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
+    {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
