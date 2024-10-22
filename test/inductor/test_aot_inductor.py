@@ -3727,43 +3727,16 @@ def fail_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    "test_duplicate_constant_folding": fail_cpu(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_missing_cubin": fail_cpu(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_cpu(is_skip=True),
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_shifted_constraint_ranges": fail_cpu(is_skip=True),
-    # failed on MacOS
-    "test_zero_grid_with_backed_symbols": fail_cpu(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122991
-    "test_runtime_checks_complex": fail_cpu(is_skip=True),
-    "test_runtime_checks_fp8": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_cuda(is_skip=True),
     # quantized unsupported for GPU
-    "test_quantized_linear": fail_cuda(is_skip=True),
-    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
+    "test_quantized_linear": fail_cuda(),
+    "test_quanatized_int8_linear": fail_cuda(),
 }
-
-
-if not IS_FBCODE:
-    # The following test passes internally but fails in OSS CI. To be investigated.
-    CUDA_TEST_FAILURES.update(
-        {
-            "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
-            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
-                is_skip=True
-            ),
-            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
-        }
-    )
 
 
 class AOTInductorTestABICompatibleCpu(AOTITestCase):
