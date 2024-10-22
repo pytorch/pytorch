@@ -1,4 +1,5 @@
 :orphan:
+.. _torch.compiler_troubleshooting_old:
 
 PyTorch 2.0 Troubleshooting (old)
 =================================

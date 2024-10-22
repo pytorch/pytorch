@@ -1,3 +1,5 @@
+.. _torch.compiler_troubleshooting:
+
 torch.compile Troubleshooting
 =================================
 
