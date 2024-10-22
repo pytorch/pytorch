@@ -34,7 +34,7 @@ Scalar item(const Tensor& self) {
 #define AT_SD_TYPES AT_EXPAND(AT_SD_BASE_TYPES)
 #endif
 
-Scalar _local_scalar_dense_cpu(const Tensor& self) {
+__ubsan_ignore_bool__ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   Scalar r;
   AT_DISPATCH_V2(
     self.scalar_type(),

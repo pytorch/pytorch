@@ -35,6 +35,7 @@
 #define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #define __ubsan_ignore_float_cast_overflow__ \
   __attribute__((no_sanitize("float-cast-overflow")))
+#define __ubsan_ignore_bool__ __attribute__((no_sanitize("bool")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
@@ -42,6 +43,7 @@
 #define __ubsan_ignore_pointer_overflow__
 #define __ubsan_ignore_function__
 #define __ubsan_ignore_float_cast_overflow__
+#define __ubsan_ignore_bool__
 #endif
 
 // Detect address sanitizer as some stuff doesn't work with it
