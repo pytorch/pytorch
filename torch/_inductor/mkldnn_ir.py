@@ -236,6 +236,8 @@ def _prepare_linear_fusion_create(
         w_scale.realize()
         w_zero_point.realize()
         inputs = inputs + [x_scale, x_zero_point] + [weight] + [w_scale, w_zero_point]
+    else:
+        inputs += [weight]
 
     if other is not None:
         if binary_sum:
