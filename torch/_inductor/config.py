@@ -1069,6 +1069,9 @@ class aot_inductor:
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
 
+    # Dictionary of presets that can be passed in
+    presets: Dict[str, Any] = {}
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
