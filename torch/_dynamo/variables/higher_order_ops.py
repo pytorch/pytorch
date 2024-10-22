@@ -1044,6 +1044,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.associative_scan import first_slice_copy
+
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1062,28 +1064,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         sub_args = [
-            leaf.call_method(
-                tx,
-                "new_empty",
-                args=(
-                    VariableTracker.build(
-                        tx,
-                        (
-                            leaf.size
-                            if leaf.size is not None
-                            else BuiltinVariable(getattr)
-                            .call_function(
-                                tx, [leaf, ConstantVariable.create("shape")], {}
-                            )
-                            .items
-                        ),
-                    ),
-                ),
-                kwargs={
-                    "dtype": VariableTracker.build(tx, leaf.dtype),
-                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
-                },
-            )
+            _make_inlined(tx, first_slice_copy)(leaf)
             for leaf in itertools.chain(xs.items, xs.items)
         ]
         (

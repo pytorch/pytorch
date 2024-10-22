@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Callable, List
+from typing import Any, Callable, List
 
 import torch
 import torch._subclasses.functional_tensor
@@ -223,15 +223,15 @@ def associative_scan(
     # Move scan dim to 0 and always perform scan on dim 0
     orig_scan_dim = dim
     leaves = [shift_source_dim_to_target_dim(elem, int(dim), 0) for elem in leaves]
+    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
+    shape = first_slice_copy(leaves[0]).shape
 
-    shape = leaves[0].shape
-
-    for x in leaves[1:]:
+    for x in sliced_leaves[1:]:
         assert x.shape == shape, "All xs tensors must have the same shape"
 
     out = combine_fn(
-        pytree.tree_unflatten(leaves, spec),
-        pytree.tree_unflatten(leaves, spec),
+        pytree.tree_unflatten(sliced_leaves, spec),
+        pytree.tree_unflatten(sliced_leaves, spec),
     )
     out_leaves = pytree.tree_leaves(out)
     if len(leaves) != len(out_leaves):
@@ -363,15 +363,7 @@ def trace_associative_scan(
     proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor]
 ):
     with disable_proxy_modes_tracing():
-        sample_xs = [
-            torch.empty_like(
-                x,
-                dtype=x.dtype,
-                device=x.device,
-                requires_grad=x.requires_grad,
-            )
-            for x in itertools.chain(xs, xs)
-        ]
+        sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
 
     outputs = None
@@ -448,7 +440,7 @@ class ScanAutogradOp(torch.autograd.Function):
         return (*outs,)
 
     @staticmethod
-    def backward(ctx, *flat_grads):
+    def backward(ctx, *flat_grads_unmasked):
         r"""
         This function computes the gradients of the scan operation.
         It does so by factorizing the components of the chainrule into
@@ -577,7 +569,7 @@ class ScanAutogradOp(torch.autograd.Function):
             ]
 
             # Mask the gradients for the variables that do not require gradients for partial gradient support
-            flat_grads = [fg for fg, m in zip(flat_grads, gradient_mask) if m]
+            flat_grads = [fg for fg, m in zip(flat_grads_unmasked, gradient_mask) if m]
 
             # Function to compute the gradients with respect
             # *) to the inputs (xs) -> grads_xs
@@ -801,7 +793,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs):
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(xs)
-    result_flat = []
+    result_flat: List[Any] = []
     num_leaves = len(inp_leaves)
     op = reversed if reverse else lambda x: x
 

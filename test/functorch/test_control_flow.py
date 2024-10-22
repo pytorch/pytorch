@@ -89,7 +89,7 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     return operands
 
 
-def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
+def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):  # noqa: F811
     carry_leaves, carry_spec = pytree.tree_flatten(init)
     inp_leaves, inp_spec = pytree.tree_flatten(xs)
     if xs is None or len(inp_leaves) == 0:
