@@ -116,7 +116,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -565,12 +565,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return RandomVariable(random_object)
         elif (
             not self.is_standard_new()
-            and (
-                SideEffects.cls_supports_mutation_side_effects(self.value)
-                or is_standard_setattr(
-                    inspect.getattr_static(self.value, "__setattr__", None)
-                )
-            )
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
             return tx.inline_user_function_return(
