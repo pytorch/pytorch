@@ -75,6 +75,9 @@ def grouped_matmul_kernel(
     g_lds,
     # number of gemms
     group_size,
+    # MISC
+    gn,
+    gk,
     # number of virtual SM
     NUM_SM: tl.constexpr,
     # tile sizes
@@ -84,13 +87,13 @@ def grouped_matmul_kernel(
 ):
     tile_idx = tl.program_id(0)
     last_problem_end = 0
+    num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
     for g in range(group_size):
         # get the gemm size of the current problem
-        gm = tl.load(group_gemm_sizes + g * 3)
-        gn = tl.load(group_gemm_sizes + g * 3 + 1)
-        gk = tl.load(group_gemm_sizes + g * 3 + 2)
+        gm = tl.load(group_gemm_sizes + g) # * 3)
+        # gn = tl.load(group_gemm_sizes + g * 3 + 1)
+        # gk = tl.load(group_gemm_sizes + g * 3 + 2)
         num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
-        num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
         num_tiles = num_m_tiles * num_n_tiles
         # iterate through the tiles in the current gemm problem
         while (tile_idx >= last_problem_end and tile_idx < last_problem_end + num_tiles):
@@ -174,7 +177,8 @@ def group_gemm_fn(tensor_a, tensor_b):
         A_addrs.append(A.data_ptr())
         # B_addrs.append(B.data_ptr())
         C_addrs.append(C.data_ptr())
-        g_sizes += [M, N, K]
+        # g_sizes += [M, N, K]
+        g_sizes += [M] #, N, K]
         g_lds += [A.stride(0), tensor_b.stride(1), C.stride(0)]
         # g_lds += [A.stride(0), 0, C.stride(0)]
 
@@ -193,6 +197,8 @@ def group_gemm_fn(tensor_a, tensor_b):
         d_g_sizes,
         d_g_lds,
         group_size,
+        N,
+        K,
     )
 
     return group_C
