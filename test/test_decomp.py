@@ -3,7 +3,6 @@
 import functools
 import itertools
 import re
-import unittest
 from collections import defaultdict
 from functools import partial
 
@@ -36,7 +35,6 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
-    TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TestCase,
     unMarkDynamoStrictTest,
