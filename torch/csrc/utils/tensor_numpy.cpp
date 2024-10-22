@@ -57,8 +57,7 @@ bool is_numpy_dlpack_deleter_bugged() {
 using namespace at;
 using namespace torch::autograd;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 bool is_numpy_available() {
   static bool available = []() {
@@ -567,7 +566,6 @@ void validate_numpy_for_dlpack_deleter_bug() {
 bool is_numpy_dlpack_deleter_bugged() {
   return numpy_with_dlpack_deleter_bug_installed;
 }
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
 
 #endif // USE_NUMPY

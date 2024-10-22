@@ -414,8 +414,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 std::optional<c10::string_view> unary_algorithm)"""
 
         self.mutation_outputs = [
-            MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
-            MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
+            MutationOutput(NoneLayout(device=inputs[0].get_device()), inputs[0], self),
+            MutationOutput(NoneLayout(device=inputs[1].get_device()), inputs[1], self),
         ]
 
     def codegen(self, wrapper):
@@ -460,7 +460,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1063,7 +1063,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
-            layout=NoneLayout(qaccum.get_device()),
+            layout=NoneLayout(device=qaccum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1095,16 +1095,8 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            self.codegen_args(),
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            op_overload=self.op_overload,
-            raw_args=[*self.inputs, *self.constant_args],
-        )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(cls, x, packed_w, orig_w, B, batch_size):
@@ -1731,7 +1723,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if binary_post_op == "sum":
             V.graph.mark_buffer_mutated(other.get_name())
             packed = QLinearPointwiseBinaryPT2E(
-                layout=NoneLayout(other.get_device()),
+                layout=NoneLayout(device=other.get_device()),
                 inputs=inputs,
                 constant_args=constant_args,
                 has_bias=(bias is not None),
