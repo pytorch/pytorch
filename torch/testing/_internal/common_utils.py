@@ -98,6 +98,7 @@ from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
+from torch.utils import cpp_extension
 try:
     import pytest
     has_pytest = True
@@ -5377,7 +5378,7 @@ def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
     """
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
             # rmtree returns permission error: [WinError 5] Access is denied
@@ -5385,3 +5386,19 @@ def remove_cpp_extensions_build_root():
             subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
+
+# Decorator to provide a helper to load inline extensions to a temp directory
+def scoped_load_inline(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        def load_inline(*args, **kwargs):
+            assert "build_directory" not in kwargs
+            with TemporaryDirectoryName() as temp_dir_name:
+                if kwargs.get("verbose", False):
+                    print(f'Using temporary extension directory {temp_dir_name}...', file=sys.stderr)
+                kwargs["build_directory"] = temp_dir_name
+                return cpp_extension.load_inline(*args, **kwargs)
+
+        return func(*args, load_inline=load_inline, **kwargs)
+
+    return wrapper
