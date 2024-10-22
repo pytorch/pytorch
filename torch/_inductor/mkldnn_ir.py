@@ -179,6 +179,7 @@ def _prepare_convolution_fusion_create(
 
     if other is not None:
         other = cls.require_stride_order(other, req_stride_order)
+        assert isinstance(other, TensorBox)
         inputs += [other]
 
     kernel_layout = FixedLayout(
