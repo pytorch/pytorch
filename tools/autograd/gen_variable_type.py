@@ -333,6 +333,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad3d",
     "put",
     "put_",
+    "_lazy_clone",
     "_to_copy",
     "replication_pad1d_backward",
     "replication_pad2d_backward",

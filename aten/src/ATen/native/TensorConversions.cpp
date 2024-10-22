@@ -62,6 +62,10 @@
 #include <algorithm>
 #include <numeric>
 
+#if USE_MPS
+#include <ATen/mps/MPSCOW.h>
+#endif  // USE_MPS
+
 namespace at::native {
 
 namespace {
@@ -435,6 +439,15 @@ static inline Tensor to_impl(
           self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
+
+#if USE_MPS
+  // MPS has a fast path with unified memory
+  if (at::mps::cow::to_will_cow(self, dtype, layout, device, copy, optional_memory_format)) {
+    // create a copy-on-write context
+    return at::_lazy_clone(self, device);
+  }
+#endif  // USE_MPS
+
   return at::_to_copy(
       self,
       dtype,

@@ -6894,6 +6894,16 @@ Tensor _to_copy_backward(
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
+Tensor _lazy_clone_backward(
+    const Tensor& grad_,
+    const c10::TensorOptions& self_options) {
+  if (grad_.device() != self_options.device()) {
+    return grad_.to(self_options, /*non_blocking=*/false, /*copy=*/false);
+  } else {
+    return grad_;
+  }
+}
+
 std::tuple<Tensor, Tensor> index_reduce_backward(
     const Tensor& grad,
     const Tensor& self,

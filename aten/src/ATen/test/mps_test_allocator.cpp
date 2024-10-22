@@ -44,3 +44,22 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
     torch::mps::synchronize();
     ASSERT_TRUE(replay_buffer.size() < max_iter);
 }
+
+TEST(MPSAllocator, MPSAllocatorRegisterCPUBackedBuffer) {
+    ASSERT_TRUE(torch::mps::is_available());
+
+    torch::Tensor cpu_t = torch::randn({10000}, at::device(at::kCPU));
+
+    auto* storage_impl = cpu_t.storage().unsafeGetStorageImpl();
+    at::DataPtr& cpu_data_ptr = storage_impl->_mutable_data_ptr_no_checks();
+
+    auto* mps_alloc = at::mps::getIMPSAllocator(true);
+
+    at::DataPtr mps_data_ptr = mps_alloc->registerCPUBackedPtr(cpu_data_ptr.get(), storage_impl->nbytes());
+
+    ASSERT_TRUE(mps_alloc->isSharedBuffer(mps_data_ptr.get()));
+
+    const void* cpu_mapped = std::get<0>(mps_alloc->getSharedBufferPtr(mps_data_ptr.get()));
+
+    ASSERT_EQ(cpu_data_ptr.get(), cpu_mapped);
+}
