@@ -5,8 +5,7 @@ from typing import List
 
 from .token_line import TokenLine
 
-
-OMIT_COMMENT = "# noqa: setlint"
+OMIT_COMMENT = "# noqa: set_linter"
 
 """
 Python's tokenizer splits Python code into lexical tokens tagged with one of many

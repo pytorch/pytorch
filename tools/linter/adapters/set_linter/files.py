@@ -13,7 +13,7 @@ def resolve_python_files(include: List[str], exclude: List[str]) -> List[Path]:
 
 
 def python_glob(strings: Sequence[str], *, check_errors: bool) -> Set[Path]:
-    result: set[Path] = set()
+    result: Set[Path] = set()
 
     nonexistent: List[str] = []
     not_python: List[str] = []

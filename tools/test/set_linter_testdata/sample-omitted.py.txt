@@ -1,15 +1,15 @@
-ignored = set()  # noqa: setlint
+ignored = set()  # noqa: set_linter
 a = set()
 b = 'set()'
 c = set
-ignored = set()  # noqa: setlint
+ignored = set()  # noqa: set_linter
 d = c.set
 f = (
    set(
    )
 )
 ignored = (
-   set(  # noqa: setlint
+   set(  # noqa: set_linter
    )
 )
 e = """ set()

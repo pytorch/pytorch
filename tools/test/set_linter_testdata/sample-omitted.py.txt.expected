@@ -1,16 +1,16 @@
 from torch.utils._ordered_set import OrderedSet
-ignored = set()  # noqa: setlint
+ignored = set()  # noqa: set_linter
 a = OrderedSet()
 b = 'set()'
 c = OrderedSet
-ignored = set()  # noqa: setlint
+ignored = set()  # noqa: set_linter
 d = c.set
 f = (
    OrderedSet(
    )
 )
 ignored = (
-   set(  # noqa: setlint
+   set(  # noqa: set_linter
    )
 )
 e = """ set()

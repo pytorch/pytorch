@@ -990,6 +990,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+            << ", TORCH_NCCL_USE_COMM_NONBLOCKING: " << nccl_use_nonblocking()
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
@@ -2790,6 +2791,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   avoidRecordStreams |= avoidRecordStreams_;
   nanCheck &= enableNanCheck_;
 
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2800,7 +2806,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
   op_id_++;
 
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -2841,8 +2846,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
     for (const auto& input : inputs) {
@@ -2968,6 +2971,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     bool avoidRecordStreams) {
   // Environment setting by the user may add onto collective call's option
   avoidRecordStreams |= avoidRecordStreams_;
+
+  // Currently, the API permits one scenario where inputs.size() and
+  // outputs.size() are > 0.
+  // 1. If the call was a _coalesced call, all inputs must be on the same
+  // device.
+  //    The group of nccl calls applies the collective separately to each input,
+  //    but the group as a whole should be efficient, and might even execute as
+  //    a single fused kernel.
+  auto device = getDevice(inputs[0]);
+  // Guard must be created before `currentStreamCaptureStatusMayInitCtx`;
+  // otherwise, extra CUDA context could be created on device 0.
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2982,14 +2998,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // op_id_ once per indvidual operation within the group
   op_id_++;
 
-  // Currently, the API permits one scenario where inputs.size() and
-  // outputs.size() are > 0.
-  // 1. If the call was a _coalesced call, all inputs must be on the same
-  // device.
-  //    The group of nccl calls applies the collective separately to each input,
-  //    but the group as a whole should be efficient, and might even execute as
-  //    a single fused kernel.
-  auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
@@ -3031,8 +3039,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
-
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -3188,6 +3194,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   auto device = getDevice(tensor);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
   bool isSendRecvSelf = false;
@@ -3308,9 +3316,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         pgStatus_,
         /*isP2P=*/true);
   }
-
-  // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
