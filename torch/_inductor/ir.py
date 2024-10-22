@@ -6613,10 +6613,19 @@ class InvokeSubgraph(ExternKernel):
 
     @classmethod
     def create(cls, subgraph: Subgraph, operands):
-        operands = [cls.realize_input(x) for x in operands]
-
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        # Realize the inputs. Also intermediates can have different strides than
+        # the inputs of the subgraph. So, force the intermediates to have same
+        # strides as that of subgraph inputs.
+        operands = [cls.realize_input(x) for x in operands]
+        # TODO(anijain2305) - Support symint inputs in future.
+        fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
+        operands = [
+            cls.require_exact_strides(x, fake_strides[idx])
+            for idx, x in enumerate(operands)
+        ]
 
         if subgraph.graph is None:
             # create and lower subgraphs
