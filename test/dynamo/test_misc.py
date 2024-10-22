@@ -7538,6 +7538,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt = torch._dynamo.optimize(nopython=True)(fn)
         opt(*inputs)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_fold_nontrivial_product_modulo(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            # The condition should fold to true.
+            if ((u0 + 10) * (u0 + 10)) % (u0 + 10) == 0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        res = f(torch.tensor([20, 21]))
+        self.assertEqual(torch.tensor(True), res)
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
@@ -11110,6 +11124,26 @@ fn
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
 
+    def test_dynamic_shapes_as_strided(self):
+        def fn(t, new_size, new_stride):
+            tmp = t.as_strided(new_size, new_stride)
+            tmp = tmp.view(-1)
+            return t * tmp.sum()
+
+        optfn = torch.compile(backend="eager", dynamic=True)(fn)
+
+        x = torch.randn(3)
+        new_size = [0, 3]
+        new_stride = [3, 1]
+
+        expected = fn(x, new_size, new_stride)
+        actual = optfn(x, new_size, new_stride)
+
+        self.assertEqual(expected.dtype, actual.dtype)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected.stride(), actual.stride())
+        self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_hasattr_nn_module_guard(self):
         class M(torch.nn.Module):
@@ -11687,6 +11721,14 @@ fn
         ones = torch.ones(4, requires_grad=True)
         fn(ones)
         nonlocal_fn()
+
+    def test_compare_tensor_with_none(self):
+        @torch.compile()
+        def f(x):
+            return torch.tensor(x == None)
+
+        res = f(torch.tensor(1))
+        self.assertEqual(torch.tensor(False), res)
 
 
 class TestTracer(JitTestCase):
