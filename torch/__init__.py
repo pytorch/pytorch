@@ -2514,6 +2514,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+from torch import fx as fx
 
 
 # Register MPS specific decomps
