@@ -11,6 +11,9 @@
 #include <ATen/TensorIteratorInternal.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
+#include <iostream>
+#include <cfenv>
+
 namespace at::native {
 inline namespace CPU_CAPABILITY {
 
@@ -302,9 +305,18 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
           TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
           iter.for_each([](char **data, const int64_t *strides, int64_t size) {
+            constexpr auto float_to_int = std::is_floating_point_v<scalar_t> && std::is_integral_v<dest_t>;
             auto src = reinterpret_cast<const scalar_t*>(data[1]);
             auto dst = reinterpret_cast<dest_t*>(data[0]);
+            if constexpr (float_to_int) {
+              std::feclearexcept(FE_INVALID);
+            }
             at::vec::convert(src, dst, size);
+            if constexpr (float_to_int) {
+              if (std::fetestexcept(FE_INVALID)) {
+                 throw std::runtime_error("Invalid float-to-integer convertion detected");
+              }
+            }
           });
         } else {
           cpu_kernel(iter, [](scalar_t x) -> dest_t {
