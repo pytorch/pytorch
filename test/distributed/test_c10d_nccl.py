@@ -530,8 +530,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t = torch.rand(10, 10, device=device)
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
-        new_pg1 = c10d.new_group([0, 1])
-        new_pg2 = c10d.new_group([0, 1])
+        new_pg1 = c10d.new_group([0, 1], use_split=True)
+        new_pg2 = c10d.new_group([0, 1], use_split=True)
         t1 = torch.rand(10, 10, device=device)
         t2 = torch.rand(10, 10, device=device)
         new_pg1.allreduce(t1).wait()
@@ -554,8 +554,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
         # PG1 is an PG without comms initialized, since we don't call collective on it
-        new_pg1 = c10d.new_group([0, 1])
-        new_pg2 = c10d.new_group([0, 1])
+        new_pg1 = c10d.new_group([0, 1], use_split=True)
+        new_pg2 = c10d.new_group([0, 1], use_split=True)
         t2 = torch.rand(10, 10, device=device)
 
         new_pg2.allreduce(t2).wait()
@@ -563,6 +563,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # default PG's backend should have a split count of 1
         self.assertEqual(backend.comm_split_count(), 1)
         # shutdown all NCCL PGs in one shot
+        torch.cuda.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl()
