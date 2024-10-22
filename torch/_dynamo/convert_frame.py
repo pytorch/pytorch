@@ -1086,7 +1086,7 @@ def _compile(
                     for key, value in d.items()
                 }
 
-            config_dict = handle_sets(config.shallow_copy_dict())
+            config_dict = handle_sets(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1121,6 +1121,7 @@ def _compile(
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
                 json.dumps(config_dict),
+                True,  # is_forward
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
