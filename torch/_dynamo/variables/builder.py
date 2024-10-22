@@ -196,6 +196,7 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
@@ -2354,12 +2355,16 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
@@ -2622,8 +2627,12 @@ def _automatic_dynamic(
         else:
             dim2constraint[dim] = constraint_range, name
 
+    from torch.export.dynamic_shapes import _RelaxedConstraint
+
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
             if constraint.t_id == t_id:
                 update_dim2constraint(
                     constraint.dim, constraint.constraint_range, constraint.name
