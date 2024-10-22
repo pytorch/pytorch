@@ -1,4 +1,4 @@
-``torch.compile`` Troubleshooting
+torch.compile Troubleshooting
 =================================
 
 So you're trying to slap ``torch.compile`` on your PyTorch model in hopes of getting it to run faster.
@@ -171,7 +171,7 @@ Below, we need to recompile since the guard checking for the tensor argument's s
 
 Dynamic Shapes
 ``torch.compile`` by first assumes tensor shapes are static/constant and thus guard on these.
-By using "dynamic shapes,"" we can get ``torch.compile`` to produce compiled code that can accept
+By using "dynamic shapes," we can get ``torch.compile`` to produce compiled code that can accept
 tensor inputs with different shapes - we avoid recompiling every time shapes differ.
 By default, automatic dynamic shapes are enabled ``torch.compile(dynamic=None)`` -
 if compilation fails due to shape mismatch, recompilation is attempted with dynamic shapes.
@@ -197,12 +197,12 @@ Below, we enable dynamic shapes and note that we no longer need to recompile.
     produce_guards
     produce_guards
 
-For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__
+For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__.
 
 Logging Tools
 ~~~~~~~~~~~~~
 
-``tlparse`` / ``TORCH_TRACE``
+tlparse / TORCH_TRACE
 -----------------------------
 
 ``tlparse`` / ``TORCH_TRACE`` are a pair of tools that produce compilation reports that look like this:
@@ -224,6 +224,17 @@ you can still greatly assist PyTorch developers by attaching the trace log gener
 .. warning:: The trace log contains all of your model code.
    Do not share the trace log if the model you are working on is sensitive. The trace log does NOT contain weights.
 
+.. raw:: html
+    <style>
+        .red {background-color:#ff0000;}
+        .green {background-color:#00ff00;}
+        .dark-green {background-color:#027f02;}
+    </style>
+
+.. role:: red
+.. role:: green
+.. role:: dark-green
+
 The output of ``tlparse`` is mostly oriented at PyTorch developers,
 and the log format is very easy to upload and share on GitHub.
 However, you can still get some useful information from it as a non-PyTorch developer.
@@ -233,21 +244,19 @@ Here are some things you can get from a ``tlparse``:
 - What model code was compiled, by looking at the stack trie?
   (This is especially useful if you're not familiar with the codebase being compiled!)
 - How many graph breaks / distinct compilation regions are there?
-  (Each distinct compile is its own color coded block like <span style="background-color: #027f02;">[0/0]</span>).
-  Frames that are potentially graph break'ed are light green  <span style="background-color: #00ff00;">[2/4]</span>.
+  (Each distinct compile is its own color coded block like :dark-green:`[0/0]`).
+  Frames that are potentially graph break'ed are light green :green:`[2/4]`.
   If there are a lot of frames, that is suspicious, and suggests that you had some catastrophic graph breaks,
   or maybe your code isn't a good match for ``torch.compile``.
 - How many times did I recompile a particular frame? Something that recompiled a lot will look like:
-  <span style="background-color: #027f02;">[10/0]</span>
-  <span style="background-color: #027f02;">[10/1]</span>
-  <span style="background-color: #027f02;">[10/2]</span>
+  :dark-green:`[10/0]` :dark-green:`[10/1]` :dark-green:`[10/2]`
   - if something is being recompiled a lot, that is very suspicious and worth looking into, even if it isn't the root cause of your problem.
-- Was there a compilation error?  Frames that errored will look like <span style="background-color: #ff0000;">[0/1]</span>.
+- Was there a compilation error?  Frames that errored will look like :red:`[0/1]`.
 - What intermediate compiler products did I generate for a given frame?
   For example, you can look at the high-level generated FX graph or the generated Triton code.
 - Is there relevant information for a particular frame? You can find these in compilation_metrics.
 
-``TORCH_LOGS``
+TORCH_LOGS
 --------------
 
 You can use the ``TORCH_LOGS`` environment variable to selectively enable parts of the ``torch.compile`` stack to log.
@@ -284,7 +293,7 @@ when we already have an idea of which ``torch.compile`` component is causing the
 Simple Workarounds
 ~~~~~~~~~~~~~~~~~~
 
-Where to apply ``torch.compile``?
+Where to apply torch.compile?
 ---------------------------------
 
 We recommend applying ``torch.compile`` to the highest-level function that doesn't cause excessive problems.
@@ -331,7 +340,7 @@ DDP or FSDP very well, so consider applying ``torch.compile`` to the inner modul
         inp = ...
         out = model_ddp(inp)
 
-``disable`` / ``suppress_errors``
+disable / suppress_errors
 ---------------------------------
 
 For some model architectures, there are portions of the model which are particularly difficult to compile
@@ -583,7 +592,7 @@ Make sure that the ``dynamic`` option of ``torch.compile`` is not set to ``False
 The default option, ``dynamic=None``, will only attempt dynamic shapes after the first compilation.
 You can set ``dynamic=True`` to upfront compile as dynamic as possible.
 
-For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__
+For more information on dynamic shapes, see `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__.
 
 Changing the cache size limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1009,12 +1018,12 @@ TorchInductor
 
 .. TODO
 
-Summary of ``TORCH_LOGS`` options
+Summary of TORCH_LOGS options
 ---------------------------------
 
-A summary of helpful TORCH_LOGS options are:
+A summary of helpful ``TORCH_LOGS`` options are:
 
-.. list-table:: Title
+.. list-table::
     :widths: 25 50
     :header-rows: 1
 

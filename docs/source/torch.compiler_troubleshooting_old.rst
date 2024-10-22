@@ -1,5 +1,5 @@
-PyTorch 2.0 Troubleshooting
-===========================
+PyTorch 2.0 Troubleshooting (old)
+=================================
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
