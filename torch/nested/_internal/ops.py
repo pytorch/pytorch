@@ -664,7 +664,7 @@ def _softmax_default(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         (new_kwargs["dim"],),
@@ -985,7 +985,7 @@ def matmul_default(func, *args, **kwargs):
 
     def _padded_impl(a, b):
         assert a.is_nested and not b.is_nested
-        nt, t = a, b
+        nt = a
 
         from .nested_tensor import nested_from_padded
 
@@ -1588,7 +1588,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
@@ -1938,6 +1938,17 @@ def _nested_select_backward_default(func, *args, **kwargs):
     grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
 
     return grad_input
+
+
+@register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
+def record_stream_default(func, *args, **kwargs):
+    inp = args[0]
+    stream = args[1]
+    # ensure all components live until stream computation completes
+    func(inp._values, stream)
+    func(inp._offsets, stream)
+    if inp._lengths is not None:
+        func(inp._lengths, stream)
 
 
 # Make the dummy available on the C++ side.
