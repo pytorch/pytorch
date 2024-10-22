@@ -597,7 +597,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
 
   const auto statArrayToDict = [=](const StatArray& statArray) {
     const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
-        statTypeNames = {"all", "small_pool", "large_pool"};
+        statTypeNames = {"all", "small_pool", "large_pool", "comms_pool"};
     py::dict dict;
     for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);

@@ -33,6 +33,14 @@ class C10_CUDA_API CUDAAllocatorConfig {
 #endif
   }
 
+  static bool comms() {
+    return instance().m_comms;
+  }
+
+  static bool comms_alloc() {
+    return instance().m_comms_alloc;
+  }
+
   static bool release_lock_on_cudamalloc() {
     return instance().m_release_lock_on_cudamalloc;
   }
@@ -127,6 +135,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
   std::atomic<bool> m_expandable_segments;
+  std::atomic<bool> m_comms;
+  std::atomic<bool> m_comms_alloc;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
   std::atomic<bool> m_pinned_use_background_threads;
