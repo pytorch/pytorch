@@ -593,6 +593,10 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
+# global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
+compiled_autograd_enabled_force_eager = False
+
+
 @contextlib.contextmanager
 def enable(compiler_fn):
     from torch._dynamo import eval_frame
