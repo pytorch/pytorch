@@ -119,6 +119,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   TORCH_XPU_ARCH_LIST
+#     specify which XPU architectures to build for.
+#     ie `TORCH_XPU_ARCH_LIST="ats-m150,lnl-m"`
+#
 #   PYTORCH_ROCM_ARCH
 #     specify which AMD GPU targets to build for.
 #     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
@@ -183,7 +187,21 @@
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
-#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_CPUINFO=ON
+#        USE_SYSTEM_SLEEF=ON
+#        USE_SYSTEM_GLOO=ON
+#        BUILD_CUSTOM_PROTOBUF=OFF
+#        USE_SYSTEM_EIGEN_INSTALL=ON
+#        USE_SYSTEM_FP16=ON
+#        USE_SYSTEM_PTHREADPOOL=ON
+#        USE_SYSTEM_PSIMD=ON
+#        USE_SYSTEM_FXDIV=ON
+#        USE_SYSTEM_BENCHMARK=ON
+#        USE_SYSTEM_ONNX=ON
+#        USE_SYSTEM_XNNPACK=ON
+#        USE_SYSTEM_PYBIND11=ON
+#        USE_SYSTEM_NCCL=ON
+#        USE_SYSTEM_NVTX=ON
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
