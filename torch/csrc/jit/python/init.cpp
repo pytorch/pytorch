@@ -1474,7 +1474,7 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile, py::call_guard<py::gil_scoped_release>())
       .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def("serialization_id", &PyTorchStreamWriter::serializationId)
