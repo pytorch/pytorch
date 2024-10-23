@@ -45,10 +45,10 @@ __device__ inline int get_interval(accscalar_t sample,
 
 template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_cuda_frame(
-  GenericPackedTensorAccessor<scalar_t, 4> output,
-  GenericPackedTensorAccessor<int64_t, 4> indices,
-  GenericPackedTensorAccessor<const scalar_t, 4> input,
-  GenericPackedTensorAccessor<const scalar_t, 3> samples,
+  PackedTensorAccessor<scalar_t, 4> output,
+  PackedTensorAccessor<int64_t, 4> indices,
+  PackedTensorAccessor<const scalar_t, 4> input,
+  PackedTensorAccessor<const scalar_t, 3> samples,
   int poolSizeH, int poolSizeW) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
@@ -102,9 +102,9 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
 
 template <typename scalar_t>
 __global__ void fractional_max_pool2d_backward_out_cuda_frame(
-  GenericPackedTensorAccessor<scalar_t, 4> gradInput,
-  GenericPackedTensorAccessor<const scalar_t, 4> gradOutput,
-  GenericPackedTensorAccessor<const int64_t, 4> indices) {
+  PackedTensorAccessor<scalar_t, 4> gradInput,
+  PackedTensorAccessor<const scalar_t, 4> gradOutput,
+  PackedTensorAccessor<const int64_t, 4> indices) {
   // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
