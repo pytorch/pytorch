@@ -236,16 +236,6 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
     _add_time_spent(key, "remote_cache_time_saved", time_saved)
 
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get a bunch of metadata about cache hits and misses to use in chromium events"""
-    cache_stats = {
-        "fxgraph_cache_hit": counters["inductor"]["fxgraph_cache_hit"],
-        "fxgraph_cache_miss": counters["inductor"]["fxgraph_cache_miss"],
-        "fxgraph_cache_bypass": counters["inductor"]["fxgraph_cache_bypass"],
-    }
-    return cache_stats
-
-
 # dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -290,9 +280,10 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
-            chromium_log.log_event_start(key, start, None)
             if phase_name:
-                chromium_log.log_event_start(phase_name, start)
+                chromium_log.log_event_start(phase_name, start, {"fn_name": key})
+            else:
+                chromium_log.log_event_start(key, start, {})
             yield
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
@@ -306,16 +297,15 @@ def dynamo_timed(
             chromium_log.log_event_end(
                 phase_name,
                 time.time_ns(),
-                {"cache_stats": get_cache_stats()},
+                {},
                 start,
             )
-        chromium_log.log_event_end(
-            key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-        )
+        else:
+            chromium_log.log_event_end(key, time.time_ns(), {}, start)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
-            # fwd only compilation stages: entire_frame_compile, backend_compile.
+            # fwd only compilation stages: entire_frame_compile, backend_compile, aotdispatch.
             # use frame_key as time aggregation key.
             if fwd_only and fail_type is None:
                 _add_time_spent(frame_key, phase_name, time_spent)
@@ -366,6 +356,7 @@ def dynamo_timed(
                                 fail_reason,
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
+                                False,  # is_forward
                             )
                             record_compilation_metrics(metrics)
 
@@ -526,7 +517,7 @@ def count_calls(g: fx.Graph) -> int:
     return c
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 
@@ -810,6 +801,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
     dynamo_config: Optional[str]
+    is_forward: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -821,6 +813,7 @@ class BwdCompilationMetrics:
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    is_forward: Optional[bool]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -831,6 +824,37 @@ _compilation_metrics: Deque[
 ] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
+def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+    event_logger = get_chromium_event_logger()
+    # The following compilation metrics are related to
+    # dynamo, so go with the "entire frame compile" event
+    event_logger.add_event_data(
+        event_name="dynamo",
+        frame_key=c.frame_key,
+        co_name=c.co_name,
+        co_filename=c.co_filename,
+        co_firstlineno=c.co_firstlineno,
+        cache_size=c.cache_size,
+        accumulated_cache_size=c.accumulated_cache_size,
+        guard_count=c.guard_count,
+        shape_env_guard_count=c.shape_env_guard_count,
+        graph_op_count=c.graph_op_count,
+        graph_node_count=c.graph_node_count,
+        graph_input_count=c.graph_input_count,
+        fail_type=c.fail_type,
+        fail_reason=c.fail_reason,
+        fail_user_frame_filename=c.fail_user_frame_filename,
+        fail_user_frame_lineno=c.fail_user_frame_lineno,
+        # Sets aren't JSON serializable
+        non_compliant_ops=list(c.non_compliant_ops),
+        compliant_custom_ops=list(c.compliant_custom_ops),
+        restart_reasons=list(c.restart_reasons),
+        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
+        has_guarded_code=c.has_guarded_code,
+        dynamo_config=c.dynamo_config,
+    )
+
+
 def record_compilation_metrics(
     compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
 ):
@@ -838,6 +862,7 @@ def record_compilation_metrics(
     _compilation_metrics.append(compilation_metrics)
     if isinstance(compilation_metrics, CompilationMetrics):
         name = "compilation_metrics"
+        add_compilation_metrics_to_chromium(compilation_metrics)
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
@@ -887,6 +912,11 @@ class ChromiumEventLogger:
             self.tls.stack = ["__start__"]
             return self.tls.stack
 
+    def get_event_data(self) -> Dict[str, Any]:
+        if not hasattr(self.tls, "event_data"):
+            self.tls.event_data = {}
+        return self.tls.event_data
+
     def __init__(self):
         self.tls = threading.local()
         # Generate a unique id for this logger, which we can use in scuba to filter down
@@ -896,11 +926,30 @@ class ChromiumEventLogger:
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
 
+    def add_event_data(
+        self,
+        event_name: str,
+        **kwargs,
+    ) -> None:
+        """
+        Adds additional metadata info to an in-progress event
+        This metadata is recorded in the END event
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                "Cannot add metadata to events that aren't in progress."
+                "Please make sure the event has started and hasn't ended."
+            )
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        event_data[event_name].update(kwargs)
+
     def log_event_start(
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Logs the start of a single event.
@@ -908,20 +957,14 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
-
-        event = self._log_timed_event(
+        self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -930,13 +973,15 @@ class ChromiumEventLogger:
         stack = self.get_stack()
         stack.clear()
         stack.append("__start__")
+        event_data = self.get_event_data()
+        event_data.clear()
 
     def log_event_end(
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
-        start_time_ns: Optional[int] = None,
+        metadata: Dict[str, Any],
+        start_time_ns: int,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -945,11 +990,25 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        # Add compile id to metadata
-        if metadata is None:
-            metadata = {}
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
+
+        # Grab metadata collected during event span
+        all_event_data = self.get_event_data()
+        if event_name in all_event_data:
+            event_metadata = all_event_data[event_name]
+            del all_event_data[event_name]
+        else:
+            event_metadata = {}
+        # Add the passed in metadata
+        event_metadata.update(metadata)
+
+        event = self._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            event_metadata,
+        )
 
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
@@ -961,13 +1020,6 @@ class ChromiumEventLogger:
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
 
-        event = self._log_timed_event(
-            event_name,
-            time_ns,
-            "E",
-            metadata,
-        )
-
         while event_name != stack[-1]:
             # If the event isn't the most recent one to end, pop
             # off the stack until it is.
@@ -977,7 +1029,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1044,7 +1096,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
+        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2496,7 +2548,7 @@ class numpy_to_tensor_wrapper:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2520,7 +2572,7 @@ class numpy_method_wrapper:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2539,7 +2591,7 @@ class numpy_operator_wrapper:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -3065,7 +3117,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3114,7 +3166,7 @@ class Lit:
     def __init__(self, s):
         self.s = s
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.s
 
 
@@ -3201,6 +3253,34 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper functions below are to prevent __torch_function__
+# calls from happening in the middle of __torch_function__
+# compiled bytecode
+# They will be skipped which is the desired result
+def call_size(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.size(i)
+
+    return fn(x, i)
+
+
+def call_stride(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.stride(i)
+
+    return fn(x, i)
+
+
+def call_storage_offset(x):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x):
+        return x.storage_offset()
+
+    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.

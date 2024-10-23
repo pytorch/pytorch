@@ -13,6 +13,7 @@ import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
+from typing_extensions import is_typeddict
 
 import torch._dynamo.config
 import torch.nn
@@ -115,7 +116,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -369,6 +370,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 mutable_local=MutableLocal(),
             )
+        elif is_typeddict(self.value):
+            if self.value.__optional_keys__:
+                unimplemented("TypedDict with optional keys not supported")
+            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
@@ -1378,10 +1383,27 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
+        self.generic_dict_vt = variables.ConstDictVariable({})
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        # A common pattern in the init code of MutableMapping objects is to
+        # update the __dict__ attribute. To prevent graph break, we directly
+        # return a ConstDictVariable for the __dict__attr.
+        #
+        # However, users can try to add a new attribute to the class using the
+        # __dict__ attribute. To catch this, we save the ConstDictVariable for
+        # the __dict__ and then lookup into this vt for each attr lookup.
         if name == "get" and type(self.value).get is collections.abc.Mapping.get:
             return variables.UserMethodVariable(polyfills.mapping_get, self)
+        elif name == "__dict__" and self.source:
+            self.generic_dict_vt = variables.LazyVariableTracker.create(
+                self.value.__dict__, AttrSource(self.source, "__dict__")
+            )
+            return self.generic_dict_vt
+        elif out := self.generic_dict_vt.maybe_getitem_const(
+            variables.ConstantVariable(name)
+        ):
+            return out
         else:
             return super().var_getattr(tx, name)
 
