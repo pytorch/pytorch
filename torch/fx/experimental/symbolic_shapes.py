@@ -934,10 +934,10 @@ def compute_unbacked_bindings(
             and rhs in pending
         ):
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[s] = path + (DivideByKey(int(lhs)),)
+            r[rhs] = path + (DivideByKey(int(lhs)),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(s, real // int(lhs))
+                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
             pending.remove(rhs)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
@@ -1014,11 +1014,10 @@ def definitely_true(a: BoolLikeType) -> bool:
     that would cause the expression to return True.
 
     When is it appropriate to use definitely_true?  First, if you can use
-    a higher level combinator like parallel_or/parallel_and, prefer using
-    those instead, they are definitely safe (modulo short-circuiting).
+    a higher level combinator prefer using those instead, they are definitely
+    safe (modulo short-circuiting).
     Second, it can be used if the program would behave equivalently if
-    definitely_true always returned False (parallel_or/parallel_and are
-    examples of this pattern, modulo short-circuiting).  Finally, it even
+    definitely_true always returned False. Finally, it even
     be OK if the program wouldn't behave equivalently, so long as the
     change is semantics preserving.  It can be semantics preserving if
     the program errors in more cases than it did previously (but otherwise
@@ -1072,30 +1071,6 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return False
     assert isinstance(x, bool)
     return x
-
-
-def parallel_or(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical OR of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely True.
-    """
-    if any(statically_known_true(a) for a in args):
-        return True
-    if any(definitely_true(a) for a in args):
-        return True
-    return any(args)
-
-
-def parallel_and(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical FALSE of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely False.
-    """
-    if any(statically_known_true(torch.sym_not(a)) for a in args):
-        return False
-    if any(definitely_false(a) for a in args):
-        return False
-    return all(args)
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -1187,7 +1162,7 @@ def _constrain_range_for_size(
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    assert isinstance(a.node.expr, sympy.Symbol), f"constraining non-Symbols NYI: {a}"
 
     a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 
@@ -1490,6 +1465,7 @@ class EqualityConstraint(Constraint):
         Tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]
     ]
     phantom_symbols: List[sympy.Symbol]
+    relaxed_sources: Set[Source]
 
     _parents: Dict[Source, Source] = field(init=False)
     _defs: Dict[Source, sympy.Expr] = field(init=False)
@@ -1555,10 +1531,12 @@ class EqualityConstraint(Constraint):
     def is_equal(self, source1: Source, source2: Source) -> bool:
         return (
             # check whether source1 and source2 have the same root
-            self._find(source1) == self._find(source2)
-            or
+            # or are relaxed
+            (src1 := self._find(source1)) in self.relaxed_sources
+            or (src2 := self._find(source2)) in self.relaxed_sources
+            or src1 == src2
             # check whether source1 is derived equal to source2
-            self.is_derived(source1, source2, lambda x: x)
+            or self.is_derived(source1, source2, lambda x: x)
         )
 
     def is_derived(
@@ -1794,6 +1772,15 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
 
 @lru_cache(256)
 def safe_expand(r: _SympyT) -> _SympyT:
+    """
+    Expand the given symbolic expression by recursively rewriting product of
+    sums into sum of products (with the product being either a multiplication or
+    exponentiation).
+
+    NOTE: using this on an intermediate expression may prevent simplification
+    down the line, e.g., if we eagerly expand `(a + b)^2` into `a^2 + 2ab + b^2`,
+    we won't be able to simplify `(a^2 + 2ab + b^2) / (a + b)` as easily.
+    """
     if hasattr(r, "expand"):
         try:
             return _fast_expand(r)
@@ -2772,7 +2759,10 @@ class DimConstraints:
                 relation_with_digit(right, flip(op), int(left))
             else:
                 assert op == "==", t
-                results[left]["eq"] = sympy.sympify(right)
+                try:
+                    results[left]["eq"] = sympy.sympify(right)
+                except TypeError as e:  # rhs source is not linked to Dim name
+                    pass
 
         # order forced specializations based on name
         forced_specializations = {
@@ -3879,8 +3869,6 @@ class ShapeEnv:
         guess
 
         """
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -3919,8 +3907,6 @@ class ShapeEnv:
         source: Optional[Source] = None,
     ) -> Union[float, SymFloat]:
         """Create a SymFloat value from a symbolic expression"""
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -4808,7 +4794,7 @@ class ShapeEnv:
                 res = f"{source_ref(source)} == {sexpr}"
                 exprs.append(res)
                 if (s0 := self.source_to_var.get(srcname)) is not None:
-                    if source != (canonical_source := self.var_to_sources[s0][0]):
+                    if source != self.var_to_sources[s0][0]:
                         verbose_exprs.append(
                             f"{res}  # duck sizing added this equality because these "
                             f"variables had the same size {self.var_to_val[s0]} "
@@ -5399,6 +5385,7 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: _SympyT) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
+        expr = safe_expand(expr)
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
@@ -6140,7 +6127,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:
