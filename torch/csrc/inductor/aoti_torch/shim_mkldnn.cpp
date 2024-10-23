@@ -16,6 +16,16 @@ using namespace torch::aot_inductor;
 
 #if AT_MKLDNN_ENABLED()
 
+template <typename T>
+c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+  c10::List<T> scalars_list;
+  scalars_list.reserve(len);
+  for (int64_t i = 0; i < len; i++) {
+    scalars_list.emplace_back(scalars[i]);
+  }
+  return scalars_list;
+}
+
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
@@ -388,30 +398,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     const char** algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // TODO: write a func for this c10::List conversion part
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(post_op_args_len_);
     for (int64_t i = 0; i < post_op_args_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
     }
 
-    c10::List<int64_t> stride_list;
-    stride_list.reserve(stride_len_);
-    for (int64_t i = 0; i < stride_len_; i++) {
-      stride_list.emplace_back(stride_args[i]);
-    }
-
-    c10::List<int64_t> padding_list;
-    padding_list.reserve(padding_len_);
-    for (int64_t i = 0; i < padding_len_; i++) {
-      padding_list.emplace_back(padding_args[i]);
-    }
-
-    c10::List<int64_t> dilation_list;
-    stride_list.reserve(dilation_len_);
-    for (int64_t i = 0; i < dilation_len_; i++) {
-      dilation_list.emplace_back(dilation_args[i]);
-    }
+    c10::List<int64_t> stride_list =
+        convert_to_c10_List<int64_t>(stride_args, stride_len_);
+    c10::List<int64_t> padding_list =
+        convert_to_c10_List<int64_t>(padding_args, padding_len_);
+    c10::List<int64_t> dilation_list =
+        convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
 
     auto tmp_result = at::native::QConvoneDNN::run_pointwise_tensor(
         *tensor_handle_to_tensor_pointer(X),
@@ -465,30 +463,18 @@ aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // TODO: write a func for this c10::List conversion part
     c10::List<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
 
-    c10::List<int64_t> stride_list;
-    stride_list.reserve(stride_len_);
-    for (int64_t i = 0; i < stride_len_; i++) {
-      stride_list.emplace_back(stride_args[i]);
-    }
-
-    c10::List<int64_t> padding_list;
-    padding_list.reserve(padding_len_);
-    for (int64_t i = 0; i < padding_len_; i++) {
-      padding_list.emplace_back(padding_args[i]);
-    }
-
-    c10::List<int64_t> dilation_list;
-    stride_list.reserve(dilation_len_);
-    for (int64_t i = 0; i < dilation_len_; i++) {
-      dilation_list.emplace_back(dilation_args[i]);
-    }
+    c10::List<int64_t> stride_list =
+        convert_to_c10_List<int64_t>(stride_args, stride_len_);
+    c10::List<int64_t> padding_list =
+        convert_to_c10_List<int64_t>(padding_args, padding_len_);
+    c10::List<int64_t> dilation_list =
+        convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
 
     auto tmp_result = at::native::QConvoneDNN::run_pointwise_binary_tensor(
         *tensor_handle_to_tensor_pointer(X),
