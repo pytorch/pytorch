@@ -184,6 +184,8 @@ if(HIP_FOUND)
   find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+  # HSA runtime lib
+  find_library(ROCM_HSART_LIB hsa-runtime64 HINTS ${ROCM_PATH}/lib)
 
   # check whether HIP declares new types
   set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
