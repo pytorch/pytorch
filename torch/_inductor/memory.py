@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import heapq
 import logging
-from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -74,7 +74,7 @@ def dep_size_hint(dep: Dep) -> int:
 
 def get_freeable_input_buf(
     nodes: List[BaseSchedulerNode],
-    graph_inputs: Set[str],
+    graph_inputs: OrderedSet[str],
 ) -> Dict[str, FreeableInputBuffer]:
     """
     Create and keep track of all input buffers that can be freed during the program
@@ -164,7 +164,7 @@ def map_successor_nodes_with_predecessor_buffers(
 def estimate_peak_memory(
     nodes: List[BaseSchedulerNode],
     name_to_input_buf: Dict[str, FreeableInputBuffer],
-    graph_outputs: Set[str],
+    graph_outputs: OrderedSet[str],
 ) -> Tuple[int, List[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -274,7 +274,7 @@ def topological_sort_lpmf(
     nodes: List[BaseSchedulerNode],
     name_to_input_buf: Dict[str, FreeableInputBuffer],
     name_to_buf: Dict[str, SchedulerBuffer],
-    graph_outputs: Set[str],
+    graph_outputs: OrderedSet[str],
 ) -> List[BaseSchedulerNode]:
     """
     A bfs-based greedy topological order. LPMF stands for "Least Peak Memory First".
@@ -293,7 +293,7 @@ def topological_sort_lpmf(
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled
-    nodes_to_schedule: Set[BaseSchedulerNode] = set()
+    nodes_to_schedule: OrderedSet[BaseSchedulerNode] = OrderedSet()
     for node in nodes:
         # note that .unmet_dependencies could have deps with the same name
         # and in that case, it should only be counted once
@@ -496,8 +496,8 @@ def reorder_for_peak_memory(
     nodes: List[BaseSchedulerNode],
     name_to_buf: Dict[str, SchedulerBuffer],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
-    graph_inputs: Set[str],
-    graph_outputs: Set[str],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
     methods: List[Callable[..., List[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
         topological_sort_bfs,

@@ -27,7 +27,9 @@ def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(
+            OrderedSet(all_args)
+        ), f"{args} v.s. {all_args}"
 
     return all_args, arg_types
 
@@ -191,7 +193,7 @@ class MultiKernel:
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        seen = set()
+        seen = OrderedSet[str]()
         for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):

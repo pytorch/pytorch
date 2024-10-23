@@ -34,7 +34,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Set,
     Tuple,
     TypeVar,
     Union,
@@ -46,6 +45,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
@@ -504,12 +504,12 @@ def aggregate_origins(node_schedule):
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
             ],
-            set(),
+            OrderedSet(),
         )
     elif isinstance(node_schedule, ir.ExternKernel):
         return node_schedule.origins
     else:
-        return set()
+        return OrderedSet()
 
 
 def get_fused_kernel_name(node_schedule, descriptive_names):
@@ -523,7 +523,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
             and "original_aten" in origin.meta
             and origin.meta["original_aten"] is not None
         ]
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -534,7 +534,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
                     sources.append(source_fn[1])
                 else:
                     sources.append(source_fn[1].__name__)
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
@@ -603,10 +603,10 @@ def get_kernel_metadata(node_schedule, wrapper):
 
 def dominated_nodes(
     initial_queue: Iterable[torch.fx.Node], skip_filter=None
-) -> Set[torch.fx.Node]:
+) -> OrderedSet[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
-    dominated_set = set(initial_queue)
+    dominated_set = OrderedSet(initial_queue)
 
     while initial_queue:
         node = initial_queue.pop()
@@ -634,7 +634,7 @@ def gather_origins(args, kwargs):
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
-    return set(itertools.chain(*arg_origins, *kwarg_origins))
+    return OrderedSet(itertools.chain(*arg_origins, *kwarg_origins))
 
 
 def sympy_str(expr: sympy.Expr) -> str:

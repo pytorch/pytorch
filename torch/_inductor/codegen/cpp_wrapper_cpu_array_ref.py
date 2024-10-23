@@ -7,6 +7,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
 from ..utils import sympy_product
@@ -53,23 +54,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
-        self.extern_call_ops = set()
+        self.extern_call_ops = OrderedSet()
         self.size = "sizes()"
         self.stride = "strides()"
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False

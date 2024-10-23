@@ -10,7 +10,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -37,6 +37,7 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -98,7 +99,7 @@ log = logging.getLogger(__name__)
 
 
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[AnyPool] = set()
+_pool_set: OrderedSet[AnyPool] = OrderedSet()
 
 
 def shutdown_compile_workers() -> None:

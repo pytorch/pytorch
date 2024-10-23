@@ -42,7 +42,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -67,6 +66,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
+from torch.utils._ordered_set import OrderedSet
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -766,10 +766,10 @@ class FxGraphHashDetails:
         self.fx_kwargs: Dict[str, object] = {}
         for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(v) is set:
+                if type(v) in (OrderedSet, set):
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
                 else:
                     self.fx_kwargs[k] = v
 
@@ -1547,10 +1547,10 @@ class CompiledFxGraph:
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
+    device_types: OrderedSet[str]
+    device_idxs: OrderedSet[int]
+    mutated_inputs: OrderedSet[str]
+    mutated_input_idxs: OrderedSet[int]
     constants: Dict[str, torch.Tensor]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
@@ -1589,10 +1589,10 @@ class CompiledFxGraph:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
+        self.device_types = OrderedSet(graph.device_types)
+        self.device_idxs = OrderedSet(graph.device_idxs)
+        self.mutated_inputs = OrderedSet(graph.mutated_inputs)
+        self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
@@ -1748,7 +1748,7 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if graph.mutated_buffers & set(graph.constants.keys()):
+            if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section

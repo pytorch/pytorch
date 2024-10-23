@@ -13,6 +13,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
@@ -40,23 +41,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
-        self.extern_call_ops = set()
+        self.extern_call_ops = OrderedSet[str]()
         self.size = "sizes()"
         self.stride = "strides()"
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
+        self.declared_int_array_vars = OrderedSet[str]()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
+        self.used_cached_devices = OrderedSet[str]()
+        self.used_cached_dtypes = OrderedSet[str]()
+        self.used_cached_layouts = OrderedSet[str]()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -530,7 +529,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values()) - set(
+        declare_kernel = OrderedSet(self.src_to_kernel.values()) - OrderedSet(
             self.initialized_kernels.keys()
         )
         declare_kernel.update(

@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -180,7 +180,7 @@ class CppCSEVariable(CSEVariable):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
-        self.dependent_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def __repr__(self) -> str:
         return (
@@ -909,7 +909,7 @@ def _get_loop_body(fn_list):
 
 
 def _get_dtype_from_loopbodies(loop_bodies):
-    dtypes = set()
+    dtypes = OrderedSet[torch.dtype]()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
             body.graph for body in list(loop_body.subblocks.values())
@@ -938,7 +938,7 @@ def template_fusion_with_epilogues_supported(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
     ) -> Tuple[bool, bool]:
-        num_indexes = len(set(index_of_template_buf_read))
+        num_indexes = len(OrderedSet(index_of_template_buf_read))
 
         if num_indexes > 1:
             same_index = False
