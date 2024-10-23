@@ -562,6 +562,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -770,6 +771,10 @@ endif()
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  if(TARGET torch_cuda)
+    target_compile_options_if_supported(torch_cuda "-Wmissing-prototypes")
+    target_compile_options_if_supported(torch_cuda "-Werror=missing-prototypes")
+  endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
     set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
