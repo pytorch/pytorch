@@ -930,9 +930,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
   }
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
-  if (input.scalar_type() != kDouble) {
-    TORCH_CHECK(input.scalar_type() == kFloat,
-                "grid_sampler_2d_cpu not implemented for ", input.scalar_type());
+  if (input.scalar_type() == kFloat) {
     auto sizes = input.sizes();
     auto strides = input.strides();
     const auto grid_sW = grid.strides()[2];
@@ -968,7 +966,7 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
   check_grid_sampler_common(input, grid);
   check_grid_sampler_3d(input, grid, interpolation_mode);
 
-  return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler3d_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
       static_cast<GridSamplerPadding>(padding_mode), align_corners);
@@ -986,9 +984,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
 
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
-  if (input.scalar_type() != kDouble) {
-    TORCH_CHECK(input.scalar_type() == kFloat,
-                "grid_sampler_2d_backward_cpu not implemented for ", input.scalar_type());
+  if (input.scalar_type() == kFloat) {
     auto isizes = input.sizes();
     auto istrides = input.strides();
     auto gsizes = grad_output.sizes();
@@ -1033,7 +1029,7 @@ grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
   check_grid_sampler_common(input, grid);
   check_grid_sampler_3d(input, grid, interpolation_mode);
 
-  return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),
