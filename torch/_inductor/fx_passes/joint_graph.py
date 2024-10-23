@@ -24,6 +24,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_lowering_pattern,
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
@@ -468,6 +469,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         ):
             config.joint_custom_post_pass(graph.graph)
             count += 1
+
+    if config.AutoChunker.enable:
+        from .auto_chunker import AutoChunker
+
+        AutoChunker(graph).chunk_batch_dimension()
 
     if count:
         stable_topological_sort(graph.graph)
