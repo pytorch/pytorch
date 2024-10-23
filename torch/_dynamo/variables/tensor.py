@@ -1146,18 +1146,11 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def as_tensor(self, tx):
+    def as_tensor(self, tx, dtype):
         if self._tensor_var is None:
-            if isinstance(self.sym_num, torch.SymFloat):
-                self._tensor_var = VariableTracker.build(
-                    tx, torch.scalar_tensor
-                ).call_function(
-                    tx, [self], {"dtype": VariableTracker.build(tx, torch.float64)}
-                )
-            else:
-                self._tensor_var = VariableTracker.build(
-                    tx, torch.scalar_tensor
-                ).call_function(tx, [self], {})
+            self._tensor_var = VariableTracker.build(
+                tx, torch.scalar_tensor
+            ).call_function(tx, [self], {"dtype": VariableTracker.build(tx, dtype)})
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
