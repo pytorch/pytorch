@@ -70,6 +70,11 @@ struct PyNode : public Node {
       Py_DECREF(obj);
     }
   }
+
+  std::function<
+      variable_list(const variable_list&, const std::vector<c10::IValue>&)>
+  get_functional() override;
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override; 
 };
 
 /**

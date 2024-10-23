@@ -77,5 +77,22 @@ variable_list GraphRoot::apply_with_saved(
   saved.after(outputs);
   return result;
 }
+ivalue_list GraphRoot::retrieve_saved(SwapSavedVariables& saved) {
+  saved.before(outputs);
+  SavedState state;
+  state.enqueue(outputs);
+  saved.after(outputs);
+  return state.stack;
+}
+functional_apply_t GraphRoot::get_functional() {
+  return [](const variable_list& inputs,
+            const std::vector<c10::IValue>& saved) -> variable_list {
+    SavedState state;
+    state.stack = saved;
+    variable_list outputs;
+    state.dequeue(outputs);
+    return outputs;
+  };
+}
 
 } // namespace torch::autograd

@@ -103,7 +103,7 @@ struct TORCH_API InputMetadata {
   bool maybe_expandable_to(const at::Tensor& grad) const;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const at::TensorOptions options_;
+  at::TensorOptions options_;
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
