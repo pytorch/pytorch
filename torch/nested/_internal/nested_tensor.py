@@ -74,6 +74,8 @@ class NestedTensor(torch.Tensor):
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
+    ks = DispatchKeySet(DispatchKey.NestedTensor)
+    ks = ks.add(DispatchKey.AutogradNestedTensor)
 
     @staticmethod
     def __new__(
@@ -84,9 +86,6 @@ class NestedTensor(torch.Tensor):
         lengths=None,
         **kwargs,
     ):
-        ks = DispatchKeySet(DispatchKey.NestedTensor)
-        ks = ks.add(DispatchKey.AutogradNestedTensor)
-
         # Only support jagged for now.
         assert offsets is not None
         assert offsets.ndim == 1
@@ -122,7 +121,7 @@ class NestedTensor(torch.Tensor):
             "sizes",
             False,
             True,  # dispatch_layout
-            ks,
+            cls.ks,
             # don't try to calculate storage based on non-zero size
             storage_size=values.untyped_storage().size(),
         )
