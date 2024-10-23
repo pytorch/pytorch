@@ -1057,19 +1057,26 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             ]
         )
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        if binary_attr == "sum":
+            V.graph.mark_buffer_mutated(qaccum.get_name())
+            packed = QConvPointWiseBinaryPT2E(
+                layout=NoneLayout(device=qaccum.get_device()),
+                inputs=inputs,
+                constant_args=constant_args,
+            )
 
-        V.graph.mark_buffer_mutated(qaccum.get_name())
-        packed = QConvPointWiseBinaryPT2E(
-            layout=NoneLayout(device=qaccum.get_device()),
+            # Return accum since it has been inplace changed.
+            return packed.inputs[packed.idx_for_inplace_sum]
+
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
+            kernel_layout.dtype = output_dtype
+
+        return QConvPointWiseBinaryPT2E(
+            layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
         )
-
-        # Return accum since it has been inplace changed.
-        return packed.inputs[packed.idx_for_inplace_sum]
 
 
 class MKLPackedLinear(ExternKernelAlloc):

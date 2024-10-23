@@ -491,14 +491,19 @@ def _register_quantized_linear_binary_lowering(
 
         binary_op_name = binary_unary_attr.binary_op_name
 
-        if binary_op_name == "sum" and not _can_be_inplace(x2):
-            # When we enable the GEMM Template, the output of QLinear
+        if binary_op_name == "sum" and (
+            not _can_be_inplace(x2)
+            or x2.data.shape != list(match.nodes[0].meta["val"].size())
+        ):
+            # Change the post op from sum to binary add for two cases:
+            # 1. When we enable the GEMM Template, the output of QLinear
             # will be reshaped from 2D back to 3D if the input is 3D.
             # This causes _can_be_inplace(x2) to return False if x2 happens
             # to be the output of QLinear in this scenario.
-            # Change the post op from sum to binary add for this case.
+            # Use post op binary_add for this case.
             # Refer to test case:
             #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+            # 2. Use post op binary_add for broadcast add.
             binary_op_name = "add"
 
         computation_args = (
@@ -547,9 +552,9 @@ def _is_valid_quantized_op_binary_optimization_pattern(
 ):
     # Check if it's a valid Binary Pattern for qconv2d and qlinear:
     # * qop_pointwise should only has one users
-    # * If extra_input_from_dequant is True, extra input of binary node should come from dequant pattern
+    # * If extra_input_from_dequant is True and the two inputs of binary node have the same shape,
+    #   extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
-    # * the two inputs of binary node should have the same shape
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
@@ -561,23 +566,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
         assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-        if output_dtype in [torch.float32, torch.bfloat16]:
-            extra_input_of_binary_node = None
-            for arg in binary_node_inputs:
-                if arg != compute_node:
-                    extra_input_of_binary_node = arg
-                    break
-            assert extra_input_of_binary_node is not None
-            # Extra input of binary node comes from dequant pattern
-            if extra_input_from_dequant and (
-                (not isinstance(extra_input_of_binary_node, torch.fx.Node))
-                or (
-                    extra_input_of_binary_node.target
-                    != quantized_decomposed.dequantize_per_tensor.default
-                )
-            ):
-                return False
-
         # the two inputs of binary node should have attribute "meta" and should be tensors
         if not (
             hasattr(binary_node_inputs[0], "meta")
@@ -587,12 +575,30 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
         ):
             return False
-        # the two inputs of binary node should have the same shape
-        if (
-            binary_node_inputs[0].meta["val"].size()  # type: ignore[union-attr]
-            != binary_node_inputs[1].meta["val"].size()  # type: ignore[union-attr]
-        ):
-            return False
+
+        if output_dtype in [torch.float32, torch.bfloat16]:
+            extra_input_of_binary_node = None
+            for arg in binary_node_inputs:
+                if arg != compute_node:
+                    extra_input_of_binary_node = arg
+                    break
+            assert extra_input_of_binary_node is not None
+            # Extra input of binary node comes from dequant pattern
+            if (
+                (
+                    binary_node_inputs[0].meta["val"].size()  # type: ignore[union-attr]
+                    == binary_node_inputs[1].meta["val"].size()  # type: ignore[union-attr]
+                )
+                and extra_input_from_dequant
+                and (
+                    (not isinstance(extra_input_of_binary_node, torch.fx.Node))
+                    or (
+                        extra_input_of_binary_node.target
+                        != quantized_decomposed.dequantize_per_tensor.default
+                    )
+                )
+            ):
+                return False
 
         # All users of the extra input in this pattern should be
         # ancestor nodes of the compute node, except for the binary node
@@ -660,9 +666,16 @@ def _register_quantized_conv_binary_lowering(
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        assert _can_be_inplace(
-            accum
-        ), "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+        binary_op_name = binary_unary_attr.binary_op_name
+
+        if binary_op_name == "sum" and (
+            not _can_be_inplace(accum)
+            or accum.data.shape != list(match.nodes[0].meta["val"].size())
+        ):
+            # Change the post op from sum to binary add for two cases:
+            # 1. when outplace add is required.
+            # 2. broadcast add.
+            binary_op_name = "add"
 
         computation_args = (
             x,
@@ -682,7 +695,7 @@ def _register_quantized_conv_binary_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
-            binary_unary_attr.binary_op_name,
+            binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
             binary_unary_attr.scalars_attr,
@@ -910,6 +923,7 @@ def _register_quantization_binary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
+    # QConv
     for int8_mixed_bf16_with_inplace_add in [False, True]:
         # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
         binary_replace_patterns = {
