@@ -4184,6 +4184,9 @@ class InputsKernel(OperationBuffer):
             elif isinstance(input, ShapeAsConstantBuffer):
                 # Skip creating dependncy for symbolics as they're visible globally
                 continue
+            elif input is None:
+                # for tensor kwargs
+                continue
             else:
                 reads.add(StarDep(input.get_name()))
 
@@ -4213,6 +4216,8 @@ class InputsKernel(OperationBuffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
+        if isinstance (x, NoneAsConstantBuffer):
+            return None
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 

@@ -567,13 +567,17 @@ def tuned_cslt_sparse_mm(
             [n, 1],
         )
     # workaround for Inductor not supporting optional tensor input arguments
-    if bias is not None:
+    if bias is not None and alpha is not None:
+        bias, alpha = realize_inputs(bias, alpha)
+        input_nodes = input_nodes + (bias, alpha)
+
+    elif bias is not None:
         bias = realize_inputs(bias)
         input_nodes = input_nodes + (bias,)
 
-    if alpha is not None:
+    elif alpha is not None:
         alpha = realize_inputs(alpha)
-        input_nodes = input_nodes + (alpha,)
+        input_nodes = input_nodes + (ir.ExternKernel.realize_input(None), alpha)
 
     # cuSPARSELt alg_id search, not that we cannot use
     # AlgorithmSelectorCache.benchmark_example_value() because this will return the base view

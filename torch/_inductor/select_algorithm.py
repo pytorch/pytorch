@@ -1147,8 +1147,9 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
+from .ir import NoneAsConstantBuffer
 def create_inputs_key(input_nodes) -> str:
-    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes if not isinstance(x, NoneAsConstantBuffer)])
 
 
 def create_precompile_key(
