@@ -1,0 +1,29 @@
+from torch.utils._ordered_set import OrderedSet
+ignored = set()  # noqa: set_linter
+a = OrderedSet()
+b = 'set()'
+c = OrderedSet
+ignored = set()  # noqa: set_linter
+d = c.set
+f = (
+   OrderedSet(
+   )
+)
+ignored = (
+   set(  # noqa: set_linter
+   )
+)
+e = """ set()
+set() set x.set set()
+\""""
+
+# From here, every mention of set is ignored
+
+class A:
+    def set(self, x):
+        self.x = x
+
+set = A().set  # Also gets ignored!
+
+good = {}
+bad = {1}  # TODO: Should get caught

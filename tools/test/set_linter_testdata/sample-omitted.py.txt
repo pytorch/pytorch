@@ -1,0 +1,28 @@
+ignored = set()  # noqa: set_linter
+a = set()
+b = 'set()'
+c = set
+ignored = set()  # noqa: set_linter
+d = c.set
+f = (
+   set(
+   )
+)
+ignored = (
+   set(  # noqa: set_linter
+   )
+)
+e = """ set()
+set() set x.set set()
+\""""
+
+# From here, every mention of set is ignored
+
+class A:
+    def set(self, x):
+        self.x = x
+
+set = A().set  # Also gets ignored!
+
+good = {}
+bad = {1}  # TODO: Should get caught
