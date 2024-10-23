@@ -943,8 +943,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def _qconv2d_add_cpu_test_helper2(self, use_relu=False, int8_mixed_bf16=False):
         r"""
         This testcase will quantize two Conv2d->Add patterns as:
-                 X
-               /   \
+
         Conv(X)   extra input
                \   /
                 Add
@@ -955,8 +954,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         , and
 
-                 X
-               /   \
         extra input   Conv(X)
                \   /
                 Add
