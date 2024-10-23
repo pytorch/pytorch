@@ -710,12 +710,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_mkldnn(self, device):
+    def test_qconv2d_cpu(self):
         r"""
         This testcase will quantize a single Conv2d module.
         """
-        self._qconv2d_cpu_test_helper(device)
+        self._qconv2d_cpu_test_helper("cpu")
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_xpu(self):
+        r"""
+        This testcase will quantize a single Conv2d module.
+        """
+        self._qconv2d_cpu_test_helper("xpu")
+
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -776,12 +785,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_relu_mkldnn(self, device):
+    def test_qconv2d_relu_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(device=device)
+        self._qconv2d_unary_cpu_test_helper(device="cpu")
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_relu_xpu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(device="xpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -794,21 +810,35 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_relu6(self, device):
+    def test_qconv2d_relu6(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.ReLU6())
+        self._qconv2d_unary_cpu_test_helper(device="cpu", unary_op=torch.nn.ReLU6())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_hardtanh(self, device):
+    def test_qconv2d_relu6(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU6 pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(device="xpu", unary_op=torch.nn.ReLU6())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_hardtanh_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.Hardtanh())
+        self._qconv2d_unary_cpu_test_helper(device="cpu", unary_op=torch.nn.Hardtanh())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_hardtanh_xpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardtanh pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(device="xpu", unary_op=torch.nn.Hardtanh())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -828,12 +858,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_hardswish(self, device):
+    def test_qconv2d_hardswish_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.Hardswish())
+        self._qconv2d_unary_cpu_test_helper(device="cpu", unary_op=torch.nn.Hardswish())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_hardswish_xpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardswish pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(device="xpu", unary_op=torch.nn.Hardswish())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -854,12 +891,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @parametrize("device", ["cpu", "xpu"])
-    def test_qconv2d_silu(self, device):
+    def test_qconv2d_silu_cpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
         """
-        self._qconv2d_unary_cpu_test_helper(device=device, unary_op=torch.nn.SiLU())
+        self._qconv2d_unary_cpu_test_helper(device="cpu", unary_op=torch.nn.SiLU())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_silu_xpu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(device="xpu", unary_op=torch.nn.SiLU())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2164,8 +2208,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 temp2 = self.conv2(torch.pow(x, 2))
                 return torch.cat((temp1, temp2), 1)
 
-        mod = M().eval().xpu()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).xpu()
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
         def matcher_check_fn():
             self.assertEqual(counters["inductor"]["qcat_matcher_count"], 1)
