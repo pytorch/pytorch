@@ -766,7 +766,6 @@ def forward(self, token, safe_obj):
     return (getitem, sin)""",  # noqa: B950
             )
 
-    @unittest.expectedFailure  # T205481814
     @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real_with_training_ir(self):
         x = torch.randn(3, 3)

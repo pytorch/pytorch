@@ -447,6 +447,8 @@ def _produce_aten_artifact(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
 
+    # script objects are always stored in constants no matter whether they're initial inputs or
+    # they're lifted in aot" before rewrite_script_object_meta
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
