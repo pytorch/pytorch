@@ -519,7 +519,7 @@ class CommBufferAllocateLine(CommBufferLine):
 class CommBufferFreeLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
-        code.writeline(f"{line} # {self.comm_buffer_type} buffer free")
+        code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
 
 
 BufferName = str
