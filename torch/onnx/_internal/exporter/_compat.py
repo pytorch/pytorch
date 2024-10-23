@@ -125,7 +125,8 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = None,
-    custom_decomp_table: dict[Callable, tuple[Callable, bool]] | None = None,
+    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
+    | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -159,9 +160,13 @@ def export_compat(
             )
 
     registry = _registration.ONNXRegistry.from_torchlib()
-    if custom_decomp_table is not None:
-        for torch_op, (onnx_op, is_complex) in custom_decomp_table.items():
-            registry.register_op(torch_op, onnx_op, is_complex=is_complex)
+    if custom_translation_table is not None:
+        for torch_op, onnx_ops in custom_translation_table.items():
+            # TODO(justinchuby): Support complex inputs with annotations
+            if not isinstance(onnx_ops, Sequence):
+                onnx_ops = (onnx_ops,)
+            for op in onnx_ops:
+                registry.register_op(torch_op, op, is_complex=False)
     try:
         onnx_program = _core.export(
             model,

@@ -154,7 +154,8 @@ def export(
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
-    custom_decomp_table: dict[Callable, Callable] | None = None,
+    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
+    | None = None,
     report: bool = False,
     verify: bool = False,
     profile: bool = False,
@@ -286,7 +287,7 @@ def export(
             :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
             Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
             at the same time.
-        custom_decomp_table: A dictionary of custom decompositions for operators in the model.
+        custom_translation_table: A dictionary of custom decompositions for operators in the model.
             The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
             and the value should be a function that builds that graph using ONNX Script. This option
             is only valid when dynamo is True.
@@ -359,7 +360,7 @@ def export(
             input_names=input_names,
             output_names=output_names,
             opset_version=opset_version,
-            custom_decomp_table=custom_decomp_table,
+            custom_translation_table=custom_translation_table,
             dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             external_data=external_data,
