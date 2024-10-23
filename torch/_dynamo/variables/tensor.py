@@ -1260,6 +1260,10 @@ class NumpyNdarrayVariable(TensorVariable):
             raise NotImplementedError
         return result
 
+    def has_unpack_var_sequence(self, tx):
+        # Fails PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py TestReductionsCPU.test_quantile_cpu_float64
+        return False
+
     @staticmethod
     def patch_args(name, args, kwargs):
         if name == "clip":
