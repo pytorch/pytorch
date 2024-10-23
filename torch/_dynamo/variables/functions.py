@@ -124,6 +124,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def closure_vars(self, tx):
         return {}
 
+    def export_freevars(self, parent, child):
+        unimplemented("abstract method, must implement")
+
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
@@ -155,6 +158,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.fn.__name__})"
+
+    def __repr__(self):
+        return str(self)
 
     def as_python_constant(self):
         if istype(self, UserFunctionVariable):
@@ -328,6 +337,65 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def __init__(self, vt: VariableTracker, **kwargs):
+        self.vt = vt
+        self.inline_tracer = None
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    # TODO: the __getattr__ call above should have redirect this call to the
+    # underlying variable tracker(?)
+    def export_freevars(self, parent, child):
+        return self.vt.export_freevars(parent, child)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.bytecode_transformation import is_generator
+
+        assert is_generator(self.get_code())
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx, self, [*self.self_args(), *args], kwargs
+        )
+        # Flag to the tracer to change the behavior of YIELD_VALUE/RETURN_VALUE
+        self.inline_tracer.consume_all_items = False
+
+        return self
+
+    def can_reconstruct(self, tx):
+        # Any graph break should force the entire context manager to run on eager mode
+        return False
+
+    def next_variable(self, tx):
+        from torch._dynamo import exc
+
+        tracer = self.inline_tracer
+
+        try:
+            # inline_call_ has a try/except block that does the same thing
+            # TODO: figure it out why it is not working for this usecase
+            return tracer.inline_call_().next_variable(tx)
+        except exc.ObservedUserStopIteration as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
 
 
 class UserMethodVariable(UserFunctionVariable):
