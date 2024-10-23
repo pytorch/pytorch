@@ -78,6 +78,7 @@ inductor_decompositions = get_decompositions(
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
+        aten.rrelu_with_noise_backward,
         out_dtype,
         aten._to_copy,
         aten.tril_indices,
