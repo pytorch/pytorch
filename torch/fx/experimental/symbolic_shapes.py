@@ -442,6 +442,11 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
+
+            # We only care about rebinding unbacked things
+            if u1.node.hint is not None:
+                continue
+
             # tensor_version ops get specialized after AOTAutograd, it's OK,
             # we don't actually want to do asserts on them.  This is all a bit
             # questionable though
@@ -6068,6 +6073,12 @@ class ShapeEnv:
         """
 
         # TODO: split conjunctions and evaluate them separately
+
+        if isinstance(
+            orig_expr,
+            (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
+        ):
+            return orig_expr
 
         # Don't track this one
         @functools.lru_cache(None)
