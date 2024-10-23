@@ -629,7 +629,7 @@ MatchTypeReturn matchTypeVariables(
     }
   }
 
-  AT_ERROR("Unhandled free variable container: ", formal->repr_str());
+  TORCH_CHECK(false, "Unhandled free variable container: ", formal->repr_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]
