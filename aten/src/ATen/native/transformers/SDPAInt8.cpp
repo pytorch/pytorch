@@ -46,7 +46,6 @@ at::Tensor sdpa_int8_math_impl(
     float a_scale,
     int32_t o_zp,
     float o_scale) {
-  auto dtype = query_.scalar_type();
   // dequant q/k/v
   auto q = (query_.to(at::kFloat) - q_zp) * q_scale;
   auto k = (key.to(at::kFloat) - k_zp) * k_scale;
@@ -132,7 +131,7 @@ at::Tensor _scaled_dot_product_int8_cpu(
 
   // TODO @Valentine233: add flash attention int8 impl
 
-  return std::move(output);
+  return output;
 }
 
 } // namespace at::native

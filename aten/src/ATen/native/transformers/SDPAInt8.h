@@ -6,6 +6,24 @@
 
 namespace at::native {
 
+at::Tensor sdpa_int8_math_impl(
+    const at::Tensor& query_,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<at::Tensor> attn_mask_,
+    c10::optional<double> scale,
+    int32_t q_zp,
+    float q_scale,
+    int32_t k_zp,
+    float k_scale,
+    int32_t v_zp,
+    float v_scale,
+    int32_t a_zp,
+    float a_scale,
+    int32_t o_zp,
+    float o_scale);
 using sdpa_int8_fn = void (*)(
     Tensor& output,
     const Tensor& query, const Tensor& key, const Tensor& value,
