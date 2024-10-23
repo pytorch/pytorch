@@ -52,6 +52,9 @@ class TwoTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a, b = inner_tensors["a"], inner_tensors["b"]
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
         return TwoTensor(a, b, outer_size, outer_stride)
 
     @classmethod

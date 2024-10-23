@@ -9,7 +9,7 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
+from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -178,12 +178,15 @@ class SubclassCreationMeta:
     # both of its inner elements are TwoTensors, then the
     # arg_count of the outer-most sublass will be 4
     arg_count: int
+    # Mark where or not symints were included. This flag is only used in one assertion
+    # in "wrap_tensor_subclasses"
+    included_subclass_symints: bool
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
     attrs: Dict[str, Union["SubclassCreationMeta", None]]
-    outer_size: List[int]
-    outer_stride: List[int]
+    outer_size: Iterable[Union[None, int, torch.SymInt]]
+    outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -195,7 +198,39 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
 
-    def creation_fn(self, all_args, *, is_runtime: bool):
+    def compute_outer_size_and_stride(
+        self,
+        all_args,
+        *,
+        curr_start_idx: int,
+    ):
+        from .subclass_utils import compute_symint_placeholders
+
+        def compute(outer, start_idx):
+            placeholders = compute_symint_placeholders(outer)
+            has_symbolic = any(placeholders)
+
+            if has_symbolic:
+                start = curr_start_idx
+                end = start_idx + sum(placeholders)
+                it_args = iter(all_args[start:end])
+                it_placeholders = iter(placeholders)
+                return pytree.tree_map_only(
+                    lambda _: next(it_placeholders), lambda _: next(it_args), outer
+                ), start + len(placeholders)
+            else:
+                return outer, start_idx
+
+        outer_size, next_idx = compute(self.outer_size, curr_start_idx)
+        outer_stride, _ = compute(self.outer_stride, next_idx)
+        return outer_size, outer_stride
+
+    def creation_fn(
+        self,
+        all_args,
+        *,
+        is_runtime: bool,
+    ):
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
@@ -204,7 +239,10 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                subclass = creation_meta.creation_fn(
+                    all_args,
+                    is_runtime=is_runtime,
+                )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
 
@@ -214,8 +252,16 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
+        if is_runtime:
+            outer_size, outer_stride = self.compute_outer_size_and_stride(
+                all_args,
+                curr_start_idx=curr_start_idx,
+            )
+        else:
+            outer_size, outer_stride = self.outer_size, self.outer_stride
+
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, self.outer_size, self.outer_stride
+            inner_tensors, self.meta, outer_size, outer_stride
         )
 
         if not is_runtime:
@@ -228,9 +274,26 @@ class SubclassCreationMeta:
         return rebuilt
 
     def make_runtime_safe(self):
+        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+            dummy = -1
+            if isinstance(x, torch.SymInt):
+                # Replace nested ints by a dummy value (-1) as NJT ignores
+                # the outer_size/outer_stride at runtime.
+                return dummy if x.node.is_nested_int() else None
+            return x
+
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
+
+        # Note: NJT outer_size in AOTDispatcher
+        # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
+        # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
+        # is designed to safely ignore this dummy value.
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
+        self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
+
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:

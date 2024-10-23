@@ -10,7 +10,10 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import normalize_gm
+from torch._functorch._aot_autograd.utils import make_boxed_compiler
+from torch._functorch.compilers import min_cut_rematerialization_partition
 from torch._higher_order_ops.wrap import wrap
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -354,8 +357,6 @@ class CtxSubclassTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
-        from torch.utils._python_dispatch import return_and_correct_aliasing
-
         if kwargs is None:
             kwargs = {}
         biggest_constant = max(
@@ -1820,7 +1821,8 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(out_ref, out_test)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-    def test_mark_static_with_subclass_desugaring(self):
+    @parametrize("dynamic", [True, False])
+    def test_mark_static_with_subclass_desugaring(self, dynamic):
         from typing import Any, Callable, Dict, List, Optional
 
         from torch._dynamo.decorators import mark_static_address
@@ -1847,16 +1849,661 @@ class GraphModule(torch.nn.Module):
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
-            self.assertEqual(static_input_idxs, [1, 2])
+            if dynamic:
+                self.assertEqual(static_input_idxs, [2, 3, 4])
+            else:
+                self.assertEqual(static_input_idxs, [1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)
 
-        @torch.compile(backend=compiler)
+        @torch.compile(backend=compiler, dynamic=dynamic)
         def fn(t0, t1, t2):
             return t0 + t1 + t2 + 2
 
         fn(torch.ones(4), x, torch.ones(4))
+
+    # copied from common_utils.py::NestedTensorTestCase
+    def assertEqualIgnoringNestedInts(self, a, b):
+        # unbinding NJTs allows us to compare them as essentially equal without
+        # caring about exact nested int comparison
+        def _unbind_njts(x):
+            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
+                return x.unbind()
+            else:
+                return x
+
+        self.assertEqual(
+            pytree.tree_map(_unbind_njts, a), pytree.tree_map(_unbind_njts, b)
+        )
+
+    def _compile_check(
+        self,
+        fn,
+        inps,
+        *,
+        dynamic=True,
+        fullgraph=True,
+        call_backward=False,
+    ):
+        def call_backward_fn(t):
+            if t.is_nested:
+                from torch.nested._internal.nested_tensor import buffer_from_jagged
+
+                t = buffer_from_jagged(t)
+            return t.sum().backward(retain_graph=True)
+
+        torch.manual_seed(0)
+        fw_compiler = EagerRecordGraphAndInputs()
+        bw_compiler = EagerRecordGraphAndInputs()
+        compiler_fn = aot_autograd(
+            fw_compiler=make_boxed_compiler(fw_compiler),
+            bw_compiler=make_boxed_compiler(bw_compiler),
+            partition_fn=min_cut_rematerialization_partition,
+            keep_inference_input_mutations=True,
+        )
+
+        c = torch.compile(backend=compiler_fn, dynamic=dynamic, fullgraph=fullgraph)(fn)
+        for inp in inps:
+            expected = fn(*inp)
+            # reset the seed for randn to generate the same tensor
+            torch.manual_seed(0)
+            got = c(*inp)
+            self.assertEqualIgnoringNestedInts(expected, got)
+
+            if call_backward:
+                re = pytree.tree_map_only(
+                    lambda x: isinstance(x, torch.Tensor) and x.requires_grad,
+                    call_backward_fn,
+                    expected,
+                )
+                rg = pytree.tree_map_only(
+                    lambda x: isinstance(x, torch.Tensor) and x.requires_grad,
+                    call_backward_fn,
+                    got,
+                )
+                self.assertEqualIgnoringNestedInts(re, rg)
+
+        if call_backward:
+            return fw_compiler.graphs, bw_compiler.graphs
+        return fw_compiler.graphs, None
+
+    def test_tensor_subclass_TwoTensor_simple(self):
+        def f(tt):
+            return tt * tt.size()[0]
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone().detach().requires_grad_(True)
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s1)", primals_6: "Sym(s0)", primals_7: "Sym(s1)"):
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_1, primals_3);  primals_1 = None
+        mul_3: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_2, primals_3);  primals_2 = None
+        return (mul, mul_3, primals_6, primals_7, primals_7, primals_3, primals_6, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_3: "Sym(s0)", primals_6: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s0, s1]", tangents_2: "f32[s0, s1]"):
+        mul_8: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_3);  tangents_1 = None
+        mul_9: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_2, primals_3);  tangents_2 = primals_3 = None
+        return (mul_8, mul_9, primals_6, primals_7, primals_7, None, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_clone_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[1], y.shape[0])
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s1)", primals_6: "Sym(s0)", primals_7: "Sym(s1)"):
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[s1, s0]" = torch.ops.aten.view.default(clone, [primals_4, primals_3]);  clone = None
+        view_1: "f32[s1, s0]" = torch.ops.aten.view.default(clone_1, [primals_4, primals_3]);  clone_1 = primals_3 = None
+        return (view, view_1, primals_4, primals_6, primals_6, primals_6, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_6: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s1, s0]", tangents_2: "f32[s1, s0]"):
+        view_2: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_1, [primals_6, primals_7]);  tangents_1 = None
+        view_3: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_2, [primals_6, primals_7]);  tangents_2 = None
+        return (view_2, view_3, primals_6, primals_7, primals_7, None, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_mul(self):
+        def f(tt, a, b):
+            s0, s1 = a.size()
+            s2, s3 = b.size()
+            # return tt * a.size()[1]
+            return tt * s0 * s1 * s2 * s3
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt, a, b)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "Sym(s0)", primals_2: "Sym(s1)", primals_3: "f32[s0, s1]", primals_4: "f32[s0, s1]", primals_5: "Sym(s0)", primals_6: "Sym(s1)", primals_7: "Sym(s1)"):
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_3, primals_1);  primals_3 = None
+        mul_3: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_4, primals_1);  primals_4 = None
+        mul_8: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_2);  mul = None
+        mul_11: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_3, primals_2);  mul_3 = None
+        mul_16: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_8, primals_1);  mul_8 = None
+        mul_19: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_11, primals_1);  mul_11 = None
+        mul_24: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_16, primals_2);  mul_16 = None
+        mul_27: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_19, primals_2);  mul_19 = None
+        return (mul_24, mul_27, primals_5, primals_7, primals_7, primals_1, primals_2, primals_5, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "Sym(s0)", primals_2: "Sym(s1)", primals_5: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s0, s1]", tangents_2: "f32[s0, s1]"):
+        mul_32: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
+        mul_33: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
+        mul_34: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_32, primals_1);  mul_32 = None
+        mul_35: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_33, primals_1);  mul_33 = None
+        mul_36: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_34, primals_2);  mul_34 = None
+        mul_37: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_35, primals_2);  mul_35 = primals_2 = None
+        mul_38: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_36, primals_1);  mul_36 = None
+        mul_39: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(mul_37, primals_1);  mul_37 = primals_1 = None
+        return (None, None, mul_38, mul_39, primals_5, primals_7, primals_7)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_view(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0], y.shape[1])
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s1)", primals_6: "Sym(s0)", primals_7: "Sym(s1)"):
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[s0, s1]" = torch.ops.aten.view.default(clone, [primals_3, primals_4]);  clone = None
+        view_1: "f32[s0, s1]" = torch.ops.aten.view.default(clone_1, [primals_3, primals_4]);  clone_1 = primals_3 = primals_4 = None
+        return (view, view_1, primals_6, primals_7, primals_7, primals_6, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_6: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s0, s1]", tangents_2: "f32[s0, s1]"):
+        view_2: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_1, [primals_6, primals_7]);  tangents_1 = None
+        view_3: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_2, [primals_6, primals_7]);  tangents_2 = None
+        return (view_2, view_3, primals_6, primals_7, primals_7, None, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_view_mul(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(y.shape[0] * y.shape[1])
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s1)", primals_6: "Sym(s0)", primals_7: "Sym(s1)"):
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        mul_6: "Sym(s0*s1)" = primals_3 * primals_4;  primals_3 = primals_4 = None
+        view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul_6]);  clone = None
+        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul_6]);  clone_1 = None
+        return (view, view_1, mul_6, primals_6, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_6: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s0*s1]", tangents_2: "f32[s0*s1]"):
+        view_2: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_1, [primals_6, primals_7]);  tangents_1 = None
+        view_3: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_2, [primals_6, primals_7]);  tangents_2 = None
+        return (view_2, view_3, primals_6, primals_7, primals_7, None, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_return_tensor_and_subclass(self):
+        def f(tt):
+            y = tt.clone()
+            return y.a, y.view(y.shape[0] * y.shape[1])
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s1)", primals_6: "Sym(s0)", primals_7: "Sym(s1)"):
+        clone: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s0, s1]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        mul_6: "Sym(s0*s1)" = primals_3 * primals_4;  primals_3 = primals_4 = None
+        view: "f32[s0*s1]" = torch.ops.aten.view.default(clone, [mul_6])
+        view_1: "f32[s0*s1]" = torch.ops.aten.view.default(clone_1, [mul_6]);  clone_1 = None
+        return (clone, view, view_1, mul_6, primals_6, primals_7)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_6: "Sym(s0)", primals_7: "Sym(s1)", tangents_1: "f32[s0*s1]", tangents_2: "f32[s0*s1]"):
+        view_2: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_1, [primals_6, primals_7]);  tangents_1 = None
+        view_3: "f32[s0, s1]" = torch.ops.aten.view.default(tangents_2, [primals_6, primals_7]);  tangents_2 = None
+        return (view_2, view_3, primals_6, primals_7, primals_7, None, None)
+""",  # noqa: B950
+        )
+
+    @unittest.expectedFailure
+    def test_tensor_subclass_TwoTensor_return_multiple(self):
+        def f(tt):
+            y = tt.clone()
+            z = tt.clone()
+            return y.a, y.view(y.shape[0] * y.shape[1]), y.b, z.view(-1)
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]", primals_3: "Sym(3)", primals_4: "Sym(4)", primals_5: "Sym(3)", primals_6: "Sym(4)"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        mul: "Sym(12)" = primals_5 * primals_6
+        view: "f32[12]" = torch.ops.aten.view.default(clone, [mul])
+        view_1: "f32[12]" = torch.ops.aten.view.default(clone_1, [mul]);  clone_1 = None
+        return [clone, view, view_1, mul, primals_5, primals_6]
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_5: "Sym(3)", primals_6: "Sym(4)", tangents_1: "f32[12]", tangents_2: "f32[12]"):
+        view_2: "f32[3, 4]" = torch.ops.aten.view.default(tangents_1, [primals_5, primals_6]);  tangents_1 = None
+        view_3: "f32[3, 4]" = torch.ops.aten.view.default(tangents_2, [primals_5, primals_6]);  tangents_2 = primals_5 = primals_6 = None
+        return [view_2, view_3, None, None]
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_automatic_dynamic_shapes(self):
+        def f(tt):
+            y = tt.clone()
+            return y.a, y.view(-1), y.b
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt1 = TwoTensor(a, b)
+
+        a = torch.ones(3, 5, requires_grad=True)
+        b = a.clone()
+        tt2 = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(
+            f, [(tt1,), (tt2,)], dynamic=None, call_backward=True
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[12]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[12]" = torch.ops.aten.view.default(clone_1, [-1])
+        return (clone, view, view_1, clone_1)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(fw[1].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, s0]", primals_2: "f32[3, s0]", primals_3: "Sym(s0)", primals_4: "Sym(s0)", primals_5: "Sym(s0)"):
+        clone: "f32[3, s0]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s0]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[3*s0]" = torch.ops.aten.view.default(clone, [-1])
+        sym_numel_default: "Sym(3*s0)" = torch.ops.aten.sym_numel.default(clone)
+        view_1: "f32[3*s0]" = torch.ops.aten.view.default(clone_1, [-1])
+        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[12]", tangents_2: "f32[12]"):
+        view_2: "f32[3, 4]" = torch.ops.aten.view.default(tangents_1, [3, 4]);  tangents_1 = None
+        view_3: "f32[3, 4]" = torch.ops.aten.view.default(tangents_2, [3, 4]);  tangents_2 = None
+        return (view_2, view_3)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[1].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_5: "Sym(s0)", tangents_1: "f32[3*s0]", tangents_2: "f32[3*s0]"):
+        view_2: "f32[3, s0]" = torch.ops.aten.view.default(tangents_1, [3, primals_5]);  tangents_1 = None
+        view_3: "f32[3, s0]" = torch.ops.aten.view.default(tangents_2, [3, primals_5]);  tangents_2 = None
+        return (view_2, view_3, primals_5, primals_5, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_mark_dynamic_shapes(self):
+        def f(tt):
+            y = tt.clone()
+            return y.a, y.view(-1), y.b
+
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+        torch._dynamo.mark_dynamic(tt, 1)
+
+        fw, bw = self._compile_check(
+            f,
+            [
+                (tt,),
+            ],
+            dynamic=None,
+            call_backward=True,
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, s0]", primals_2: "f32[3, s0]", primals_3: "Sym(s0)", primals_4: "Sym(s0)", primals_5: "Sym(s0)"):
+        clone: "f32[3, s0]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s0]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[3*s0]" = torch.ops.aten.view.default(clone, [-1])
+        sym_numel_default: "Sym(3*s0)" = torch.ops.aten.sym_numel.default(clone)
+        view_1: "f32[3*s0]" = torch.ops.aten.view.default(clone_1, [-1])
+        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_5: "Sym(s0)", tangents_1: "f32[3*s0]", tangents_2: "f32[3*s0]"):
+        view_2: "f32[3, s0]" = torch.ops.aten.view.default(tangents_1, [3, primals_5]);  tangents_1 = None
+        view_3: "f32[3, s0]" = torch.ops.aten.view.default(tangents_2, [3, primals_5]);  tangents_2 = None
+        return (view_2, view_3, primals_5, primals_5, None)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_different_shape(self):
+        def f(tt):
+            y = tt.clone()
+            return y.view(3, 2, 4)
+
+        a = torch.ones((2 * 4 * 3), requires_grad=True)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[24]", primals_2: "f32[24]"):
+        clone: "f32[24]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[24]" = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+
+        view: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone, [3, 2, 4]);  clone = None
+        view_1: "f32[3, 2, 4]" = torch.ops.aten.view.default(clone_1, [3, 2, 4]);  clone_1 = None
+        return (view, view_1)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[3, 2, 4]", tangents_2: "f32[3, 2, 4]"):
+        view_2: "f32[24]" = torch.ops.aten.view.default(tangents_1, [24]);  tangents_1 = None
+        view_3: "f32[24]" = torch.ops.aten.view.default(tangents_2, [24]);  tangents_2 = None
+        return (view_2, view_3)
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_return_shape(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def fn(x):
+            return x.clone().view(x.shape[0] * x.shape[1])
+
+        a = torch.ones(2, 3)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+        out = fn(tt)
+        self.assertEqual(tt.view(2 * 3), out)
+        self.assertEqual(out.shape, (6,))
+
+    def test_tensor_subclass_TwoTensor_nested(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x, i, y):
+            out1 = x.sin() + i.sin() + y.sin()
+            val1 = x.shape[0] * i.shape[1] * y.shape[0]
+            return out1 * val1
+
+        i = torch.randn(2, 2, requires_grad=True)
+        x = TwoTensor(i, i.clone())
+        y = TwoTensor(x.clone(), x.clone())
+
+        out = f(x, i, y)
+
+        x_test = x.clone().detach().requires_grad_(True)
+        i_test = i.clone().detach().requires_grad_(True)
+        y_test = y.clone().detach().requires_grad_(True)
+
+        out_test = f(x_test, i_test, y_test)
+        torch.allclose(out, out_test)
+
+        out.sum().backward()
+        out_test.sum().backward()
+        torch.allclose(x.grad, x_test.grad)
+        torch.allclose(i.grad, i_test.grad)
+        torch.allclose(y.grad, y_test.grad)
+
+    def test_subclass_TwoTensor_TwoTensor_TwoTensor(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x):
+            return x.sin()
+
+        data = torch.randn(2, 3)
+        s = TwoTensor(data, data.clone())
+        y = TwoTensor(s, s.clone())
+        z = TwoTensor(s, y)
+        out = f(z)
+        self.assertEqual(out, z.sin())
+
+    @unittest.expectedFailure
+    def test_njt_subclass_simple(self):
+        def f(nt):
+            y = nt.clone()
+            return y * y.size(0) * y.size(1)
+
+        nt, _ = get_jagged_tensor(((2, 3, 4), 5), None, True)
+
+        fw, bw = self._compile_check(f, [(nt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f64[s0, s1]", primals_2: "i64[s2 + 1]", primals_3: "f32[s6, 0]", primals_4: "f32[s7, 0]", primals_5: "Sym(s2)", primals_6: "Sym(s1)", primals_7: "Sym(s1)", primals_8: "Sym(s1)", primals_9: "Sym(s2)", primals_10: "Sym(s3)"):
+        clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+
+        mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_9);  clone = None
+        mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_10);  mul = None
+        return (mul_1, primals_2, primals_3, primals_4, primals_9, primals_8, primals_8, primals_8, primals_9, primals_10)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_8: "Sym(s1)", primals_9: "Sym(s2)", primals_10: "Sym(s3)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
+        mul_2: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_10);  tangents_1 = primals_10 = None
+        mul_3: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul_2, primals_9);  mul_2 = None
+        return (mul_3, tangents_2, tangents_3, tangents_4, primals_9, primals_8, primals_8, None, None, None)
+""",  # noqa: B950
+        )
+
+    def test_njt_subclass_from_cat(self):
+        # create from an existing NJT
+        def f(nt):
+            y = nt.clone()
+            z = torch.cat([y, y], dim=-1)
+            return z
+
+        nt, _ = get_jagged_tensor(((2, 3, 4), 5), None, True)
+
+        fw, bw = self._compile_check(f, [(nt,)], dynamic=True, call_backward=True)
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f64[s0, s1]", primals_2: "i64[s2 + 1]", primals_3: "f32[s6, 0]", primals_4: "f32[s7, 0]", primals_5: "Sym(s2)", primals_6: "Sym(s1)", primals_7: "Sym(s1)", primals_8: "Sym(s1)", primals_9: "Sym(s2)", primals_10: "Sym(s3)"):
+        clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+
+        cat: "f64[s0, 2*s1]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
+        add_2: "Sym(2*s1)" = primals_8 + primals_8
+        return (cat, primals_2, primals_3, primals_4, primals_9, add_2, add_2, primals_8, primals_9, add_2)
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_8: "Sym(s1)", primals_9: "Sym(s2)", add_2: "Sym(2*s1)", tangents_1: "f64[s0, 2*s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
+        slice_1: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_8)
+        slice_2: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_8, add_2);  tangents_1 = add_2 = None
+
+        add_4: "f64[s0, s1]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
+        return (add_4, tangents_2, tangents_3, tangents_4, primals_9, primals_8, primals_8, None, None, None)
+""",  # noqa: B950
+        )
+
+    @unittest.expectedFailure
+    def test_njt_subclass_from_buffer(self):
+        # create the NJT from a buffer(?)
+        def f(nt):
+            nested_size = ((2, 3, 4), 5)
+            offsets = None
+            nt2, _ = get_jagged_tensor(nested_size, offsets, requires_grad=False)
+            nt3 = torch.cat([nt2, nt], dim=-1)
+            return nt3.sin() * nt3.size(1)
+
+        nested_size = ((2, 3, 4), 5)
+        offsets = None
+        nt, _ = get_jagged_tensor(nested_size, offsets, requires_grad=False)
+
+        fw, _ = self._compile_check(
+            f,
+            [(nt,)],
+            dynamic=True,
+            call_backward=False,  # we cannot set requires_grad=True inside a compile region
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(fw[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f64[9, s2]", arg1_1: "i64[s3 + 1]", arg2_1: "f32[s7, 0]", arg3_1: "f32[s8, 0]", arg4_1: "Sym(s3)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)", arg8_1: "Sym(s3)", arg9_1: "Sym(s4)"):
+        randn: "f64[2, 5]" = torch.ops.aten.randn.default([2, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
+        randn_1: "f64[3, 5]" = torch.ops.aten.randn.default([3, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
+        randn_2: "f64[4, 5]" = torch.ops.aten.randn.default([4, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
+
+        cat: "f64[9, 5]" = torch.ops.aten.cat.default([randn, randn_1, randn_2]);  randn = randn_1 = randn_2 = None
+
+        cat_2: "f64[9, s2 + 5]" = torch.ops.aten.cat.default([arg0_1, cat], 1);  arg0_1 = cat = None
+
+        sin: "f64[9, s2 + 5]" = torch.ops.aten.sin.default(cat_2)
+        mul: "f64[9, s2 + 5]" = torch.ops.aten.mul.Tensor(sin, arg9_1);  sin = arg9_1 = None
+
+        sym_size_int_1: "Sym(s2 + 5)" = torch.ops.aten.sym_size.int(cat_2, 1);  cat_2 = None
+        sym_stride_int: "Sym(s2 + 5)" = torch.ops.aten.sym_stride.int(mul, 0)
+        return (mul, arg1_1, arg2_1, arg3_1, arg8_1, sym_size_int_1, sym_stride_int)
+""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(SubclassTests)
