@@ -795,6 +795,7 @@ endif()
 if(USE_MPS)
   add_dependencies(torch_cpu metallibs)
   target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+  target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_bfloat,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_bfloat.metallib)
 endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
