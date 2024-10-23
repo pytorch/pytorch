@@ -15,6 +15,9 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <ATen/Config.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -97,7 +100,10 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   };
   return input.options().backend() == at::Backend::CPU &&
       is_cpu_backend(params) && is_cpu_backend(hx) &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      (input.scalar_type() == kFloat ||
+       (input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) ||
+       (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
+        mkldnn_fp16_device_check())) &&
       input.numel() != 0;
 #endif
   return false;
@@ -173,7 +179,7 @@ struct CellParams : public CellParamsBase {
       const Tensor& _b_ih,
       const Tensor& _b_hh,
       const Tensor& _w_hr)
-      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {};
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {}
 
   const Tensor& w_ih;
   const Tensor& w_hh;
@@ -819,7 +825,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
   using unstacked_output_type = LayerOutput<std::vector<Tensor>, hidden_type>;
 
   FullLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   unstacked_output_type operator()(
       const std::vector<Tensor>& step_inputs,
@@ -864,7 +870,7 @@ struct FullBidirectionalLayer
   using output_type = typename Layer<Tensor, hidden_type, param_type>::output_type;
 
   FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell) {};
+    : layer_(cell) {}
 
   output_type operator()(
       const Tensor& input,
@@ -916,7 +922,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   PackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -977,7 +983,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -1034,7 +1040,7 @@ struct PackedBidirectionalLayer
       typename Layer<PackedSequence, hidden_type, param_type>::output_type;
 
   PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell), rev_layer_(cell) {};
+    : layer_(cell), rev_layer_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -1883,7 +1889,8 @@ static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple
 
 namespace {
 
-static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
+[[maybe_unused]] static auto ensure_linear_params_registered =
+    register_linear_params();
 
 static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))

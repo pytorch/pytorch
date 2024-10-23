@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -100,6 +100,10 @@ def stack_to_unsqueeze_pass(graph):
     return None
 
 
+def merge_concats_pass(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
@@ -108,7 +112,9 @@ def lazy_init():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
-def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
+def pre_grad_passes(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[object] = ()
+) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -134,7 +140,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                     gm=mod,
                     # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
                     fake_mode=detect_fake_mode(example_inputs),
-                ).propagate(*example_inputs)
+                ).propagate(*tuple(example_inputs))
 
             # normalization pass
             pass_execution_and_save(
@@ -179,6 +185,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
+            )
+            pass_execution_and_save(
+                merge_concats_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply merge_concats_pass",
             )
             pass_execution_and_save(
                 fuse_split_linear_add_pass.apply,
@@ -233,10 +245,14 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
             optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
+            # We should always do the normalization_pass first
+            if "normalization_pass" in config.pre_grad_fusion_options:
+                pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
-                if pass_name in PRE_GRAD_FUSIONS:
+                if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(

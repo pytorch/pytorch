@@ -17,6 +17,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    set_stance,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -33,6 +34,10 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
+
+
+# Register polyfill functions
+from .polyfills import loader as _  # usort: skip # noqa: F401
 
 
 __all__ = [
@@ -53,6 +58,7 @@ __all__ = [
     "run",
     "replay",
     "disable",
+    "set_stance",
     "reset",
     "OptimizedModule",
     "is_compiling",

@@ -61,7 +61,7 @@ class MeanShadowLogger(ns.Logger):
         self.float_sum = None
         self.quant_sum = None
 
-    def forward(self, x, y):
+    def forward(self, x, y):  # type: ignore[override]
         """Compute the average of quantized and floating-point data from modules.
 
         The inputs x,y are output data from the quantized and floating-point modules.
