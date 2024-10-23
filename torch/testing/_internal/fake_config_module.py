@@ -1,7 +1,7 @@
 import sys
 from typing import Optional
 
-from torch.utils._config_module import install_config_module, Config
+from torch.utils._config_module import Config, install_config_module
 
 
 e_bool = True

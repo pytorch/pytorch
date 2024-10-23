@@ -6,7 +6,6 @@ import sys
 import tempfile
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from typing_extensions import ParamSpec
-from dataclasses import dataclass
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
