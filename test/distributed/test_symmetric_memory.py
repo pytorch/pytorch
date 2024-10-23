@@ -23,9 +23,11 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TestCase,
 )
 
 
@@ -762,6 +764,26 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+
+class SymmMemUtilTest(TestCase):
+    @requires_cuda
+    def test_memset32(self):
+        torch.cuda.set_device("cuda:0")
+        t = torch.zeros(64, dtype=torch.uint32, device="cuda")
+        _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
+        self.assertTrue(t[:32].eq(0).all())
+        self.assertTrue(t[32:48].eq(1).all())
+        self.assertTrue(t[48:].eq(0).all())
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
 
 
 if __name__ == "__main__":
