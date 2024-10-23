@@ -23,7 +23,7 @@ function(c10d_add_test test_src)
   endif()
   add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
 
-  if (ARG_INSTALL_TEST)
+  if(ARG_INSTALL_TEST)
     set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
     install(TARGETS ${test_name} DESTINATION bin)
   endif()
