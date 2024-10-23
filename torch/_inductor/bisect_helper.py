@@ -4,6 +4,7 @@ import functools
 import os
 import shutil
 import sys
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
@@ -12,19 +13,52 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 # Set the subdirectory name
 SUBDIR_NAME = "bisect"
 
+
+@dataclass
+class Subsystem:
+    name: str
+
+
+@dataclass
+class BisectSubsystem(Subsystem):
+    pass
+
+
+@dataclass
+class BinarySubsystem(Subsystem):
+    pass
+
+
+@dataclass
+class ConfigChange(BinarySubsystem):
+    name: str = field(init=False)
+    config_name: str
+    config_field: str
+    config_value: object
+
+    def __post_init__(self) -> None:
+        self.name = f"{self.config_name}_{self.config_field}"
+
+
 # Dictionary of backend -> subsystems
-BACKENDS: Dict[str, List[str]] = {
+BACKENDS: Dict[str, List[Subsystem]] = {
     # run dynamo without aot_autograd
     "eager": [],
     # run dynamo with aot_autograd, but no partitioner or decomps
     "aot_eager": [],
     # run dynamo with aot autograd, decompositions and partitioner
     "aot_eager_decomp_partition": [
-        "decomposition"  # number of decompositions we apply in tracing
+        ConfigChange("aot_eager_decomp_partition", "cse", False),
+        BisectSubsystem(
+            "decomposition"
+        ),  # number of decompositions we apply in tracing
     ],  # TODO - add cse ?
     "inductor": [
-        "post_grad_passes",  # passes applied individually on forward, and backward in inductor
-        "lowerings",  # lowering aten operators to inductor
+        BisectSubsystem(
+            "post_grad_passes"
+        ),  # passes applied individually on forward, and backward in inductor
+        ConfigChange("inductor", "emulate_precision_casts", True),
+        BisectSubsystem("lowerings"),  # lowering aten operators to inductor
     ],  # TODO - add more - fusions, amp numeric mode ?
 }
 
@@ -79,15 +113,32 @@ class BisectionManager:
 
     @classmethod
     def update_run_state(
-        cls, backend_name: str, subsystem_name: str, run_state: str
+        cls, backend_name: str, subsystem: Subsystem, run_state: str
     ) -> None:
         file_path = os.path.join(
-            cls.get_dir(), backend_name, f"{subsystem_name}_run_state.txt"
+            cls.get_dir(), backend_name, f"{subsystem.name}_run_state.txt"
         )
+        if isinstance(subsystem, ConfigChange):
+            assert run_state == "test_disable"
+            cls.set_config_values(
+                backend_name,
+                subsystem.name,
+                {subsystem.config_field: subsystem.config_value},
+            )
+
         cls.write_lines_to_file(file_path, [run_state])
 
     @classmethod
+    def set_config_values(
+        cls, backend: str, subsystem: str, config_data: Dict[str, object]
+    ) -> None:
+        file_path = os.path.join(cls.get_dir(), backend, f"{subsystem}_config.txt")
+        lines = [f"{k}={v}\n" for k, v in config_data.items()]
+        cls.write_lines_to_file(file_path, lines)
+
+    @classmethod
     def update_bisect_status(cls, backend_name: str, subsystem_name: str) -> None:
+        assert isinstance(subsystem_name, str)
         file_path = os.path.join(cls.get_dir(), "bisect_status.txt")
         lines = [f"backend={backend_name}\n", f"subsystem={subsystem_name}\n"]
         cls.write_lines_to_file(file_path, lines)
@@ -96,6 +147,7 @@ class BisectionManager:
     def update_bisect_range(
         cls, backend_name: str, subsystem_name: str, low: int, high: int
     ) -> None:
+        assert isinstance(subsystem_name, str)
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_bisect_range.txt"
         )
@@ -130,8 +182,13 @@ class BisectionManager:
         lines = cls.read_lines_from_file(file_path)
         for line in lines:
             if line.startswith("subsystem="):
-                return line.strip().split("=")[1]
+                out = line.strip().split("=")[1]
+                return out if out else None
         return None
+
+    @classmethod
+    def get_subsystem_object(cls, backend_name: str, subsystem_name: str) -> Subsystem:
+        return next(obj for obj in BACKENDS[backend_name] if obj.name == subsystem_name)
 
     @classmethod
     def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
@@ -174,6 +231,37 @@ class BisectionManager:
             )
 
         return low, high
+
+    @classmethod
+    def update_config_change(cls, backend: str, subsystem: ConfigChange) -> None:
+        file_path = os.path.join(cls.get_dir(), backend, f"{subsystem.name}_config.txt")
+        lines = [
+            f"config_name={subsystem.config_name}\n",
+            f"config_field={subsystem.config_field}\n",
+            f"config_value={subsystem.config_value}\n",
+        ]
+        cls.write_lines_to_file(file_path, lines)
+
+    @classmethod
+    def get_config_change(cls, config_name: str) -> Optional[Dict[str, object]]:
+        backend = cls.get_backend()
+        subsystem = cls.get_subsystem()
+
+        if not backend or not subsystem:
+            return None
+
+        file_path = os.path.join(cls.get_dir(), backend, f"{subsystem}_config.txt")
+
+        if not os.path.exists(file_path):
+            return None
+
+        lines = cls.read_lines_from_file(file_path)
+        config_data = {}
+        for line in lines:
+            key, value = line.strip().split("=", 1)
+            config_data[key] = eval(value)
+
+        return config_data
 
     @classmethod
     def delete_bisect_status(cls) -> None:
@@ -243,21 +331,29 @@ class BisectionManager:
             return call_counter > midpoint
 
     @classmethod
-    def advance_subsystem(cls, curr_backend: str, curr_subsystem: str) -> Optional[str]:
+    def advance_subsystem(
+        cls, curr_backend: str, curr_subsystem: Subsystem
+    ) -> Optional[Subsystem]:
         """
         Tries to move to the next subsystem within the current system.
         """
-        print(f"Disabling {curr_subsystem} did not fix the issue.")
+        print(f"Disabling {curr_subsystem.name} did not fix the issue.")
 
         current_subsystems = BACKENDS[curr_backend]
-        current_subsystem_index = current_subsystems.index(curr_subsystem)
+        current_subsystem_index = next(
+            i
+            for i, subsystem in enumerate(current_subsystems)
+            if subsystem.name == curr_subsystem.name
+        )
 
         if current_subsystem_index < len(current_subsystems) - 1:
-            curr_subsystem = current_subsystems[current_subsystem_index + 1]
-            cls.update_bisect_status(curr_backend, curr_subsystem)
-            cls.update_run_state(curr_backend, curr_subsystem, "test_disable")
-            print(f"Moving to the next subsystem: {curr_backend} - {curr_subsystem}")
-            return curr_subsystem
+            next_subsystem = current_subsystems[current_subsystem_index + 1]
+            cls.update_bisect_status(curr_backend, next_subsystem.name)
+            cls.update_run_state(curr_backend, next_subsystem, "test_disable")
+            print(
+                f"Moving to the next subsystem: {curr_backend} - {next_subsystem.name}"
+            )
+            return next_subsystem
         else:
             print(
                 f"All subsystems in {curr_backend} have been checked. The issue is not in this system."
@@ -280,18 +376,19 @@ class BisectionManager:
             return None
 
     @classmethod
-    def perform_bisection(
+    def process_subsystem(
         cls,
         curr_backend: str,
-        curr_subsystem: str,
+        curr_subsystem: Subsystem,
         fn: Callable[[], bool],
         cli_interface: bool = True,
     ) -> bool:
         """
-        Perform the bisection process for the current system and subsystem. Returns True if the issue is found, False otherwise.
+        Process the current subsystem. Returns True if the issue is found, False otherwise.
         """
+        assert isinstance(curr_subsystem, Subsystem)
         while True:
-            run_state = cls.get_run_state(curr_backend, curr_subsystem)
+            run_state = cls.get_run_state(curr_backend, curr_subsystem.name)
             reset_counters()
             if run_state == "test_disable":
                 if not fn():
@@ -300,38 +397,46 @@ class BisectionManager:
                         return False
                     curr_subsystem = next_subsystem
                 else:
-                    # breakpoint()
-                    print(
-                        f"Disabling {curr_subsystem} fixed the issue. Starting bisect by getting upper bound."
-                    )
+                    if isinstance(curr_subsystem, ConfigChange):
+                        print(
+                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field}"
+                            f"to {curr_subsystem.config_value} fixed the issue"
+                        )
+                    else:
+                        print(f"Disabling {curr_subsystem.name} fixed the issue.")
+                    if isinstance(curr_subsystem, BinarySubsystem):
+                        return True
+                    print("Starting bisect by getting upper bound.")
                     cls.update_run_state(
                         curr_backend, curr_subsystem, "find_max_bounds"
                     )
             elif run_state == "find_max_bounds":
                 if fn():
                     raise RuntimeError(
-                        f"Function succeeded with 'find_max_bounds' status for {curr_backend} - {curr_subsystem}."
+                        f"Function succeeded with 'find_max_bounds' status for {curr_backend} - {curr_subsystem.name}."
                     )
                 else:
-                    _, high = cls.get_bisect_range(curr_backend, curr_subsystem)
+                    _, high = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                     print(f"Upper bound of {high} found for {curr_backend}.")
                     cls.update_run_state(curr_backend, curr_subsystem, "bisect")
             elif run_state == "bisect":
-                low, high = cls.get_bisect_range(curr_backend, curr_subsystem)
+                low, high = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                 midpoint = (low + high) // 2
                 print(
-                    f"Bisecting {curr_backend} - {curr_subsystem} (Range: [{low}, {high}], Midpoint: {midpoint})"
+                    f"Bisecting {curr_backend} - {curr_subsystem.name} (Range: [{low}, {high}], Midpoint: {midpoint})"
                 )
                 if fn():
                     cls.update_bisect_range(
-                        curr_backend, curr_subsystem, midpoint + 1, high
+                        curr_backend, curr_subsystem.name, midpoint + 1, high
                     )
                 else:
-                    cls.update_bisect_range(curr_backend, curr_subsystem, low, midpoint)
-                low, high = cls.get_bisect_range(curr_backend, curr_subsystem)
+                    cls.update_bisect_range(
+                        curr_backend, curr_subsystem.name, low, midpoint
+                    )
+                low, high = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                 if low == high:
                     print(
-                        f"Binary search completed for {curr_backend} - {curr_subsystem}. The bisect number is {low}. "
+                        f"Binary search completed for {curr_backend} - {curr_subsystem.name}. The bisect number is {low}. "
                         f"Debug info: {call_counter_debug_info.get(low, 'not found')}"
                     )
                     return True
@@ -366,27 +471,43 @@ class BisectionManager:
             cleanup = DisableBisect()
 
         curr_backend = cls.get_backend()
-        curr_subsystem = cls.get_subsystem()
+        curr_subsystem_name = cls.get_subsystem()
 
         if not curr_backend:
             cls.initialize_system()
             curr_backend = cls.get_backend()
-            curr_subsystem = cls.get_subsystem()
+            assert curr_backend is not None
+            curr_subsystem_name = cls.get_subsystem()
 
+        curr_subsystem = (
+            cls.get_subsystem_object(curr_backend, curr_subsystem_name)
+            if curr_subsystem_name is not None
+            else None
+        )
         while True:
             assert curr_backend is not None
             reset_counters()
             if curr_subsystem:
-                result = cls.perform_bisection(
+                result = cls.process_subsystem(
                     curr_backend, curr_subsystem, fn, cli_interface=cli_interface
                 )
                 if result:
-                    curr_subsystem = cls.get_subsystem()
-                    assert curr_subsystem is not None
-                    low, _ = cls.get_bisect_range(curr_backend, curr_subsystem)
+                    curr_subsystem = cls.get_subsystem_object(
+                        curr_backend, cls.get_subsystem()  # type: ignore[arg-type]
+                    )
+
+                    if isinstance(curr_subsystem, BinarySubsystem):
+                        return BisectionResult(
+                            curr_backend,
+                            curr_subsystem.name,
+                            0,
+                            curr_subsystem.name,
+                        )
+
+                    low, _ = cls.get_bisect_range(curr_backend, curr_subsystem.name)
                     return BisectionResult(
                         curr_backend,
-                        curr_subsystem,
+                        curr_subsystem.name,
                         low,
                         call_counter_debug_info.get(low, None),
                     )
@@ -412,7 +533,7 @@ class BisectionManager:
                     current_subsystems = BACKENDS[curr_backend]
                     if current_subsystems:
                         curr_subsystem = current_subsystems[0]
-                        cls.update_bisect_status(curr_backend, curr_subsystem)
+                        cls.update_bisect_status(curr_backend, curr_subsystem.name)
                         cls.update_run_state(
                             curr_backend, curr_subsystem, "test_disable"
                         )

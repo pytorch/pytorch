@@ -1187,7 +1187,7 @@ def _constrain_range_for_size(
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    assert isinstance(a.node.expr, sympy.Symbol), f"constraining non-Symbols NYI: {a}"
 
     a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 
@@ -3075,7 +3075,7 @@ class ShapeEnv:
         # deferred_runtime_asserts to compute its length
         self.num_deferred_runtime_asserts = 0
         self.log = log
-        self.log.debug("create_env")
+        self.log.info("create_env")
         self.frozen = False
         self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
@@ -3879,8 +3879,6 @@ class ShapeEnv:
         guess
 
         """
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -3919,8 +3917,6 @@ class ShapeEnv:
         source: Optional[Source] = None,
     ) -> Union[float, SymFloat]:
         """Create a SymFloat value from a symbolic expression"""
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -4808,7 +4804,7 @@ class ShapeEnv:
                 res = f"{source_ref(source)} == {sexpr}"
                 exprs.append(res)
                 if (s0 := self.source_to_var.get(srcname)) is not None:
-                    if source != (canonical_source := self.var_to_sources[s0][0]):
+                    if source != self.var_to_sources[s0][0]:
                         verbose_exprs.append(
                             f"{res}  # duck sizing added this equality because these "
                             f"variables had the same size {self.var_to_val[s0]} "
@@ -5563,20 +5559,19 @@ class ShapeEnv:
         # because we would now give inconsistent results for all size
         # oblivous tests!
         if upper < 2 and symbol in self.size_like:
-            upper = 2
+            vr = ValueRanges(lower, 2)
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
-            r = ValueRanges(lower, upper)
-            self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
-            self.var_to_range[symbol] = r
+            self.log.debug("_update_var_to_range %s = %s (new)", symbol, vr)
+            self.var_to_range[symbol] = vr
             if vr_sloc is None:
                 sloc = self._get_sloc()
                 vr_sloc = ValueRangesSLoc(sloc, sloc)
             self.var_to_range_sloc[symbol] = vr_sloc
         else:
             old = self.var_to_range[symbol]
-            new = old & ValueRanges(lower, upper)
+            new = old & vr
             if new != old:
                 if vr_sloc is None:
                     sloc = self._get_sloc()
@@ -5932,7 +5927,7 @@ class ShapeEnv:
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
-        return ValueRanges(-int_oo, int_oo)
+        return ValueRanges.unknown_int()
 
     @_lru_cache
     def _simplify_floor_div(self, expr: sympy.Expr) -> sympy.Expr:
@@ -6141,7 +6136,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:
@@ -6356,8 +6350,7 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
-            if self.runtime_asserts_frozen:
-                log.warning("runtime_asserts_frozen but then got %s", expr)
+            assert not self.runtime_asserts_frozen, expr
 
             self._check_frozen(expr, sympy.true)
 
