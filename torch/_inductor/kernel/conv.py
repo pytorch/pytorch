@@ -407,21 +407,17 @@ def conv_layout(
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
     with V.graph.fake_mode:
-        input_tensor = ir.ir_node_to_tensor(x, guard_shape=True)
-        weight_tensor = ir.ir_node_to_tensor(weight, guard_shape=True)
-        bias_tensor = ir.ir_node_to_tensor(bias, guard_shape=True)
-        memory_format = torch.channels_last if input_tensor.is_contiguous(memory_format=torch.channels_last) else torch.contiguous_format
         output = torch.ops.aten.convolution(
-            input_tensor,
-            weight_tensor,
-            bias_tensor,
+            ir.ir_node_to_tensor(x, guard_shape=True),
+            ir.ir_node_to_tensor(weight, guard_shape=True),
+            ir.ir_node_to_tensor(bias, guard_shape=True),
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
             transposed,
             V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
             groups,
-        ).to(memory_format=memory_format)
+        )
         sizes = ir.convert_shape_to_inductor(output.size())
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
@@ -560,7 +556,15 @@ def convolution(
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
-    layout = conv_layout(x, weight, None, **kwargs)
+        layout = conv_layout(x, weight, None, **kwargs)
+    else:
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+
     ordered_kwargs_for_cpp_kernel = [
         "stride",
         "padding",
@@ -657,7 +661,7 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-
+    # import pdb; pdb.set_trace()
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
@@ -669,7 +673,6 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
-
     return autotune_select_algorithm("convolution", choices, args, layout)
 
 

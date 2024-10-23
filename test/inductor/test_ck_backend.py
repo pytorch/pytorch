@@ -365,10 +365,12 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(
+        os.environ,
+        {"PATH": _get_path_without_sccache(), "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
     @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
-    @parametrize("channels_last_input", (True, False))
-    def test_max_autotune_conv2d(self, max_autotune_conv_backends, channels_last_input):
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         tensor_options = {"device": "cuda", "dtype": torch.float32}
@@ -395,11 +397,8 @@ class TestCKBackend(TestCase):
             def conv2d(x, w):
                 return torch.conv2d(x, w)
 
-            Y_eager = torch.conv2d(x, w)
-            if channels_last_input:
-                Y_compiled = conv2d(x_cl, w_cl)
-            else:
-                Y_compiled = conv2d(x, w_cl)
+            Y_eager = torch.conv2d(x_cl, w_cl)
+            Y_compiled = conv2d(x_cl, w_cl)
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 

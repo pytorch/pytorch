@@ -646,7 +646,7 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
-        fake_out = ir.Buffer(name="buf_out", layout=layout)
+        fake_out = ir.Buffer("buf_out", layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
@@ -676,7 +676,7 @@ class TritonTemplate(KernelTemplate):
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
-        ), V.graph.set_current_device(layout.device), TritonTemplateKernel(
+        ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
             use_jit=False,
@@ -858,15 +858,16 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         input_nodes,
         layout,
         make_kernel_render,
-        description,
+        debug_extra,
         bmreq,
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
     ) -> None:
-        super().__init__(name, input_nodes, layout, description)
+        super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
+        self.debug_extra = debug_extra
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
             log_info = {}
@@ -890,7 +891,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.bmreq.precompile()
 
     def __str__(self) -> str:
-        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"
@@ -909,6 +910,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                debug_extra=self.debug_extra,
                 mutated_inputs=self.mutated_inputs,
             )
         )
@@ -944,7 +946,7 @@ class ExternKernelCaller(ChoiceCaller):
         *,
         has_out_variant=True,
     ) -> None:
-        super().__init__(choice.name, input_nodes, layout, description="")
+        super().__init__(choice.name, input_nodes, layout)
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
@@ -961,12 +963,9 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            try:
-                torch._C._dynamo.guards.assert_size_stride(
-                    out_new, tuple(out.size()), tuple(out.stride())
-                )
-            except AssertionError as e:
-                log.warning(e)
+            torch._C._dynamo.guards.assert_size_stride(
+                out_new, tuple(out.size()), tuple(out.stride())
+            )
             out.copy_(out_new)  # for correctness checking
             return benchmarker.benchmark(algo, args, {})
 
@@ -990,7 +989,7 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        if self.choice.use_fallback_kernel:
+        if config.abi_compatible and self.choice.use_fallback_kernel:
             assert (
                 self.choice.op_overload is not None
             ), "Please provide an op_overload to use ir.FallbackKernel"
@@ -1650,9 +1649,11 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
-                kernel_description = choice.description
+                kernel_info = (
+                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
+                )
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_description}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
                 )
             else:
                 sys.stderr.write(
@@ -1664,7 +1665,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            f" seconds precompiling for {len(timings)} choices\n"
+            " seconds precompiling\n"
         )
 
     @staticmethod
@@ -1674,7 +1675,7 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmarking.
         """
         if isinstance(node, ir.Layout):
-            node = ir.Buffer(name="fake", layout=node)
+            node = ir.Buffer("fake", node)
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
