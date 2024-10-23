@@ -97,6 +97,31 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
 #endif
 }
 
+C10_CUDA_API void __inline__ memcpy2d_and_sync(
+    void* dst,
+    const void* src,
+    size_t src_pitch,
+    size_t dst_pitch,
+    size_t width_in_bytes,
+    size_t height,
+    cudaMemcpyKind kind,
+    cudaStream_t stream) {
+
+  if (C10_UNLIKELY(warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+    warn_or_error_on_sync();
+  }
+
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_stream_synchronization(
+        c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
+  }
+
+  C10_CUDA_CHECK(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
+
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+}
+
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
   if (C10_UNLIKELY(
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {

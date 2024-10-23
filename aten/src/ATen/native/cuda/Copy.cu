@@ -283,6 +283,12 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
+
+  // Check if the tensor is 1D or 2D and non-contiguous
+  if (iter.ndim() <= 2 && !iter.is_contiguous()) {  
+    return false; 
+  }
+
   if (same_dtype && iter.is_contiguous()) {
     // Contiguous same-dtype copies can always use cudaMemcpyAsync
     return false;
@@ -398,8 +404,34 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // TODO: warn on the return value.
     CachingHostAllocator_recordEvent(ptr, ctx, stream);
 
-  } else {
-    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
+  } else { 
+    if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
+
+      const auto& dst_tensor = iter.tensor(0);
+      const auto& src_tensor = iter.tensor(1);      
+      auto src_sizes = src_tensor.sizes();
+      auto src_strides = src_tensor.strides();
+      
+      auto height = iter.ndim() == 1 ? 1 : src_sizes[0];
+      auto width_in_bytes = iter.ndim() == 1 ? nbytes : src_sizes[1] * src_tensor.element_size();
+
+      // Ensure pitch is at least width_in_bytes
+      size_t src_pitch = std::max(src_strides[0] * src_tensor.element_size(), width_in_bytes);
+      size_t dst_pitch = std::max(src_strides[0] * dst_tensor.element_size(), width_in_bytes);
+
+      at::cuda::memcpy2d_and_sync(
+          dst,        
+          src,        
+          src_pitch,  
+          dst_pitch, 
+          width_in_bytes,
+          height,                               // Number of rows
+          kind,                                 // Copy direction
+          stream         
+        );
+    } else {
+      at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
+    }
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
