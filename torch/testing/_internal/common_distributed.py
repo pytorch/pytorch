@@ -81,7 +81,7 @@ TEST_SKIPS = {
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
-    "no_accelerator":TestSkip(89, "accelerator is not available."),
+    "no_accelerator": TestSkip(89, "accelerator is not available."),
 }
 
 
