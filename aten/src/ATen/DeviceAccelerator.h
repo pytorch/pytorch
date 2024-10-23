@@ -6,6 +6,8 @@
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <optional>
 
+namespace at::accelerator {
+
 // This file defines the top level Accelerator concept for PyTorch.
 // A device is an accelerator per the definition here if:
 // - It is mutually exclusive with all other accelerators
@@ -15,13 +17,29 @@
 // As of today, accelerator devices are (in no particular order):
 // CUDA, MTIA, XPU, HIP, MPS, PrivateUse1
 
-namespace at {
-
 // Ensures that only one accelerator is available (at
 // compile time if possible) and return it.
 // When checked is true, the returned optional always has a value.
 TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 
-TORCH_API bool isAccelerator(c10::DeviceType d);
+TORCH_API bool isAccelerator(c10::DeviceType device_type);
 
+TORCH_API c10::DeviceIndex deviceCount();
+
+TORCH_API void setDeviceIndex(c10::DeviceIndex device_index);
+
+TORCH_API c10::DeviceIndex getDeviceIndex();
+
+TORCH_API void setCurrentStream(c10::Stream stream);
+
+TORCH_API c10::Stream getCurrentStream(c10::DeviceIndex device_index);
+
+void synchronizeDevice(c10::DeviceIndex device_index);
+
+} // namespace at::accelerator
+
+namespace at {
+// Keep BC only
+using at::accelerator::getAccelerator;
+using at::accelerator::isAccelerator;
 } // namespace at
