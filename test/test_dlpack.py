@@ -275,7 +275,9 @@ class TestTorchDlPack(TestCase):
         tensor = torch.rand(10)
         wrap = TensorDLPackWrapper(tensor)
         # Create a new tensor from the wrapper.
-        # This should identify that the wrapper class provides the DLPack methods and use them for creating the new tensor, instead of iterating element by element.
+        # This should identify that the wrapper class provides the DLPack methods
+        # and use them for creating the new tensor, instead of iterating element
+        # by element.
         new_tensor = torch.tensor(wrap)
         self.assertEqual(tensor, new_tensor)
 
