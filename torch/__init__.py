@@ -308,7 +308,6 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -521,6 +520,9 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __sub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rsub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
@@ -2227,7 +2229,7 @@ class _TorchCompileInductorWrapper:
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: _Dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -2514,6 +2516,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+from torch import fx as fx
 
 
 # Register MPS specific decomps
