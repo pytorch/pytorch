@@ -7009,7 +7009,7 @@ class TestCompiledDistribution(TestCase):
         func = torch.compile(self.sample_from_existing_dist, fullgraph=True)
         _ = func(dist=dist, has_entropy=True)
         logits = probs.log()
-        dist = Categorical(logists=logits)
+        dist = Categorical(logits=logits)
         _ = func(dist=dist, has_entropy=True)
 
 

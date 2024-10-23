@@ -64,10 +64,10 @@ class LogitRelaxedBernoulli(Distribution):
         new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
         batch_shape = torch.Size(batch_shape)
         new.temperature = self.temperature
-        if "probs" in self.__dict__:
+        if hasattr(self, "_probs"):
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if hasattr(self, "_logits"):
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(LogitRelaxedBernoulli, new).__init__(batch_shape, validate_args=False)

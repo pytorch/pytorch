@@ -61,7 +61,7 @@ class Distribution:
             for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
                     continue  # skip constraints that cannot be checked
-                if param not in self.__dict__ and isinstance(
+                if not hasattr(self, "_" + param) and hasattr(type(self), param) and isinstance(
                     getattr(type(self), param), lazy_property
                 ):
                     continue  # skip checking lazily-constructed args

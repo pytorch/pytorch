@@ -81,10 +81,10 @@ class ContinuousBernoulli(ExponentialFamily):
         new = self._get_checked_instance(ContinuousBernoulli, _instance)
         new._lims = self._lims
         batch_shape = torch.Size(batch_shape)
-        if "probs" in self.__dict__:
+        if hasattr(self, "_probs"):
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if hasattr(self, "_logits"):
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(ContinuousBernoulli, new).__init__(batch_shape, validate_args=False)

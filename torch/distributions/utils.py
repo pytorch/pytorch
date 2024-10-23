@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 from functools import update_wrapper
 from numbers import Number
 from typing import Any, Dict
@@ -130,7 +131,7 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-class lazy_property:
+class lazy_property(property):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -138,17 +139,28 @@ class lazy_property:
     attribute.
     """
 
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
-        update_wrapper(self, wrapped)  # type:ignore[arg-type]
+    def __init__(self, fget=None, fset=None, fdel=None, doc=None):
+        wrapped = fget
+        assert fset is None
+        assert doc is None
+        wrapped = wrapped
+        name = "_" + wrapped.__name__
+        # update_wrapper(self, wrapped)  # type:ignore[arg-type]
 
-    def __get__(self, instance, obj_type=None):
-        if instance is None:
-            return _lazy_property_and_property(self.wrapped)
-        with torch.enable_grad():
-            value = self.wrapped(instance)
-        setattr(instance, self.wrapped.__name__, value)
-        return value
+        def getter(instance):
+            if instance is None:
+                return _lazy_property_and_property(wrapped)
+            if hasattr(instance, name):
+                return getattr(instance, name)
+            with torch.enable_grad():
+                value = wrapped(instance)
+            setattr(instance, name, value)
+            return value
+
+        def setter(instance, value):
+            setattr(instance, name, value)
+
+        super().__init__(getter, setter, fdel, wrapped.__doc__)
 
 
 class _lazy_property_and_property(lazy_property, property):

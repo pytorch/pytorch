@@ -75,10 +75,10 @@ class Categorical(Distribution):
         new = self._get_checked_instance(Categorical, _instance)
         batch_shape = torch.Size(batch_shape)
         param_shape = batch_shape + torch.Size((self._num_events,))
-        if "probs" in self.__dict__:
+        if hasattr(self, "_probs"):
             new.probs = self.probs.expand(param_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if hasattr(self, "_logits"):
             new.logits = self.logits.expand(param_shape)
             new._param = new.logits
         new._num_events = self._num_events

@@ -61,10 +61,10 @@ class NegativeBinomial(Distribution):
         new = self._get_checked_instance(NegativeBinomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count.expand(batch_shape)
-        if "probs" in self.__dict__:
+        if hasattr(self, "_probs"):
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
-        if "logits" in self.__dict__:
+        if hasattr(self, "_logits"):
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
         super(NegativeBinomial, new).__init__(batch_shape, validate_args=False)
