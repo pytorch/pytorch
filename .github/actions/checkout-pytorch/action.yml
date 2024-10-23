@@ -47,4 +47,4 @@ runs:
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
-        show-progress:: false
+        show-progress: false
