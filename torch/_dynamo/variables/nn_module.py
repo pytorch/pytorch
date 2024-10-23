@@ -39,6 +39,8 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     set_example_value,
+    unpatched_nn_module_call,
+    unpatched_nn_module_call_impl,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
@@ -860,7 +862,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         if (
             not isinstance(mod, torch.fx.GraphModule)
-            and mod.__call__.__func__ is not torch.nn.Module.__call__
+            and mod.__call__.__func__ is not unpatched_nn_module_call
         ):
             name = "__call__"
             fn = getattr(self.value_type, name)
@@ -871,8 +873,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
         if (
-            mod.__call__.__func__ is torch.nn.Module.__call__
-            and mod._call_impl.__func__ is torch.nn.Module._call_impl
+            istype(mod.__call__, types.MethodType)
+            and istype(mod._call_impl, types.MethodType)
+            and mod.__call__.__func__ is unpatched_nn_module_call
+            and mod._call_impl.__func__ is unpatched_nn_module_call_impl
             and "forward" not in mod.__dict__
         ):
             forward_method = inspect.getattr_static(mod, "forward")

@@ -562,7 +562,7 @@ public:
     }
 
     template<class Lambda>
-    [[deprecated("Registering operator kernels with stateful lambdas (i.e. lambdas with a capture) has non-obvious behavior. This is deprecated. Please use a lambda without a capture or a functor class instead.")]]
+    C10_DEPRECATED_MESSAGE("Registering operator kernels with stateful lambdas (i.e. lambdas with a capture) has non-obvious behavior. This is deprecated. Please use a lambda without a capture or a functor class instead.")
     // enable_if: only enable it if Lambda is actually a functor but not a stateless lambda
     std::enable_if_t<guts::is_functor<Lambda>::value && !guts::is_stateless_lambda<std::decay_t<Lambda>>::value, RegisterOperators&&>
     op(const std::string& schemaOrName, Lambda&& lambda, Options&& options = RegisterOperators::options()) && {
