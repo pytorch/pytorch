@@ -1007,7 +1007,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.compiled_autograd_enabled:
+            if not compiled_autograd.enabled():
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.
@@ -1259,10 +1259,6 @@ class NumpyNdarrayVariable(TensorVariable):
         if result is None:
             raise NotImplementedError
         return result
-
-    def has_unpack_var_sequence(self, tx):
-        # Fails PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py TestReductionsCPU.test_quantile_cpu_float64
-        return False
 
     @staticmethod
     def patch_args(name, args, kwargs):

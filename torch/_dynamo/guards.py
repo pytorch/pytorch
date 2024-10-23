@@ -1737,6 +1737,7 @@ class GuardBuilder(GuardBuilderBase):
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
+            relaxed_sources: Set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -1747,6 +1748,7 @@ class GuardBuilder(GuardBuilderBase):
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
+                        relaxed_sources,
                     )
                 else:
                     log.warning("Untracked tensor used in export constraints")
@@ -1754,6 +1756,7 @@ class GuardBuilder(GuardBuilderBase):
                 source_pairs=source_pairs,
                 derived_equalities=derived_equalities,
                 phantom_symbols=list(phantom_symbols.values()),
+                relaxed_sources=relaxed_sources,
                 warn_only=False,
             )
         else:
