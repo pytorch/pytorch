@@ -461,6 +461,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.rsub,
             aten._safe_softmax,
             aten._scaled_dot_product_flash_attention_for_cpu.default,
+            aten._scaled_dot_product_int8_for_cpu.default,
             aten.select_backward,
             aten.select_scatter,
             aten.sgn,

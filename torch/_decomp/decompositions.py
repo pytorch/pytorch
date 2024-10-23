@@ -5036,6 +5036,62 @@ def scaled_dot_product_flash_attention_for_cpu(
     return output, attn
 
 
+@register_decomposition(aten._scaled_dot_product_int8_for_cpu.default)
+def scaled_dot_product_int8_for_cpu(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    *,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+    q_zp: int = 0,
+    q_scale: float = 0.0,
+    k_zp: int = 0,
+    k_scale: float = 0.0,
+    v_zp: int = 0,
+    v_scale: float = 0.0,
+    a_zp: int = 0,
+    a_scale: float = 0.0,
+    o_zp: int = 0,
+    o_scale: float = 0.0,
+) -> Tensor:
+    dtype = query.dtype
+    torch._check(
+        dtype == torch.uint8,
+        lambda: f"query must be U8 but got {dtype}",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: f"q, k, v must be a 4 dimensional tensor, got {query.dim()}, {key.dim()}, {value.dim()}",
+    )
+    torch._check(
+        dropout_p == 0.0, lambda: f"dropout probability must be zero, got {dropout_p}"
+    )
+    torch._check(
+        query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
+        lambda: "q, k, v should have the same head size",
+    )
+
+    output = aten._scaled_dot_product_int8_for_cpu.default(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        dropout_mask=None,
+        scale=scale,
+    )
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
+    )
+    return output
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
