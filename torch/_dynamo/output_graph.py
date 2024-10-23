@@ -443,11 +443,14 @@ class OutputGraph:
         if self.backward_state_proxy is None:
             if self.export:
                 unimplemented("backward_state does not support export")
+            example_value = BackwardState()
             self.backward_state_proxy = self.root_tracer.create_graph_input(
-                "dynamo_backward_state", BackwardState, source=BackwardStateSource()
+                "dynamo_backward_state",
+                type(example_value),
+                example_value,
+                source=BackwardStateSource(),
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
-            set_example_value(self.backward_state_proxy.node, BackwardState())
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 
@@ -670,12 +673,12 @@ class OutputGraph:
             # (this is harmless because we do remove the unused ones later)
             proxy = self.root_tracer.create_graph_input(
                 str(s0),
-                torch.SymInt,
+                type(s),
+                s,
                 before=True,
                 source=prop,
             )
             self.root_tracer.bound_symbols[s0] = proxy
-            set_example_value(proxy.node, s)
             assert isinstance(s, torch.SymInt)
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
@@ -2121,7 +2124,9 @@ class SubgraphTracer(fx.Tracer):
     # for SymInts that may occur in the tensor argument.
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False, source=None):
+    def create_graph_input(
+        self, name, type_expr, example_value, before=False, source=None
+    ):
         log.debug(
             "create_graph_input %s %s",
             name,
@@ -2165,6 +2170,7 @@ class SubgraphTracer(fx.Tracer):
             ctx = self.graph.inserting_before(None)
         with ctx:
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            set_example_value(proxy.node, example_value)
             if self.input_name_to_proxy and before:
                 k, v = self.input_name_to_proxy.popitem()
                 self.input_name_to_proxy[name] = proxy
@@ -2185,8 +2191,10 @@ class SubgraphTracer(fx.Tracer):
         # If that is the case, just return the already lifted Proxy.
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
-        new_proxy = self.create_graph_input(proxy.node.name)
-        set_example_value(new_proxy.node, proxy.node.meta["example_value"])
+        example_value = proxy.node.meta["example_value"]
+        new_proxy = self.create_graph_input(
+            proxy.node.name, type(example_value), example_value
+        )
         self.lifted_freevars[proxy] = new_proxy
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)

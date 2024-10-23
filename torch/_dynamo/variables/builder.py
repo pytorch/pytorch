@@ -34,7 +34,7 @@ from typing import (
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_chromium_event_logger
+from torch._dynamo.utils import _clone_input, get_chromium_event_logger
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -90,7 +90,6 @@ from ..trace_rules import (
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
-    clone_input,
     common_constant_types,
     get_fake_value,
     get_locals_to_steal,
@@ -953,6 +952,7 @@ class VariableBuilder:
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
+                new_symint,
                 source=new_source,
             )
 
@@ -1132,6 +1132,7 @@ class VariableBuilder:
                 proxy = self.tx.output.root_tracer.create_graph_input(
                     re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                     type(value),
+                    value,
                     source=self.source,
                 )
 
@@ -1176,6 +1177,7 @@ class VariableBuilder:
             proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(value),
+                fake_script_obj,
                 source=self.source,
             )
 
@@ -1255,7 +1257,10 @@ class VariableBuilder:
             source = self.source
             assert isinstance(value, list)
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                value,
+                source=source,
             )
             tensor_list_proxy.node.meta["steal_arg"] = True
 
@@ -1569,18 +1574,6 @@ class VariableBuilder:
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
-        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
-        # When we've discovered an untracked tensor, then we actually need
-        # to get Dynamo to track the tensor (which is what this function does)
-        # and put it as a graph input on the root tracer. Later on,
-        # if the input is actually used in the body of the HigherOrderOperator,
-        # then the relevant SubgraphTracer will lift it to being an input of
-        # the subgraph.
-        # See NOTE [HigherOrderOperator tracing design] for more details.
-
-        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
-        )
         options = {}
         if type(value) in config.traceable_tensor_subclasses:
             options["torch_function_fn"] = build_torch_function_fn(
@@ -1618,10 +1611,30 @@ class VariableBuilder:
                 "requires some design around FSDP + torch.compile."
             )
 
+        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
+        # When we've discovered an untracked tensor, then we actually need
+        # to get Dynamo to track the tensor (which is what this function does)
+        # and put it as a graph input on the root tracer. Later on,
+        # if the input is actually used in the body of the HigherOrderOperator,
+        # then the relevant SubgraphTracer will lift it to being an input of
+        # the subgraph.
+        # See NOTE [HigherOrderOperator tracing design] for more details.
+
+        example_value = wrap_to_fake_tensor_and_record(
+            value, tx=self.tx, is_tensor=True, source=source
+        )
+        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(value),
+            example_value,
+            source=source,
+        )
+        cache_real_value_when_export(self.tx, tensor_proxy, value)
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
-            example_value=value,
+            example_value=example_value,
             subclass_type=subclass_type,
             source=source,
             **options,
@@ -1707,15 +1720,25 @@ class VariableBuilder:
         # that there's not another great way to do this atm.
         # This creates the right graphargs, as well as registration for guards in tensor names and shape env.
         LazyVariableTracker.realize_all(VariableBuilder(self.tx, source)(tensor_value))
-        proxy = self.tx.output.root_tracer.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value), source=source
+        example_value = wrap_to_fake_tensor_and_record(
+            tensor_value,
+            tx=self.tx,
+            is_tensor=False,
+            source=source,
         )
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(tensor_value),
+            example_value,
+            source=source,
+        )
+        cache_real_value_when_export(self.tx, proxy, tensor_value)
         options = {"source": source}
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=tensor_value,
+            example_value=example_value,
             **options,
         )
 
@@ -1858,11 +1881,11 @@ class VariableBuilder:
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
+            wrapped_value,
             source=self.get_source(),
         )
 
         self.tx.output.root_tracer.bound_symbols[wrapped_value.node.expr] = proxy
-        set_example_value(proxy.node, wrapped_value)
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
@@ -1923,21 +1946,27 @@ class VariableBuilder:
         # Tensor.  However, we never let the UnspecializedPythonVariable escape
         # here, so there should never actually be any guards against this
         # source.
-        options = {"source": FloatTensorSource(self.get_source()), "raw_value": value}
+        source = FloatTensorSource(self.get_source())
+        options = {"source": source, "raw_value": value}
 
         # TODO: Maybe the tensor-ification should be built into the source,
         # rather than by special pattern match
+        example_value = wrap_to_fake_tensor_and_record(
+            wrapped_value, tx=self.tx, is_tensor=False, source=source
+        )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
-            source=self.get_source(),
+            example_value,
+            source=source,
         )
+        cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
         unspec_var = wrap_fx_proxy_cls(
             UnspecializedPythonVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=wrapped_value,
+            example_value=example_value,
             **options,
         )
         assert isinstance(unspec_var, UnspecializedPythonVariable)
@@ -2001,17 +2030,22 @@ class VariableBuilder:
         options = {"source": self.get_source()}
         options.update({"raw_value": value})
 
+        example_value = wrap_to_fake_tensor_and_record(
+            wrapped_value, tx=self.tx, is_tensor=False, source=self.get_source()
+        )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
+            example_value,
             source=self.get_source(),
         )
+        cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
         unspec_var = wrap_fx_proxy_cls(
             UnspecializedPythonVariable,
             tx=self.tx,
             proxy=proxy,
-            example_value=wrapped_value,
+            example_value=example_value,
             **options,
         )
         self.tx.output.unspec_variable_map[self.name] = unspec_var
@@ -2081,6 +2115,15 @@ def wrap_fx_proxy(
         return result
 
 
+def cache_real_value_when_export(tx, proxy, example_value):
+    if tx.export:
+        # The legacy behavior for real value cache with subclasses was
+        # to perform a clone WITHOUT preserving the subclass.  It's
+        # not entirely clear this is what you actually want though.
+        with torch._C.DisableTorchFunctionSubclass():
+            proxy.tracer.real_value_cache[proxy.node] = _clone_input(tx, example_value)
+
+
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
 #
@@ -2134,26 +2177,18 @@ def wrap_fx_proxy_cls(
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
-    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
+    # Placeholders always carry example_value in node.meta.
+    # non-placeholders always have no example_value in node.meta
+    if proxy.node.op == "placeholder":
+        assert (
+            "example_value" in proxy.node.meta
+        ), f"placeholder {proxy} doesn't have 'example_value' in node.meta"
+    else:
+        assert (
+            "example_value" not in proxy.node.meta
+        ), f"{proxy.node.meta['example_value']}"
 
     initial_example_value = example_value
-
-    def _clone_input(value):
-        if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not (
-                isinstance(value, FakeTensor)
-                or (
-                    # Is functional tensor fakeified by this instance of Dynamo
-                    torch._is_functional_tensor(value)
-                    and maybe_get_fake_mode(value) is tx.fake_mode
-                )
-                or value.is_nested
-            ):
-                # NB: ensure strides are preserved
-                value = clone_input(value)
-
-        return value
 
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
@@ -2168,14 +2203,8 @@ def wrap_fx_proxy_cls(
             pass
 
         elif isinstance(example_value, torch.Tensor):
-            if tx.export:
-                # The legacy behavior for real value cache with subclasses was
-                # to perform a clone WITHOUT preserving the subclass.  It's
-                # not entirely clear this is what you actually want though.
-                with torch._C.DisableTorchFunctionSubclass():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
-                        example_value
-                    )
+            cache_real_value_when_export(tx, proxy, example_value)
+
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
@@ -2206,7 +2235,7 @@ def wrap_fx_proxy_cls(
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
         # tensor, the stored example value will update too!)
-        example_value = _clone_input(example_value)
+        example_value = _clone_input(tx, example_value)
         set_example_value(proxy.node, example_value)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
