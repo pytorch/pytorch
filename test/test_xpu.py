@@ -420,6 +420,14 @@ print(torch.xpu.device_count())
             )
         )
 
+    def test_get_arch_list(self):
+        arch_list = torch.xpu.get_arch_list()
+        if not arch_list:
+            return
+        flags = torch.xpu.get_gencode_flags()
+        for arch in arch_list:
+            self.assertTrue(arch in flags)
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
