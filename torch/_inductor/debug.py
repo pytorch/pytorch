@@ -559,7 +559,7 @@ class DebugFormatter:
                         except Exception:
                             pass
                     static_layout = FixedLayout(
-                        device=layout.device,
+                        layout.device,
                         dtype=layout.dtype,
                         size=list(V.graph.sizevars.size_hints(layout.size)),
                         stride=list(V.graph.sizevars.size_hints(layout.stride)),

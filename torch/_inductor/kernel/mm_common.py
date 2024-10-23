@@ -455,9 +455,9 @@ def mm_args(
             out_dtype = mat1.get_dtype()
 
         layout = FixedLayout(
-            device=mat1.get_device(),
-            dtype=out_dtype,
-            size=[*b, m, n],
+            mat1.get_device(),
+            out_dtype,
+            [*b, m, n],
         )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
