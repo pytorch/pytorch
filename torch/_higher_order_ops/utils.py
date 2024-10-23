@@ -415,7 +415,9 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
+    assert all(
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+    ), args
     partitioned_args: List[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
