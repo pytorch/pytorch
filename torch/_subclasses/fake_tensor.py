@@ -518,18 +518,18 @@ class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
 
 
-# This memorizes the unbacked SymInt representing quantities like the number
-# of nonzero elements in this tensor.  There is one instance of the descriptor
-# per particular quantity to memoize.
+# This memorizes unbacked SymInt or SymFloats representing quantities like the
+# number of nonzero elements in this tensor or learning rate. There is one
+# instance of the descriptor per particular quantity to memoize.
 #
 # Memoization is helpful if you do something like x[mask] and y[mask];
 # mask.nonzero() gets repeatedly called and should give a consistent unbacked
-# SymInt.  It needs to be invalidated in the same way constant is.
+# SymInt. It needs to be invalidated in the same way constant is.
 #
 # Making this a descriptor may seem overly fancy, but actually it's the most
-# convenient way to make sure we have access to FakeTensor during access,
-# which is required for testing version counter and epoch validity
-class SymIntMemoDescriptor:
+# convenient way to ensure access to FakeTensor during access, which is
+# required for testing version counter and epoch validity.​
+class SymNumberMemoDescriptor:
     _name: str
 
     # By default, SymInts in this memo are invalidated across versions/epochs.
@@ -560,9 +560,14 @@ class SymIntMemoDescriptor:
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[Type[FakeTensor]] = None
-    ) -> Optional[torch.SymInt]:
+    ) -> Optional[Union[torch.SymInt, torch.SymFloat]]:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
+
+        # If backed, it's ok to preserve memo since we know it won't renumber.
+        if r.node.hint is not None:
+            return r
+
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
@@ -575,7 +580,9 @@ class SymIntMemoDescriptor:
             return None
         return r
 
-    def __set__(self, obj: FakeTensor, value: Optional[torch.SymInt]) -> None:
+    def __set__(
+        self, obj: FakeTensor, value: Optional[Union[torch.SymInt, torch.SymFloat]]
+    ) -> None:
         if value is None:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
@@ -604,14 +611,14 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymIntMemoDescriptor()
-    item_memo = SymIntMemoDescriptor()
-    unique_memo = SymIntMemoDescriptor()
+    nonzero_memo = SymNumberMemoDescriptor()
+    item_memo = SymNumberMemoDescriptor()
+    unique_memo = SymNumberMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
     # nested int.
-    nested_int_memo = SymIntMemoDescriptor(is_nested_int=True)
+    nested_int_memo = SymNumberMemoDescriptor(is_nested_int=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -889,6 +896,7 @@ class FakeTensor(Tensor):
             self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
                 nt_tensor_id=None
             )
+        assert isinstance(self.nested_int_memo, torch.SymInt)
         return self.nested_int_memo * coeff
 
     # Similar to FunctionalTensor.tolist
