@@ -209,9 +209,10 @@ class ConfigModule(ModuleType):
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
-        ignored_keys = (),
-        if "_save_config_ignore":
-            ignored_keys  = self._save_config_ignore
+        ignored_keys = []
+        if "_save_config_ignore" in self._config:
+            assert isinstance(self._save_config_ignore, list)
+            ignored_keys = self._save_config_ignore
         return pickle.dumps(
             self._get_dict(ignored_keys=ignored_keys),
             protocol=2,
