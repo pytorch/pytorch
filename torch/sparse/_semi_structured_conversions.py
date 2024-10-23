@@ -87,11 +87,11 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     if dense.dtype != torch.float:
         ksparse = 4
         dense_4 = dense.view(-1, k // ksparse, ksparse)
-        m0, m1, m2, m3 = (dense_4 != 0).unbind(-1)
+        m0, m1, _m2, m3 = (dense_4 != 0).unbind(-1)
     else:
         ksparse = 2
         dense_2 = dense.view(-1, k // ksparse, ksparse)
-        m0, m2 = m1, m3 = (dense_2 != 0).unbind(-1)
+        m0, _m2 = m1, m3 = (dense_2 != 0).unbind(-1)
     meta_ncols = k // (ksparse * quadbits_per_meta_elem)
 
     # Encoding quadruples of True/False values as follows:
@@ -342,11 +342,15 @@ def _compute_compressed_swizzled_bitmask(dense):
     # [0 0 1 1]
 
     # reshape tensor to expand tiles into 8-bit vectors
-    bitmask_binary_representation = bitmask_4x4_chunks.reshape(*bitmask_4x4_chunks.shape[:2], 4, 2, 8)
+    bitmask_binary_representation = bitmask_4x4_chunks.reshape(
+        *bitmask_4x4_chunks.shape[:2], 4, 2, 8
+    )
 
     # to convert from binary representaiton, we can do a matmul with powers of two
-    powers_of_two = 2**torch.arange(8, dtype=torch.float, device="cuda")
+    powers_of_two = 2 ** torch.arange(8, dtype=torch.float, device="cuda")
     # To run on GPU: cast to float to do matmul and then cast back
-    compressed_swizzled_bitmask = (bitmask_binary_representation.to(torch.float) @ powers_of_two).to(torch.uint8)
+    compressed_swizzled_bitmask = (
+        bitmask_binary_representation.to(torch.float) @ powers_of_two
+    ).to(torch.uint8)
 
     return compressed_swizzled_bitmask

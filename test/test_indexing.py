@@ -2,7 +2,6 @@
 
 import operator
 import random
-
 import unittest
 import warnings
 from functools import reduce
@@ -11,7 +10,6 @@ import numpy as np
 
 import torch
 from torch import tensor
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -691,9 +689,7 @@ class TestIndexing(TestCase):
             [[0, 2, 3], slice(None), [1, 3, 4]],
             # [...]
             # less dim, ellipsis
-            [
-                [0, 2],
-            ],
+            [[0, 2]],
             [[0, 2], slice(None)],
             [[0, 2], Ellipsis],
             [[0, 2], slice(None), Ellipsis],
@@ -778,9 +774,7 @@ class TestIndexing(TestCase):
             [[0], [1, 2, 4], slice(None)],
             [[0], [1, 2, 4], Ellipsis],
             [[0], [1, 2, 4], Ellipsis, slice(None)],
-            [
-                [1],
-            ],
+            [[1]],
             [[0, 2, 1], [3], [4]],
             [[0, 2, 1], [3], [4], slice(None)],
             [[0, 2, 1], [3], [4], Ellipsis],
@@ -953,21 +947,10 @@ class TestIndexing(TestCase):
         # and verifies consistency with CPU result
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
-        indices = [
-            torch.tensor([0, 1, 2, 3]),
-            torch.tensor(
-                [
-                    1,
-                ]
-            ),
-        ]
+        indices = [torch.tensor([0, 1, 2, 3]), torch.tensor([1])]
         indices_dev = [i.to(device) for i in indices]
         values0d = torch.tensor(1.0)
-        values1d = torch.tensor(
-            [
-                1.0,
-            ]
-        )
+        values1d = torch.tensor([1.0])
 
         out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values0d, accumulate=True)
@@ -981,21 +964,13 @@ class TestIndexing(TestCase):
         t_dev = t.to(device)
 
         indices = [
-            torch.tensor(
-                [
-                    0,
-                ]
-            ),
+            torch.tensor([0]),
             torch.arange(3)[:, None],
             torch.arange(2)[None, :],
         ]
         indices_dev = [i.to(device) for i in indices]
         values1d = torch.tensor([-1.0, -2.0])
-        values2d = torch.tensor(
-            [
-                [-1.0, -2.0],
-            ]
-        )
+        values2d = torch.tensor([[-1.0, -2.0]])
 
         out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
@@ -1006,6 +981,37 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
+    def test_index_put_large_indices(self, device):
+        def generate_indices(num_indices: int, index_range: int):
+            indices = []
+            for _ in range(num_indices):
+                x = random.randint(0, index_range - 1)
+                indices.append(x)
+            return torch.tensor(indices)
+
+        num_indices = 401988
+        max_index_range = 2000
+        results = []
+        target_index_range = [16, 256, 2000]
+        for generated_index_range in target_index_range:
+            # create CPU tensors
+            a_tensor_size = (max_index_range, 256)
+            a = torch.randn(a_tensor_size, dtype=torch.bfloat16)
+            b = generate_indices(
+                num_indices=num_indices, index_range=generated_index_range
+            )
+            c_tensor_size = (num_indices, 256)
+            c = torch.randn(c_tensor_size, dtype=torch.bfloat16)
+            # create GPU copies
+            a_dev = a.to(device)
+            b_dev = b.to(device)
+            c_dev = c.to(device)
+            # run
+            a.index_put_(indices=[b], values=c, accumulate=True)
+            a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
+            self.assertEqual(a_dev.cpu(), a)
+
+    @onlyCUDA
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)
@@ -1014,9 +1020,7 @@ class TestIndexing(TestCase):
         self.assertTrue(not t1.is_contiguous())
         self.assertTrue(not t2.is_contiguous())
 
-        indices = [
-            torch.tensor([0, 1]),
-        ]
+        indices = [torch.tensor([0, 1])]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
         out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)

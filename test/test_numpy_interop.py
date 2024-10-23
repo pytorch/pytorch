@@ -3,7 +3,6 @@
 # Owner(s): ["module: numpy"]
 
 import sys
-
 from itertools import product
 
 import numpy as np
@@ -17,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -329,13 +327,7 @@ class TestNumPyInterop(TestCase):
 
         # list of list or numpy array.
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor(
-                [
-                    [1, 2, 3],
-                    np.random.random(size=(2,)),
-                ],
-                device=device,
-            )
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
@@ -420,7 +412,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(asarray.dtype, dtype)
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
             if np.dtype(dtype).kind == "u":  # type: ignore[misc]
-                wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
+                wrapped_x = np.array([1, -2, 3, -4]).astype(dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
             else:
@@ -480,11 +472,18 @@ class TestNumPyInterop(TestCase):
     def test_parse_numpy_int_overflow(self, device):
         # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(
-            RuntimeError,
-            "(Overflow|an integer is required)",
-            lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
-        )  # type: ignore[call-overload]
+        if np.__version__ > "2":
+            self.assertRaisesRegex(
+                OverflowError,
+                "out of bounds",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
+        else:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "(Overflow|an integer is required)",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
 
     @onlyCPU
     def test_parse_numpy_int(self, device):

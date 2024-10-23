@@ -29,6 +29,10 @@ Tensor& addmm_out(
       "x",
       mat2.sizes()[1],
       ")");
+  TORCH_CHECK(
+    mat1.dtype() == mat2.dtype(),
+    "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
+  )
 
   std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
   result.resize_(result_shape);
@@ -48,9 +52,9 @@ Tensor& addmm_out(
       at::native::scalar_tensor(
         beta,
         self.scalar_type(),
-        c10::nullopt,
+        std::nullopt,
         at::kCPU,
-        c10::nullopt
+        std::nullopt
       )
     );
   }
@@ -64,7 +68,7 @@ Tensor& addmm_out(
 
   // complex/double case
   if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -131,6 +135,10 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       "x",
       mat2.sizes()[1],
       ")");
+  TORCH_CHECK(
+    self.dtype() == mat2.dtype(),
+    "expected self and mat2 to have the same dtype, but got: ", self.dtype(), " != ", mat2.dtype()
+  )
 
   result.resize_({self.size(0), mat2.size(1)});
   if (self.numel() == 0 || mat2.numel() == 0) {
@@ -140,7 +148,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
   }
 
   if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -195,7 +203,7 @@ Tensor& baddbmm_out(
 
   // complex and double case
   if (batch1.is_complex() || batch2.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
 
@@ -321,7 +329,7 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   }
 
   if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Double and complex datatype matmul is not supported in oneDNN");
   }
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());

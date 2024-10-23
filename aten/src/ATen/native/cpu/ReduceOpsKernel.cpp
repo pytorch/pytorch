@@ -20,7 +20,6 @@
 #include <ATen/ops/imag.h>
 #endif
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
@@ -63,11 +62,12 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (const auto i C10_UNUSED : c10::irange(n)) {
-      f(
-        (scalar_t*)result_data_bytes, result_dim_stride,
-        (scalar_t*)self_data_bytes, self_dim_stride, init_val
-      );
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
+      f((scalar_t*)result_data_bytes,
+        result_dim_stride,
+        (scalar_t*)self_data_bytes,
+        self_dim_stride,
+        init_val);
       result_data_bytes += strides[0];
       self_data_bytes += strides[1];
     }
@@ -211,7 +211,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
-  double val;
+  double val = 0;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {

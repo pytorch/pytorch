@@ -133,7 +133,6 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
   }
   ++it;
 
-  std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
     ++it;
@@ -429,7 +428,7 @@ Node* createSingletonSubgraphAndUpdateAliasing(
     Symbol subgraphKind,
     AliasDb& db) {
   return executeSubgraphMergeAndUpdateAliasing(
-      to_merge, c10::nullopt, db, [&]() {
+      to_merge, std::nullopt, db, [&]() {
         return createSingletonSubgraph(to_merge, subgraphKind);
       });
 }

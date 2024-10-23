@@ -6,15 +6,15 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
-    Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_types import Placement
 
 
 __all__ = [
@@ -227,7 +227,8 @@ class RowwiseParallel(ParallelStyle):
             "weight",
             nn.Parameter(distribute_tensor(module.weight, device_mesh, [Shard(1)])),
         )
-        if module.bias is not None:
+        if getattr(module, "bias", None) is not None:
+            # The Linear module has bias
             module.register_parameter(
                 "bias",
                 nn.Parameter(
@@ -287,7 +288,12 @@ class SequenceParallel(ParallelStyle):
     This style implements the operation that is described in the paper
     `Reducing Activation Recomputation in Large Transformer Models <https://arxiv.org/abs/2205.05198>`__
 
-    Both the input and output of the ``nn.Module`` will be sharded on the sequence dimension.
+    If the input passed in to this ``nn.Module`` is a :class:`torch.Tensor`, it assumes that the input is already sharded
+    on the sequence dimension and converts the input to a :class:`DTensor` sharded on the sequence dimension. If the input
+    passed in to this ``nn.Module`` is already a :class:`DTensor` but is not sharded on the sequence dimension, it would
+    redistribute the input to be sharded on the sequence dimension.
+
+    The output of the ``nn.Module`` will be sharded on the sequence dimension.
 
     Keyword Args:
         sequence_dim (int, optional):
@@ -320,7 +326,7 @@ class SequenceParallel(ParallelStyle):
 
     def __init__(self, *, sequence_dim: int = 1, use_local_output: bool = False):
         super().__init__()
-        self.sequence_dim = sequence_dim
+        self.sequence_sharding = (Shard(sequence_dim),)
         self.use_local_output = use_local_output
 
     def _replicate_module_fn(
@@ -335,13 +341,19 @@ class SequenceParallel(ParallelStyle):
             module.register_parameter(p_name, replicated_param)
 
     @staticmethod
-    def _prepare_input_fn(sequence_dim, mod, inputs, device_mesh):
+    def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
         input_tensor = inputs[0]
         if isinstance(input_tensor, DTensor):
-            return inputs
+            # if the passed in input DTensor is not sharded on the sequence dim, we need to redistribute it
+            if input_tensor.placements != sequence_sharding:
+                input_tensor = input_tensor.redistribute(
+                    placements=sequence_sharding, async_op=True
+                )
+            return input_tensor
         elif isinstance(input_tensor, torch.Tensor):
+            # assume the input passed in already sharded on the sequence dim and create the DTensor
             return DTensor.from_local(
-                input_tensor, device_mesh, [Shard(sequence_dim)], run_check=False
+                input_tensor, device_mesh, sequence_sharding, run_check=False
             )
         else:
             raise ValueError(
@@ -357,7 +369,7 @@ class SequenceParallel(ParallelStyle):
             module,
             device_mesh,
             self._replicate_module_fn,
-            partial(self._prepare_input_fn, self.sequence_dim),
+            partial(self._prepare_input_fn, self.sequence_sharding),
             partial(self._prepare_output_fn, self.use_local_output),
         )
 

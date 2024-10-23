@@ -2,7 +2,10 @@
 
 import collections
 import inspect
+import os
 import re
+import subprocess
+import sys
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
@@ -21,6 +24,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 if IS_FBCODE:
     # optree is not yet enabled in fbcode, so just re-test the python implementation
@@ -738,6 +742,35 @@ class TestPythonPytree(TestCase):
                 lambda xs, _: DummyType(*xs),
             )
 
+    def test_import_pytree_doesnt_import_optree(self):
+        # importing torch.utils._pytree shouldn't import optree.
+        # only importing torch.utils._cxx_pytree should.
+        script = """
+import sys
+import torch
+import torch.utils._pytree
+assert "torch.utils._pytree" in sys.modules
+if "torch.utils._cxx_pytree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+if "optree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import optree")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(
+                msg=(
+                    "Subprocess exception while attempting to run test: "
+                    + e.output.decode("utf-8")
+                )
+            )
+
     def test_treespec_equality(self):
         self.assertEqual(
             py_pytree.LeafSpec(),
@@ -1120,14 +1153,7 @@ TreeSpec(tuple, None, [*,
             z: Any
 
         tree1 = [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5]
-        tree2 = [
-            ACustomPytree(
-                x=2,
-                y={"cin": [2, 2, 2], "bar": 2},
-                z="leaf",
-            ),
-            2,
-        ]
+        tree2 = [ACustomPytree(x=2, y={"cin": [2, 2, 2], "bar": 2}, z="leaf"), 2]
 
         py_pytree.register_pytree_node(
             ACustomPytree,
@@ -1282,10 +1308,7 @@ class TestCxxPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec),
-            ("PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)"),
-        )
+        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):

@@ -24,13 +24,13 @@ namespace at { namespace native {
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
-  AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
+  TORCH_CHECK(false, "miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     double epsilon) {
-  AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
+  TORCH_CHECK(false, "miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
 }}  // namespace at::native
@@ -162,10 +162,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const optional<Tensor>& running_mean_opt,
-    const optional<Tensor>& running_var_opt,
-    const optional<Tensor>& save_mean_t_opt,
-    const optional<Tensor>& save_var_t_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_t_opt,
+    const std::optional<Tensor>& save_var_t_opt,
     double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& running_mean =

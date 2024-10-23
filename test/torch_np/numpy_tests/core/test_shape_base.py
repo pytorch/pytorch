@@ -1,11 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
-
 import pytest
 from pytest import raises as assert_raises
 
@@ -17,6 +15,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy

@@ -10,8 +10,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using at::Tensor;
 
@@ -315,5 +314,4 @@ const Variable& AutogradMeta::fw_grad(
   return direct_fw_grad;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <c10/core/Stream.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 namespace torch::autograd {
 
@@ -29,8 +29,6 @@ struct InputBuffer {
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
       const std::optional<c10::Stream>& opt_consumer_stream);
-
-  at::Device device() const;
 
   Variable operator[](size_t pos) {
     return buffer[pos];

@@ -19,7 +19,7 @@ class TensorType:
         self.__args__ = dim
 
     def __repr__(self):
-        return f'TensorType[{self.__args__}]'
+        return f"TensorType[{self.__args__}]"
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -38,8 +38,9 @@ class _DynType:
     """
     _DynType defines a type which stands for the absence of type information.
     """
-    def __init__(self):
-        self.__name__ = '_DynType'
+
+    def __init__(self) -> None:
+        self.__name__ = "_DynType"
 
     def __eq__(self, other):
         return isinstance(other, self.__class__)
@@ -52,6 +53,7 @@ class _DynType:
 
 
 Dyn = _DynType()
+
 
 @compatibility(is_backward_compatible=False)
 def is_consistent(t1, t2):
@@ -73,8 +75,10 @@ def is_consistent(t1, t2):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and \
-            all(is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
+        return len(t1.__args__) == len(t2.__args__) and all(
+            is_consistent(elem1, elem2)
+            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        )
     else:
         return False
 
@@ -98,8 +102,10 @@ def is_more_precise(t1, t2):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and \
-            all(is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
+        return len(t1.__args__) == len(t2.__args__) and all(
+            is_more_precise(elem1, elem2)
+            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        )
 
     else:
         return False

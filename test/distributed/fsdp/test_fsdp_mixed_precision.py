@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     subtest_name,
@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
+
 
 try:
     import torchvision
@@ -352,7 +353,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         self, offload_params: bool, use_orig_params: bool
     ):
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin1 = nn.Linear(10, 10)
                 self.lin2 = nn.Linear(10, 10)
@@ -600,7 +601,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             fsdp_model = FSDP(model, mixed_precision=mp_config)
@@ -774,7 +775,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         low_prec_dtype = torch.float16
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(5, 5)
 
@@ -826,7 +827,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             if use_composable:
@@ -956,7 +957,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             if use_composable:
@@ -1084,7 +1085,7 @@ instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
 
 
 class IgnoredModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
 
@@ -1093,7 +1094,7 @@ class IgnoredModule(nn.Module):
 
 
 class ModelWithIgnoredModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = nn.Linear(100, 100)
         self.ignored = IgnoredModule()

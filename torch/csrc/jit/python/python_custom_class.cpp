@@ -10,7 +10,9 @@ namespace torch::jit {
 struct CustomMethodProxy;
 struct CustomObjectProxy;
 
-py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
+py::object ScriptClass::__call__(
+    const py::args& args,
+    const py::kwargs& kwargs) {
   auto instance =
       Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
   Function* init_fn = instance.type()->findMethod("__init__");
@@ -21,8 +23,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
           "Did you forget to add '.def(torch::init<...>)' to its registration?",
           instance.type()->repr_str()));
   Method init_method(instance._ivalue(), init_fn);
-  // NOLINTNEXTLINE(performance-move-const-arg)
-  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
+  invokeScriptMethodFromPython(init_method, args, kwargs);
   return py::cast(instance);
 }
 

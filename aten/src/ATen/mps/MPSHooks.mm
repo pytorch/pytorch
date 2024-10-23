@@ -10,7 +10,7 @@
 
 namespace at::mps {
 
-void MPSHooks::initMPS() const {
+void MPSHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.mps");
   // TODO: initialize MPS devices and streams here
 }
@@ -20,27 +20,38 @@ bool MPSHooks::hasMPS() const {
 }
 
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
-  if (major >= 14) {
-    if (major > 14) {
-      TORCH_WARN("Can't check whether running on ", major, ".", minor, "+ returning one for 14.0+");
-    } else if (minor > 0) {
-      TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.0+");
-    }
-    return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
-  }
-  TORCH_CHECK(major == 13, "Trying to check for unexpected MacOS major ", major);
-  switch (minor) {
-    case 0:
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
-    case 1:
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
-    case 2:
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
-    case 3:
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+  switch (major) {
+    case 15:
+      if (minor > 0)
+        TORCH_WARN("Can't check whether running on 15.", minor, "+ returning one for 15.0+");
+      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+    case 14:
+      switch (minor) {
+        case 0:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+        case 4:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+        default:
+          TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+      }
+    case 13:
+      switch (minor) {
+        case 0:
+          return true;
+        case 1:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
+        case 2:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
+        case 3:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+        default:
+          TORCH_WARN("Can't check whether running on 13.", minor, "+ returning one for 13.3+");
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+      }
     default:
-      TORCH_WARN("Can't check whether running on 13.", minor, "+ returning one for 13.3+");
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+      TORCH_WARN("Checking for unexpected MacOS ", major, ".", minor, " returning false");
+      return false;
   }
 }
 
@@ -122,6 +133,14 @@ bool MPSHooks::queryEvent(uint32_t event_id) const {
 
 double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
   return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
+bool MPSHooks::isPinnedPtr(const void* data) const {
+  return at::mps::isMPSPinnedPtr(data);
+}
+
+Allocator* MPSHooks::getPinnedMemoryAllocator() const {
+  return at::mps::getIMPSAllocator(true);
 }
 
 using at::MPSHooksRegistry;

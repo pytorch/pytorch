@@ -3,19 +3,20 @@ import contextlib
 
 import torch
 from torch._inductor.dependencies import MemoryDep
-
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout, Pointwise
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 class TestDependencies(InductorTestCase):
     def _create_buffer(self, name, shape, dtype=torch.float32):
-        return Buffer(name, FixedLayout(torch.device(GPU_TYPE), dtype, shape))
+        return Buffer(
+            name=name,
+            layout=FixedLayout(torch.device(GPU_TYPE), dtype=dtype, size=shape),
+        )
 
     def setUp(self):
         super().setUp()
@@ -34,15 +35,20 @@ class TestDependencies(InductorTestCase):
         self._stack.close()
         super().tearDown()
 
-    def test_bucketize_dependencies(self):
+    def test_bucketize_dependencies_no_sorter(self):
         offsets = self._create_buffer("offsets", (1025,), torch.int32)
 
         def inner_fn(index):
             idx = index[0]
             return ops.bucketize(
                 values=idx,
-                offsets_name=offsets.get_name(),
-                offsets_size=offsets.get_size()[0],
+                boundaries=(
+                    offsets.get_name(),
+                    offsets.get_size()[-1],
+                    offsets.get_size()[0] * offsets.get_stride()[0],
+                    offsets.get_stride()[-1],
+                ),
+                boundary_indices=0,
                 indexing_dtype=torch.int32,
                 right=True,
             )
@@ -55,6 +61,39 @@ class TestDependencies(InductorTestCase):
         )
 
         self.assertEqual(len(pointwise.get_reads()), 1)
+
+    def test_bucketize_dependencies_sorter(self):
+        offsets = self._create_buffer("offsets", (1025,), torch.int32)
+        sorter = self._create_buffer("sorter", (1025,), torch.int32)
+
+        def inner_fn(index):
+            idx = index[0]
+            return ops.bucketize(
+                values=idx,
+                boundaries=(
+                    offsets.get_name(),
+                    offsets.get_size()[-1],
+                    offsets.get_size()[0] * offsets.get_stride()[0],
+                    offsets.get_stride()[-1],
+                ),
+                boundary_indices=0,
+                indexing_dtype=torch.int32,
+                right=True,
+                sorter=(
+                    sorter.get_name(),
+                    sorter.get_stride()[-1],
+                ),
+                sorter_indices=0,
+            )
+
+        pointwise = Pointwise.create(
+            device=torch.device(GPU_TYPE),
+            dtype=torch.int32,
+            inner_fn=inner_fn,
+            ranges=[1024 * 4],
+        )
+
+        self.assertEqual(len(pointwise.get_reads()), 2)
 
     def test_get_offset(self):
         x = sympy_index_symbol("x")

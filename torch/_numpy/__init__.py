@@ -17,14 +17,18 @@ from ._ndarray import (
 from ._ufuncs import *  # noqa: F403
 from ._util import AxisError, UFuncTypeError
 
-# from . import testing
 
+from math import pi, e  # usort: skip
+
+
+all = all
 alltrue = all
+
+any = any
 sometrue = any
 
 inf = float("inf")
 nan = float("nan")
-from math import pi, e  # isort: skip
 
 False_ = False
 True_ = True

@@ -4,14 +4,13 @@ import unittest
 
 import torch
 import torch._logging
-
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU
 
 
 class MLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(1, 6)
         self.l2 = torch.nn.Linear(6, 1)

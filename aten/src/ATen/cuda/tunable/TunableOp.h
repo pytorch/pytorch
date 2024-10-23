@@ -18,7 +18,6 @@
 #endif
 
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -54,9 +53,15 @@ class TunableOp {
         auto params_sig = params->Signature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result == ResultEntry::Null() && ctx->IsTuningEnabled()) {
-          result = FindFastest(params);
-          mgr.Add(op_sig, params_sig, result);
+        if (result == ResultEntry::Null()) {
+          if (ctx->IsTuningEnabled()) {
+            result = FindFastest(params);
+            mgr.Add(op_sig, params_sig, result);
+          }
+          else if (ctx->IsRecordUntunedEnabled()) {
+            // or record the gemm into file
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+          }
         }
       }
       else {
@@ -124,8 +129,11 @@ class TunableOp {
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
 
+      // numeric check option is controlled by non-static env var, so check it once per tuned operator
+      bool do_numerics_check = ctx->IsNumericsCheckEnabled();
+
       // calcaulte a reference answer for numerical check
-      if (ctx->IsNumericsCheckEnabled()) {
+      if (do_numerics_check) {
         reference_params = params->DeepCopy(false);
         TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
       }
@@ -137,7 +145,7 @@ class TunableOp {
       bool use_buffer_rotation = (rotating_size > 0);
       size_t param_size = params->GetSize(use_buffer_rotation);
       size_t param_count = (rotating_size / param_size) + 1;
-      constexpr size_t MB = 1024*1024;
+      constexpr size_t MB = 1024ull*1024;
       if (use_buffer_rotation) {
         TUNABLE_LOG2("Rotating buffer ", rotating_size/MB, " MiB. ",
             "Needed Size: ", param_size/MB, " MiB. ",
@@ -156,10 +164,11 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
-        if (ctx->IsNumericsCheckEnabled()) {
+        if (do_numerics_check) {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
           if (status != OK) {
+            numerical_params->Delete();
             TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
@@ -256,6 +265,7 @@ class TunableOp {
     std::string CreateSignature() {
 #ifndef _WIN32
       const auto* name = typeid(*this).name();
+      // NOLINTNEXTLINE(*array*)
       char buf[256];
       size_t buf_len = 256;
       abi::__cxa_demangle(name, buf, &buf_len, nullptr);
@@ -274,7 +284,7 @@ class TunableOp {
 };
 
 struct OpParams {
-  OpParams() {}
+  OpParams() = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
 };

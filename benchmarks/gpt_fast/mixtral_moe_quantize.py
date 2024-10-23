@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 ##### Quantization Primitives ######
 
 
@@ -183,7 +184,5 @@ class ConditionalFeedForwardInt8(nn.Module):
         ].to(x.dtype)
         expert_outs = torch.einsum(
             "tao, taio -> tai", (x1 * x3), w2_weights
-        ) * self.scales2[expert_indices].to(
-            x.dtype
-        )  # [T, A, D, D]
+        ) * self.scales2[expert_indices].to(x.dtype)  # [T, A, D, D]
         return expert_outs

@@ -9,6 +9,7 @@ from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
 from torch.testing._internal.common_utils import NoTest
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -807,7 +808,7 @@ class TestPDT(JitTestCase):
 
     def test_nn_parameter_as_arg(self):
         class TestNNParameter(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inp = torch.nn.Parameter(torch.ones(2, 3))
 

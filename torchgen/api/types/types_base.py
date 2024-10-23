@@ -12,12 +12,17 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, Union
 
-from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
+
+if TYPE_CHECKING:
+    from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 
 
 # An ArgName is just the str name of the argument in schema;
@@ -36,7 +41,7 @@ ArgName = Union[str, SpecialArgName]
 # This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
 class BaseCppType:
-    ns: Optional[str]
+    ns: str | None
     name: str
 
     def __str__(self) -> str:
@@ -71,7 +76,7 @@ class CType(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return self
 
 
@@ -87,13 +92,13 @@ class BaseCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return str(self.type).replace("at::", "")
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return self
 
 
 @dataclass(frozen=True)
 class ConstRefCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         if strip_ref:
@@ -103,13 +108,13 @@ class ConstRefCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"const {self.elem.cpp_type_registration_declarations()} &"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return self.elem.remove_const_ref()
 
 
 @dataclass(frozen=True)
 class VectorCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -118,13 +123,13 @@ class VectorCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"::std::vector<{self.elem.cpp_type_registration_declarations()}>"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return VectorCType(self.elem.remove_const_ref())
 
 
 @dataclass(frozen=True)
 class ArrayCType(CType):
-    elem: "CType"
+    elem: CType
     size: int
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
@@ -134,13 +139,13 @@ class ArrayCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return ArrayCType(self.elem.remove_const_ref(), self.size)
 
 
 @dataclass(frozen=True)
 class TupleCType(CType):
-    elems: List["CType"]
+    elems: list[CType]
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -149,13 +154,13 @@ class TupleCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return TupleCType([e.remove_const_ref() for e in self.elems])
 
 
 @dataclass(frozen=True)
 class MutRefCType(CType):
-    elem: "CType"
+    elem: CType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         if strip_ref:
@@ -165,7 +170,7 @@ class MutRefCType(CType):
     def cpp_type_registration_declarations(self) -> str:
         return f"{self.elem.cpp_type_registration_declarations()} &"
 
-    def remove_const_ref(self) -> "CType":
+    def remove_const_ref(self) -> CType:
         return self.elem.remove_const_ref()
 
 
@@ -190,10 +195,10 @@ class NamedCType:
     def cpp_type_registration_declarations(self) -> str:
         return self.type.cpp_type_registration_declarations()
 
-    def remove_const_ref(self) -> "NamedCType":
+    def remove_const_ref(self) -> NamedCType:
         return NamedCType(self.name, self.type.remove_const_ref())
 
-    def with_name(self, name: str) -> "NamedCType":
+    def with_name(self, name: str) -> NamedCType:
         return NamedCType(name, self.type)
 
 
@@ -208,11 +213,11 @@ class NamedCType:
 class Binding:
     name: str
     nctype: NamedCType
-    argument: Union[Argument, TensorOptionsArguments, SelfArgument]
+    argument: Argument | TensorOptionsArguments | SelfArgument
     # TODO: maybe don't represent default here
-    default: Optional[str] = None
+    default: str | None = None
 
-    def rename(self, name: str) -> "Binding":
+    def rename(self, name: str) -> Binding:
         return Binding(
             name=name,
             nctype=self.nctype,
@@ -224,7 +229,7 @@ class Binding:
     def type(self) -> str:
         return self.nctype.cpp_type()
 
-    def no_default(self) -> "Binding":
+    def no_default(self) -> Binding:
         return Binding(
             name=self.name,
             nctype=self.nctype,
@@ -255,7 +260,7 @@ class Binding:
     def defn(self) -> str:
         return f"{self.type} {self.name}"
 
-    def with_name(self, name: str) -> "Binding":
+    def with_name(self, name: str) -> Binding:
         return Binding(
             name=name, nctype=self.nctype, argument=self.argument, default=self.default
         )

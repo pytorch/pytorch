@@ -70,13 +70,13 @@ public:
     // internal-only for registering stack based kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& kernel(DispatchKey dispatch_key) && {
-      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullopt, nullptr);
+      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), std::nullopt, nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& catchAllKernel() && {
-      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullopt, nullptr);
+      return std::move(*this).kernel(std::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), std::nullopt, nullptr);
     }
 
     // internal only for registering caffe2 ops
@@ -215,7 +215,7 @@ public:
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
       return std::move(*this).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
@@ -272,7 +272,7 @@ public:
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
@@ -302,7 +302,7 @@ public:
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
@@ -384,7 +384,7 @@ public:
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
       return std::move(*this).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
@@ -410,18 +410,18 @@ public:
     }
 
     Options()
-    : schemaOrName_(c10::nullopt)
+    : schemaOrName_(std::nullopt)
     , kernels()
-    , aliasAnalysisKind_(c10::nullopt)
+    , aliasAnalysisKind_(std::nullopt)
     {}
 
     // KernelRegistrationConfig accumulates all information from the config
     // parameters passed to a RegisterOperators::op() call into one object.
     struct KernelRegistrationConfig final {
       KernelRegistrationConfig()
-        : dispatch_key(c10::nullopt)
+        : dispatch_key(std::nullopt)
         , func()
-        , cpp_signature(c10::nullopt)
+        , cpp_signature(std::nullopt)
         , inferred_function_schema(nullptr)
       {}
 
@@ -434,7 +434,7 @@ public:
     std::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
 
     std::vector<KernelRegistrationConfig> kernels;
-    optional<AliasAnalysisKind> aliasAnalysisKind_;
+    std::optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
     friend class Library;
   };
@@ -522,7 +522,7 @@ public:
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
      constexpr bool AllowLegacyTypes = true;
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
-       c10::nullopt,
+       std::nullopt,
        KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
        impl::CppSignature::make<FuncType>(),
        // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
@@ -553,7 +553,7 @@ public:
 
       constexpr bool AllowLegacyTypes = true;
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
@@ -570,7 +570,7 @@ public:
 
       constexpr bool AllowLegacyTypes = true;
       return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
-        c10::nullopt,
+        std::nullopt,
         KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor

@@ -1,6 +1,8 @@
 import operator_benchmark as op_bench
+
 import torch
 from torch import nn
+
 
 """
 Microbenchmarks for RNNs.
@@ -46,14 +48,20 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
         )[0]
 
         x = torch.randn(
-            sequence_len, batch_size, I  # sequence length  # batch size
-        )  # Number of features in X
+            sequence_len,  # sequence length
+            batch_size,  # batch size
+            I,  # Number of features in X
+        )
         h = torch.randn(
-            NL * (D + 1), batch_size, H  # layer_num * dir_num  # batch size
-        )  # hidden size
+            NL * (D + 1),  # layer_num * dir_num
+            batch_size,  # batch size
+            H,  # hidden size
+        )
         c = torch.randn(
-            NL * (D + 1), batch_size, H  # layer_num * dir_num  # batch size
-        )  # hidden size
+            NL * (D + 1),  # layer_num * dir_num
+            batch_size,  # batch size
+            H,  # hidden size
+        )
 
         self.inputs = {"x": x, "h": h, "c": c}
         self.set_module_name("QLSTM")

@@ -10,6 +10,7 @@ from torch._dynamo.testing import reduce_to_scalar_loss
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import profile, ProfilerActivity, record_function
 
+
 try:
     from .common import timed
     from .dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup

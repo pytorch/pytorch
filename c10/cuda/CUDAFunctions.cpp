@@ -22,7 +22,7 @@ int device_count_impl(bool fail_if_no_driver) {
   // Clear out the error state, so we don't spuriously trigger someone else.
   // (This shouldn't really matter, since we won't be running very much CUDA
   // code in this regime.)
-  cudaError_t last_err C10_UNUSED = cudaGetLastError();
+  [[maybe_unused]] cudaError_t last_err = cudaGetLastError();
   switch (err) {
     case cudaErrorNoDevice:
       // Zero devices is ok here
@@ -166,11 +166,11 @@ std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
       return device_index;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace _internal {
-bool dummyHasPrimaryContext(C10_UNUSED DeviceIndex device_index) {
+bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
 bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;

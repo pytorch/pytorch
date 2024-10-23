@@ -121,7 +121,7 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source, const std::string& the_namespace) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(c10::nullopt, source, nativeResolver(), /*self=*/nullptr);
+    cu->define(std::nullopt, source, nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name_[Symbol::fromQualString(
                             the_namespace + "::" + method->name())]

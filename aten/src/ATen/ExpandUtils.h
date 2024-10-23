@@ -14,7 +14,6 @@
 #include <c10/util/irange.h>
 
 #include <functional>
-#include <sstream>
 #include <tuple>
 #include <utility>
 
@@ -79,7 +78,7 @@ inline void check_defined(
     const char* api_name) {
   for (auto& t : tensors) {
     if (!t.get().defined()) {
-      AT_ERROR(api_name, "(...) called with an undefined Tensor");
+      TORCH_CHECK(false, api_name, "(...) called with an undefined Tensor");
     }
   }
 }
@@ -421,15 +420,15 @@ inline c10::MaybeOwned<Tensor> expand_size(
 inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
-  DimVector sizes;
+  SymDimVector sizes;
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sizes();
+      sizes = to_expand[i].sym_sizes();
       first = false;
     } else {
-      sizes = infer_size_dimvector(sizes, to_expand[i].sizes());
+      sizes = infer_size_symdimvector(sizes, to_expand[i].sym_sizes());
     }
   }
 
@@ -437,10 +436,10 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
-    } else if (to_expand[i].sizes().equals(sizes)) {
+    } else if (to_expand[i].sym_sizes().equals(sizes)) {
       result[i] = to_expand[i];
     } else {
-      result[i] = to_expand[i].expand(sizes);
+      result[i] = to_expand[i].expand_symint(sizes);
     }
   }
   return result;
@@ -499,7 +498,7 @@ inline Tensor sum_to(
   return _sum_to(std::move(tensor), shape, always_return_non_view);
 }
 
-static inline bool is_expandable_to(
+inline bool is_expandable_to(
     SymIntArrayRef shape,
     c10::SymIntArrayRef desired) {
   size_t ndim = shape.size();
@@ -517,7 +516,7 @@ static inline bool is_expandable_to(
   return true;
 }
 
-static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   auto sym_shape = c10::SymIntArrayRef(
       reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
   auto sym_desired = c10::SymIntArrayRef(

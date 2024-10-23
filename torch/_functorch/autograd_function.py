@@ -30,7 +30,7 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 # We do this by using creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
 class CustomFunctionHigherOrderOperator(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("custom_function_call")
 
     def __call__(self, autograd_function, *args, **kwargs):
@@ -274,7 +274,17 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
-def custom_function_call_vmap(interpreter, autograd_function, *operands):
+def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
+    if any(
+        isinstance(val, torch.Tensor)
+        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
+    ):
+        raise NotImplementedError(
+            f"Run vmap on autograd.Function with kwarg-only Tensor args. "
+            f"Please do not pass kwarg-only Tensors to autograd.Function. "
+            f"Got: {kwargs}"
+        )
+
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
@@ -302,22 +312,44 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"https://pytorch.org/docs/main/notes/extending.func.html"
         )
 
+    return custom_function_call_vmap_helper(
+        interpreter, autograd_function.vmap, autograd_function, *operands, **kwargs
+    )
+
+
+def custom_function_call_vmap_helper(
+    interpreter, vmap_function, op, *operands, **kwargs
+):
     current_level = interpreter.level()
     info = VmapInfo(
         batch_size=interpreter.batch_size(),
         randomness=interpreter.randomness(),
     )
-    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
+    # We're either in the autograd.Function case (vmap staticmethod)
+    # or the torch.library.register_vmap case.
+    autograd_function_case = isinstance(op, torch.autograd.function.FunctionMeta)
 
+    def lower_to_next():
+        if autograd_function_case:
+            return interpreter.lower()
+        else:
+            return torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.FuncTorchBatched)
+            )
+
+    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
     # If none of the tensors are batched at the current level, then we skip the
     # current level. This saves the user from needing to handle this case in
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
-        with interpreter.lower():
-            return custom_function_call(autograd_function, *operands)
+        with lower_to_next():
+            if autograd_function_case:
+                return custom_function_call(op, *operands)
+            else:
+                return op(*operands, **kwargs)
 
-    with interpreter.lower():
-        result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+    with lower_to_next():
+        result = vmap_function(info, in_dims, *unwrapped_operands, **kwargs)
     validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result
 
@@ -693,12 +725,13 @@ def autograd_function_forward_rewritten(original_forward, original_setup_context
 
 
 class AutogradFunctionApply(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("autograd_function_apply")
 
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         length_of_tensor_args = sum(args_tensor_mask)
         # Filter out the original tensor args from fwd_args,
         # lifted freevars should not be args of ApplyTemplate.apply
@@ -710,6 +743,15 @@ class AutogradFunctionApply(HigherOrderOperator):
             def forward(ctx, *args):
                 nonlocal saved_values
                 output, saved_values = fwd(None, *fwd_args)
+
+                # If users call ctx.mark_non_differentiable() in the original fwd function.
+                if len(non_differentiable_idx) > 0:
+                    non_differentiable_output = []
+                    for i, x in enumerate(output):
+                        if i in non_differentiable_idx:
+                            non_differentiable_output.append(x)
+                    ctx.mark_non_differentiable(*non_differentiable_output)
+
                 return output
 
             @staticmethod

@@ -18,6 +18,8 @@
 #endif
 #include <ATen/ops/_efficientzerotensor_native.h>
 
+#include <utility>
+
 namespace at::native {
 
 static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size) {
@@ -109,7 +111,7 @@ const Tensor& resize_mps_(
   }
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
-  resize_impl_mps_(self_, size, /*strides=*/c10::nullopt);
+  resize_impl_mps_(self_, size, /*stride=*/std::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -139,11 +141,11 @@ Tensor& set_mps_(Tensor& result) {
 }
 
 Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
-  checkSetStorage(result, storage, storage_offset, size, stride);
+  checkSetStorage(result, std::move(storage), storage_offset, size, stride);
   //std::cout << "set storage_mps " << storage_offset << " stride " << stride << std::endl;
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   std::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
-                                          std::optional<IntArrayRef>(stride) : c10::nullopt;
+                                          std::optional<IntArrayRef>(stride) : std::nullopt;
   at::native::resize_impl_mps_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }
@@ -157,7 +159,7 @@ Tensor _efficientzerotensor_mps(IntArrayRef size,
     auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
     auto zero_ks = at::DispatchKeySet(c10::DispatchKey::MPS) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, std::nullopt);
     return out;
 }
 

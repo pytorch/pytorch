@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-
 from torch.utils._strobelight.cli_function_profiler import (
     strobelight,
     StrobelightCLIFunctionProfiler,
@@ -16,7 +15,7 @@ if __name__ == "__main__":
     @strobelight(sample_each=10000, stop_at_error=False)
     @torch.compile()
     def work():
-        for i in range(10):
+        for _ in range(10):
             torch._dynamo.reset()
             for j in range(5):
                 torch._dynamo.reset()
@@ -30,7 +29,7 @@ if __name__ == "__main__":
     @strobelight(profiler, sample_tags=["something", "another"])
     def work2():
         sum = 0
-        for i in range(100000000):
+        for _ in range(100000000):
             sum += 1
 
     work2()

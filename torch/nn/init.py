@@ -388,6 +388,14 @@ def xavier_uniform_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
+
+    Note:
+        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
+        that the weight matrix is used in a transposed manner,
+        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
+        This is important for correct initialization.
+        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
+        pass in a transposed weight matrix, i.e. ``nn.init.xavier_uniform_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
@@ -420,6 +428,14 @@ def xavier_normal_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
+
+    Note:
+        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
+        that the weight matrix is used in a transposed manner,
+        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
+        This is important for correct initialization.
+        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
+        pass in a transposed weight matrix, i.e. ``nn.init.xavier_normal_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
@@ -471,6 +487,14 @@ def kaiming_uniform_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
+
+    Note:
+        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
+        that the weight matrix is used in a transposed manner,
+        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
+        This is important for correct initialization.
+        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
+        pass in a transposed weight matrix, i.e. ``nn.init.kaiming_uniform_(w.T, ...)``.
     """
     if torch.overrides.has_torch_function_variadic(tensor):
         return torch.overrides.handle_torch_function(
@@ -528,6 +552,14 @@ def kaiming_normal_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
+
+    Note:
+        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
+        that the weight matrix is used in a transposed manner,
+        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
+        This is important for correct initialization.
+        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
+        pass in a transposed weight matrix, i.e. ``nn.init.kaiming_normal_(w.T, ...)``.
     """
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op")
@@ -569,7 +601,7 @@ def orthogonal_(
         return tensor
     rows = tensor.size(0)
     cols = tensor.numel() // rows
-    flattened = tensor.new(rows, cols).normal_(0, 1, generator=generator)
+    flattened = tensor.new_empty((rows, cols)).normal_(0, 1, generator=generator)
 
     if rows < cols:
         flattened.t_()

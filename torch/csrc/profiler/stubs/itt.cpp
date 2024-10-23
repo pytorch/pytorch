@@ -1,12 +1,10 @@
-#include <sstream>
-
 #include <c10/util/irange.h>
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/profiler/stubs/base.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
+
+namespace torch::profiler::impl {
 namespace {
 
 struct ITTMethods : public ProfilerStubs {
@@ -51,6 +49,5 @@ struct RegisterITTMethods {
 RegisterITTMethods reg;
 
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
+C10_DIAGNOSTIC_POP()

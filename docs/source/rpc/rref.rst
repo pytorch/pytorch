@@ -132,7 +132,7 @@ to Y, and Y forks to Z:
   OwnerRRef -> A -> Y -> Z
 
 If all of Z's messages, including the delete message, are processed by the
-owner before Y's messages. the owner will learn of Z's deletion befores
+owner before Y's messages. the owner will learn of Z's deletion before
 knowing Y exists. Nevertheless, this does not cause any problem. Because, at least
 one of Y's ancestors will be alive (A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the

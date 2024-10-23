@@ -39,7 +39,7 @@ inline c10::List<std::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariab
   result.reserve(xs.size());
   for (const SavedVariable& v : xs) {
     auto var = v.unpack(saved_for);
-    result.push_back(var.defined() ? std::optional<Tensor>(var) : c10::nullopt);
+    result.push_back(var.defined() ? std::optional<Tensor>(var) : ::std::nullopt);
   }
   return result;
 }

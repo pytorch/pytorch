@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * class ScriptTypeParser
@@ -51,5 +50,4 @@ class TORCH_API ScriptTypeParser {
   friend struct ConstantTableValue;
   friend struct SourceImporterImpl;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

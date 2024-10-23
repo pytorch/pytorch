@@ -132,7 +132,7 @@ std::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
   bool canMerge = llgaHelper_.shouldMerge(producer, consumer) &&
       aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
   if (!canMerge) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   llgaHelper_.mergeNodeIntoSubgraph(producer, consumer, aliasDb_);
   return consumer;

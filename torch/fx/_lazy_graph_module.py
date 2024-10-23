@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
 
-from torch.fx import GraphModule
 from torch.fx.graph_module import (
     _format_import_block,
+    GraphModule,
     reduce_graph_module,
     reduce_package_graph_module,
 )
 from torch.package import PackageExporter, sys_importer
+
 from ._compatibility import compatibility
+
 
 _use_lazy_graph_module_flag = False
 _force_skip_lazy_graph_module_flag = False

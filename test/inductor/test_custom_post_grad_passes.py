@@ -7,13 +7,11 @@ import torch
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.fx as fx
 from torch._dynamo.utils import counters
-
 from torch._inductor import config
+from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
-
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -110,12 +108,15 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
         _register_fusion_lowering(_mkldnn_conv_relu_pattern(), custom_pass_dict)
 
     # custom post grad pass
-    class _CustomPass(PatternMatcherPass):
-        def __init__(self):
+    class _CustomPass(PatternMatcherPass, CustomGraphPass):
+        def __init__(self) -> None:
             super().__init__()
 
         def __call__(self, g: torch.fx.graph.Graph):
             self.apply(g)
+
+        def uuid(self) -> bytes:
+            return get_hash_for_files((__file__,))
 
     # case model
     class _ConvReLU(torch.nn.Module):

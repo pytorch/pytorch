@@ -4,14 +4,12 @@
 #include <torch/types.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <chrono>
 #include <utility>
 
-namespace torch {
-namespace data {
-namespace detail {
+namespace torch::data::detail {
 
 /// Encapsulates the full life cycle of DataLoader jobs.
 ///
@@ -44,8 +42,8 @@ class DataShuttle {
 
   /// Returns the result of a job, or nullopt if all jobs were exhausted. Called
   /// by the main thread.
-  optional<Result> pop_result(
-      optional<std::chrono::milliseconds> timeout = nullopt) {
+  std::optional<Result> pop_result(
+      std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
     if (in_flight_jobs_ > 0) {
       auto result = results_.pop(timeout);
       --in_flight_jobs_;
@@ -82,6 +80,4 @@ class DataShuttle {
   Queue<Result> results_;
 };
 
-} // namespace detail
-} // namespace data
-} // namespace torch
+} // namespace torch::data::detail

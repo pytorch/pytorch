@@ -24,10 +24,10 @@ New operators:
 import functools
 
 import torch.nn.functional as F
-
 from torch import _C
 from torch.onnx import symbolic_helper
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -46,7 +46,6 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=20)
 
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
-@_beartype.beartype
 def _grid_sampler(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -58,7 +57,9 @@ def _grid_sampler(
     mode_s = {v: k for k, v in F.GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg, index]
     # mode string changes at https://onnx.ai/onnx/operators/text_diff_GridSample_16_20.html
     mode_s = convert_grid_sample_mode(mode_s)
-    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg, index]
+    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[  # type: ignore[call-arg, index]
+        padding_mode_enum  # type: ignore[index]
+    ]
     return g.op(
         "GridSample",
         input,
@@ -71,7 +72,6 @@ def _grid_sampler(
 
 @_onnx_symbolic("aten::affine_grid_generator")
 @symbolic_helper.parse_args("v", "v", "b")
-@_beartype.beartype
 def _affine_grid_generator(
     g: jit_utils.GraphContext,
     theta: _C.Value,
@@ -88,6 +88,5 @@ def _affine_grid_generator(
 
 @_onnx_symbolic("aten::gelu")
 @symbolic_helper.parse_args("v", "s")
-@_beartype.beartype
 def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
     return g.op("Gelu", self, approximate_s=approximate)

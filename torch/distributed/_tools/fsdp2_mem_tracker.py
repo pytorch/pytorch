@@ -21,6 +21,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
+
 _TOTAL_KEY = "Total"
 
 __all__ = ["FSDPMemTracker"]
@@ -569,7 +570,6 @@ class FSDPMemTracker(MemTracker):
         self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
-        pass
 
     def __enter__(self) -> "FSDPMemTracker":
         self._in_fake_mode = True if active_fake_mode() else False

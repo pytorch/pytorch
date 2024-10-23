@@ -51,6 +51,12 @@
 #endif // _WIN32
 #endif // __GNUC__
 
+// The following files are implemented in a header-only way and are guarded by
+// test/cpp/aoti_abi_check
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <c10/util/complex.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -90,6 +96,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
@@ -117,6 +124,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float64(AtenTensorHandle tensor, double* ret_value);
@@ -138,6 +147,11 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_item_complex64(
+    AtenTensorHandle tensor,
+    c10::complex<float>* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
@@ -172,6 +186,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int64(
     AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
+    c10::complex<float> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -195,6 +212,9 @@ aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
@@ -380,6 +400,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm_v2(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle bias,
+    AtenTensorHandle scale_result,
+    int32_t* out_dtype,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
@@ -449,11 +480,27 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d);
+
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
     AtenTensorHandle weight,
+    AtenTensorHandle* out);
+
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
+    AtenTensorHandle weight,
+    AtenTensorHandle weight_scale,
+    AtenTensorHandle weight_zero_point,
+    AtenTensorHandle bias,
     AtenTensorHandle* out);
 
 // This will soon be deprecated after ao_quantization is complete.
@@ -466,8 +513,23 @@ aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     int64_t out_channel,
     AtenTensorHandle* out);
 
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu__wrapped_quantized_linear_prepacked(
+    AtenTensorHandle input,
+    AtenTensorHandle input_scale,
+    AtenTensorHandle input_zero_point,
+    AtenTensorHandle weight,
+    AtenTensorHandle out_scale,
+    AtenTensorHandle out_zeropoint,
+    int64_t out_channel,
+    AtenTensorHandle* out);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
@@ -516,6 +578,14 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg);
 
+// When AOTI debug printer option is enabled, this function will be invoked to
+// torch pickle save the intermediate tensor for debugging purpose.
+AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
+    AtenTensorHandle self,
+    const char* tensor_name,
+    const char* launch_prefix,
+    const char* kernel_name);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
@@ -547,7 +617,7 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
-#endif
+#endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
@@ -606,6 +676,7 @@ struct Half;
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
+DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)
 DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)

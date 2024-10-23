@@ -69,7 +69,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     const auto& textIndex = tup_elems[0].toIntList();
     int64_t fnameIndex = tup_elems[1].toInt();
     int64_t starting_line_no_ = tup_elems[2].toInt();
-    std::optional<std::string> filename = c10::nullopt;
+    std::optional<std::string> filename = std::nullopt;
 
     TORCH_CHECK(
         (uint64_t)fnameIndex < text_table_.size(),
@@ -249,7 +249,7 @@ std::optional<SourceRange> ConcreteSourceRangeUnpickler::
     return (entry - 1)->range;
   }
 
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 TORCH_API void setShouldUseFormatWithStringTable(

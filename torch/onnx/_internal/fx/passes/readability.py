@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Sequence
 
 import torch
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
@@ -30,7 +29,6 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         super().__init__(diagnostic_context, fx_module)
         self.original_nn_module = original_nn_module
 
-    @_beartype.beartype
     def _rename_param_and_buffer(
         self,
         diagnostic: diagnostics.Diagnostic,
@@ -77,7 +75,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         ), "RestoreParameterAndBufferNames does not take any kwargs"
         # state_to_readable_name[parameter/buffer] returns the original readable name of
         # the parameter/buffer. E.g., "self.linear.weight".
-        state_to_readable_name: Dict[Union[torch.nn.Parameter, torch.Tensor], str] = {}
+        state_to_readable_name: dict[torch.nn.Parameter | torch.Tensor, str] = {}
         state_to_readable_name.update(
             {v: k for k, v in self.original_nn_module.named_parameters()}
         )
@@ -89,7 +87,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         # old_name_to_nodes[old_name] returns a tuple of (nodes, new_name)
         # where `nodes` is a list of `get_attr` nodes with `old_name` as `target` and
         # `new_name` is the new readable name.
-        old_name_to_nodes: Dict[str, Tuple[List[torch.fx.Node], str]] = {}
+        old_name_to_nodes: dict[str, tuple[list[torch.fx.Node], str]] = {}
 
         for node in self.module.graph.nodes:
             if node.op == "get_attr":

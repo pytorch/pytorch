@@ -18,7 +18,7 @@ def get_custom_op_library_path():
 
 
 class Model(torch.jit.ScriptModule):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.p = torch.nn.Parameter(torch.eye(5))
 

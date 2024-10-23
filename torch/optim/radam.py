@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
 from typing import cast, List, Optional, Tuple, Union
@@ -10,17 +11,18 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["RAdam", "radam"]
 
@@ -29,7 +31,7 @@ class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-3,
+        lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -40,6 +42,8 @@ class RAdam(Optimizer):  # noqa: D101
         capturable: bool = False,
         differentiable: bool = False,
     ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -222,9 +226,8 @@ RAdam.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -234,8 +237,8 @@ RAdam.__doc__ = (
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_maximize_doc}
-        {_differentiable_doc}
         {_capturable_doc}
+        {_differentiable_doc}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
@@ -382,20 +385,26 @@ def _multi_tensor_radam(
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_avg_sqs,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_avg_sqs_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_avg_sqs = cast(List[Tensor], grouped_exp_avg_sqs_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -502,12 +511,13 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                _dispatch_sqrt(
+                (
                     (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
                     / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
                 )
+                ** 0.5
                 if rho_t > 5
                 else 0
                 for rho_t in rho_t_list
@@ -521,7 +531,7 @@ def _multi_tensor_radam(
                 (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
             ]
             bias_correction2 = [
-                _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
+                ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
                 for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
             ]
 

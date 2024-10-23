@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import torch
 import functools
@@ -40,7 +41,7 @@ def _(x):
 
 def numpy_cube_setup_context(ctx, inputs, output):
     x, = inputs
-    cube, dx = output
+    _cube, dx = output
     ctx.save_for_backward(x, dx)
 
 def numpy_cube_backward(ctx, grad_out, grad_dx):
@@ -49,6 +50,12 @@ def numpy_cube_backward(ctx, grad_out, grad_dx):
     return grad_x
 
 numpy_cube.register_autograd(numpy_cube_backward, setup_context=numpy_cube_setup_context)
+
+def numpy_cube_vmap(info, in_dims, x):
+    result = numpy_cube(x)
+    return result, (in_dims[0], in_dims[0])
+
+numpy_cube.register_vmap(numpy_cube_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
 def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
@@ -70,6 +77,16 @@ def numpy_mul_backward(ctx, grad_out):
 
 numpy_mul.register_autograd(numpy_mul_backward, setup_context=numpy_mul_setup_context)
 
+def numpy_mul_vmap(info, in_dims, x, y):
+    x_bdim, y_bdim = in_dims
+    x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+    y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+    result = x * y
+    result = result.movedim(-1, 0)
+    return result, 0
+
+numpy_mul.register_vmap(numpy_mul_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_mul_scalar", mutates_args=())
 def numpy_mul_scalar(x: Tensor, *, scalar: float) -> Tensor:
     return torch.tensor(to_numpy(x) * scalar, device=x.device)
@@ -86,6 +103,15 @@ def numpy_mul_scalar_backward(ctx, grad_out):
     return grad_x
 
 numpy_mul_scalar.register_autograd(numpy_mul_scalar_backward, setup_context=numpy_mul_scalar_setup_context)
+
+def numpy_mul_scalar_vmap(info, in_dims, x, *, scalar):
+    x_bdim, = in_dims
+    x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+    result = x * scalar
+    result = result.movedim(-1, 0)
+    return result, 0
+
+numpy_mul_scalar.register_vmap(numpy_mul_scalar_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
@@ -105,7 +131,7 @@ def _(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
 def numpy_sort_setup_context(ctx, inputs, output):
-    out, ind, ind_inv = output
+    _out, ind, ind_inv = output
     ctx.dim = inputs[1]
     ctx.save_for_backward(ind, ind_inv)
     ctx.mark_non_differentiable(ind, ind_inv)
@@ -116,6 +142,14 @@ def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
 
 numpy_sort.register_autograd(numpy_sort_backward, setup_context=numpy_sort_setup_context)
 
+def numpy_sort_vmap(info, in_dims, x, dim):
+    x_bdim, _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    dim = dim if dim >= 0 else dim + x.dim() - 1
+    result = numpy_sort(x, dim + 1)
+    return result, (0, 0, 0)
+
+numpy_sort.register_vmap(numpy_sort_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_take", mutates_args=())
 def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
@@ -133,7 +167,7 @@ def _(x, ind, ind_inv, dim):
     return torch.empty_like(x)
 
 def numpy_take_setup_context(ctx, inputs, output):
-    x, ind, ind_inv, dim = inputs
+    _x, ind, ind_inv, dim = inputs
     ctx.dim = dim
     ctx.save_for_backward(ind, ind_inv)
 
@@ -143,6 +177,26 @@ def numpy_take_backward(ctx, grad_out):
     return grad_x, None, None, None
 
 numpy_take.register_autograd(numpy_take_backward, setup_context=numpy_take_setup_context)
+
+def numpy_take_vmap(info, in_dims, x, ind, ind_inv, dim):
+    x_bdim, ind_bdim, ind_inv_bdim, _ = in_dims
+
+    # wrap dim
+    logical_dim = x.dim() if x_bdim is None else x_bdim - 1
+    dim = dim if dim >= 0 else dim + logical_dim
+
+    def expand_bdim(x, x_bdim):
+        if x_bdim is None:
+            return x.expand(info.batch_size, *x.shape)
+        return x.movedim(x_bdim, 0)
+
+    x = expand_bdim(x, x_bdim)
+    ind = expand_bdim(ind, ind_bdim)
+    ind_inv = expand_bdim(ind_inv, ind_inv_bdim)
+
+    return numpy_take(x, ind, ind_inv, dim + 1), 0
+
+numpy_take.register_vmap(numpy_take_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_nonzero", mutates_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
@@ -170,6 +224,11 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(result, args=())
 
+def numpy_nonzero_vmap(info, in_dims, x):
+    raise NotImplementedError("Operator is data-dependent and cannot be vmapped.")
+
+numpy_nonzero.register_vmap(numpy_nonzero_vmap)
+
 @torch.library.custom_op("_torch_testing::numpy_view_copy", mutates_args=())
 def numpy_view_copy(x: Tensor, shape: Sequence[int]) -> Tensor:
     return torch.tensor(np.copy(to_numpy(x).reshape(shape)), device=x.device)
@@ -185,6 +244,16 @@ def numpy_view_copy_backward(ctx, grad_out):
     return torch.ops._torch_testing.numpy_view_copy(grad_out, ctx.x_shape), None
 
 numpy_view_copy.register_autograd(numpy_view_copy_backward, setup_context=numpy_view_copy_setup_context)
+
+def numpy_view_copy_vmap(info, in_dims, x, shape):
+    x_bdim, _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    x_shape = x.shape[0]
+    batch_shape = (x_shape, *shape)
+    result = numpy_view_copy(x, batch_shape)
+    return result, 0
+
+numpy_view_copy.register_vmap(numpy_view_copy_vmap)
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -222,6 +291,13 @@ def numpy_cat_backward(ctx, grad_out):
 
 numpy_cat.register_autograd(numpy_cat_backward, setup_context=numpy_cat_setup_context)
 
+def numpy_cat_vmap(info, in_dims, x, dim):
+    x_bdim, = in_dims
+    result = numpy_cat(x, dim)
+    return result, x_bdim
+
+numpy_cat.register_vmap(numpy_cat_vmap)
+
 def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     r0 = make_arg(2, 3, 4, low=0.9, high=2)
@@ -249,6 +325,14 @@ def numpy_split_copy_backward(ctx, grad_out):
 
 numpy_split_copy.register_autograd(numpy_split_copy_backward, setup_context=numpy_split_copy_setup_context)
 
+def numpy_split_copy_vmap(info, in_dims, x, splits, dim):
+    x_bdim, _ , _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    result = numpy_split_copy(x, splits, dim + 1)
+    return result, 0
+
+numpy_split_copy.register_vmap(numpy_split_copy_vmap)
+
 def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     x = make_arg(2, 9, low=0.9, high=2)
@@ -274,6 +358,14 @@ def numpy_split_copy_with_int_backward(ctx, grad_out, _):
 numpy_split_copy_with_int.register_autograd(
     numpy_split_copy_with_int_backward,
     setup_context=numpy_split_copy_with_int_setup_context)
+
+def numpy_split_copy_with_int_vmap(info, in_dims, x, splits, dim):
+    x_bdim, _ , _ = in_dims
+    x = x.movedim(x_bdim, 0)
+    result, len_split = numpy_split_copy_with_int(x, splits, dim + 1)
+    return (result, len_split), ([0 for _ in range(len(result))], None)
+
+numpy_split_copy_with_int.register_vmap(numpy_split_copy_with_int_vmap)
 
 @torch.library.custom_op("_torch_testing::numpy_nms", mutates_args=())
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
@@ -330,6 +422,11 @@ def _(boxes, scores, iou_threshold):
     i0 = ctx.create_unbacked_symint()
     result = boxes.new_empty([i0], dtype=torch.int64)
     return result
+
+def numpy_nms_vmap(info, in_dims, boxes, scores, iou_threshold):
+    raise NotImplementedError("Operator is data-dependent and cannot be vmapped.")
+
+numpy_nms.register_vmap(numpy_nms_vmap)
 
 def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype)

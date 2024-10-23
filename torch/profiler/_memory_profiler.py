@@ -32,6 +32,7 @@ from torch._C._profiler import (
 from torch._utils import _element_size
 from torch.profiler import _utils
 
+
 KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
 
@@ -191,7 +192,7 @@ def _extract_parameters_and_gradients(
 
 
 def extract_parameters(node: _ProfilerEvent) -> Iterator[TensorKey]:
-    for p, p_grad in _extract_parameters_and_gradients(node):
+    for p, _p_grad in _extract_parameters_and_gradients(node):
         if p is not None:
             yield p
 

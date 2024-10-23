@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <ostream>
 #include <type_traits>
 
@@ -231,7 +232,7 @@ class C10_API SymInt {
 
   std::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
-      return c10::make_optional(data_);
+      return std::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
     if (auto c = node->constant_int()) {

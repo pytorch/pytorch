@@ -227,6 +227,7 @@ void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config) {
 #ifdef USE_KINETO
+  libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
@@ -272,6 +273,16 @@ void prepareTrace(
   }
 
   libkineto::api().activityProfiler().prepareTrace(k_activities);
+#endif // USE_KINETO
+}
+
+void toggleCollectionDynamic(const bool enable) {
+#ifdef USE_KINETO
+  // TODO: We may want to consider adding another input arg for this function
+  // if we want to support turning off certain devices and keeping others on.
+  // For now, we can keep it simple at have it turn off all tracing of "CUDA"
+  // devices
+  libkineto::api().activityProfiler().toggleCollectionDynamic(enable);
 #endif // USE_KINETO
 }
 
