@@ -66,10 +66,9 @@ endif()
 # sycl_runtime_version needs to be hardcoded and uplifted when SYCL runtime version uplifts.
 # TODO: remove this when sycl.lib is supported on Windows
 if(WIN32)
-  set(sycl_runtime_version 7)
   find_library(
     SYCL_LIBRARY
-    NAMES "sycl${sycl_runtime_version}"
+    NAMES "sycl7" "sycl8"
     HINTS ${SYCL_LIBRARY_DIR}
     NO_DEFAULT_PATH
   )
