@@ -123,7 +123,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
-          timeout_minutes: 15
+          timeout_minutes: 30
           max_attempts: 5
           retry_wait_seconds: 90
           command: |
