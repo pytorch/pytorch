@@ -443,29 +443,6 @@ class FrameStateSizeEntry:
             return auto_dynamic
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
-    # Comparisons on lattice is defined as:
-    # auto_unset < int < auto_dynamic
-    @staticmethod
-    def _atom_compare_key(x: Union[AutoUnset, AutoDynamic, int]) -> AtomKey:
-        if x is auto_unset:
-            return (0, None)
-        if x is auto_dynamic:
-            return (2, None)
-        return (1, x)
-
-    @classmethod
-    def _atom_tup_compare_key(
-        cls,
-        xs: Union[
-            AutoUnset, AutoDynamic, Tuple[Union[AutoUnset, AutoDynamic, int], ...]
-        ],
-    ) -> Tuple[int, Optional[Tuple[AtomKey, ...]]]:
-        if xs is auto_unset:
-            return (0, None)
-        if xs is auto_dynamic:
-            return (2, None)
-        return (1, tuple(cls._atom_compare_key(x) for x in xs))
-
     def __ior__(self, other: Self) -> Self:
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
