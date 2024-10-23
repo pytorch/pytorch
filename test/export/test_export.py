@@ -5461,7 +5461,7 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
+    #@testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -5496,9 +5496,6 @@ graph():
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
-
-        # To reflect retracibility issue
-        _ = export(export(M2(), inps).module())
 
     def test_nested_module_with_parameter(self):
         class M1(torch.nn.Module):
