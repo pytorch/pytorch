@@ -2567,6 +2567,10 @@ Arguments:
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "is_initialized",
+              &::c10d::Backend::isInitialized,
               py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding

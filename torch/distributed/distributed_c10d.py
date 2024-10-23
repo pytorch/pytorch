@@ -4733,6 +4733,7 @@ def new_group(
     use_local_synchronization=False,
     group_desc=None,
     use_split=False,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Create a new distributed group.
@@ -4813,6 +4814,7 @@ def new_group(
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
         use_split=use_split,
+        device_id=device_id,
     )
 
 
@@ -4825,6 +4827,7 @@ def _new_group_with_tag(
     use_local_synchronization=False,
     group_desc=None,
     use_split=False,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -4835,7 +4838,8 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
+    if device_id is None:
+        device_id = default_pg.bound_device_id
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()

@@ -462,6 +462,11 @@ class NCCLComm {
 #endif
   }
 
+  bool isInitialized() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return initialized_;
+  }
+
   bool isAborted() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
