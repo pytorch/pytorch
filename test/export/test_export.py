@@ -1166,6 +1166,17 @@ graph():
         )
         check_users_for_graph(ep.graph)
 
+    def test_export_custom_op_lib(self):
+        ops_registered_before = set(torch.ops.mylib)
+
+        # Assert warning for CompositeImplictAutograd op
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+        ops_registered_after = set(torch.ops.mylib)
+        self.assertEqual(ops_registered_after, ops_registered_before)
+
     def test_export_preserve_linear_but_not_custom_op(self):
         table = torch.export.default_decompositions()
         del table[torch.ops.aten.linear.default]
@@ -5461,7 +5472,6 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    #@testing.expectedFailureRetraceability  # Retracing tensor constants results in buffers
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
