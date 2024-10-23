@@ -32,6 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -60,7 +61,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
-from typing_extensions import Self, TypeIs
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -155,7 +155,7 @@ def get_plain_tensors(
     subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
 ) -> List[Tensor]:
     # This function is used in Runtime, do not add redundant asserts
-    plain_tensors: List[Tensor] = [] if out_append_list is not None else []
+    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
@@ -170,7 +170,7 @@ def get_plain_tensors(
     return plain_tensors
 
 
-def is_fake(x: object) -> TypeIs[Tensor]:
+def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -1214,7 +1214,7 @@ class FakeTensorMode(TorchDispatchMode):
     # In this case, it's insufficient to test only one FakeTensor: you need
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
-    def is_our_fake(self, t: object) -> TypeIs[FakeTensor]:
+    def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
         return isinstance(t, FakeTensor) and t.fake_mode is self
 
     # If we should avoid device init. This changes the behavior of various APIs:

@@ -85,7 +85,6 @@ class ROCmTemplateKernel(ROCmKernel):
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
-
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
@@ -111,7 +110,7 @@ class ROCmTemplateKernel(ROCmKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
