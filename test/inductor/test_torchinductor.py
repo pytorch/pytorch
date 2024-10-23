@@ -2049,6 +2049,7 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2101,6 +2102,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
