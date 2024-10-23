@@ -186,6 +186,34 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad(self) -> None:
+        self._init_process()
+
+        t = _SymmetricMemory.empty_strided_p2p(*self._get_test_alloc_args())
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        peer_rank = (self.rank + 1) % self.world_size
+
+        signal_pad = symm_mem.get_signal_pad(peer_rank)
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 4)
+
+        # Only specify sizes
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8))
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), 64)
+
+        # Only specify dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 8)
+
+        # Specify both sizes and dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8), dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), 64)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
 
