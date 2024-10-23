@@ -418,6 +418,14 @@ class _TorchDynamoContext:
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
 
+        import fbvscode; fbvscode.set_trace()
+        if not torch._dynamo.config.specialize_float:
+            self.enter_exit_hooks.append(
+                config._make_closure_patcher(
+                    automatic_dynamic_shapes=False, assume_static_by_default=True
+                )
+            )
+
         if on_enter is not nothing:
             # this case is not common
             def call_on_enter():
