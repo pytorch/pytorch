@@ -619,7 +619,6 @@ class TestDecomp(TestCase):
         for dim in (-1, 0, 1):
             self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
 
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @tf32_off()
