@@ -145,28 +145,28 @@ class TestConfigModule(TestCase):
     def test_get_hash(self):
         print(config.get_hash())
         self.assertEqual(
-            config.get_hash(), b'\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05'
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         # Test cached value
         self.assertEqual(
-            config.get_hash(), b'\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05'
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         self.assertEqual(
-            config.get_hash(), b'\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05'
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b'\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05'
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
         self.assertEqual(
-            config.get_hash(), b'\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05'
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         del config.e_compile_ignored
 
