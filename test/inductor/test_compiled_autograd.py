@@ -6,9 +6,11 @@ import io
 import itertools
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -2405,6 +2407,39 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             not in logs.getvalue()
         )
 
+    def test_multithreading_tls(self):
+        def train(errors, model, x):
+            try:
+                out = model(x)
+                with compiled_autograd.enable(compiler_fn):
+                    self.assertEqual(compiled_autograd.enabled(), True)
+                    self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
+            except Exception as e:
+                print(f"Found error: {e}")
+                errors.put(1)
+                raise
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+        )
+        x = torch.randn([2, 4])
+
+        threads = []
+        errors = queue.Queue()
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(4):
+                thread = threading.Thread(target=train, args=(errors, model, x))
+                threads.append(thread)
+                thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        assert errors.empty()
+
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -2839,6 +2874,12 @@ known_graph_breaks_tests = {
     "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # torch/_custom_op/autograd.py in skip files
     "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # torch/_custom_op/autograd.py in skip files
     "test_save_for_backward_inputs_are_namedtuple",  # torch/_custom_op/autograd.py in skip files
+    "test_reentrant_with_leaf_variable_hook",  # reentrant .backward
+    "test_reentrant_with_non_leaf_variable_hook",  # reentrant .backward
+    "test_reentrant_child_error",  # reentrant .backward
+    "test_deep_reentrant",  # reentrant .backward
+    "test_reentrant_priority",  # reentrant .backward
+    "test_simple_reentrant",  # reentrant .backward
 }
 
 test_contexts = {
@@ -2860,9 +2901,11 @@ skipped_tests = {
 
 known_failing_tests = {
     # Category: Compiled autograd
+    "test_grad_mode_restored_reentrant",  # create_graph
+    "test_reentrant_with_callbacks_both_depths",  # queue_callback
+    "test_reentrant_with_callbacks_depth_0",  # queue_callback
+    "test_reentrant_with_callbacks_depth_1",  # queue_callback
     "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
-    "test_reentrant_with_leaf_variable_hook",  # hangs when enabled with graph breaks
-    "test_reentrant_with_non_leaf_variable_hook",  # hangs when enabled with graph breaks
     "test_anomaly_grad_warnings",  # does not support anomaly mode
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
     "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
@@ -2872,7 +2915,6 @@ known_failing_tests = {
     "test_retain_grad_inplace_over_view",  # retains_grad_hooks
     "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks
     "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
-    "test_reentrant_child_error",  # hangs when enabled with graph breaks
     "test_accumulate_grad",  # create_graph
     "test_anomaly_assign_parent_cleanup",  # create_graph
     "test_anomaly_mode_no_check_nan",  # anomaly mode
@@ -2911,19 +2953,12 @@ known_failing_tests = {
     "test_custom_autograd_no_early_free",  # create_graph
     "test_custom_function_error",  # vjp
     "test_custom_function_save_for_forward",  # vjp
-    "test_deep_reentrant",  # hangs with graph breaks
     "test_dont_materialize_grads",  # undefined grad
-    "test_grad_mode_restored_reentrant",  # hangs with graph breaks
     "test_no_grad_copy",  # setting static member in lifted backward
     "test_no_grad_copy_sparse",  # setting static member in lifted backward
     "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
-    "test_reentrant_priority",  # hangs with graph breaks
-    "test_reentrant_with_callbacks_both_depths",  # hangs with graph breaks
-    "test_reentrant_with_callbacks_depth_0",  # probably hangs with graph breaks
-    "test_reentrant_with_callbacks_depth_1",  # probably hangs with graph breaks
     "test_save_output_nr",  # output_nr grad passed as None
     "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
-    "test_simple_reentrant",  # hangs with graph breaks
     "test_lobpcg",  # create_graph
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
