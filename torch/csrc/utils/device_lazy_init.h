@@ -46,6 +46,14 @@ inline void maybe_initialize_device(const at::TensorOptions& options) {
   maybe_initialize_device(device);
 }
 
+inline void maybe_initialize_device(
+    std::optional<at::DeviceType>& device_type) {
+  if (!device_type.has_value()) {
+    return;
+  }
+  maybe_initialize_device(device_type.value());
+}
+
 bool is_device_initialized(at::DeviceType device_type);
 
 } // namespace torch::utils

@@ -53,7 +53,7 @@ bool isAccelerator(c10::DeviceType device_type) {
 }
 
 c10::DeviceIndex deviceCount() {
-  const auto device_type = at::getAccelerator(false);
+  const auto device_type = getAccelerator(false);
   if (!device_type.has_value()) {
     return static_cast<c10::DeviceIndex>(0);
   }
@@ -62,19 +62,19 @@ c10::DeviceIndex deviceCount() {
 }
 
 void setDeviceIndex(c10::DeviceIndex device_index) {
-  const auto device_type = at::getAccelerator(true).value();
+  const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   impl.setDevice({device_type, device_index});
 }
 
 c10::DeviceIndex getDeviceIndex() {
-  const auto device_type = at::getAccelerator(true).value();
+  const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return static_cast<c10::DeviceIndex>(impl.getDevice().index());
 }
 
 void setCurrentStream(c10::Stream stream) {
-  const auto device_type = at::getAccelerator(true).value();
+  const auto device_type = getAccelerator(true).value();
   TORCH_CHECK(
       device_type == stream.device_type(),
       "stream's device type ",
@@ -86,13 +86,13 @@ void setCurrentStream(c10::Stream stream) {
 }
 
 c10::Stream getCurrentStream(c10::DeviceIndex device_index) {
-  const auto device_type = at::getAccelerator(true).value();
+  const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getStream({device_type, device_index});
 }
 
 void synchronizeDevice(c10::DeviceIndex device_index) {
-  const auto device_type = at::getAccelerator(true).value();
+  const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   // impl.synchronizeDevice should can be safely called from any device
   impl.synchronizeDevice(device_index);
