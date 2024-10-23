@@ -53,44 +53,40 @@ log = logging.getLogger(__name__)
 # ops for different cases). Later, the codegen will perform "persistent
 # allocation" to satisfy the aforementioned constraints, and optionally,
 # perform buffer planning to optimize overall memory usage.
-def can_convert_to_comm_buffer(
-    buffer: ir.Buffer, comm_buffer_type: ir.CommBufferType
+def can_realize_as_comm_buffer(
+    x: ir.TensorBox, comm_buffer_type: ir.CommBufferType
 ) -> bool:
     """
-    Check if a buffer can be converted to a comm buffer of the specified
+    Check if an input can be realized as a comm buffer of the specified
     `comm_buffer_type`.
     """
-    if not isinstance(buffer, ir.Buffer):
-        raise AssertionError(
-            "can_convert_to_comm_buffer(): `buffer` must be of type "
-            f"`ir.Buffer` (got {buffer})."
-        )
-    assert isinstance(buffer, ir.Buffer), type(buffer)
+    data = _get_data(x)
 
-    layout = buffer.get_layout()
+    if isinstance(data, ir.Loops):
+        return True
+
+    layout = data.get_layout()
     if isinstance(layout, ir.CommBufferLayout):
         return True
 
-    if isinstance(layout, ir.FlexibleLayout) and not is_symbolic(buffer.get_numel()):
+    if isinstance(layout, ir.FlexibleLayout) and not is_symbolic(data.get_numel()):
         return True
 
     return False
 
 
-def convert_to_comm_buffer(
-    buffer: ir.Buffer, comm_buffer_type: ir.CommBufferType, group_name: str
+def realize_as_comm_buffer(
+    x: ir.TensorBox, comm_buffer_type: ir.CommBufferType, group_name: str
 ) -> None:
     """
-    Convert a buffer to a comm buffer of the specified `comm_buffer_type`.
+    Realize an input as a comm buffer of the specified `comm_buffer_type`.
 
-    Specifically, this changes the layout of the buffer to
-    `ir.CommBufferLayout`.
+    Specifically, this realizes the underlying buffer if it's still unrealized
+    and changes the layout of the buffer to `ir.CommBufferLayout`.
     """
-    if not isinstance(buffer, ir.Buffer):
-        raise AssertionError(
-            "convert_to_comm_buffer(): `buffer` must be of type "
-            f"`ir.Buffer` (got {buffer})."
-        )
+    x.realize()
+    buffer = _get_data(x)
+    assert isinstance(buffer, ir.Buffer)
 
     layout = buffer.get_layout()
     if isinstance(layout, ir.CommBufferLayout):
@@ -98,8 +94,8 @@ def convert_to_comm_buffer(
 
     if not isinstance(layout, ir.FlexibleLayout):
         raise AssertionError(
-            "Only a buffer with FlexibleLayout can be converted to "
-            f"a comm buffer (got {layout})."
+            "A buffer can only be realized as a comm buffer if it "
+            f"has `FlexibleLayout` (got {layout})."
         )
 
     if is_symbolic(buffer.get_numel()):
@@ -113,6 +109,20 @@ def convert_to_comm_buffer(
         comm_buffer_type=comm_buffer_type,
         group_name=group_name,
     )
+
+
+def _get_data(x: ir.TensorBox) -> ir.IRNode:
+    if isinstance(x.data, ir.BaseView):
+        # TensorBox -> *View -> StorageBox -> IRNode
+        return x.data.unwrap_view().data
+    elif isinstance(x.data, ir.StorageBox):
+        # TensorBox -> StorageBox -> IRNode
+        return cast(ir.Buffer, x.data.data)
+    else:
+        raise AssertionError(
+            "Expect the data attr of a `TensorBox` to be either "
+            f"an `ir.BaseView` or `ir.StorageBox` (got {x.data})."
+        )
 
 
 _bufs_to_skip_wait: OrderedSet[Tuple[int, str]] = OrderedSet()
@@ -130,39 +140,23 @@ def should_skip_wait(x: ir.IRNode) -> bool:
     return (id(V.graph), x.get_name()) in _bufs_to_skip_wait
 
 
-def _get_buffer(x: ir.TensorBox) -> ir.Buffer:
-    if isinstance(x.data, ir.BaseView):
-        # TensorBox -> View -> StorageBox -> Buffer
-        return x.data.unwrap_view().data
-    elif isinstance(x.data, ir.StorageBox):
-        # TensorBox -> StorageBox -> Buffer
-        return cast(ir.Buffer, x.data.data)
-    else:
-        raise AssertionError(
-            "Expect the data attr of a `TensorBox` to be either "
-            f"an `ir.BaseView` or `ir.StorageBox` (got {x.data})."
-        )
-
-
 def _should_lower_as_one_shot_all_reduce(
     inp: ir.TensorBox, reduce_op: str, group_name: str
 ):
     from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
 
-    buffer = _get_buffer(inp)
-    inp_size = buffer.get_numel() * buffer.get_dtype().itemsize
+    inp_size = inp.get_numel() * inp.get_dtype().itemsize
     return (
         config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
-        and can_convert_to_comm_buffer(buffer, ir.CommBufferType.SYMM_MEM)
+        and can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM)
         and reduce_op in ("sum",)
         and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
     )
 
 
 def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
-    buffer = _get_buffer(inp)
-    convert_to_comm_buffer(buffer, ir.CommBufferType.SYMM_MEM, group_name)
+    realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)
     return pytree.tree_map(
         ir.TensorBox.create,
         ir.FallbackKernel.create(
@@ -191,7 +185,6 @@ def register_comm_lowerings():
 
     @register_lowering(c10d.all_reduce)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
-        inp.realize()
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
@@ -215,7 +208,6 @@ def register_comm_lowerings():
     def _all_reduce_(
         inp: ir.TensorBox, reduce_op: str, group_name: str
     ) -> ir.TensorBox:
-        inp.realize()
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             ret = copy_(
                 inp,
