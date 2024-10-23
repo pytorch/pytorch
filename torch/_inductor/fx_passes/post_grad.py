@@ -887,12 +887,12 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
                 return next_carry, ys
 
             def cond_fn_out(*flat_args):
-                _, _, _, idx, _ = pytree.tree_unflatten(flat_args, while_loop_spec)
-                return idx < scan_length
+                _, _, _, idx, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
+                return idx < scan_length  # type: ignore[has-type]
 
             def body_fn_out(*flat_args):
                 init, xs, additional_inputs, idx, ys_outs = pytree.tree_unflatten(
-                    flat_args, while_loop_spec
+                    flat_args, while_loop_spec  # type: ignore[has-type]
                 )
 
                 scan_idx = maybe_reverse_idx(idx)

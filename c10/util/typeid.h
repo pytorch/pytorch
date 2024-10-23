@@ -135,7 +135,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      c10::string_view_ext name) noexcept
+      c10::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -152,7 +152,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  c10::string_view_ext name_;
+  c10::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -328,6 +328,7 @@ class C10_API TypeMeta final {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept;
+  ~TypeMeta() = default;
 
   /**
    * Copy constructor.
@@ -339,6 +340,7 @@ class C10_API TypeMeta final {
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
+  TypeMeta& operator=(TypeMeta&& src) noexcept = default;
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
   inline TypeMeta& operator=(ScalarType scalar_type) noexcept {
@@ -409,7 +411,7 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  c10::string_view_ext name() const noexcept {
+  c10::string_view name() const noexcept {
     return data().name_;
   }
 
@@ -428,7 +430,7 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static c10::string_view_ext TypeName() noexcept {
+  static c10::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
