@@ -17,11 +17,10 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
-    get_stride_order,
+    get_fill_order,
     InputBuffer,
     IRNode,
     StorageBox,
-    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -77,7 +76,14 @@ def create_placeholder(
 
 def maybe_realize(args: List[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
-    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
+    return tree_map(
+        lambda x: (
+            realize_inputs(x)
+            if x is not None and not isinstance(x, sympy.Symbol)
+            else x
+        ),
+        args,
+    )
 
 
 def get_float32_precision():
@@ -793,8 +799,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    stride_order = get_stride_order(query.get_stride())
-    fill_order = stride_order2fill_order(stride_order)
+    fill_order = get_fill_order(query.get_stride())
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(

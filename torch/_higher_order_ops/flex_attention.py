@@ -57,10 +57,9 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
         torch.Tensor: A new tensor with same shape and data as the input,
         but with strides permuted based on the query tensor's stride order.
     """
-    from torch._inductor.ir import get_stride_order, stride_order2fill_order
+    from torch._inductor.ir import get_fill_order
 
-    stride_order = get_stride_order(query_strides)
-    fill_order = stride_order2fill_order(stride_order)
+    fill_order = get_fill_order(query_strides)
     assert out.storage_offset() == 0, "Only support storage_offset == 0"
     out_strides = _construct_strides(out.shape, fill_order)
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
@@ -85,7 +84,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if not all(
-            isinstance(buf, torch.Tensor)
+            isinstance(buf, (torch.Tensor, torch.SymInt))
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
             raise RuntimeError("Other buffers must be tensors.")
@@ -415,7 +414,7 @@ def flex_attention_functionalize(
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
     assert all(
-        isinstance(item, torch.Tensor)
+        isinstance(item, (torch.Tensor, torch.SymInt))
         for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
     )
 
@@ -584,7 +583,9 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         *score_mod_other_buffers: Tuple[Any, ...],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
-            buffer.requires_grad for buffer in mask_mod_other_buffers
+            buffer.requires_grad
+            for buffer in mask_mod_other_buffers
+            if isinstance(buffer, torch.Tensor)
         )
         assert (
             not any_buffer_requires_grad
