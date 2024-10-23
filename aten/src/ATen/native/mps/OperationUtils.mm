@@ -1,4 +1,5 @@
 //  Copyright © 2022 Apple Inc.
+#include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -15,6 +16,9 @@
 #else
 #include <ATen/ops/scalar_tensor.h>
 #endif
+
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
 
 namespace at::native::mps {
 
@@ -885,6 +889,46 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 
   cplMap[key] = std::make_pair(cpl, func);
   return cplMap[key];
+}
+
+class BundledShaderLibary: public MetalShaderLibrary {
+public:
+  BundledShaderLibary(): MetalShaderLibrary("") {}
+protected:
+  id<MTLLibrary> getLibrary() override {
+    if (C10_UNLIKELY(!library)) {
+      auto device = MPSDevice::getInstance()->device();
+      NSError *error = nil;
+      library = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
+      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    }
+    return library;
+  }
+
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
+   throw std::runtime_error("Should never be called");
+  }
+private:
+  static dispatch_data_t getSectionData(const std::string& name) {
+      uint32_t idx = 0;
+      for(const auto cnt: c10::irange(_dyld_image_count())) {
+          if (strstr(_dyld_get_image_name(cnt), "/libtorch_cpu.dylib")) {
+            idx = cnt; break;
+          }
+      }
+      const auto* mach_header = reinterpret_cast<const struct mach_header_64*>(_dyld_get_image_header(idx));
+      unsigned long mtl_lib_size = 0;
+      const auto* mtl_lib_data = getsectiondata(mach_header, "__TEXT", name.c_str(), &mtl_lib_size);
+      if (mtl_lib_data == nullptr) {
+        throw std::runtime_error("Can't find metal library section " + name);
+      }
+      return dispatch_data_create(mtl_lib_data, mtl_lib_size, dispatch_get_main_queue(), ^() {});
+    }
+};
+
+MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
+    static BundledShaderLibary l;
+    return l;
 }
 
 } // namespace at::native::mps
