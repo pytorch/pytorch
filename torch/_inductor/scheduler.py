@@ -2797,6 +2797,8 @@ class Scheduler:
             output = []
             for rd in node.read_writes.reads:
                 name = rd.name
+                if name not in self.name_to_buf:
+                    continue
                 buf = self.name_to_buf[name]
                 if len(buf.users) == 1:
                     output.append(buf.node)
