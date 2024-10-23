@@ -72,11 +72,11 @@ inline bool is_thp_alloc(size_t nbytes) {
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
-constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
+constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
   return gAlignment;
 }
 
-constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
+constexpr bool is_thp_alloc([[maybe_unused]] size_t nbytes) {
   return false;
 }
 #endif
