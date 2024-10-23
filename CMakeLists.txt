@@ -54,13 +54,14 @@ set(CMAKE_C_STANDARD
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.3+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+# --- [ Check that minimal gcc version is 9.2+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.2)
   message(
     FATAL_ERROR
-      "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+      "GCC-9.2 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
+
 
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
