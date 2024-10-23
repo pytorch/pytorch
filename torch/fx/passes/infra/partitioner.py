@@ -90,11 +90,13 @@ class CapabilityBasedPartitioner:
         partition_map: Dict[int, Set] = collections.defaultdict(set)
 
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}   # mapping from node to partition_id
+        assignment: Dict[Node, int] = {}  # mapping from node to partition_id
         partitions_by_id: Dict[
             int, Partition
         ] = {}  # mapping from partition_id to partition
-        partition_users: Dict[int, Set] = {}  # mapping from partition_id to partition users
+        partition_users: Dict[
+            int, Set
+        ] = {}  # mapping from partition_id to partition users
         new_partition_id = itertools.count()
 
         # try to merge partition other_id into partition self_id
@@ -138,7 +140,9 @@ class CapabilityBasedPartitioner:
             all_user_nodes = set()
             removed_candidates_list = [other_nodes, self_nodes]
             partition_users_list = [partition_users[self_id], partition_users[other_id]]
-            for users, removed_candidates in zip(partition_users_list, removed_candidates_list):
+            for users, removed_candidates in zip(
+                partition_users_list, removed_candidates_list
+            ):
                 for user in users:
                     if user not in removed_candidates:
                         all_user_nodes.add(user)
@@ -147,7 +151,7 @@ class CapabilityBasedPartitioner:
             if dfs_iter_find_cycle(all_user_nodes):
                 # return false indicating cyclic dependency found and
                 # merge is aborted
-                return False
+                return self_id, False
 
             # merge the smaller partition into the larger.
             merge_id, removed_id = self_id, other_id
@@ -169,7 +173,7 @@ class CapabilityBasedPartitioner:
             partition_users[merge_id] = all_user_nodes
             del partition_users[removed_id]
 
-            return True
+            return merge_id, True
 
         def merge_single_node(node: Node, id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
@@ -229,10 +233,9 @@ class CapabilityBasedPartitioner:
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
-                    # note: merge partition `other_id` into partition `self_id` if
-                    # it doesn't create cyclic dependency in the graph, otherwise,
-                    # this is a no-op
-                    maybe_merge_partition(self_id, other_id)
+                    # note: merge partitions if it doesn't create cyclic dependency
+                    # in the graph, otherwise, this is a no-op
+                    self_id, _ = maybe_merge_partition(self_id, other_id)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
