@@ -194,6 +194,7 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        kwargs['rep'] = 200
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:

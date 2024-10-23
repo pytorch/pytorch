@@ -34,6 +34,7 @@ def _is_triton_available():
     except ImportError:
         return False
 
+attrs_descriptor_available = False
 
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
 if _is_triton_available():
