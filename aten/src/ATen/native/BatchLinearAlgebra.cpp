@@ -134,7 +134,7 @@ extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info
 // potrs
 #if defined(_WIN32) && defined(_M_ARM64)
 
-// The functions zpotrs, cpotrs, dpotrs, and spotrs are not directly available in LAPACKE on Windows on ARM, 
+// The functions zpotrs, cpotrs, dpotrs, and spotrs are not directly available in LAPACKE on Windows on ARM,
 // so we need to have wrapper functions to call them.
 // The issue on ARM platform can be found below:
 // https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
@@ -321,7 +321,7 @@ extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 // ormqr
 #if defined(_WIN32) && defined(_M_ARM64)
 
-// The functions zunmqr, cunmqr, dormqr, and sormqr are not directly available in LAPACKE on Windows on ARM, 
+// The functions zunmqr, cunmqr, dormqr, and sormqr are not directly available in LAPACKE on Windows on ARM,
 // so we need to have wrapper functions to call them.
 // The issue on ARM platform can be found below:
 // https://community.arm.com/support-forums/f/high-performance-computing-forum/56512/unable-to-use-lapack---potrs-functions
