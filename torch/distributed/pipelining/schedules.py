@@ -808,7 +808,6 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Chunk counters
         fwd_mb_index = 0
         bwd_mb_index = 0
-        weight_stage_mb_index = 0
 
         # Warmup phase
         send_work = None
@@ -1658,21 +1657,39 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
 
-                    if not stage.is_first:
+                    if (
+                        not stage.is_first
+                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                        and stage_idx - 1 not in stage_index_to_stage
+                    ):
                         assert (
                             stage_idx,
                             mb_index,
                         ) in fwd_recv_ops, f"Computing {action=} before receiving input"
                         fwd_recv_ops.pop((stage_idx, mb_index)).wait()
+
                     output = stage.forward_one_chunk(
                         mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
-                    self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+                    # TODO(whc) we have a discrepancy between tuple and tensor output type for forward_one_chunk.
+                    self._maybe_compute_loss(stage, output[0], target_mbs, mb_index)
+
+                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                    # see [Note: V-schedule special case]
+                    if stage_idx + 1 in stage_index_to_stage:
+                        stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
+                            output, mb_index
+                        )
+
                 elif comp_type == BACKWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
 
-                    if not stage.is_last:
+                    if (
+                        not stage.is_last
+                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                        and stage_idx + 1 not in stage_index_to_stage
+                    ):
                         assert (
                             stage_idx,
                             mb_index,
@@ -1684,6 +1701,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     stage.backward_one_chunk(
                         mb_index, loss=loss, full_backward=self.use_full_backward
                     )
+
+                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                    # see [Note: V-schedule special case]
+                    if stage_idx - 1 in stage_index_to_stage:
+                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                            stage.get_local_bwd_output(mb_index), mb_index
+                        )
+
                 elif comp_type == WEIGHT:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)

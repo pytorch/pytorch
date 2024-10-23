@@ -6,8 +6,9 @@ import logging
 import os
 from typing import List
 
-import torch
 from model_registry import MultiMLP
+
+import torch
 from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
@@ -43,6 +44,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
@@ -304,6 +306,7 @@ class TestScheduleLowering(TestCase):
         "test_info",
         [
             {
+                "schedule": "simple_2_rank_2_stage",
                 "compute": {
                     0: ["0F0", "0F1", "   ", "0B0", "   ", "0B1"],
                     1: ["   ", "1F0", "1B0", "1F1", "1B1", "   "],
@@ -335,6 +338,7 @@ class TestScheduleLowering(TestCase):
                 "simulated_steps": 9,
             },
             {
+                "schedule": "v_2_rank_4_stage",
                 "compute": {
                     0: [
                         "0F0",

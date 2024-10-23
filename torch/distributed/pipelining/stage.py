@@ -301,6 +301,70 @@ class _PipelineStageBase(ABC):
 
         return ops
 
+    """[Note: V-schedule special case]
+
+    V-Schedules have a special case where 2 stages with adjacent stage_id are on the same rank.
+
+    ex: 2 ranks, 4 stages forms a simple V:
+    rank0:  stage 0                   stage 3
+    rank1:          stage 1  stage 2
+
+    stage 0,1 and 2,3 communicate activations using send/recv as usual, but stage 1,2 do not need to
+    use communication ops.  Instead, they should pass tensor data directly via function call.
+
+    set_local_fwd_input and (get_local_bwd_output + set_local_bwd_input) facilitate this optimization, and
+    should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
+    """
+
+    def set_local_fwd_input(self, prev_stage_outputs: Tuple[Any], mb_index: int):
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[mb_index]
+        assert isinstance(
+            prev_stage_outputs, tuple
+        ), f"Expected tuple, got {type(prev_stage_outputs)}"
+        for info, tensor in zip(recv_infos, prev_stage_outputs):
+            assert isinstance(
+                tensor, torch.Tensor
+            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            if not isinstance(info, _RecvInfo):
+                # TODO: when would info not be a _RecvInfo? should this be an error?
+                continue
+
+            # TODO(whc) we shouldn't need a copy here, and this feels hacky.  But i need to ensure 'tensor' is
+            # a leaf tensor that requires_grad and i'm not allowed to modify requires_grad-ness of existing tensor
+            # with torch.no_grad():
+            # info.buffer.copy_(tensor)
+            info.buffer = tensor.detach().requires_grad_(True)
+
+    def get_local_bwd_output(self, mb_index):
+        assert (
+            self.has_backward
+        ), "can't steal_bwd_input if this stage doesn't have backward"
+        assert not self.is_first, "can't get bwd output if this stage is first"
+
+        self._check_chunk_id(mb_index)
+        # TODO(whc) we should be indexing mb_index into self.grads_input, but it appears we are only storing
+        # the most recently created grads which needs to be fixed not only here but also for get_bwd_send_ops.
+
+        return self.grads_input
+
+    def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+        # TODO(whc) discrepancy between list/tuple type here. need to clean up
+        # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+
+        assert (
+            self.has_backward
+        ), "can't set bwd input if this stage doesn't have backward"
+        assert not self.is_last, "can't set bwd input if this stage is last"
+        recv_infos = self.grad_recv_info[mb_index]
+        for info, tensor in zip(recv_infos, next_stage_bwd_outputs):
+            assert isinstance(
+                tensor, torch.Tensor
+            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            assert isinstance(
+                info, _RecvInfo
+            ), f"Expected a recv info, got {type(info)}"
+            info.buffer = tensor
+
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the input arguments
@@ -615,7 +679,7 @@ class _PipelineStageBase(ABC):
             map_debug_info(output),
         )
         self._validate_fwd_outputs(output_tuple)
-        return output
+        return output_tuple
 
     def backward_one_chunk(
         self, bwd_chunk_id: int, loss=None, full_backward: bool = True
@@ -719,7 +783,7 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                     "full_backward": False,
                 }
-                weight_grads, _ = self.backward_maybe_with_nosync("weight", bwd_kwargs)
+                self.backward_maybe_with_nosync("weight", bwd_kwargs)
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,
@@ -1603,13 +1667,13 @@ def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
         ]
 
         logger.debug(
-            f"Rank: {pg_rank}"  # noqa: G004
-            f"Stage id: {stage_id}"
-            f"Stage num stages: {stage.num_stages}"
-            f"Stage rank: {rank}"
-            f"Stage world size: {world_size}"
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}"  # noqa: G003
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}"  # noqa: G003
+            f"Rank: {pg_rank}",  # noqa: G004
+            f"Stage id: {stage_id}",
+            f"Stage num stages: {stage.num_stages}",
+            f"Stage rank: {rank}",
+            f"Stage world size: {world_size}",
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}",  # noqa: G003
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}",  # noqa: G003
         )
 
         all_inputs.extend(stage_input_shapes)
