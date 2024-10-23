@@ -822,7 +822,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6(self):
+    def test_qconv2d_relu6_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
@@ -830,7 +830,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6(self):
+    def test_qconv2d_relu6_xpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
