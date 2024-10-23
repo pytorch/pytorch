@@ -344,6 +344,11 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8 = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         if out_dtype is not None:
             self.assertEqual(out_dtype, out_fp8.dtype)
+        print(out_fp32)
+        print("===========}")
+        print(out_fp8.to(torch.float))
+        print("===========")
+        print(out_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -360,12 +365,12 @@ class TestFP8MatmulCuda(TestCase):
             # ROCm does support e5m2 MM
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
-
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
         if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+            # hipblasLT does not trigger a RuntimeError, however it's still not supported
             with self.assertRaises(RuntimeError):
                 self._test_tautological_mm(device, out_dtype=e5m2_type)
 
