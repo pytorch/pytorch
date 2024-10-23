@@ -2,6 +2,20 @@
 
 set -ex
 
+# Skip pytorch-nightly installation in docker images
+# Installation of pytorch-nightly is needed to prefetch mobilenet_v2 avd v3 models for some tests.
+# Came from https://github.com/ROCm/pytorch/commit/85bd6bc0105162293fa0bbfb7b661f85ec67f85a
+# Models are downloaded on first use to the folder /root/.cache/torch/hub
+# But pytorch-nightly installation also overrides .ci/docker/requirements-ci.txt settings
+# and upgrades some of python packages (sympy from 1.12.0 to 1.13.0)
+# which causes several 'dynamic_shapes' tests to fail
+# Skip prefetching models affects these tests without any errors:
+#   python test/mobile/model_test/gen_test_model.py mobilenet_v2
+#   python test/quantization/eager/test_numeric_suite_eager.py -k test_mobilenet_v3
+# Issue https://github.com/ROCm/frameworks-internal/issues/8772
+echo "Skip torch-nightly installation"
+exit 0
+
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 # Cache the test models at ~/.cache/torch/hub/
