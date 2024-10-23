@@ -3045,6 +3045,8 @@ class TestCase(expecttest.TestCase):
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
+        torch.compiler.set_stance("default")
+
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
         # When strict mode is False, suppress_errors is True

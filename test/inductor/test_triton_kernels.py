@@ -1667,7 +1667,7 @@ def forward(self, x_1, output_1):
         a = torch.randn(301, device=GPU_TYPE)
         b = torch.randn(301, device=GPU_TYPE)
 
-        backend = torch._dynamo.testing.AOTEagerAndRecordGraphs()
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
         torch.compile(
             f,
             fullgraph=True,

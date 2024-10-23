@@ -981,6 +981,37 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
+    def test_index_put_large_indices(self, device):
+        def generate_indices(num_indices: int, index_range: int):
+            indices = []
+            for _ in range(num_indices):
+                x = random.randint(0, index_range - 1)
+                indices.append(x)
+            return torch.tensor(indices)
+
+        num_indices = 401988
+        max_index_range = 2000
+        results = []
+        target_index_range = [16, 256, 2000]
+        for generated_index_range in target_index_range:
+            # create CPU tensors
+            a_tensor_size = (max_index_range, 256)
+            a = torch.randn(a_tensor_size, dtype=torch.bfloat16)
+            b = generate_indices(
+                num_indices=num_indices, index_range=generated_index_range
+            )
+            c_tensor_size = (num_indices, 256)
+            c = torch.randn(c_tensor_size, dtype=torch.bfloat16)
+            # create GPU copies
+            a_dev = a.to(device)
+            b_dev = b.to(device)
+            c_dev = c.to(device)
+            # run
+            a.index_put_(indices=[b], values=c, accumulate=True)
+            a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
+            self.assertEqual(a_dev.cpu(), a)
+
+    @onlyCUDA
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)

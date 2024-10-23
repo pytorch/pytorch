@@ -6,10 +6,9 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
-#include <sstream>
 #include <type_traits>
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -308,4 +307,4 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   sub_iter.for_each(loop, grain_size);
 }
 
-}}}  // namespace at::native::<anonymous>
+}} // namespace at::native::<anonymous>

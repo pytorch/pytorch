@@ -39,7 +39,6 @@
 
 #include <sstream>
 #include <cstddef>
-#include <functional>
 #include <memory>
 
 namespace c10::cuda::_internal {
@@ -61,7 +60,7 @@ namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags;
+  unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
   int ctx_is_active = 0;
@@ -103,7 +102,7 @@ void CUDAHooks::init() const {
 #endif
 }
 
-const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
@@ -124,7 +123,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
-  cudaPointerAttributes attr;
+  cudaPointerAttributes attr{};
   // We do not believe that CUDA needs mutable access to the data
   // here.
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
@@ -325,10 +324,10 @@ bool CUDAHooks::hasCUDART() const {
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
-  int runtimeVersion;
+  int runtimeVersion = 0;
   cudaRuntimeGetVersion(&runtimeVersion);
 
-  auto printCudaStyleVersion = [&](int v) {
+  auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM
     // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
     if(v < 500) {
@@ -369,7 +368,7 @@ std::string CUDAHooks::showConfig() const {
 #if AT_CUDNN_ENABLED()
 
 
-  auto printCudnnStyleVersion = [&](int v) {
+  auto printCudnnStyleVersion = [&](size_t v) {
     oss << (v / 1000) << "." << (v / 100 % 10);
     if (v % 100 != 0) {
       oss << "." << (v % 100);

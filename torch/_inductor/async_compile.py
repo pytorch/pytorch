@@ -49,6 +49,8 @@ _t0: Optional[float] = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
+log = logging.getLogger(__name__)
+
 
 def pre_fork_setup():
     """
@@ -160,10 +162,14 @@ class AsyncCompile:
         pool: AnyPool
         if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
+            log.info("Creating subprocess pool with %d workers", get_compile_threads())
             pool = SubprocPool(get_compile_threads())
         else:
             pre_fork_setup()
             ctx = multiprocessing.get_context(get_worker_start_method())
+            log.info(
+                "Creating forked subprocess pool with %d workers", get_compile_threads()
+            )
             pool = ProcessPoolExecutor(
                 get_compile_threads(),
                 mp_context=ctx,

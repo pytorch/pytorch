@@ -95,8 +95,8 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t* pool_offsets,
     int64_t nvalues,
     scalar_t* mx_rows,
-    GenericPackedTensorAccessor<scalar_t, 2> input_values_acc,
-    GenericPackedTensorAccessor<scalar_t, 2> output_values_acc) {
+    PackedTensorAccessor<scalar_t, 2> input_values_acc,
+    PackedTensorAccessor<scalar_t, 2> output_values_acc) {
   /*
     See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
@@ -156,9 +156,9 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     int64_t* grad_offsets,
     int64_t* out_offsets,
     int64_t* lower_bound_values,
-    GenericPackedTensorAccessor<scalar_t, 2> values_accessor,
-    GenericPackedTensorAccessor<scalar_t, 2> out_values_accessor,
-    GenericPackedTensorAccessor<scalar_t, 2> grad_values_accessor) {
+    PackedTensorAccessor<scalar_t, 2> values_accessor,
+    PackedTensorAccessor<scalar_t, 2> out_values_accessor,
+    PackedTensorAccessor<scalar_t, 2> grad_values_accessor) {
   /*
     See ATen/native/sparse/SoftMax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this

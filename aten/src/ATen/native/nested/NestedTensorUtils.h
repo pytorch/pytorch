@@ -22,6 +22,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <tuple>
 #include <utility>
 #include <vector>
 

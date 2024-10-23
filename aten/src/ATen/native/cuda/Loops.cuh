@@ -11,6 +11,7 @@
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
+#include <tuple>
 
 namespace at::native {
 

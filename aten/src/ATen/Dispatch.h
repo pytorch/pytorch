@@ -38,11 +38,9 @@ inline constexpr bool should_include_kernel_dtype(
  * binary.
  */
 #if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
-namespace at {
-namespace detail {
+namespace at::detail {
 TORCH_API void record_kernel_function_dtype(std::string name);
-}
-} // namespace at
+} // namespace at::detail
 
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type) \
   at::detail::record_kernel_function_dtype(           \
@@ -104,23 +102,23 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
 }
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, "
-    "pass an at::ScalarType instead")]] inline at::ScalarType
-scalar_type(const at::DeprecatedTypeProperties& t) {
+    "pass an at::ScalarType instead")
+inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
   return t.scalarType();
 }
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, "
-    "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")]] inline void
-deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
+    "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")
+inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
 
-[[deprecated(
+C10_DEPRECATED_MESSAGE(
     "AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX is deprecated, "
     "use AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, ...) "
-    "instead")]] inline void
-deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
+    "instead")
+inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 } // namespace detail
 

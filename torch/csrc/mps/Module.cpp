@@ -44,7 +44,7 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
   HANDLE_TH_ERRORS
   track_bad_mps_fork();
   return THPGenerator_initDefaultGenerator(
-      at::detail::getMPSHooks().getDefaultGenerator());
+      at::detail::getMPSHooks().getDefaultMPSGenerator());
   END_HANDLE_TH_ERRORS
 }
 

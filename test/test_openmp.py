@@ -4,7 +4,7 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 try:
@@ -27,7 +27,6 @@ class Network(torch.nn.Module):
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
-@unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 class TestOpenMP_ParallelFor(TestCase):
     batch = 20
     channels = 1
