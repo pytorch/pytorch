@@ -21,9 +21,8 @@ RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 RUN yum install -y devtoolset-${DEVTOOLSET_VERSION}-gcc devtoolset-${DEVTOOLSET_VERSION}-gcc-c++ devtoolset-${DEVTOOLSET_VERSION}-gcc-gfortran devtoolset-${DEVTOOLSET_VERSION}-binutils
 # EPEL for cmake
-RUN wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm && \
-    rpm -ivh epel-release-latest-7.noarch.rpm && \
-    rm -f epel-release-latest-7.noarch.rpm
+RUN yum --enablerepo=extras install -y epel-release
+
 # cmake
 RUN yum install -y cmake3 && \
     ln -s /usr/bin/cmake3 /usr/bin/cmake
@@ -71,6 +70,10 @@ FROM cuda as cuda12.4
 RUN bash ./install_cuda.sh 12.4
 ENV DESIRED_CUDA=12.4
 
+FROM cuda as cuda12.6
+RUN bash ./install_cuda.sh 12.6
+ENV DESIRED_CUDA=12.6
+
 # Install MNIST test data
 FROM base as mnist
 ADD ./common/install_mnist.sh install_mnist.sh
@@ -80,6 +83,7 @@ FROM base as all_cuda
 COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.1  /usr/local/cuda-12.1 /usr/local/cuda-12.1
 COPY --from=cuda12.4  /usr/local/cuda-12.4 /usr/local/cuda-12.4
+COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
 
 # Final step
 FROM ${BASE_TARGET} as final

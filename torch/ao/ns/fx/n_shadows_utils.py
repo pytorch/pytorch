@@ -406,20 +406,20 @@ def create_submodule_from_subgraph(
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
             cur_name_idx += 1
-            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined, arg-type]
+            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined,arg-type]
 
         elif cur_node_orig.op == "call_function":
             cur_node_copy = g.call_function(
                 cur_node_orig.target,  # type: ignore[arg-type]
                 cur_args_copy,  # type: ignore[arg-type]
-                cur_kwargs_copy,  # type: ignore[possibly-undefined, arg-type]
+                cur_kwargs_copy,  # type: ignore[possibly-undefined]
             )
 
         elif cur_node_orig.op == "call_method":
             cur_node_copy = g.call_method(
                 cur_node_orig.target,  # type: ignore[arg-type]
                 cur_args_copy,  # type: ignore[arg-type]
-                cur_kwargs_copy,  # type: ignore[possibly-undefined, arg-type]
+                cur_kwargs_copy,  # type: ignore[possibly-undefined]
             )
 
         else:

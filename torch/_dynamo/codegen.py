@@ -7,10 +7,11 @@ import types
 from typing import Counter, Dict, List, Optional
 
 import torch.nn
-from . import utils
 
+from . import utils
 from .bytecode_transformation import (
     add_push_null,
+    add_push_null_call_function_ex,
     create_call_function,
     create_call_method,
     create_dup_top,
@@ -50,7 +51,8 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
-    ):
+        overridden_sources=None,
+    ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
@@ -64,6 +66,10 @@ class PyCodegen:
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        # This serves as a way for codegen to use a different source; we need
+        # this because sometimes we can't easily modify the original source
+        # without affecting other components, e.g., guards.
+        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
@@ -83,7 +89,7 @@ class PyCodegen:
         res = value.reconstruct(self)
         assert res is None, f"reconstruct!=None {value}"
 
-    def add_push_null(self, gen_fn):
+    def add_push_null(self, gen_fn, call_function_ex=False):
         """
         `gen_fn` generates instructions via PyCodegen methods
         that push a single callable to the stack.
@@ -95,11 +101,19 @@ class PyCodegen:
         with such bits (LOAD_GLOBAL 3.11+, LOAD_ATTR 3.12+, LOAD_SUPER_ATTR).
         """
         old_len = len(self._output)
+        if sys.version_info < (3, 13):
+            # gen_fn may DUP_TOP instead if TOS is not cleared.
+            # Will cause problems since NULL will be pushed right
+            # before the generated instructions in <= 3.12
+            self.clear_tos()
         gen_fn()
         # inplace modify self._output
         added_insts = self._output[old_len:]
         del self._output[old_len:]
-        self._output.extend(add_push_null(added_insts))
+        if call_function_ex:
+            self._output.extend(add_push_null_call_function_ex(added_insts))
+        else:
+            self._output.extend(add_push_null(added_insts))
         if sys.version_info >= (3, 13):
             # NULL will be at top of stack
             self.clear_tos()
@@ -107,7 +121,9 @@ class PyCodegen:
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self.call_reconstruct(value)
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value, value)
+            self.call_reconstruct(source)
             self.clear_tos()
             return
 
@@ -121,27 +137,25 @@ class PyCodegen:
 
         if self.mutable_side_effects_from_source:
             # this is needed to get aliasing relationships right
-            # value.mutable_local.source will get mutated to hold `value`
+            # value.source will get mutated to hold `value`
             # mutable_side_effects_from_source=False is used to codegen the mutation
             # mutable_side_effects_from_source=True is used to codegen a reference
             from .side_effects import MutableSideEffects
 
             if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.mutable_local.source)
+                self(value.source)
                 return
 
         if allow_cache:
-            if value.mutable_local and value.mutable_local in self.tempvars:
-                output.append(self.create_load(self.tempvars[value.mutable_local]))
-                self.top_of_stack = value
-                return
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
 
         if value.source is not None and allow_cache and self.value_from_source:
-            self.call_reconstruct(value.source)
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value.source, value.source)
+            self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
@@ -245,8 +259,6 @@ class PyCodegen:
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        if value.mutable_local:
-            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):
@@ -460,7 +472,7 @@ class PyCodegen:
                     lambda: self.extend_output(
                         [
                             self.create_load_python_module(torch),
-                            self.create_load_attr("as_tensor"),
+                            self.create_load_attr("_as_tensor_fullprec"),
                         ]
                     )
                 )

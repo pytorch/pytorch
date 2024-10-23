@@ -1,17 +1,21 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import typing
 from typing import List, Optional, Sequence, Union  # noqa: F401
 
-import torch  # noqa: F401
-
+import torch
+from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
-from .. import device, dtype, Tensor, types
 
 
 @exposed_in("torch.library")
 def infer_schema(
-    prototype_function: typing.Callable, mutates_args=(), op_name: Optional[str] = None
+    prototype_function: typing.Callable,
+    /,
+    *,
+    mutates_args,
+    op_name: Optional[str] = None,
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -264,4 +268,4 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
     elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
         return typing.List[type_args[0]]  # type: ignore[valid-type]
     else:
-        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
+        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

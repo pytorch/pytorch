@@ -86,7 +86,8 @@ class TestSubclass(TestCase):
                 x = nn.Parameter(x)
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([tensor_cls]):
+                x_loaded = torch.load(f)
 
             self.assertEqual(x, x_loaded)
             self.assertIsNot(x, x_loaded)
@@ -130,7 +131,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p1 = nn.Parameter(create_fn())
 
@@ -179,7 +180,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(create_fn())
 
@@ -206,7 +207,7 @@ class TestSubclass(TestCase):
             self.fail('dummy fail for base tensor until the test passes for subclasses')
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = nn.UninitializedParameter()
 

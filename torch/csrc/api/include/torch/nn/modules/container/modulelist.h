@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// A list of `Module`s that registers its elements.
 ///
@@ -71,7 +70,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// Special cloning function for `ModuleList` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<ModuleListImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));
@@ -99,7 +98,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    using Type = typename std::remove_reference<M>::type;
+    using Type = std::remove_reference_t<M>;
     push_back(std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -242,7 +241,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void insert(size_t index, M&& module) {
-    using Type = typename std::remove_reference<M>::type;
+    using Type = std::remove_reference_t<M>;
     insert(index, std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -270,5 +269,4 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 /// module storage semantics.
 TORCH_MODULE(ModuleList);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

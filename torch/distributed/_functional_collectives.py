@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -97,7 +97,7 @@ RANK_TYPES = Union[
     List[List[int]],
     dist.ProcessGroup,
     DeviceMesh,
-    Tuple["dist._tensor.DeviceMesh", int],
+    Tuple["dist.tensor.DeviceMesh", int],
     str,
 ]
 
@@ -600,7 +600,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
@@ -653,7 +653,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
-    def numpy(self):
+    def numpy(self):  # type: ignore[override]
         return self.wait().numpy()
 
 
@@ -806,10 +806,7 @@ def _are_we_tracing() -> bool:
         is not None
     ):
         return True
-    mode = get_innermost_proxy_mode()
-    if mode is None:
-        return False
-    return mode.tracer is not None
+    return get_proxy_mode() is not None
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
@@ -963,66 +960,7 @@ if not torch._running_with_deploy():
 
     # mark these ops has side effect so that they won't be removed by DCE
     torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_gather_into_tensor_out.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_gather_into_tensor.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default
-    )
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce.default)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_.default)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_reduce_coalesced.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_reduce_coalesced_.default
-    )
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_to_all_single.default)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast.default)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast_.default)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.reduce_scatter_tensor.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional_autograd.all_to_all_single.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional_autograd.all_gather_into_tensor.default
-    )
-    # also the no-overload version
     torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_gather_into_tensor_out)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_gather_into_tensor)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.all_gather_into_tensor_coalesced
-    )
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_coalesced)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_reduce_coalesced_)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.all_to_all_single)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.broadcast_)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.reduce_scatter_tensor)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional.reduce_scatter_tensor_coalesced
-    )
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional_autograd.all_to_all_single)
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional_autograd.reduce_scatter_tensor
-    )
-    torch.fx.node.has_side_effect(
-        torch.ops._c10d_functional_autograd.all_gather_into_tensor
-    )
 
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release

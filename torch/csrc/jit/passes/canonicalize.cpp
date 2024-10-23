@@ -3,8 +3,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Canonicalize a graph, renumbering it so that all structurally equivalent
 // graphs have same numbers.
@@ -231,5 +230,4 @@ static void CanonicalizeOutputs(Block* block) {
 void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
   CanonicalizeOutputs(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

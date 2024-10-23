@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 This module implements observers which are used to collect statistics about
@@ -252,6 +253,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.int32,
             torch.float8_e5m2,
             torch.float8_e4m3fn,
+            torch.uint16,
         )
 
         assert (
@@ -367,6 +369,8 @@ class UniformQuantizationObserverBase(ObserverBase):
                     )
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
+            elif self.dtype in [torch.uint16]:
+                zero_point = zero_point.new_full(zero_point.size(), 2**15)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(quant_max - quant_min)
             scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
@@ -1567,7 +1571,7 @@ class ReuseInputObserver(ObserverBase):
     Note: this is only enabled in FX Graph Mode Quantization
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(torch.quint8, is_dynamic=False)
 
     def forward(self, x):

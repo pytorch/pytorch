@@ -2,16 +2,17 @@
 
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import istype
+
+
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class MutableLocalSource(Enum):
@@ -30,7 +31,7 @@ class MutableLocalBase:
     Base class for Variable.mutable_local
     """
 
-    def __init__(self, typ: MutableLocalSource):
+    def __init__(self, typ: MutableLocalSource) -> None:
         # In HigherOrderOperator tracing, we need to distinguish
         # between MutableLocals inside the HigherOrderOperator and
         # ones outside it. For example, it is not safe to mutate
@@ -69,7 +70,7 @@ class MutableLocal(MutableLocalBase):
     state.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):
@@ -109,7 +110,7 @@ class VariableTrackerMeta(type):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
 
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs) -> None:
         super().__init__(name, bases, attrs)
         VariableTrackerMeta.all_subclasses.append(cls)
 
@@ -120,6 +121,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     VariableTracker instances are immutable and should be copied in
     order to change them.
+
+    Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -142,9 +145,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def visit(
         cls,
         fn: Callable[["VariableTracker"], None],
-        value,
-        cache=None,
-    ):
+        value: Any,
+        cache: Optional[Dict[int, Any]] = None,
+    ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
         """
@@ -172,7 +175,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             for subvalue in value.values():
                 cls.visit(fn, subvalue, cache)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 
     def debug_repr(self):
@@ -206,7 +209,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
-        raise NotImplementedError(f"{self} has no type")
+        try:
+            return type(self.as_python_constant())
+        except NotImplementedError:
+            raise NotImplementedError(f"{self} has no type") from None
 
     def as_python_constant(self):
         """For constants"""
@@ -240,9 +246,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
-        source = None
-        if self.source:
-            source = AttrSource(self.source, name)
+        source = self.source and AttrSource(self.source, name)
         return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
@@ -359,12 +363,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
+    @staticmethod
+    def build(
+        tx: "InstructionTranslatorBase",
+        value: Any,
+        source: Optional[Source] = None,
+    ) -> Any:
+        """Create a new VariableTracker from a value and optional Source"""
+        from . import builder
+
+        if source is None:
+            return builder.SourcelessBuilder.create(tx, value)
+        else:
+            return builder.VariableBuilder(tx, source)(value)
+
     def __init__(
         self,
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-    ):
+    ) -> None:
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local

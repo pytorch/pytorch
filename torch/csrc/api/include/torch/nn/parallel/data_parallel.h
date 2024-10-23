@@ -15,14 +15,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <cstddef>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 namespace {
 
@@ -62,8 +60,9 @@ namespace {
 struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
       : destination_device_(destination_device){};
-  ~ReduceAdd() override {}
+  ~ReduceAdd() override = default;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   autograd::variable_list apply(autograd::variable_list&& inputs) override {
     TORCH_CHECK(
         !torch::autograd::compute_requires_grad(inputs),
@@ -190,7 +189,7 @@ template <typename ModuleType>
 std::vector<Tensor> parallel_apply(
     std::vector<ModuleType>& modules,
     const std::vector<Tensor>& inputs,
-    const std::optional<std::vector<Device>>& devices = nullopt) {
+    const std::optional<std::vector<Device>>& devices = std::nullopt) {
   TORCH_CHECK(
       modules.size() == inputs.size(), "Must have as many inputs as modules");
   if (devices) {
@@ -253,8 +252,8 @@ template <typename ModuleType>
 Tensor data_parallel(
     ModuleType module,
     Tensor input,
-    std::optional<std::vector<Device>> devices = nullopt,
-    std::optional<Device> output_device = nullopt,
+    std::optional<std::vector<Device>> devices = std::nullopt,
+    std::optional<Device> output_device = std::nullopt,
     int64_t dim = 0) {
   if (!devices) {
     const auto device_count = torch::cuda::device_count();
@@ -293,5 +292,4 @@ Tensor data_parallel(
 }
 
 } // namespace parallel
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

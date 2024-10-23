@@ -27,6 +27,7 @@ namespace c10 {
 struct StreamGuard {
   /// No default constructor, see Note [Omitted default constructor from RAII]
   explicit StreamGuard() = delete;
+  ~StreamGuard() = default;
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current  stream on that device to the passed stream.
@@ -99,7 +100,7 @@ struct OptionalStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalStreamGuard(optional<Stream> stream_opt)
+  explicit OptionalStreamGuard(std::optional<Stream> stream_opt)
       : guard_(stream_opt) {}
 
   /// Copy is disallowed
@@ -111,6 +112,7 @@ struct OptionalStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   OptionalStreamGuard& operator=(OptionalStreamGuard&& other) = delete;
+  ~OptionalStreamGuard() = default;
 
   /// Resets the currently set stream to the original stream and
   /// the currently set device to the original device.  Then,
@@ -162,6 +164,7 @@ struct MultiStreamGuard {
 
   // See Note [Move assignment for RAII guards is tricky]
   MultiStreamGuard& operator=(MultiStreamGuard&& other) = delete;
+  ~MultiStreamGuard() = default;
 
  private:
   c10::impl::InlineMultiStreamGuard<impl::VirtualGuardImpl> guard_;

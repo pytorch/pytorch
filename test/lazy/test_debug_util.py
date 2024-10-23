@@ -10,6 +10,7 @@ import torch._lazy.ts_backend
 import torch.nn as nn
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
+
 torch._lazy.ts_backend.init()
 
 

@@ -8,6 +8,7 @@
 
 #include <c10/core/Allocator.h>
 
+#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
@@ -17,7 +18,6 @@ class Context;
 }
 
 namespace at {
-
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
     "this error has occurred because you are trying "
@@ -31,7 +31,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
   ~MTIAHooksInterface() override = default;
 
-  virtual void initMTIA() const {
+  void init() const override {
     // Avoid logging here, since MTIA needs init devices first then it will know
     // how many devices are available. Make it as no-op if mtia extension is not
     // dynamically loaded.
@@ -91,11 +91,21 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* data) const override {
     return false;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const override {
+  Allocator* getPinnedMemoryAllocator() const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* memoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* getDeviceCapability(DeviceIndex device) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }

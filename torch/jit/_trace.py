@@ -10,7 +10,6 @@ functionalities in `torch.jit`.
 """
 
 import contextlib
-
 import copy
 import functools
 import inspect
@@ -28,14 +27,12 @@ from torch._jit_internal import (
     get_callable_argument_names,
     is_scripting,
 )
-
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
-
 from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
-
 from torch.testing._comparison import default_tolerances
+
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -58,7 +55,6 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
             i += 1
 
         f_locals = frame.f_locals
-        f_globals = frame.f_globals
 
         for k, v in f_locals.items():
             if isinstance(v, torch.Tensor) and var is v:
@@ -139,7 +135,7 @@ class ONNXTracedModule(torch.nn.Module):
             else:
                 return tuple(out_vars)
 
-        graph, out = torch._C._create_graph_by_tracing(
+        graph, _out = torch._C._create_graph_by_tracing(
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
@@ -244,7 +240,6 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     if not isinstance(args, tuple):
         args = (args,)
 
-    saved_args = _clone_inputs(args)
     if is_module:
         saved_state = copy.deepcopy(model.state_dict())
 
@@ -966,7 +961,7 @@ def trace(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
@@ -1182,7 +1177,7 @@ def trace_module(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 

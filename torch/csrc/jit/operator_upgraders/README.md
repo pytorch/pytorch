@@ -37,7 +37,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
     1. Add a test module in `test/jit/fixtures_srcs/fixtures_src.py`. In `test/jit/fixtures_srcs/generate_models.py`,
   ```
   class TestVersionedLinspaceV7(torch.nn.Module):
-      def __init__(self):
+      def __init__(self) -> None:
           super().__init__()
 
       def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
@@ -163,7 +163,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
 
             # Step 2. Write down how current module should look like
             class MyModuleFloat(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
 
                 def forward(self, a, b: float):

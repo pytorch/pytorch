@@ -4,16 +4,13 @@ from contextlib import nullcontext
 from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
-
 import torch._decomp
 import torch._prims
-
 import torch._refs
 import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
 import torch.overrides
-
 from torch._prims_common import torch_function_passthrough
 
 
@@ -132,6 +129,8 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             func = torch._decomp.decomposition_table.get(orig_func, None)
         elif func is None and isinstance(orig_func, torch._ops.OpOverloadPacket):
             default = getattr(orig_func, "default", None)
+            if default is None and orig_func._dir:
+                default = getattr(orig_func, orig_func._dir[0], None)
             if default is not None:
                 func = torch._decomp.decomposition_table.get(default, None)
 

@@ -8,7 +8,7 @@ namespace torch::jit::tensorexpr {
 
 StmtPtr Tensor::constructStmt(
     const std::vector<VarPtr>& args,
-    ExprPtr body,
+    const ExprPtr& body,
     const std::vector<ExprPtr>& reduce_dims,
     const std::vector<VarPtr>& reduce_args) const {
   std::vector<ExprPtr> indices(args.begin(), args.end());
@@ -99,7 +99,7 @@ StmtPtr Tensor::constructStmt(
 Tensor Compute(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
   std::vector<VarHandle> args = create_index_vars(dims);
   ExprHandle body = body_func(args);
@@ -116,7 +116,7 @@ Tensor Compute(
 Tensor Compute(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
   if (dims.size() != 1) {
     throw malformed_input("mismatch between body and arg size (1)");
@@ -137,7 +137,7 @@ Tensor Compute(
 Tensor Compute(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
   if (dims.size() != 2) {
@@ -159,7 +159,7 @@ Tensor Compute(
 Tensor Compute(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
@@ -183,7 +183,7 @@ Tensor Compute(
 Tensor Compute(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
@@ -211,7 +211,7 @@ Tensor Compute(
 Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
     const BufHandle& buffer,
     const std::vector<ExprHandle>& reduce_dims) {
@@ -235,9 +235,9 @@ Tensor Reduce(
 Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     const Reducer& reducer,
-    Tensor tensor,
+    const Tensor& tensor,
     const std::vector<ExprHandle>& reduce_dims) {
   return Reduce(
       name,
@@ -251,7 +251,7 @@ Tensor Reduce(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
-    Tensor tensor,
+    const Tensor& tensor,
     const std::vector<ExprHandle>& reduce_dims) {
   return Reduce(name, dims, std::nullopt, reducer, tensor, reduce_dims);
 }

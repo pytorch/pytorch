@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/inplace_check.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static void CheckInplace(Block* block) {
   for (auto node : block->nodes()) {
@@ -19,5 +18,4 @@ void CheckInplace(std::shared_ptr<Graph>& graph) {
   CheckInplace(graph->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

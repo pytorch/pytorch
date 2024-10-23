@@ -9,7 +9,11 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 
+
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 OutputType = List[Optional[Union[int, torch.Tensor]]]
@@ -135,6 +139,11 @@ def check_for_mutation(
     else:
         mutation_indices = func.mutated_input_idxs
 
+    static_inputs_log.debug(
+        "check mutation static input indices: %s", func.static_input_idxs
+    )
+    static_inputs_log.debug("check mutation mutation indices: %s", mutation_indices)
+
     return (
         get_mutation_stack_trace(func.placeholders, mutation_indices)
         if mutation_indices
@@ -239,7 +248,7 @@ class CheckInvariantStatus(Enum):
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.name == "CudagraphManagedIdxMismatch":
             return "cudagraph managed tensor data pointer changed"
         elif self.name == "StaticInputIdxMismatch":
@@ -284,7 +293,7 @@ def log_data_ptr_mismatch(
 def maybe_warning_due_to_dynamic_shape(
     fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
-):
+) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
     def warn_msg():
@@ -305,3 +314,17 @@ def maybe_warning_due_to_dynamic_shape(
         > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
     ):
         perf_hint_log.warning(warn_msg())
+        return True
+
+    return False
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphCachedInfo:
+    """
+    Info needed to realign inputs
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    stack_traces: List[Optional[str]]
+    cudagraph_fail_reasons: List[str]

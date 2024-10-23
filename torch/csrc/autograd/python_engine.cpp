@@ -32,9 +32,7 @@ struct THPEngine {
 
 static bool _reinitialize_engine = false;
 
-namespace torch {
-namespace autograd {
-namespace python {
+namespace torch::autograd::python {
 
 PythonEngine::PythonEngine() = default;
 
@@ -102,7 +100,7 @@ void PythonEngine::thread_init(
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
@@ -110,7 +108,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(std::move(graph_task), fn, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -160,9 +158,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     throw;
   }
 }
-} // namespace python
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::python
 
 PyObject* THPEngineClass = nullptr;
 
@@ -258,7 +254,7 @@ PyObject* THPEngine_run_backward(
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
     Edge gradient_edge; // Temporary variable to hold the gradient edge
-    c10::optional<at::Tensor> mb_output;
+    std::optional<at::Tensor> mb_output;
     if (THPVariable_Check(_tensor)) {
       mb_output = THPVariable_Unpack(_tensor);
       TORCH_CHECK(
@@ -464,7 +460,8 @@ static struct PyMethodDef THPEngine_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEngineType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._EngineBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

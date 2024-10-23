@@ -27,7 +27,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._state_dict_utils import _gather_state_dict
-from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -53,6 +52,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor, Replicate
 from torch.utils._pytree import tree_map_only
 
 
@@ -536,9 +536,7 @@ def _flatten_optim_state_dict(
                     else:
                         # Move the tensor in the original osd back to CPU to make the
                         # original osd unaffected.
-                        unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
-                            state_name
-                        ].cpu()
+                        unflat_osd_state[fqn][state_name] = param_state.cpu()
 
     # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
@@ -1457,7 +1455,7 @@ def _unflatten_orig_param_states(
             # gather the tensor on its TP dimension before chunking them into DTensor again.
             if placement != Replicate():
                 placement_dim = placement.dim  # type: ignore[attr-defined]
-                value_local = value.redistribute(placements=(Replicate(),))
+                value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
                 reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)

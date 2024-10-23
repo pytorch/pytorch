@@ -7,16 +7,12 @@
 #include <mutex>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 /// A `Sampler` is an object that yields an index with which to access a
 /// dataset.
 template <typename BatchRequest = std::vector<size_t>>
@@ -29,7 +25,7 @@ class Sampler {
   /// Resets the `Sampler`'s internal state.
   /// Typically called before a new epoch.
   /// Optionally, accepts a new size when reseting the sampler.
-  virtual void reset(optional<size_t> new_size) = 0;
+  virtual void reset(std::optional<size_t> new_size) = 0;
 
   /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.
@@ -42,6 +38,4 @@ class Sampler {
   virtual void load(serialize::InputArchive& archive) = 0;
 };
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

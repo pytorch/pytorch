@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Diagnostic components for TorchScript based ONNX export, i.e. `torch.onnx.export`."""
+
 from __future__ import annotations
 
 import contextlib
@@ -7,11 +8,11 @@ import gzip
 from typing import TYPE_CHECKING
 
 import torch
-
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
 from torch.utils import cpp_backtrace
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator

@@ -1,9 +1,9 @@
 # Owner(s): ["module: dynamo"]
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+
 
 try:
     from . import utils
@@ -223,6 +223,28 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
+
+    def test_store_global_crossfile_inline(self):
+        try:
+            from . import mock_store_global_crossfile_inline
+        except ImportError:
+            import mock_store_global_crossfile_inline
+
+        @torch.compile()
+        def fn(x):
+            mock_store_global_crossfile_inline.set_flag_true()
+            mock_store_global_crossfile_inline.set_flag_false()
+            return x + 1
+
+        @torch.compile()
+        def fn_set_true(x):
+            mock_store_global_crossfile_inline.set_flag_true()
+            return x + 1
+
+        fn_set_true(torch.ones(2, 2))
+        self.assertTrue(mock_store_global_crossfile_inline.global_flag)
+        fn(torch.ones(2, 2))
+        self.assertFalse(mock_store_global_crossfile_inline.global_flag)
 
 
 if __name__ == "__main__":

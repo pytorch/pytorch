@@ -339,7 +339,7 @@ class TestSubgraphRewriter(JitTestCase):
         Credit to Jerry Zhang (GitHub: jerryzh168) for this test case
         """
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dtype = torch.float16
 
@@ -378,7 +378,7 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_replaces_referenced_submodules(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.submod = torch.nn.ReLU()
@@ -388,7 +388,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.sigmoid(x))
 
         class Pattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.submod = torch.nn.ReLU()
@@ -397,7 +397,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.sigmoid(x))
 
         class Replacement(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.id = torch.nn.Identity()
                 self.submod = torch.nn.ReLU()
@@ -406,7 +406,7 @@ class TestSubgraphRewriter(JitTestCase):
                 return self.submod(self.id(x))
 
         class Comparison(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.id = torch.nn.Identity()
                 self.submod = torch.nn.ReLU()

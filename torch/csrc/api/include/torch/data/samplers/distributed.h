@@ -6,16 +6,12 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 /// A `Sampler` that selects a subset of indices to sample from and defines a
 /// sampling behavior. In a distributed setting, this selects a subset of the
@@ -33,7 +29,7 @@ class DistributedSampler : public Sampler<BatchRequest> {
       : size_(size),
         num_replicas_(num_replicas),
         rank_(rank),
-        epoch_(0),
+
         allow_duplicates_(allow_duplicates) {}
 
   /// Set the epoch for the current enumeration. This can be used to alter the
@@ -62,7 +58,7 @@ class DistributedSampler : public Sampler<BatchRequest> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t rank_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t epoch_;
+  size_t epoch_{0};
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool allow_duplicates_;
 };
@@ -78,7 +74,7 @@ class TORCH_API DistributedRandomSampler : public DistributedSampler<> {
       bool allow_duplicates = true);
 
   /// Resets the `DistributedRandomSampler` to a new set of indices.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns the next batch of indices.
   std::optional<std::vector<size_t>> next(size_t batch_size) override;
@@ -111,7 +107,7 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
       bool allow_duplicates = true);
 
   /// Resets the `DistributedSequentialSampler` to a new set of indices.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns the next batch of indices.
   std::optional<std::vector<size_t>> next(size_t batch_size) override;
@@ -134,6 +130,4 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
   std::vector<size_t> all_indices_;
 };
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

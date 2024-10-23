@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-
 import logging
 
 import torch
@@ -19,8 +18,11 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     unique_graph_id,
     UnsupportedAliasMutationException,
 )
@@ -28,6 +30,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -35,9 +38,27 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+
 from .utils import _from_fun, create_fw_bw_graph
 
+
 log = logging.getLogger(__name__)
+
+"""
+We're going to define a `cond_op` operation.
+In order to do this, we need implementations for each of the dispatch keys.
+"""
+
+
+class CondOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("cond")
+
+    def __call__(self, pred, true_fn, false_fn, operands):
+        return super().__call__(pred, true_fn, false_fn, operands)
+
+
+cond_op = CondOp()
 
 
 @exposed_in("torch")
@@ -111,6 +132,10 @@ def cond(pred, true_fn, false_fn, operands):
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     if isinstance(pred, (bool, int, float)):
         log.warning(
             "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
@@ -137,7 +162,7 @@ def cond(pred, true_fn, false_fn, operands):
             lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only "
                 f"consists of tensor leaves, but got {operands}."
             )
 
@@ -146,20 +171,20 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
-    with _set_compilation_env():
-        with torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(cond_op, backend="eager", fullgraph=True)(
-                    pred, true_fn, false_fn, operands
-                )
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _cond_op_wrapper(*args, **kwargs):
+        return cond_op(*args, **kwargs)
 
-
-"""
-We're going to define a `cond_op` operation.
-In order to do this, we need implementations for each of the dispatch keys.
-"""
-cond_op = HigherOrderOperator("cond")
-cond_op.__module__ = "torch.ops.higher_order"
+    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+            if metadata_mode:
+                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+            else:
+                backend = "eager"
+            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+                pred, true_fn, false_fn, operands
+            )
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
@@ -206,10 +231,10 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
-    ), "Cond operands must be a list or tuple of tensors"
+    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
     assert all(
-        isinstance(o, torch.Tensor) for o in operands
-    ), "Cond operands must be a list of tensors"
+        isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
+    ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -349,14 +374,14 @@ class CondAutogradOp(torch.autograd.Function):
         ctx._pred = pred
         ctx._joint_true_graph = joint_true_graph
         ctx._joint_false_graph = joint_false_graph
-        ctx.save_for_backward(*operands)
+        save_tensors_and_symints_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, fw_true_graph, fw_false_graph, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        operands = ctx.saved_tensors
+        operands = saved_tensors_and_symints(ctx)
 
         grads = cond_op(
             ctx._pred,
@@ -373,7 +398,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
         torch.Tensor,
-        lambda t: not t.requires_grad,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
@@ -398,10 +423,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, pred, true_fn, false_fn, operands):
-    if mode.enable_tracing:
-        return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-    else:
-        return cond_op(pred, true_fn, false_fn, operands)
+    return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
 @cond_op.py_impl(FakeTensorMode)
@@ -438,8 +460,8 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next() as m:
-        functional_true = ctx.functionalize(true_fn)
-        functional_false = ctx.functionalize(false_fn)
+        functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
+        functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
             if _has_potential_branch_input_mutation(
@@ -471,7 +493,8 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         isinstance(i, torch.Tensor) for i in inputs
     ), "Cond inputs must be a list of tensors"
 
-    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+    pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
+    pred_ = get_unwrapped(pred) if pred_is_batched else pred
 
     # unbatched tensors are not vmapped
     tensors, in_dims = zip(
@@ -481,7 +504,7 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         ]
     )
 
-    if is_batchedtensor(pred):
+    if pred_is_batched:
         # prepend "pred" and vmap everything
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims

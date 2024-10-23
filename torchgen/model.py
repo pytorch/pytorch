@@ -262,7 +262,12 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {
+    DispatchKey.MPS,
+    DispatchKey.CUDA,
+    DispatchKey.CPU,
+    DispatchKey.XPU,
+}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -273,6 +278,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -314,6 +320,18 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.SparseCsrCUDA,
         DispatchKey.NestedTensorCUDA,
         DispatchKey.AutogradCUDA,
+    }
+
+
+# XPU specific dispatcy keys
+def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.XPU,
+        DispatchKey.QuantizedXPU,
+        DispatchKey.SparseXPU,
+        DispatchKey.SparseCsrXPU,
+        DispatchKey.NestedTensorXPU,
+        DispatchKey.AutogradXPU,
     }
 
 
@@ -1466,14 +1484,15 @@ class FunctionSchema:
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert len(
-                    [
-                        arg
-                        for arg in self.arguments.out
-                        if not arg.name.startswith("_scratch_")
-                    ]
-                ) == len(
-                    self.returns
+                assert (
+                    len(
+                        [
+                            arg
+                            for arg in self.arguments.out
+                            if not arg.name.startswith("_scratch_")
+                        ]
+                    )
+                    == len(self.returns)
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
         if self.name.name.inplace:
@@ -1572,9 +1591,7 @@ class FunctionSchema:
             ), "invariant: all scratch operators are expected to be out= operators too"
             return SchemaKind.scratch
         elif is_out:
-            assert (
-                not is_scratch
-            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"  # noqa: B950
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -1874,7 +1891,9 @@ class BaseTy(Enum):
     Storage = auto()
     Stream = auto()
     SymInt = auto()
+    SymBool = auto()
     ConstQuantizerPtr = auto()  # TODO: rename
+    GraphModule = auto()
 
 
 @dataclass(frozen=True)
@@ -2681,9 +2700,7 @@ class NativeFunctionsViewGroup:
                 )
         if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
             if self.view_inplace is not None:
-                assert (
-                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
-                ), (
+                assert self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel, (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )

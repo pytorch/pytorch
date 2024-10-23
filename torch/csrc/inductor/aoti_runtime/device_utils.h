@@ -24,13 +24,11 @@
     }                                                      \
   } while (0)
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 using DeviceStreamType = cudaStream_t;
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor
 
 #else // !USE_CUDA
 
@@ -40,12 +38,10 @@ using DeviceStreamType = cudaStream_t;
     throw std::runtime_error("CPU runtime error"); \
   }
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 using DeviceStreamType = void*;
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor
 
 #endif // USE_CUDA

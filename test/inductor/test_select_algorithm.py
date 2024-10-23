@@ -52,7 +52,6 @@ class TestSelectAlgorithm(TestCase):
         if not is_big_gpu(0):
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu_cuda(self):
         @torch.compile
@@ -69,7 +68,6 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_addmm_cuda(self):
         @torch.compile
@@ -206,6 +204,22 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(512, 512, device="cuda"),
             torch.randn(512, 512, device="cuda"),
             torch.randn(512, 512, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @expectedFailureDynamicWrapper
+    @patches
+    def test_mm_plus_mm3_cuda(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(512, 32, device="cuda"),
+            torch.randn(32, 8, device="cuda"),
+            torch.randn(512, 32, device="cuda"),
+            torch.randn(32, 8, device="cuda"),
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)

@@ -5,23 +5,10 @@ import inspect
 import re
 import sys
 import traceback
+import warnings
 import weakref
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    overload,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from typing_extensions import deprecated, ParamSpec
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 import torch._library as _library
@@ -43,13 +30,11 @@ __all__ = [
     "impl_abstract",
     "register_fake",
     "register_torch_dispatch",
+    "register_vmap",
     "get_ctx",
     "custom_op",
     "infer_schema",
 ]
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -67,6 +52,15 @@ def fallthrough_kernel():
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
     raise NotImplementedError("fallthrough_kernel() should never be called.")
+
+
+def _warn_deploy():
+    warnings.warn(
+        "Python torch.library APIs do nothing under torch::deploy (multipy). "
+        "Please instead use C++ custom operator registration APIs.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
 
 
 class Library:
@@ -97,6 +91,9 @@ class Library:
                 ns,
                 " is a reserved namespace. Please try creating a library with another name.",
             )
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
@@ -145,6 +142,10 @@ class Library:
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
@@ -176,6 +177,10 @@ class Library:
 
     def _register_fake(self, op_name, fn, _stacklevel=1):
         r"""Registers the fake impl for an operator defined in the library."""
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
         caller_module = inspect.getmodule(frame)
@@ -216,6 +221,10 @@ class Library:
         If it is a TorchDispatchMode, we expect fn to have the following signature:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
         """
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
         qualname = f"{self.ns}::{op_name}"
         entry = torch._library.simple_registry.singleton.find(qualname)
         handle = entry.torch_dispatch_rules.register(torch_dispatch_class, fn)
@@ -233,6 +242,10 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
@@ -277,6 +290,8 @@ class Library:
                 to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -284,6 +299,10 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         """
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
         if not callable(fn):
             raise TypeError(
                 f"Input function is required to be a callable but found type {type(fn)}"
@@ -344,6 +363,43 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
+    def fallback(self, fn, dispatch_key="", *, with_keyset=False):
+        r"""Registers the function implementation as the fallback for the given key.
+
+        This function only works for a library with global namespace ("_").
+
+        Args:
+            fn: function used as fallback for the given dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+
+        Example::
+            >>> my_lib = Library("_", "IMPL")
+            >>> def fallback_kernel(op, *args, **kwargs):
+            >>>     # Handle all autocast ops generically
+            >>>     # ...
+            >>> my_lib.fallback(fallback_kernel, "Autocast")
+        """
+        if torch._running_with_deploy():
+            _warn_deploy()
+            return
+
+        if dispatch_key == "":
+            dispatch_key = self.dispatch_key
+
+        if self.ns != "_":
+            raise RuntimeError(
+                f"""Fallback can only be registered using libary fragment on the global namespace "_" but it is {self.ns}"""
+            )
+
+        assert dispatch_key != ""
+        assert self.m is not None
+
+        self.m.fallback(dispatch_key, fn, with_keyset)
+
     def _destroy(self):
         if self.m is not None:
             self.m.reset()
@@ -368,6 +424,7 @@ class Library:
             if not hasattr(namespace, name):
                 continue
             delattr(namespace, name)
+            namespace._dir.remove(name)
 
 
 def _del_library(
@@ -479,101 +536,43 @@ def _(lib: Library, schema, alias_analysis=""):
     return wrap
 
 
-if TYPE_CHECKING:
+@functools.singledispatch
+def impl(qualname, types, func=None, *, lib=None):
+    """Register an implementation for a device type for this operator.
 
-    @overload
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Literal[None] = None,
-        *,
-        lib: Optional[Library] = None,
-    ) -> Callable[[Callable[_P, _T]], None]:
-        ...
+    You may pass "default" for ``types`` to register this implementation as the
+    default implementation for ALL device types.
+    Please only use this if the implementation truly supports all device types;
+    for example, this is true if it is a composition of built-in PyTorch operators.
 
-    @overload
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Callable[_P, _T],
-        *,
-        lib: Optional[Library] = None,
-    ) -> Callable[_P, _T]:
-        ...
+    Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
-    @overload
-    def impl(
-        lib: Library,
-        name: str,
-        dispatch_key: str,
-    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-        ...
+    Args:
+        qualname (str): Should be a string that looks like "namespace::operator_name".
+        types (str | Sequence[str]): The device types to register an impl to.
+        lib (Optional[Library]): If provided, the lifetime of this registration
+            will be tied to the lifetime of the Library object.
 
-    def impl(*args, **kwargs):
-        pass
-
-else:
-
-    @functools.singledispatch
-    def impl(
-        qualname: str,
-        types: Union[str, Sequence[str]],
-        func: Optional[Callable[_P, _T]] = None,
-        *,
-        lib: Optional[Library] = None,
-    ):
-        """Register an implementation for a device type for this operator.
-
-        You may pass "default" for ``types`` to register this implementation as the
-        default implementation for ALL device types.
-        Please only use this if the implementation truly supports all device types;
-        for example, this is true if it is a composition of built-in PyTorch operators.
-
-        Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
-
-        Args:
-            qualname (str): Should be a string that looks like "namespace::operator_name".
-            types (str | Sequence[str]): The device types to register an impl to.
-            lib (Optional[Library]): If provided, the lifetime of this registration
-                will be tied to the lifetime of the Library object.
-
-        Examples:
-            >>> import torch
-            >>> import numpy as np
-            >>>
-            >>> # Define the operator
-            >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
-            >>>
-            >>> # Add implementations for the cpu device
-            >>> @torch.library.impl("mylib::mysin", "cpu")
-            >>> def f(x):
-            >>>     return torch.from_numpy(np.sin(x.numpy()))
-            >>>
-            >>> x = torch.randn(3)
-            >>> y = torch.ops.mylib.mysin(x)
-            >>> assert torch.allclose(y, x.sin())
-        """
-        return _impl_str(qualname, types, func, lib=lib)
-
-    @impl.register
-    def _(lib: Library, name: str, dispatch_key: str = ""):
-        """Legacy torch.library.impl API. Kept around for BC"""
-
-        def wrap(f):
-            lib.impl(name, f, dispatch_key)
-            return f
-
-        return wrap
+    Examples:
+        >>> import torch
+        >>> import numpy as np
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the cpu device
+        >>> @torch.library.impl("mylib::mysin", "cpu")
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.ops.mylib.mysin(x)
+        >>> assert torch.allclose(y, x.sin())
+    """
+    return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
-def _impl_str(
-    qualname: str,
-    types: Union[str, Sequence[str]],
-    func: Optional[Callable[_P, _T]] = None,
-    *,
-    lib: Optional[Library] = None,
-) -> Optional[Callable[[Callable[_P, _T]], None]]:
-    # See impl()
+def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -590,21 +589,30 @@ def _impl_str(
         else:
             keys.add(_device_type_to_key(typ))
 
-    def register_(func: Callable[_P, _T]) -> None:
+    def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
+
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        for key in keys:
-            use_lib.impl(qualname, func, key)
+        if disable_dynamo:
+
+            @torch._disable_dynamo
+            def func_no_dynamo(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            for key in keys:
+                use_lib.impl(qualname, func_no_dynamo, key)
+        else:
+            for key in keys:
+                use_lib.impl(qualname, func, key)
 
     if func is None:
-        return register_
+        return register
     else:
-        register_(func)
-        return None
+        register(func)
 
 
 def _device_type_to_key(device_type: str) -> str:
@@ -615,6 +623,17 @@ def _device_type_to_key(device_type: str) -> str:
         # device_type. I don't really care that much about the difference.
         return "CompositeExplicitAutograd"
     return torch._C._dispatch_key_for_device(device_type)
+
+
+@impl.register
+def _(lib: Library, name, dispatch_key=""):
+    """Legacy torch.library.impl API. Kept around for BC"""
+
+    def wrap(f):
+        lib.impl(name, f, dispatch_key)
+        return f
+
+    return wrap
 
 
 @deprecated(
@@ -650,11 +669,13 @@ def register_kernel(
     This API may be used as a decorator.
 
     Args:
-        fn (Callable): The function to register as the implementation for
-            the given device types.
+        op (str | OpOverload): The operator to register an impl to.
         device_types (None | str | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
+        func (Callable): The function to register as the implementation for
+            the given device types.
+        lib (Optional[Library]): If provided, the lifetime of this registration
 
     Examples::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
@@ -696,7 +717,8 @@ def register_kernel(
     assert isinstance(op, str)
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
-    return impl(op, device_types, func, lib=lib)
+
+    return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
 
 
 def register_fake(
@@ -768,10 +790,10 @@ def register_fake(
         >>>
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
-        >>>     # Number of nonzero-elements is data-dependent.
-        >>>     # Since we cannot peek at the data in an fake impl,
-        >>>     # we use the ctx object to construct a new symint that
-        >>>     # represents the data-dependent size.
+        >>> # Number of nonzero-elements is data-dependent.
+        >>> # Since we cannot peek at the data in an fake impl,
+        >>> # we use the ctx object to construct a new symint that
+        >>> # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
         >>>     nnz = ctx.new_dynamic_size()
         >>>     shape = [nnz, x.dim()]
@@ -875,11 +897,13 @@ def register_autograd(
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_sin", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, x.cos())
         >>>
         >>> # Example with a keyword-only arg
@@ -895,11 +919,13 @@ def register_autograd(
         >>> def backward(ctx, grad):
         >>>     return grad * ctx.val
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_mul", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_mul", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_mul(x, val=3.14)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
@@ -1242,17 +1268,35 @@ def opcheck(
     ``opcheck`` tests these metadata and properties.
 
     Concretely, we test the following:
-    - test_schema: if the operator's schema is correct.
-    - test_autograd_registration: if autograd was registered correctly.
+
+    - test_schema: If the schema matches the implementation of
+      the operator. For example: if the schema specifies a Tensor is mutated,
+      then we check the implementation mutates the Tensor. If the schema
+      specifies that we return a new Tensor, then we check that the
+      implementation returns a new Tensor (instead of an existing one or
+      a view of an existing one).
+    - test_autograd_registration: If the operator supports training
+      (autograd): we check that its autograd formula is registered via
+      torch.library.register_autograd or a manual registration to one
+      or more DispatchKey::Autograd keys. Any other DispatchKey-based
+      registrations may lead to undefined behavior.
     - test_faketensor: If the operator has a FakeTensor kernel
-    (and if it is correct). The FakeTensor kernel is necessary (
-    but not sufficient) for the operator to work with PyTorch compilation
-    APIs (torch.compile/export/FX).
+      (and if it is correct). The FakeTensor kernel is necessary (
+      but not sufficient) for the operator to work with PyTorch compilation
+      APIs (torch.compile/export/FX). We check that a FakeTensor kernel
+      (also sometimes known as a meta kernel) was registered for the
+      operator and that it is correct. This test takes the result of
+      running the operator on real tensors and the result of running
+      the operator on FakeTensors and checks that they have the same
+      Tensor metadata (sizes/strides/dtype/device/etc).
     - test_aot_dispatch_dynamic: If the operator has correct behavior
-    with PyTorch compilation APIs (torch.compile/export/FX).
-    This checks that the outputs (and gradients, if applicable) are the
-    same under eager-mode PyTorch and torch.compile.
-    This test is a superset of ``test_faketensor``.
+      with PyTorch compilation APIs (torch.compile/export/FX).
+      This checks that the outputs (and gradients, if applicable) are the
+      same under eager-mode PyTorch and torch.compile.
+      This test is a superset of ``test_faketensor`` and is an e2e test;
+      other things it tests are that the operator supports
+      functionalization and that the backward pass (if it exists) also
+      supports FakeTensor and functionalization.
 
     For best results, please call ``opcheck`` multiple times with a
     representative set of inputs. If your operator supports

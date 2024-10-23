@@ -69,6 +69,12 @@ class C10_API Scalar {
       "int64_t is the same as long long on MacOS");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
+#if defined(_MSC_VER)
+  static_assert(
+      std::is_same_v<long long, int64_t>,
+      "int64_t is the same as long long on Windows");
+  Scalar(long vv) : Scalar(vv, true) {}
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
   static_assert(
       std::is_same_v<long, int64_t>,

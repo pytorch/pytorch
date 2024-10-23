@@ -15,7 +15,7 @@
 #include <structmember.h>
 #include <string>
 
-PyObject* THPEventClass = nullptr;
+PyTypeObject* THPEventClass = nullptr;
 
 static PyObject* THPEvent_pynew(
     PyTypeObject* type,
@@ -156,15 +156,16 @@ static PyObject* THPEvent_from_ipc_handle(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_ipc_handle(
+    PyObject* _self [[maybe_unused]],
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
-  (void)self;
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
-  std::string handle = "0";
-  return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
+  constexpr const char* handle = "0";
+  return PyBytes_FromStringAndSize(
+      handle, std::char_traits<char>::length(handle));
   END_HANDLE_TH_ERRORS
 }
 
@@ -275,7 +276,8 @@ static PyMethodDef THPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Event", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Event", /* tp_name */
     sizeof(THPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPEvent_dealloc, /* tp_dealloc */
@@ -315,7 +317,7 @@ PyTypeObject THPEventType = {
 };
 
 void THPEvent_init(PyObject* module) {
-  THPEventClass = (PyObject*)&THPEventType;
+  THPEventClass = &THPEventType;
   if (PyType_Ready(&THPEventType) < 0) {
     throw python_error();
   }

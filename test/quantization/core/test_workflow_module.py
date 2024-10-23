@@ -1,80 +1,94 @@
 # Owner(s): ["oncall: quantization"]
 
 # Torch
-import torch
-from torch.ao.quantization import (
-    MinMaxObserver,
-    PerChannelMinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    HistogramObserver,
-    RecordingObserver,
-    PlaceholderObserver,
-    NoopObserver,
-    FakeQuantize,
-    FixedQParamsObserver,
-    default_debug_qconfig,
-    default_observer,
-    default_histogram_observer,
-    default_per_channel_weight_observer,
-    prepare,
-    prepare_qat,
-    convert,
-    QConfig,
-    FusedMovingAvgObsFakeQuantize,
-    get_embedding_qat_module_mappings,
-    get_embedding_static_quant_module_mappings,
-)
-from torch.ao.quantization.quantize import _get_observer_dict
-
-import torch.nn as nn
-
 # Standard library
 import copy
 import io
 import itertools
-import unittest
 import math
+import unittest
+
 import numpy as np
+import torch
+
+import torch.nn as nn
+import torch.testing._internal.hypothesis_utils as hu
 
 # Testing utils
-from hypothesis import given, settings
-from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
+from hypothesis import given, settings, strategies as st
+from torch.ao.quantization import (
+    convert,
+    default_debug_qconfig,
+    default_histogram_observer,
+    default_observer,
+    default_per_channel_weight_observer,
+    FakeQuantize,
+    FixedQParamsObserver,
+    FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
+    HistogramObserver,
+    MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    NoopObserver,
+    PerChannelMinMaxObserver,
+    PlaceholderObserver,
+    prepare,
+    prepare_qat,
+    QConfig,
+    RecordingObserver,
+)
+from torch.ao.quantization.quantize import _get_observer_dict
+
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+
 from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
-    test_only_eval_fn,
+    DeFusedEmbeddingBagLinear,
+    QuantizationTestCase,
     SingleLayerLinearModel,
+    test_only_eval_fn,
 )
 
 from torch.testing._internal.common_quantized import (
+    _fake_quantize_per_channel_affine_grad_reference,
+    _fake_quantize_per_channel_affine_reference,
+    override_qengines,
     override_quantized_engine,
     supported_qengines,
-    override_qengines,
-    _fake_quantize_per_channel_affine_reference,
-    _fake_quantize_per_channel_affine_grad_reference,
     to_tensor,
 )
-
-from torch.testing._internal.common_quantization import (
-    DeFusedEmbeddingBagLinear,
-)
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
+# copy and modified from torch/ao/quantization/observer.py
+_INT_DTYPES = (
+    torch.qint8,
+    torch.quint8,
+    torch.quint4x2,
+    torch.qint32,
+    torch.int8,
+    torch.uint8,
+    torch.int16,
+    torch.int32,
+    torch.uint16,
+)
+
 class TestObserver(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
+    @given(qdtype=st.sampled_from(_INT_DTYPES),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_per_tensor_observers(self, qdtype, qscheme, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
         if (qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric) or qdtype == torch.qint32:
             reduce_range = False
+        if qdtype == torch.quint4x2:
+            return
+
         ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
                         MovingAverageMinMaxObserver(averaging_constant=0.5,
                                                     dtype=qdtype,
@@ -82,18 +96,23 @@ class TestObserver(QuantizationTestCase):
                                                     reduce_range=reduce_range)]
 
         def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
+            assert dtype in _INT_DTYPES, "Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
             eps = torch.tensor([tolerance])
-            if dtype == torch.qint8:
+            if dtype in [torch.qint8, torch.int8]:
                 if reduce_range:
                     quant_min, quant_max = -64, 63
                 else:
                     quant_min, quant_max = -128, 127
-            elif dtype == torch.quint8:
+            elif dtype in [torch.quint8, torch.uint8]:
                 if reduce_range:
                     quant_min, quant_max = 0, 127
                 else:
                     quant_min, quant_max = 0, 255
-            elif dtype == torch.qint32:
+            elif dtype == torch.int16:
+                quant_min, quant_max = -1 * (2 ** 15), (2 ** 15) - 1
+            elif dtype == torch.uint16:
+                quant_min, quant_max = 0, (2 ** 16) - 1
+            elif dtype in [torch.qint32, torch.int32]:
                 quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
 
             min_val_neg = torch.tensor([0.])
@@ -103,12 +122,15 @@ class TestObserver(QuantizationTestCase):
             if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
                 scale = torch.max(-min_val_neg, max_val_pos) / (float(quant_max - quant_min) / 2)
                 scale = torch.max(scale, eps)
-                if dtype == torch.quint8:
+                if dtype in [torch.quint8, torch.uint8]:
                     zero_point = 128
+                if dtype in [torch.uint16]:
+                    zero_point = 2 ** 15
             else:
                 scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
                 zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
                 zero_point = torch.clamp(zero_point, quant_min, quant_max)
+
             return scale, zero_point
 
         for myobs in ObserverList:
@@ -891,6 +913,83 @@ def _get_buffer_ids(module):
     """
     return [id(v) for k, v in module._buffers.items()]
 
+class TestFusedModuleScriptable(QuantizationTestCase):
+    def test_fx_qat_convbn_fused_jit_scriptable(self):
+        """
+        Tests jit scriptability works for fused ConvBN.
+        """
+        for qengine in ['fbgemm', 'qnnpack']:
+            with override_quantized_engine(qengine):
+                # create conv-bn
+                class Model(nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                        self.bn = nn.BatchNorm2d(1)
+
+                    def forward(self, x):
+                        x = self.conv(x)
+                        x = self.bn(x)
+                        return x
+
+                model = Model()
+                model = torch.fx.symbolic_trace(model)
+
+                # fuse it
+                fused_model = torch.ao.quantization.fuse_modules_qat(
+                    model,
+                    [['conv', 'bn']],
+                )
+                # convert to QAT
+                qconfig_mapping = torch.ao.quantization.get_default_qat_qconfig_mapping(qengine)
+
+                quantizable_model = torch.ao.quantization.quantize_fx.prepare_qat_fx(fused_model,
+                                                                                     qconfig_mapping,
+                                                                                     example_inputs=None)
+                assert isinstance(quantizable_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+
+                # jit script
+                scripted_model = torch.jit.script(quantizable_model)
+
+                self.assertTrue(
+                    isinstance(scripted_model, torch.jit.ScriptModule),
+                    "Expected prepared model with to be scriptable")
+
+    def test_qat_convbn_fused_jit_scriptable(self):
+        """
+        Tests jit scriptability works for fused ConvBN.
+        """
+        for qengine in ['fbgemm', 'qnnpack']:
+            with override_quantized_engine(qengine):
+                # create conv-bn
+                class Model(nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                        self.bn = nn.BatchNorm2d(1)
+
+                    def forward(self, x):
+                        x = self.conv(x)
+                        x = self.bn(x)
+                        return x
+
+                model = Model()
+
+                # fuse it
+                fused_model = torch.ao.quantization.fuse_modules_qat(
+                    model,
+                    [['conv', 'bn']],
+                )
+                # convert to QAT
+                fused_model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                torch.ao.quantization.prepare_qat(fused_model, inplace=True)
+                assert isinstance(fused_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+
+                # Test jit script fails
+                # Prepared eager module fails due to observer hooks not being scriptable
+                with self.assertRaises(RuntimeError):
+                    torch.jit.script(fused_model)
+
 class TestDistributed(QuantizationTestCase):
 
     def test_observers_preserve_buffers(self):
@@ -996,7 +1095,7 @@ class TestDistributed(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             # create conv-bn
             class Model(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = nn.Conv2d(4, 1, 3, padding=1)
                     self.bn = nn.BatchNorm2d(1)
@@ -1045,7 +1144,7 @@ class TestDistributed(QuantizationTestCase):
         """
         class Model(nn.Module):
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
                 self.bn = nn.BatchNorm2d(1)
@@ -1276,7 +1375,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
     def test_embedding_bag_qat_config(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
@@ -1356,7 +1455,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(2, 2)
                 self.relu = nn.ReLU()

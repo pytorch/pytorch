@@ -16,8 +16,7 @@
 #include <string>
 #include <type_traits>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// The base class for all modules in PyTorch.
 ///
@@ -116,7 +115,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const;
+      const std::optional<Device>& device = std::nullopt) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `Module&`.
@@ -698,5 +697,4 @@ void Module::to_impl(Ts&&... ts) {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
