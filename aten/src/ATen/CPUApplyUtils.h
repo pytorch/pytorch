@@ -136,7 +136,7 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkDeviceType("CPU_tensor_apply", tensors, kCPU);
   checkLayout("CPU_tensor_apply", tensors, kStrided);
   if (!_all_equal_numel(tensors))
-    AT_ERROR(_all_equal_numel_error(tensors));
+    TORCH_CHECK(false, _all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)

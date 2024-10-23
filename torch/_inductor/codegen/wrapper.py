@@ -1312,6 +1312,8 @@ class PythonWrapperCodegen(CodeGen):
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
+            elif kwargs[key] is None:
+                constants[key] = None
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.TMADescriptor):
@@ -2248,10 +2250,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
         self.launcher_fn_name = self.subgraph_name
-
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        # No need to insert the asserts for the subgraph inputs.
-        pass
 
     def write_header(self) -> None:
         pass
