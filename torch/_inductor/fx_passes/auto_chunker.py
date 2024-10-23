@@ -2,7 +2,7 @@ import itertools
 from typing import Sequence, Set
 
 import torch
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.utils import cache_on_self
 from torch.utils import _pytree
 import operator
@@ -84,11 +84,11 @@ class AutoChunkerTransform:
     Do the real transformation.
 
     Put all the transformation in a separate class rather than inside AutoChunker
-    class so we don't need worry about invalidating cache in AutoChunker.
+    class to make it easier to think about cache invalidation.
     """
     def __init__(self, analyzer, nodes_to_chunk):
-        print("enter AutoChunkerTransform")
         assert len(nodes_to_chunk) > 0
+        metrics.num_auto_chunking += 1
         self.analyzer = analyzer
         self.nodes_to_chunk = nodes_to_chunk
 
@@ -98,12 +98,11 @@ class AutoChunkerTransform:
         self.gm = analyzer.gm
 
         self.pretend_identity_tangent()
+
         source_node_chunks = self._chunk_source_node(source_node)
 
         self.num_chunk = len(source_node_chunks)
         
-        self.gm.print_readable()
-
         final_replacement = {}
 
         for chunk_id, source_node_chunk in enumerate(source_node_chunks):
@@ -116,14 +115,39 @@ class AutoChunkerTransform:
 
         self.cat_replacement_chunks(final_replacement)
         self.apply_original_tangent(final_replacement)
+        self.apply_final_replacement(final_replacement)
+
+        self.gm.graph.eliminate_dead_code()
+
+        log.debug("Joint graph after chunking:\n%s", self.gm.print_readable(False))
+        self._fake_tensor_prop()
+
+    def _recreate_node_with_replacement(self, orig_nd, replacement):
+        new_args, new_kwargs = _pytree.tree_map(lambda nd: replacement[nd] if nd in replacement else nd, (orig_nd.args, orig_nd.kwargs))
+
+        replace_nd = self.gm.graph.call_function(orig_nd.target, new_args, new_kwargs)
+        return replace_nd
+         
+
+    def apply_final_replacement(self, final_replacement):
+        # collect the extra nodes that need to be replaced.
+        # One example is the view op applied upon the gradient of bias
+        nodes_to_chunk_set = set(self.nodes_to_chunk)
+        for orig_nd, _ in final_replacement.items():
+            for user in tuple(orig_nd.users):
+                if user in nodes_to_chunk_set:
+                    new_node = self._recreate_node_with_replacement(user, final_replacement)
+                    user.replace_all_uses_with(new_node)
+
+                    # Even if 'user' becomes dead node, DCE pass may encounter
+                    # error since this dead node may refer to nodes created
+                    # after it. (i.e. violating the toplogical order).
+                    # Delete it explicitly
+                    self.gm.graph.erase_node(user)
 
         for orig_nd, replace_nd in final_replacement.items():
             orig_nd.replace_all_uses_with(replace_nd)
 
-        self.gm.graph.eliminate_dead_code()
-        print("graph after chunking")
-        self.gm.print_readable()
-        self._fake_tensor_prop()
 
     def pretend_identity_tangent(self):
         tangent = self.analyzer.gradient_output
@@ -134,6 +158,7 @@ class AutoChunkerTransform:
         one._rename(f"tangent_overriden_as_one")
 
         tangent.replace_all_uses_with(one)
+        self.overriden_tangent = one
 
     def cat_replacement_chunks(self, replacement):
         for orig_nd, replace_nd in replacement.items():
@@ -143,11 +168,9 @@ class AutoChunkerTransform:
                 replacement[orig_nd] = replace_nd
 
     def apply_original_tangent(self, replacement):
-        # TODO: find a more reliable way to reapply the original tangent?
         scalar_tangent = self.analyzer.gradient_output
         for orig_nd, replace_nd in replacement.items():
-            fake_tensor = _get_fake_tensor_from_node(orig_nd)
-            if fake_tensor.numel() > 1:
+            if self.analyzer.is_bwd_node(orig_nd):
                 # multiply the gradients with the scalar tangent
                 replace_nd = self.gm.graph.call_function(aten.mul, (replace_nd, scalar_tangent))
                 replacement[orig_nd] = replace_nd
@@ -200,13 +223,15 @@ class AutoChunkerTransform:
 
             # create accumulator (for add) only for the first chunk
             if chunk_id == 0:
-                # This does not work since orig_nd will be replace by accum in the end.
-                # This results in an invalid fx graph
-                # accum = self.gm.graph.call_function(aten.zeros_like.default, (orig_nd,))
                 fake_tensor = _get_fake_tensor_from_node(orig_nd)
-                # zeros cause error in inductor: AssertionError: both a fallback and a decomp for same op: aten.zeros.default
+
+                # We call aten.full since other 'better' alternatives does not work
+                # 1. accum = self.gm.graph.call_function(aten.zeros_like.default, (orig_nd,))
+                #    does not work since orig_nd will be replaced by accum in the end.
+                #    This results in an invalid fx graph.
+                # 2. accum = self.gm.graph.call_function(aten.zeros.default, (fake_tensor.shape,), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                #    does not work since we would get error: AssertionError: both a fallback and a decomp for same op: aten.zeros.default
                 # Use full instead
-                # accum = self.gm.graph.call_function(aten.zeros.default, (fake_tensor.shape,), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
                 accum = self.gm.graph.call_function(aten.full.default, (fake_tensor.shape, 0), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
                 final_replacement[orig_nd] = accum
             else:
@@ -216,11 +241,12 @@ class AutoChunkerTransform:
             chunk_replacement[orig_nd] = replace_nd
 
             # do the accumulation
-            # TODO avoid inplace update since joint graph assumes no side effect?
+            # We are not doing inplace update since the joint graph seems to assume no side effet.
+            # The partition may move nodes around without respecting side effect.
             final_replacement[orig_nd] = self.gm.graph.call_function(aten.add.Tensor, (accum, replace_nd))
             return
 
-        # Special handling for sum
+        # Special handling for sum to a single value
         if orig_nd.target == aten.sum.default:
             # create accumulator only for the first chunk
             if chunk_id == 0:
@@ -234,19 +260,37 @@ class AutoChunkerTransform:
             chunk_replacement[orig_nd] = replace_nd
 
             # do the accumulation
-            # TODO avoid inplace update since joint graph assumes no side effect?
-            self.gm.graph.call_function(aten.add_.Tensor, (accum, replace_nd))
+            final_replacement[orig_nd] = self.gm.graph.call_function(aten.add.Tensor, (accum, replace_nd))
             return
 
+        # Special handling for sum across the chunk dimension
+        if orig_nd.target == aten.sum.dim_IntList:
+            arg0 = orig_nd.args[0]
+            sum_dim = orig_nd.args[1]
+
+            if len(sum_dim) == 1 and arg0.meta.get("chunk_dim", None) == sum_dim[0]:
+                if chunk_id == 0:
+                    fake_tensor = _get_fake_tensor_from_node(orig_nd)
+                    accum = self.gm.graph.call_function(aten.full.default, (fake_tensor.shape, 0), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                    final_replacement[orig_nd] = accum
+                else:
+                    accum = final_replacement[orig_nd]
+                replace_nd = self.gm.graph.call_function(orig_nd.target, (chunk_replacement[arg0], *orig_nd.args[1:]))
+                chunk_replacement[orig_nd] = replace_nd
+
+                final_replacement[orig_nd] = self.gm.graph.call_function(aten.add.Tensor, (accum, replace_nd))
+                return
+
         # Special handling for expanding the tangent
-        if orig_nd.target == aten.expand.default and "tangent" in orig_nd.args[0].name:
+        # if orig_nd.target == aten.expand.default and "tangent" in orig_nd.args[0].name:
+        if orig_nd.target == aten.expand.default and orig_nd.args[0] is self.overriden_tangent:
             # Lookup the correct shape from the previous node which is the
             # corresponding chunked node in the fwd pass
             fwd_nd = self.nodes_to_chunk[node_id - 1]
             assert isinstance(fwd_nd, torch.fx.Node)
             assert "chunk_dim" in fwd_nd.args[0].meta
-            orig_nd.meta["chunk_dim"] = fwd_nd.args[0].meta["chunk_dim"]
             chunk_dim = fwd_nd.args[0].meta["chunk_dim"]
+            orig_nd.meta["chunk_dim"] = chunk_dim
             chunked_shape = list(_get_fake_tensor_from_node(fwd_nd.args[0]).shape)
             # TODO handle the non-divisible case
             chunked_shape[chunk_dim] //= self.num_chunk
@@ -255,31 +299,36 @@ class AutoChunkerTransform:
 
             return
 
-        # common case is, output has the same chunk_dim as the chunked input
+        # Handle the common case here.
+        # Output should have the same chunk_dim as the chunked input unless it's permute like ops
         if chunk_id == 0:
             seen_chunk_dim = set()
             for arg in _pytree.tree_flatten((orig_nd.args, orig_nd.kwargs))[0]:
                 if isinstance(arg, torch.fx.Node) and "chunk_dim" in arg.meta:
                     seen_chunk_dim.add(arg.meta["chunk_dim"])
     
-            assert len(seen_chunk_dim) == 1, f"{orig_nd.format_node()}, {seen_chunk_dim}"
-            orig_nd.meta["chunk_dim"] = next(iter(seen_chunk_dim))
+            assert len(seen_chunk_dim) <= 1, f"{orig_nd.format_node()}, {seen_chunk_dim}"
 
-            # permute is different
-            if orig_nd.target == aten.permute.default:
-                # TODO: need change to be more general
-                orig_nd.meta["chunk_dim"] = 1 - orig_nd.meta["chunk_dim"]
+            # It's possible that len(seen_chunk_dim) is 0 if a tensor is a result of sum across the chunk dimesion
+            # This tensor itself is not chunked at all. So there is no chunk dim.
+            if len(seen_chunk_dim) == 1:
+                orig_nd.meta["chunk_dim"] = next(iter(seen_chunk_dim))
+
+                # permute is different
+                if orig_nd.target == aten.permute.default:
+                    # TODO: need change to be more general
+                    orig_nd.meta["chunk_dim"] = 1 - orig_nd.meta["chunk_dim"]
 
         # do the replacement
-        new_args, new_kwargs = _pytree.tree_map(lambda nd: chunk_replacement[nd] if nd in chunk_replacement else nd, (orig_nd.args, orig_nd.kwargs))
-
-        replace_nd = self.gm.graph.call_function(orig_nd.target, new_args, new_kwargs)
+        replace_nd = self._recreate_node_with_replacement(orig_nd, chunk_replacement)
         chunk_replacement[orig_nd] = replace_nd
 
     def _chunk_source_node(self, source_node):
         bs = _get_fake_tensor_from_node(source_node).shape[0]
-        print(f"{bs=}")
+        log.debug("batch size of the source node for chunking: %s", bs)
         self.num_chunk = config.AutoChunker.num_chunk or 2
+        # TODO need take care of the non-divisible case for numerical
+        # parity.
         self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
         out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
         chunks = []
@@ -390,6 +439,22 @@ class AutoChunker:
     @cache_on_self
     def node_list(self):
         return list(self.gm.graph.nodes)
+
+    @property
+    @cache_on_self
+    def node_to_idx(self):
+        """
+        When the graph get mutated, the index does not change. It still means
+        the index of the node in the graph before mutation.
+
+        This can be used to decide if a node is in fwd or bwd part of
+        the graph
+        """
+        return {nd: idx for idx, nd in enumerate(self.node_list)}
+
+    def is_bwd_node(self, nd):
+        assert nd in self.node_to_idx
+        return self.node_to_idx[nd] >= self.first_bwd_node_index
 
     @property
     @cache_on_self
@@ -512,14 +577,13 @@ class AutoChunker:
             """
             We want to dedup the nodes and order then as the orignal graph
             """
-            node_to_idx = {nd: idx for idx, nd in enumerate(self.node_list)}
             out = set()
             for nd in itertools.chain(lhs, rhs):
                 assert isinstance(nd, torch.fx.Node)
                 if nd not in out:
                     out.add(nd)
 
-            return sorted(out, key=lambda nd: node_to_idx[nd])
+            return sorted(out, key=lambda nd: self.node_to_idx[nd])
 
         nodes_to_chunk = _merge_reachable_nodes(reachable_nodes, extra_bwd_reachable_nodes)
 

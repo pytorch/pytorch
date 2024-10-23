@@ -1,5 +1,5 @@
 import torch
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch._dynamo.utils import same
 import os
@@ -10,6 +10,10 @@ USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
 
 @config.patch("AutoChunker.enable", True)
 class AutoChunkerTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+
     def common_matmul_test(self, has_softmax, use_bias=False):
         M, K, N = 1024, 16, 1024
 
@@ -52,6 +56,9 @@ class AutoChunkerTest(TestCase):
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
+        # Make sure AutoChunking is not skipped
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
         # Only assert peak memory saving for large input. For small input, the saving can
         # be largely distorted by other memory allocation such as the tensor used to clear L2
         # cache by triton perf benchmarking API.
@@ -61,6 +68,9 @@ class AutoChunkerTest(TestCase):
 
     def test_matmul_trivial(self):
         self.common_matmul_test(has_softmax=False)
+
+    def test_linear_trivial(self):
+        self.common_matmul_test(has_softmax=False, use_bias=True)
    
     # Due to not able to generate an inplace version of a softmax like
     # kernel, having 2 chunks does not have large enough savings.
@@ -69,7 +79,7 @@ class AutoChunkerTest(TestCase):
     def test_matmul_softmax(self):
         self.common_matmul_test(has_softmax=True)
 
-    @config.patch("AutoChunker.num_chunk", 2)
+    @config.patch("AutoChunker.num_chunk", 4)
     def test_linear_softmax(self):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
