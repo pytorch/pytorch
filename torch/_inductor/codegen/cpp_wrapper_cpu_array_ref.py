@@ -11,6 +11,7 @@ from ..virtualized import V
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
+    BufferLike,
     EnterSubgraphLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
@@ -71,7 +72,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[bool] = None
-        self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
+        self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
     @staticmethod
     def create(
@@ -213,7 +214,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         return f"RAIIAtenTensorHandle {name}({name}_handle);"
 
-    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
+    def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
@@ -331,6 +332,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         args.insert(
             0, f"convert_arrayref_tensor_to_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,

@@ -6,10 +6,9 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
-#include <sstream>
 #include <type_traits>
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -70,7 +69,7 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (C10_UNUSED const auto j : c10::irange(n)) {
+  for ([[maybe_unused]] const auto j : c10::irange(n)) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -308,4 +307,4 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   sub_iter.for_each(loop, grain_size);
 }
 
-}}}  // namespace at::native::<anonymous>
+}} // namespace at::native::<anonymous>
