@@ -661,7 +661,6 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-    # import pdb; pdb.set_trace()
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
