@@ -34,7 +34,11 @@ const uint32_t block_size_bound = 256;
 const uint32_t grid_size_bound = 4;
 // number of randoms given by distributions like curand_uniform4, curand_uniform2_double
 // used in calculating philox offset.
+#if defined(USE_ROCM)
+const uint32_t curand4_engine_calls = 16;
+#else
 const uint32_t curand4_engine_calls = 4;
+#endif
 
 // utility function that calculates proper philox_offset
 // for distributions utilizing TensorIterator. For distributions using

@@ -18,5 +18,9 @@ constexpr uint32_t num_threads() {
 }
 #endif
 
+#if defined(USE_ROCM)
+constexpr int thread_work_size() { return 16; }
+#else
 constexpr int thread_work_size() { return 4; }
+#endif
 constexpr int block_work_size() { return thread_work_size() * num_threads(); }
