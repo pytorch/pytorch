@@ -712,6 +712,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
             fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
+            # Embedding weights are not needed for embedding backward
+            model.tok_embeddings.set_unshard_in_backward(False)
             fully_shard([model.norm, model.output], **fsdp_kwargs)
         elif module_grouping == "mem_eff_weight_tied":
             fully_shard([model.tok_embeddings, model.output], **fsdp_kwargs)
@@ -906,7 +908,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         meshes = [init_device_mesh("cuda", (self.world_size,))]  # always test FSDP
         if self.world_size == 4:  # test HSDP too if enough GPUs
             shard_size, replicate_size = 2, 2
-            meshes.append(init_device_mesh("cuda", (replicate_size, shard_size)))
+            meshes.append(
+                init_device_mesh(
+                    "cuda",
+                    (replicate_size, shard_size),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
         self.run_subtests(
             {
                 "mesh": meshes,
@@ -1299,7 +1307,9 @@ class TestFullyShardHSDPTraining(FSDPTest):
         shard_size = 2 if self.world_size > 2 else 1
         replicate_size = self.world_size // shard_size
         global_mesh = init_device_mesh(
-            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
+            "cuda",
+            (replicate_size, shard_size),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
         )
         self.run_subtests(
             {

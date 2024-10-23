@@ -73,13 +73,14 @@ static PyObject* THPGenerator_pynew(
   }
 #endif
   else if (device.type() == at::kXPU) {
-    self->cdata = at::detail::getXPUHooks().getNewGenerator(device.index());
+    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
   } else if (device.type() == at::kIPU) {
-    self->cdata = at::detail::getIPUHooks().getNewGenerator(device.index());
+    self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
