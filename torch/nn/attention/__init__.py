@@ -138,4 +138,4 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
-    return "2.5.7"
+    return "2.6.2"
