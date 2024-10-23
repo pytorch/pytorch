@@ -86,7 +86,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if not all(
-            isinstance(buf, torch.Tensor)
+            isinstance(buf, (torch.Tensor, torch.SymInt, int))
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
             raise RuntimeError("Other buffers must be tensors.")
@@ -130,7 +130,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
     ]:
         if not all(
-            isinstance(buf, torch.Tensor)
+            isinstance(buf, (torch.Tensor, int, torch.SymInt))
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
             raise RuntimeError("Other buffers must be tensors.")
@@ -416,7 +416,7 @@ def flex_attention_functionalize(
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
     assert all(
-        isinstance(item, torch.Tensor)
+        isinstance(item, (torch.Tensor, torch.SymInt))
         for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
     )
 
@@ -504,14 +504,18 @@ def create_fw_bw_graph(
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
 
-            def _from_fun(t: Tensor) -> Tensor:
-                return torch.empty_strided(
-                    t.size(),
-                    t.stride(),
-                    device=t.device,
-                    dtype=t.dtype,
-                    requires_grad=t.requires_grad,
-                )
+            def _from_fun(
+                t: Union[Tensor, torch.SymInt, int]
+            ) -> Union[Tensor, torch.SymInt, int]:
+                if isinstance(t, torch.Tensor):
+                    return torch.empty_strided(
+                        t.size(),
+                        t.stride(),
+                        device=t.device,
+                        dtype=t.dtype,
+                        requires_grad=t.requires_grad,
+                    )
+                return t
 
             # If someone runs this hop under the default compiler backend ("eager")
             # Then this path will be run with the actual user inputs. We convert them
@@ -526,8 +530,14 @@ def create_fw_bw_graph(
                 unwrapped_score_mod_indexes = pytree.tree_map(_from_fun, index_values)
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
-            assert all(isinstance(t, FakeTensor) for t in unwrapped_score_mod_indexes)
-            assert all(isinstance(t, FakeTensor) for t in unwrapped_other_buffers)
+            assert all(
+                isinstance(t, (FakeTensor, int, torch.SymInt))
+                for t in unwrapped_score_mod_indexes
+            )
+            assert all(
+                isinstance(t, (FakeTensor, int, torch.SymInt))
+                for t in unwrapped_other_buffers
+            )
 
             example_flat_out = pytree.tree_map(
                 _from_fun,
@@ -585,7 +595,9 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         *score_mod_other_buffers: Tuple[Any, ...],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
-            buffer.requires_grad for buffer in mask_mod_other_buffers
+            buffer.requires_grad
+            for buffer in mask_mod_other_buffers
+            if isinstance(buffer, torch.Tensor)
         )
         assert (
             not any_buffer_requires_grad
@@ -767,9 +779,16 @@ def sdpa_dense_backward(
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
+
+    def _map_buffer(
+        buffer: Union[torch.Tensor, torch.SymInt, int]
+    ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
+        if isinstance(buffer, torch.Tensor):
+            return torch.empty_like(buffer) if buffer.requires_grad else None
+        return buffer
+
     actual_grad_score_mod_captured = [
-        torch.empty_like(buffer) if buffer.requires_grad else None
-        for buffer in score_mod_other_buffers
+        _map_buffer(buffer) for buffer in score_mod_other_buffers
     ]
 
     Bq, Bkv = query.size(0), key.size(0)
@@ -873,7 +892,7 @@ def sdpa_dense_backward(
     actual_grad_key.copy_(grad_key)
     actual_grad_value.copy_(grad_value)
     score_mod_other_buffer_grads = [
-        actual_grad.copy_(grad) if actual_grad is not None else actual_grad
+        actual_grad.copy_(grad) if isinstance(actual_grad, torch.Tensor) else None
         for actual_grad, grad in zip(
             actual_grad_score_mod_captured, grad_score_mod_captured
         )

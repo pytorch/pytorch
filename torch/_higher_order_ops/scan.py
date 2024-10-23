@@ -309,7 +309,9 @@ def trace_scan(
     with disable_proxy_modes_tracing():
         sample_inits = [x_init.clone() for x_init in init]
         sample_inputs = [first_slice_copy(x, dim) for x in xs]
-        sample_additional_inputs = [x.clone() for x in additional_inputs]
+        sample_additional_inputs = [
+            x.clone() if isinstance(x, torch.Tensor) else x for x in additional_inputs
+        ]
         combine_graph = reenter_make_fx(combine_fn)(
             *sample_inits, *sample_inputs, *sample_additional_inputs
         )

@@ -233,7 +233,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         operands, (list, tuple)
     ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
     assert all(
-        isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
+        isinstance(o, (torch.Tensor, torch.SymInt, int)) for o in operands
     ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)

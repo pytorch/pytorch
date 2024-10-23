@@ -251,7 +251,7 @@ class OutputGraph:
         torch_function_mode_stack,
     ):
         super().__init__()
-        self.tracers = [SubgraphTracer(self, export_root=export)]
+        self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -543,6 +543,20 @@ class OutputGraph:
     def bound_symbols(self):
         return self.current_tracer.bound_symbols
 
+    # Unbacked symbols may be created as a function call in parent (e.g. t.to_list()).
+    # We track the symbol-proxy mapping for unbacked symbols when the
+    # SymNodeVariable is constructed (e.g. t.to_list() call) so that when subtracer tries
+    # to bind an unbacked symint, e.g. a subgraph input with shape u0,
+    # the proxy for u0 can be found in parent's bound_symbols.
+    def track_unbacked_symbols(self, s: torch.SymInt, proxy: torch.fx.Proxy):
+        assert not s.node.has_hint(), f"{s} is not unbacked"
+        log.debug("track unbacked symbols %s at level %s", s, self.current_tracer.level)
+        # It's possible that an unbacked symbol is created outside of current subgraph
+        # In this case, we need to lift it to inputs before tracking the symbol
+        if self.current_tracer.parent is not None:
+            proxy = self.current_tracer.maybe_lift_tracked_freevar_to_input(proxy)
+        self.bound_symbols[s.node.expr] = proxy
+
     # If you are here, and you're looking for create_graph_input,
     # to avoid ambiguity, please call one of the following:
     # - self.current_tracer.create_graph_input
@@ -570,7 +584,10 @@ class OutputGraph:
                 prior_tracer
                 if prior_tracer
                 else SubgraphTracer(
-                    self, parent=self.current_tracer, source_target=source_target
+                    self,
+                    parent=self.current_tracer,
+                    source_target=source_target,
+                    is_export=self.current_tracer.is_export,
                 )
             )
             self.tracers.append(tracer)
@@ -649,71 +666,6 @@ class OutputGraph:
     @property
     def current_tx(self):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
-
-    def add_symbol_bindings(self, arg: GraphArg):
-        # Insert implicit size vars as necessary.  With dynamic shapes, we
-        # maintain the invariant that every sizevar gets a direct SymInt input
-        # into the graph.  This means downstream graph transforms can assume
-        # every size variable is explicitly bound and accessible, instead of
-        # having to pull it out implicitly from tensors.
-
-        if self.export:
-            return
-
-        assert arg.fake_tensor is not None
-
-        def bind_symint(s: torch.SymInt, prop):
-            if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
-                return
-            s0 = s.node.expr
-            if s0 in self.bound_symbols:
-                return
-            log.debug("bind_symint %s %s", s, prop.name())
-            # TODO: don't readd symint if we already have it in graph
-            # (this is harmless because we do remove the unused ones later)
-            proxy = self.root_tracer.create_graph_input(
-                str(s0),
-                type(s),
-                s,
-                before=True,
-                source=prop,
-            )
-            self.root_tracer.bound_symbols[s0] = proxy
-            assert isinstance(s, torch.SymInt)
-            proxy.node.meta["grapharg"] = GraphArg(
-                prop,
-                s,
-                pass_arg_as_tensor=False,
-                fake_tensor=None,
-                is_tensor=False,
-            )
-
-        def handle_tensor(t, src):
-            for i, s in enumerate(t.size()):
-                bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
-            if t.layout is torch.strided:
-                for i, s in enumerate(t.stride()):
-                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
-                bind_symint(
-                    t.storage_offset(),
-                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-                )
-            elif t.layout is torch.sparse_coo:
-                handle_tensor(t._indices(), src)
-                handle_tensor(t._values(), src)
-            elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                handle_tensor(t.crow_indices(), src)
-                handle_tensor(t.col_indices(), src)
-            elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
-                handle_tensor(t.ccol_indices(), src)
-                handle_tensor(t.row_indices(), src)
-            if is_traceable_wrapper_subclass(t):
-                attrs, ctx = t.__tensor_flatten__()
-                for attr in attrs:
-                    inner_t = getattr(t, attr)
-                    handle_tensor(inner_t, AttrSource(src, attr))
-
-        handle_tensor(arg.fake_tensor, arg.source)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -1832,19 +1784,13 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(
-        self, output_graph, parent=None, export_root=False, source_target=None
-    ):
+    def __init__(self, output_graph, parent=None, is_export=False, source_target=None):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
 
-        # The export is only ever set for the ROOT tracer.  It controls
-        # whether or not certain inputs are allowed to be added or not.
-        # Look at call sites of create_graph_input to see how it is used.
-        if export_root:
-            assert parent is None
-        self.export_root = export_root
+        # See note [Export inputs must be explicitly passed in]
+        self.is_export = is_export
         # Map from graph input name to its placeholder proxy object, where the
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
@@ -1881,6 +1827,8 @@ class SubgraphTracer(fx.Tracer):
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+
+        self.level: int = parent.level + 1 if parent is not None else 0
 
         self._cur_code = None
         self._orig_gm_meta = None
@@ -2129,15 +2077,18 @@ class SubgraphTracer(fx.Tracer):
         self, name, type_expr, example_value, before=False, source=None
     ):
         log.debug(
-            "create_graph_input %s %s",
+            "create_graph_input %s %s at level %s before=%s",
             name,
             source.name() if source is not None else "(none)",
+            self.level,
+            before,
         )
         if source is None:
             assert (
                 self.parent is not None
-            ), "you are required to provide a source for inputs on the root tracer"
+            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
 
+        # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
         # want, because we take care of writing the bytecode that knows how
         # to source all the inputs.
@@ -2146,7 +2097,7 @@ class SubgraphTracer(fx.Tracer):
         # object which only depends on the inputs you explicitly passed to it.
         # So we are a bit more strict about what sources can become inputs
         # in export
-        if self.export_root:
+        if self.is_export and self.parent is None:
             if not is_from_local_source(source, allow_cell_or_freevar=False):
                 self.output_graph.source_to_user_stacks.setdefault(source, []).append(
                     TracingContext.extract_stack()
@@ -2178,6 +2129,7 @@ class SubgraphTracer(fx.Tracer):
                 self.input_name_to_proxy[k] = v
             else:
                 self.input_name_to_proxy[name] = proxy
+            self.maybe_bind_symbols(example_value, source)
             return proxy
 
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
@@ -2187,11 +2139,27 @@ class SubgraphTracer(fx.Tracer):
         assert (
             self.parent is not None
         ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+
         # Proxys are associated with VariableTracker.
         # It is possible that we've already lifted the Proxy to be an input.
         # If that is the case, just return the already lifted Proxy.
-        if proxy in self.lifted_freevars:
-            return self.lifted_freevars[proxy]
+        def _already_lifted(proxy: torch.fx.Proxy):
+            if proxy in self.lifted_freevars:
+                return self.lifted_freevars[proxy]
+            example_value = proxy.node.meta["example_value"]
+
+            # For SymInt, it's possible that one lifted symints is accessed
+            # via a size call in parent thus creating duplicated proxies for
+            # the same SymInts, we use the expr to deduplicate in this case.
+            if isinstance(example_value, torch.SymInt):
+                expr = example_value.node.expr
+                if expr in self.bound_symbols:
+                    return self.bound_symbols[expr]
+            return None
+
+        maybe_lifted_proxy = _already_lifted(proxy)
+        if isinstance(maybe_lifted_proxy, torch.fx.Proxy):
+            return maybe_lifted_proxy
 
         # We first lift proxy to parent's graph then lift to current grpah's input
         # so that when we bind symints of the sizes in current graph, those symints
@@ -2217,6 +2185,106 @@ class SubgraphTracer(fx.Tracer):
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
+
+    def maybe_bind_symbols(self, example_value, src: Optional[Source]):
+        # See note [Export inputs must be explicitly passed in]
+        is_strict_export = self.is_export
+        is_non_strict_export = torch.compiler.is_compiling()
+        if is_strict_export or is_non_strict_export:
+            return
+
+        if isinstance(example_value, torch.Tensor):
+            return self.handle_tensor(example_value, src)
+
+    def handle_tensor(self, t: torch.Tensor, src: Optional[Source]):
+        for i, s in enumerate(t.size()):
+            self.bind_symint(
+                s,
+                (
+                    TensorPropertySource(src, TensorProperty.SIZE, i)
+                    if src is not None
+                    else None
+                ),
+            )
+        if t.layout is torch.strided:
+            for i, s in enumerate(t.stride()):
+                self.bind_symint(
+                    s,
+                    (
+                        TensorPropertySource(src, TensorProperty.STRIDE, i)
+                        if src is not None
+                        else None
+                    ),
+                )
+            self.bind_symint(
+                t.storage_offset(),
+                (
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET)
+                    if src is not None
+                    else None
+                ),
+            )
+        elif t.layout is torch.sparse_coo:
+            self.handle_tensor(t._indices(), src)
+            self.handle_tensor(t._values(), src)
+        elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            self.handle_tensor(t.crow_indices(), src)
+            self.handle_tensor(t.col_indices(), src)
+        elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            self.handle_tensor(t.ccol_indices(), src)
+            self.handle_tensor(t.row_indices(), src)
+        if is_traceable_wrapper_subclass(t):
+            attrs, ctx = t.__tensor_flatten__()
+            for attr in attrs:
+                inner_t = getattr(t, attr)
+                self.handle_tensor(
+                    inner_t, AttrSource(src, attr) if src is not None else None
+                )
+
+    def bind_symint(self, s: Union[int, torch.SymInt], source: Optional[Source]):
+        if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
+            return
+        assert isinstance(s, torch.SymInt)
+
+        s0 = s.node.expr
+        if s0 in self.bound_symbols:
+            return self.bound_symbols[s0]
+
+        log.debug(
+            "bind_symint %s from %s at level %s",
+            s,
+            source.name() if source is not None else "subgraph inputs",
+            self.level,
+        )
+        ph = self.create_graph_input(
+            str(s0),
+            type(s),
+            s,
+            before=True,
+            source=source,
+        )
+        self.bound_symbols[s0] = ph
+        set_example_value(ph.node, s)
+
+        if self.parent is None:
+            assert (
+                source is not None
+            ), "When bound with top-level phs, symbols' source must be provided."
+            ph.node.meta["grapharg"] = GraphArg(
+                source,
+                s,
+                pass_arg_as_tensor=False,
+                fake_tensor=None,
+                is_tensor=False,
+            )
+            return ph
+
+        # Recursively bind symbols for parent tracer
+        parent_proxy = self.parent.bind_symint(s, source)
+        # Similar to lifted tensors, we put lifted symbols to lifted_freevars
+        # for tracking.
+        self.lifted_freevars[parent_proxy] = ph
+        return ph
 
 
 # NOTE: [HigherOrderOperator tracing design]

@@ -1684,7 +1684,6 @@ class VariableBuilder:
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
-        self.tx.output.add_symbol_bindings(grapharg)
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):

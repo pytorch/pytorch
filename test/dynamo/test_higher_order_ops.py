@@ -16,6 +16,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
+    check_dynamic_shape_capture,
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -35,11 +36,6 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-
-
-def check_dynamic_shape_capture():
-    # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
-    return not config.assume_static_by_default
 
 
 def count_ops(gm, args, freq, op):
@@ -213,7 +209,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(lambda x: torch.sin(x), x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 2)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_enum_arg(self):
         class SomeEnum(enum.Enum):
@@ -229,7 +226,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(g, x, val)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), 2)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), arg_count)
 
     def test_return_captured_var(self):
         freevar = torch.randn(3)
@@ -244,7 +242,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(fn, default_args_generator((x,)), 2)
+
+        # when testing with dynamic shape, symbols are lifted as input
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -260,7 +261,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(fn, default_args_generator((x,)), 3, 4)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 4)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -273,14 +276,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), 3, 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 3)
 
     def test_capture_untracked_global(self):
         def f(x):
             return wrap(lambda x: x + global_var, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_symint_input(self):
         def f(x):
@@ -386,13 +393,13 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, s0, l_x_);  wrap_body_0 = s0 = l_x_ = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
-        def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
-            view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
+        def forward(self, s0: "Sym(s0)", l_x_: "f32[s0, 1]"):
+            view: "f32[s0]" = l_x_.view(s0);  l_x_ = s0 = None
             add: "f32[s0]" = view + 0.5;  view = None
             return (add,)
 """,
@@ -418,7 +425,8 @@ class GraphModule(torch.nn.Module):
             y2 = t[0] + 0.2
             yield (x2, y2, (x2, y2))
 
-        self._test_wrap_simple(f, my_args_generator((x, y, (x, y))), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, my_args_generator((x, y, (x, y))), arg_count)
 
     def test_wrap_pytree_args_not_const_symint_tensor(self):
         class MyClass:
@@ -488,7 +496,9 @@ class GraphModule(torch.nn.Module):
             def g(x):
                 return wrap(lambda x: x + y, x)
 
-            self._test_wrap_simple(g, default_args_generator((x,)), 3)
+            # when testing with dynamic shape, a symbol is lifted as input
+            arg_count = 4 if check_dynamic_shape_capture() else 3
+            self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
             return g(x)
 
         f(x, y)
@@ -500,7 +510,9 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return wrap(lambda x: x + y, x)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_capture_tracked_nested(self):
         x = torch.randn(3, 3)
@@ -509,7 +521,9 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_inlined_functions(self):
         def g(x, y):
@@ -520,7 +534,9 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_same_freevar_twice(self):
         free = torch.randn(3)
@@ -537,7 +553,9 @@ class GraphModule(torch.nn.Module):
 
         # Since, `x` is unused, we don't lift it to
         # be the input.
-        self._test_wrap_simple(f, default_args_generator((x,)), 2, 3)
+        # when testing with dynamic shape, a symbol is lifted as input
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count, 3)
 
     def test_register_subclass(self):
         from torch._higher_order_ops.cond import cond_op
@@ -1054,7 +1072,8 @@ class GraphModule(torch.nn.Module):
             return wrap(f, x)
 
         x = torch.randn(3, 3)
-        self._test_wrap_simple(g, default_args_generator((x,)), 2)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(g, default_args_generator((x,)), arg_count)
 
     def test_wrap_kwarg(self):
         def f(x, y):
@@ -1062,7 +1081,8 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_int(self):
         def f(x, y):
@@ -1071,9 +1091,12 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = 8
 
-        self._test_wrap_simple(
-            f, default_args_generator((x, y)), ifdynstaticdefault(2, 3)
+        arg_count = (
+            ifdynstaticdefault(2, 3) + 1
+            if check_dynamic_shape_capture()
+            else ifdynstaticdefault(2, 3)
         )
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_all_kwarg(self):
         def f(y, x):
@@ -1082,7 +1105,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_only(self):
         def f(x, y):
@@ -1094,7 +1118,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_default(self):
         def f(x, y):
@@ -1106,7 +1131,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_default_if_branch(self):
         def f(x, y):
@@ -1121,7 +1147,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        self._test_wrap_simple(f, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x, y)), arg_count)
 
     def test_wrap_kwarg_recompile(self):
         def f(x, y, z=None):
@@ -1162,7 +1189,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        self._test_wrap_simple(f, default_args_generator((x, y, 8)), 2)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(f, default_args_generator((x, y, 8)), arg_count)
 
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -1522,8 +1550,8 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 3 inputs (buffer, x, z)
-                self.assertEqual(len(operands), 3)
+                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1535,7 +1563,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 3)
+                    self.assertEqual(num_placeholders, 4)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
@@ -1826,10 +1854,11 @@ def forward(self):
             yield [x], [x.sin()]
             yield (x,), (x.sin(),)
 
+        arg_count = 4 if check_dynamic_shape_capture() else 3
         actual_graph = self._test_wrap_simple(
             f,
             my_args_generator(),
-            3,
+            arg_count,
             3,
             return_graph=True,
         )
@@ -2000,7 +2029,10 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: [torch.sin(x), torch.cos(x)], x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 2, expected_opcount=3)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(
+            f, default_args_generator((x,)), arg_count, expected_opcount=3
+        )
 
     def test_fallback_on_python_primitives_output(self):
         counters.clear()
@@ -2028,8 +2060,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 3)
 
         counters.clear()
+        arg_count = 4 if check_dynamic_shape_capture() else 2
         graph = self._test_wrap_simple(
-            f, default_args_generator((x,)), 2, 4, return_graph=True
+            f, default_args_generator((x,)), arg_count, 4, return_graph=True
         )
         self.assertEqual(len(counters["graph_break"]), 0)
 
@@ -2066,8 +2099,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
 
         counters.clear()
+
+        arg_count = 3 if check_dynamic_shape_capture() else 2
         graph = self._test_wrap_simple(
-            f, default_args_generator((x,)), 2, 2, return_graph=True
+            f, default_args_generator((x,)), arg_count, 2, return_graph=True
         )
         self.assertEqual(len(counters["graph_break"]), 0)
 
@@ -2137,7 +2172,8 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(h, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(h, default_args_generator((x, y)), arg_count)
 
     def test_internal_nonlocal(self):
         def f(x, y):
@@ -2162,7 +2198,8 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        self._test_wrap_simple(h, default_args_generator((x, y)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(h, default_args_generator((x, y)), arg_count)
 
     def test_capture_numpy_number(self):
         import numpy as np
@@ -2174,7 +2211,8 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3)
         # np.number are lifted to graph inputs
-        self._test_wrap_simple(f, default_args_generator((x,)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_freevars_as_inputs_to_wrap(self):
         y = torch.randn(3)
@@ -2183,7 +2221,8 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x, y: x + y, x, y)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
     def test_lift_tensor_constant(self):
         def f(x):
@@ -2191,7 +2230,10 @@ class GraphModule(torch.nn.Module):
             return wrap(lambda x: x + y, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x,)), 3, expected_opcount=3)
+        arg_count = 4 if check_dynamic_shape_capture() else 3
+        self._test_wrap_simple(
+            f, default_args_generator((x,)), arg_count, expected_opcount=3
+        )
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
@@ -2211,14 +2253,18 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap(gn, x)
 
-        self._test_wrap_simple(fn, default_args_generator((torch.randn(10, 10),)), 4)
+        arg_count = 5 if check_dynamic_shape_capture() else 4
+        self._test_wrap_simple(
+            fn, default_args_generator((torch.randn(10, 10),)), arg_count
+        )
 
     def test_fn_with_kwargs_in_torch_ops(self):
         def fn(x):
             return wrap(lambda z: torch.cos(input=z), x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), 2)
+        arg_count = 3 if check_dynamic_shape_capture() else 2
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):
@@ -2573,7 +2619,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
-    def test_hints_wrapper(self):
+    def test_hints_wrapper_haha(self):
         def ref_fn(x, y):
             x = x + y
             x = torch.relu(x)

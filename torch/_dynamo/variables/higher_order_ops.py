@@ -7,7 +7,7 @@ import inspect
 import itertools
 import logging
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -538,6 +538,58 @@ def speculate_subgraph(
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
 
+                # NOTE: [HigherOrderOperator subgraph input ordering]
+                # The input ordering of the higher order ops is determined by the order of
+                # the creatation of the placehoder.
+                # Mannually created inputs are created in validate_args_and_maybe_create_graph_inputs before
+                # speculating subgraph.
+                # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
+                # their ordering is determined by the time they are lifted: earlier lifted ones precede later
+                # lifted ones.
+                #
+                # Suppose the placeholders are
+                # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
+                # The following code re-order the placeholders to
+                # O1, O2, O3, O4, O5, X1, X2, X3
+                def move_lifted_freevars_phs_to_end(
+                    graph: torch.fx.Graph, lifted_freevars: Tuple[torch.fx.Node]
+                ):
+                    lifted_ph_set = {
+                        child_p.node for child_p in lifted_freevars.values()
+                    }
+
+                    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
+
+                    # No need to reorder when graph doesn't have args or doesn't
+                    # have lifted freevars or all inputs are lifted freevars.
+                    if (
+                        len(prev_phs) == 0
+                        or len(lifted_ph_set) == 0
+                        or len(prev_phs) == len(lifted_ph_set)
+                    ):
+                        return
+
+                    # Step 1: find first X1
+                    for x1 in prev_phs:
+                        if x1 in lifted_ph_set:
+                            break
+
+                    assert x1 is not None and x1.op == "placeholder"
+                    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
+                    cand_x = x1.next
+                    while cand_x is not None and cand_x.op == "placeholder":
+                        if cand_x in lifted_ph_set:
+                            cand_x = cand_x.next
+                        else:
+                            nxt = cand_x.next
+                            cand_x._remove_from_list()
+                            x1.prepend(cand_x)
+                            cand_x = nxt
+
+                    graph.lint()
+
+                move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+
                 return (
                     (output, treespec),
                     graph,
@@ -712,7 +764,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
-        if not only_consist_of(args[3], (TensorVariable,)):
+        if not only_consist_of(args[3], (TensorVariable, ConstantVariable)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
