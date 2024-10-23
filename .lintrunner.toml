@@ -241,7 +241,9 @@ exclude_patterns = [
     'c10/util/*inl.h',
     'c10/test/**/*.h',
     'third_party/**/*',
-    'torch/csrc/api/**',
+    'torch/csrc/api/include/torch/nn/modules/common.h',
+    'torch/csrc/api/include/torch/linalg.h',
+    'torch/csrc/api/include/torch/nn/pimpl-inl.h',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
@@ -1330,7 +1332,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.6.3',  # sync with RUFF
+    'ruff==0.7.0',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1415,7 +1417,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.6.3',  # sync with PYFMT
+    'ruff==0.7.0',  # sync with PYFMT
 ]
 is_formatter = true
 
