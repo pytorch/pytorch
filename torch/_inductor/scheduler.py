@@ -2786,7 +2786,7 @@ class Scheduler:
            Note that the extra memory allocation is not necessarily causing peak memory increase.
            This is just a heuristic.
 
-        We return true only if the saving for fusion can not trade of the extra memory allocation.
+        We return true only if the saving for fusion can not trade off the extra memory allocation.
         """
 
         from .codegen.wrapper import buffer_reuse_key

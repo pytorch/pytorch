@@ -205,7 +205,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
     @unittest.skipIf(
         torch.cuda.get_device_properties().total_memory < int(1e10),
-        "Need 10GB memory to be save to run the test",
+        "Need 10GB memory to be safe to run the test",
     )
     def test_fusing_reductions_increase_peak_memory(self):
         @torch.compile
