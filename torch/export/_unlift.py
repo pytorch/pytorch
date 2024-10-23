@@ -331,12 +331,12 @@ def _create_stateful_graph_module(
                         detached_value = value.detach()
                         original_tensor_to_detached_tensor[value] = detached_value
                         value = detached_value
-                _assign_attr(
-                    value,
-                    stateful_gm,
-                    const_name,
-                    attr_kind=_AttrKind.CONSTANT,
-                )
+            _assign_attr(
+                value,
+                stateful_gm,
+                const_name,
+                attr_kind=_AttrKind.CONSTANT,
+            )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
