@@ -39,20 +39,26 @@ jobs:
   build-wheel:
     name: "Build Triton Wheel"
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
-        device: ["cuda", "rocm", "xpu"]
+        device: ["cuda", "rocm", "xpu", "arm"]
         include:
           - device: "rocm"
             rocm_version: "6.2"
+            runs_on: [self-hosted, linux.2xlarge]
           - device: "cuda"
             rocm_version: ""
+            runs_on: [self-hosted, linux.2xlarge]
+          - device: "xpu"
+            runs_on: [self-hosted, linux.2xlarge]
+          - device: "arm"
+            runs_on: [self-hosted, linux.arm64.2xlarge]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'arm' && '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cpu-aarch64:e853daf57c8991f082ed2120a04b405e85689f2b' || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -115,7 +121,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 
           # Triton xpu build use GCC11
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
