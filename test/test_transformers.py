@@ -2512,21 +2512,21 @@ class TestSDPACudaOnly(NNTestCase):
         mask_cpu = mask.detach().clone().cpu()
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
             out = nn.functional.scaled_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    attn_mask=mask,
-                    dropout_p=0.0,
-                    is_causal=False,
-                )
-        out_cpu = nn.functional.scaled_dot_product_attention(
-                q_cpu,
-                k_cpu,
-                v_cpu,
-                attn_mask=mask_cpu,
+                q,
+                k,
+                v,
+                attn_mask=mask,
                 dropout_p=0.0,
                 is_causal=False,
             )
+        out_cpu = nn.functional.scaled_dot_product_attention(
+            q_cpu,
+            k_cpu,
+            v_cpu,
+            attn_mask=mask_cpu,
+            dropout_p=0.0,
+            is_causal=False,
+        )
 
         out.sum().backward()
         out_cpu.sum().backward()
