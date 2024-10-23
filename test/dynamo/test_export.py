@@ -1921,7 +1921,6 @@ def forward(self, l_x_):
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
     return (getitem,)""",
             )
-
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 "Cond doesn't work unless it is captured completely with torch.compile",

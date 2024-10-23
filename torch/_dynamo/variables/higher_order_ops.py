@@ -2335,7 +2335,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx.output,
             parent=tx.output.current_tracer,
             source_target="autograd.Function",
-            level=tx.output.current_tracer.level + 1,
         )
 
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
@@ -2374,7 +2373,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx.output,
             parent=fwd_tracer,
             source_target="autograd.Function",
-            level=fwd_tracer.level + 1,
         )
 
         # Speculate subgraph on the backward. We make the

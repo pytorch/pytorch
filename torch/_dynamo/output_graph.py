@@ -588,7 +588,6 @@ class OutputGraph:
                     parent=self.current_tracer,
                     source_target=source_target,
                     is_export=self.current_tracer.is_export,
-                    level=self.current_tracer.level + 1,
                 )
             )
             self.tracers.append(tracer)
@@ -1785,9 +1784,7 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(
-        self, output_graph, parent=None, is_export=False, source_target=None, level=0
-    ):
+    def __init__(self, output_graph, parent=None, is_export=False, source_target=None):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
@@ -1831,7 +1828,7 @@ class SubgraphTracer(fx.Tracer):
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
 
-        self.level: int = level
+        self.level: int = parent.level + 1 if parent is not None else 0
 
         self._cur_code = None
         self._orig_gm_meta = None
