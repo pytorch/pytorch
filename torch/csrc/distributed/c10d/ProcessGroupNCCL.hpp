@@ -499,7 +499,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
     // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
     // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
-    // accepts int. Otherwise, an imlicit conversion may happen at the API call
+    // accepts int. Otherwise, an implicit conversion may happen at the API call
     // and the value may become negative.
     // [Note 2]: this member is pybinded to Python, the value passed from Python
     // must be within the numerical range of C++ int. Otherwise, Python will
@@ -540,7 +540,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
-  [[deprecated]] ProcessGroupNCCL(
+  C10_DEPRECATED ProcessGroupNCCL(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,

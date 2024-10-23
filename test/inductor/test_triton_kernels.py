@@ -54,6 +54,14 @@ if HAS_GPU:
                 fast_dividef as my_fast_dividef,
             )
 
+    def _triton_get_ast_equal_to_str(params):
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            return f"'tt.equal_to': {params}"
+        except ImportError:
+            return f"equal_to_1={params}"
+
     # Define shared triton constants here.
     CONSTANT_C: tl.constexpr = 4
     STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
@@ -1259,9 +1267,9 @@ def forward(self, x_1, output_1):
         if dynamic:
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
-            self.assertTrue("equal_to_1=()" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         else:
-            self.assertTrue("equal_to_1=(3,)" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1290,7 +1298,7 @@ def forward(self, x_1, output_1):
 
         # float 1.0 (both literal or symbolic)
         # should not be added to equal_to_1
-        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1667,7 +1675,7 @@ def forward(self, x_1, output_1):
         a = torch.randn(301, device=GPU_TYPE)
         b = torch.randn(301, device=GPU_TYPE)
 
-        backend = torch._dynamo.testing.AOTEagerAndRecordGraphs()
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
         torch.compile(
             f,
             fullgraph=True,
