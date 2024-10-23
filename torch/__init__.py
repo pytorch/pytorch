@@ -522,6 +522,9 @@ class SymInt:
     def __sub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __rsub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
         return self.node._graph_repr()
 
@@ -2226,7 +2229,7 @@ class _TorchCompileInductorWrapper:
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: _Dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
