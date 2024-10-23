@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import ast
 import dataclasses
+import functools
 import inspect
 import math
 import operator
@@ -14,6 +15,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Set,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -22,10 +24,14 @@ from typing import (
 import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.fx._utils import first_call_function_nn_module_stack
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
+    from torch._ops import OperatorBase
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
 
@@ -529,6 +535,35 @@ def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
+def apply_runtime_assertion_pass(gm, graph_signature):
+    from torch._export.passes._node_metadata_hook import (
+        _node_metadata_hook,
+        _set_node_metadata_hook,
+    )
+    from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
+
+    if not torch._dynamo.config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
+        )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            shape_env = _get_shape_env_from_gm(gm)
+            if shape_env:
+                insert_deferred_runtime_asserts(
+                    gm,
+                    shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
+    # update output specs
+    gm.recompile()
+    graph_signature.user_outputs = _graph_output_names(gm)
+    return gm, graph_signature
+
+
 def nodes_first(
     nodes: List[torch.fx.Node], node_call_back=None
 ) -> Optional[torch.fx.Node]:
@@ -564,6 +599,15 @@ def node_replace_(old_node: torch.fx.Node, new_node: torch.fx.Node) -> None:
     old_node.replace_all_uses_with(new_node)
     old_node.users.clear()
     old_node.graph.erase_node(old_node)
+
+
+def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) -> None:
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
 
 def node_inline_(call_mod_node: torch.fx.Node) -> None:
@@ -918,3 +962,174 @@ def _disable_load_state_dict_hooks(mod: torch.nn.Module):
     finally:
         mod._state_dict_hooks = state_dict_hooks
         mod._state_dict_pre_hooks = state_dict_pre_hooks
+
+
+def _is_cia_op(op: "OperatorBase") -> bool:
+    return (
+        torch._C._dispatch_has_kernel_for_dispatch_key(
+            op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        )
+        or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
+    )
+
+
+def _is_preservable_cia_op(op: "OperatorBase") -> bool:
+    return _check_valid_to_preserve(op) and _is_cia_op(op)
+
+
+def _is_aten_op(op: "OperatorBase") -> bool:
+    return op.name().split("::")[0] == "aten"
+
+
+def _is_custom_op(op: "OperatorBase") -> bool:
+    return not _is_aten_op(op)
+
+
+# We can't cache this because custom op registry API in python can still
+# add entries to the C++ dispatcher.
+def _materialize_cpp_cia_ops() -> None:
+    """
+    Utility function to query C++ dispatcher to get the all
+    possible CIA ops and populate them into torch.ops namespace
+    """
+    cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
+        "CompositeImplicitAutograd"
+    )
+
+    # Materialize all CIA ops
+    for op in cia_ops:
+        namespace, op_name = tuple(op.split("::"))
+        split_list = op_name.split(".")
+        # Sometime overload could be missing
+        assert len(split_list) == 1 or len(split_list) == 2
+        op_name = split_list[0]
+        op_overload_name = "default"
+        if len(split_list) == 2:
+            op_overload_name = split_list[1]
+
+        _ = getattr(getattr(getattr(torch.ops, namespace), op_name), op_overload_name)
+
+
+def _special_op_to_preserve_cia(*args, **kwargs):
+    """
+    This is an special marker that tells our infra that we shouldn't decompose this op.
+    """
+    return NotImplemented
+
+
+# Our strategy for deciding if we can preserve a op is following:
+# 1. The op should be known statically that it is functional
+# 2. If it is maybe aliasing, we decompose because we must know if an op
+#    is mutating or aliasing.
+# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
+# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
+def _check_valid_to_preserve(op_overload: "OperatorBase"):
+    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+        return False
+    if op_overload in FunctionalTensor.metadata_fns:
+        return False
+
+    if not hasattr(op_overload, "_schema"):
+        return False
+
+    alias_info = len(
+        [i for i in op_overload._schema.arguments if i.alias_info is not None]
+    )
+
+    is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
+
+    if is_mutating_or_aliasing:
+        return False
+
+    if not torch._C._dispatch_has_kernel(op_overload.name()):
+        return False
+
+    return True
+
+
+@functools.lru_cache(maxsize=1)
+def _collect_all_valid_cia_ops_for_aten_namespace() -> Set["OperatorBase"]:
+    return _collect_all_valid_cia_ops_for_namespace("aten")
+
+
+def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> Set["OperatorBase"]:
+    # Step 1: Materialize all ops from C++ dispatcher
+    _materialize_cpp_cia_ops()
+
+    # Step 2: Query all ops from python dispatcher
+    assert hasattr(torch.ops, namespace)
+    op_namespace = getattr(torch.ops, namespace)
+    cia_ops = set()
+    for op in op_namespace:
+        op_packet = getattr(op_namespace, op)
+        for overload in op_packet.overloads():
+            op_overload = getattr(op_packet, overload)
+            if _is_preservable_cia_op(op_overload):
+                cia_ops.add(op_overload)
+    return cia_ops
+
+
+def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
+    """
+    This is an util function that gets the all CIA functional ops.
+
+    The algorithm is in 2 steps:
+      1. We first query C++ dispatcher to get the list of CIA ops
+         and then we call getattr on torch.ops.aten to lazily populate
+         them.
+
+      2. Sometimes, handful of ops have CIA registered in python dispatcher
+         but not on the C++ side, these can't be caught at the first step.
+         So we walk again to get the final list.
+
+    Note that the output of this function should never be modified
+    """
+    cia_ops = set()
+    for op_namespace_name in torch.ops._dir:
+        # The reason we split here is because aten ops are safe to cache.
+        if op_namespace_name != "aten":
+            cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
+        else:
+            cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
+    return cia_ops
+
+
+def _get_decomp_for_cia(op: "OperatorBase"):
+    # [NOTE] Seperating out func.decompose
+    # Ideally we should be able to just register func.decompose but
+    # we can't as this decomp is gonna be registered to the py_impl.
+    # As a result it will infinitely recurse. So we first check if the op
+    # has py_impl entry for CIA and if it is we use that first. If not,
+    # we register C++ query to py_impl.
+    dk = torch._C.DispatchKey.CompositeImplicitAutograd
+    if dk in op.py_kernels and not isinstance(op.py_kernels[dk], torch._C.DispatchKey):
+        return op.py_kernels[dk]
+
+    def _special_op_to_decompose_cia(*args, **kwargs):
+        kernel = kwargs["kernel"]
+        del kwargs["kernel"]
+        # Can't call kernel.decompose due to infinite recursion as
+        # we register this kernel to py_impl directly
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            return kernel._op_dk(dk, *args, **kwargs)
+        else:
+            raise AssertionError(
+                f"Expected {kernel} to have CompositeImplicitAutograd kernel"
+            )
+
+    return functools.partial(_special_op_to_decompose_cia, kernel=op)
+
+
+# This table is a stop-gap table which replicates
+# the old behaviour of post-dispatch IR.
+# This table contains all functional CIA ops mapping
+# to their default decomp. In old export, this will
+# be decomposed implicitly.
+def _decomp_table_to_post_autograd_aten():
+    decomp_table = {}
+    for k in _collect_all_valid_cia_ops_for_aten_namespace():
+        decomp_table[k] = _get_decomp_for_cia(k)
+    return decomp_table

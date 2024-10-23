@@ -440,9 +440,13 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -864,7 +868,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -6071,14 +6093,17 @@ foreach_add_scalar = register_foreach_pointwise(
 )
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.List, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
@@ -6323,13 +6348,21 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    grid,
+    tma_descriptor_metadata,
+    kwargs,
+):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
+        tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
@@ -6437,6 +6470,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )

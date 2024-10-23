@@ -6,7 +6,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import sys
 import textwrap
 import traceback
 from contextlib import nullcontext
@@ -84,6 +83,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    ir_dataclass,
     is_dynamic,
     is_gpu,
     sympy_dot,
@@ -107,23 +107,6 @@ _IntLike: TypeAlias = Union[int, Expr]
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-from typing_extensions import dataclass_transform
-
-
-@dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls)
-
-    if cls is None:
-        return wrap
-    return wrap(cls)
-
 
 """ [Note: Inductor IR]
 
@@ -251,6 +234,14 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def get_fill_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+    """
+    Convert strides to fill order (argsort)
+    """
+    sorted_idx: Sequence[int] = argsort(seq)
+    return sorted_idx
+
+
 def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
@@ -267,7 +258,7 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     """
     Convert strides to stride order
     """
-    sorted_idx: List[int] = argsort(seq)
+    sorted_idx: Sequence[int] = get_fill_order(seq)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
@@ -2316,7 +2307,9 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or old_size[i] == 1:
+            elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(old_size[i], 1), size_oblivious=True
+            ):
                 pass
             else:
                 # Sanity check: Expect broadcast compatibility
@@ -2339,7 +2332,13 @@ class ExpandView(BaseView):
             assert skip >= 0
             new_stride = [sympy.Integer(0)] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
-                new_stride.append(stride if size != 1 else sympy.Integer(0))
+                new_stride.append(
+                    stride
+                    if not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(size, 1), size_oblivious=True
+                    )
+                    else sympy.Integer(0)
+                )
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -3841,7 +3840,7 @@ class ComputedBuffer(OperationBuffer):
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
-            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion
+            not is_gpu(self.get_device().type) or not config.loop_ordering_after_fusion
         )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
@@ -4182,6 +4181,9 @@ class InputsKernel(OperationBuffer):
         for input in self.inputs:
             if isinstance(input, list):
                 reads.update(StarDep(x.get_name()) for x in input)
+            elif isinstance(input, ShapeAsConstantBuffer):
+                # Skip creating dependncy for symbolics as they're visible globally
+                continue
             else:
                 reads.add(StarDep(input.get_name()))
 
@@ -4563,11 +4565,7 @@ class ExternKernel(InputsKernel):
 
     def get_kernel_name(self):
         return (
-            (
-                V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
-                if config.abi_compatible
-                else self.cpp_kernel_name
-            )
+            V.graph.wrapper_code.get_c_shim_func_name(self.cpp_kernel_name)  # type: ignore[attr-defined]
             if V.graph.cpp_wrapper
             else self.python_kernel_name
         )
@@ -4824,11 +4822,13 @@ class ExternKernel(InputsKernel):
                         x,
                         freeze=True,
                         want_contiguous=False,
-                        stride_order=get_stride_order(
-                            V.graph.sizevars.size_hints(x.get_layout().stride)
-                        )
-                        if is_stride_order_storage_and_layout(x, order)
-                        else order,
+                        stride_order=(
+                            get_stride_order(
+                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                            )
+                            if is_stride_order_storage_and_layout(x, order)
+                            else order
+                        ),
                         allow_padding=allow_padding,
                     )
                     return x
@@ -5167,11 +5167,7 @@ class ExternKernelOut(ExternKernel):
             and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
         ):
             # For https://github.com/pytorch/pytorch/issues/128474
-            kernel_name = (
-                "aoti_torch__mm_plus_mm_out"
-                if config.abi_compatible
-                else "torch::inductor::_mm_plus_mm_out"
-            )
+            kernel_name = "aoti_torch__mm_plus_mm_out"
         else:
             kernel_name = self.get_kernel_name()
         wrapper.generate_extern_kernel_out(
@@ -5227,9 +5223,7 @@ class RandomSeeds(ExternKernelOut):
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
-            cpp_kernel_name="at::_ops::randint_low_out::call"
-            if config.abi_compatible
-            else "at::randint_out",
+            cpp_kernel_name="at::_ops::randint_low_out::call",
             op_overload=aten.randint.low_out,
         )
 
@@ -5302,6 +5296,75 @@ class MutationOutput(Buffer):
         return False
 
 
+class TMADescriptor(ExternKernel):
+    """
+    An IR node representing a host-side TMA descriptor in the Triton API
+    (the ones obtained via create_{1d,2d}_tma_descriptor calls). Mostly
+    useful for user-defined Triton kernels relying on host-side TMA; but
+    can, in principle, be used for Inductor's Triton templates, too.
+    """
+
+    # as TMA descriptors are immutable,
+    # we can dedup them by the input args
+    _CACHE: Dict[Any, TMADescriptor] = {}
+
+    @classmethod
+    def create(
+        cls,
+        tensor: TensorBox,
+        dims: List[Union[int, torch.SymInt]],
+        block_dims: List[Union[int, torch.SymInt]],
+        element_size: Optional[int] = None,
+    ):
+        key = (id(tensor), dims, block_dims, element_size)
+        if key not in cls._CACHE:
+            cls._CACHE[key] = TMADescriptor(tensor, dims, block_dims, element_size)
+        return cls._CACHE[key]
+
+    def __init__(
+        self,
+        tensor: TensorBox,
+        dims: List[Union[int, torch.SymInt]],
+        block_dims: List[Union[int, torch.SymInt]],
+        element_size: Optional[int] = None,
+    ):
+        assert len(dims) in (1, 2)
+        assert len(dims) == len(block_dims)
+
+        if element_size is None:
+            element_size = tensor.get_dtype().itemsize
+
+        self.tensor = tensor
+        self.dims = dims
+        self.block_dims = block_dims
+        self.element_size = element_size
+        self.rank = len(self.dims)
+
+        inputs = [tensor]
+        constant_args = [
+            *self.dims,
+            *self.block_dims,
+            self.element_size,
+        ]
+
+        super().__init__(
+            None,
+            # link back to the underlying tensor in terms of ownership
+            # to avoid getting the underlying tensor deleted *before*
+            # the TMADescriptor node can be deleted.
+            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            inputs,
+            tuple(constant_args),
+            None,
+        )
+
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def codegen(self, wrapper):
+        wrapper.generate_tma_descriptor(self)
+
+
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
@@ -5333,9 +5396,25 @@ class UserDefinedTritonKernel(ExternKernel):
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
+        """
+        Filter out None args.
+
+        see https://github.com/pytorch/pytorch/issues/115344
+
+        Two cases for a None arg:
+        1. The arg is already tl.constexpr, so leave it in
+        2. The arg is not tl.constexpr so we have to remove it
+        """
+        constexpr_indices_set = set(constexpr_indices)
+        raw_args = [
+            arg
+            for idx, arg in enumerate(raw_args)
+            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
+        ]
 
         # Call to kernel
         self.codegen_comment(wrapper)
+
         wrapper.generate_user_defined_triton_kernel(
             new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
@@ -5348,13 +5427,15 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(self, *, kernel_idx, grid, kernel_args):
+    def __init__(self, *, kernel_idx, grid, tma_descriptor_metadata, kernel_args):
         inputs = []
         kwargs = {}
         constant_args = []
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                if k in tma_descriptor_metadata:
+                    t = TMADescriptor.create(t, *tma_descriptor_metadata[k])
                 inputs.append(t)
                 kwargs[k] = t
             else:
@@ -5375,6 +5456,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.grid = grid
 
         kernel, configs = self.get_kernel_and_configs()
+
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
@@ -5411,7 +5493,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
 
-        if V.graph.cpp_wrapper and config.abi_compatible:
+        if V.graph.cpp_wrapper:
             # Inductor doesn't really support aten Generator, so the Generator kwarg is always NULL here,
             # which needs to be explicitly generated for cpp wrapper
             wrapper.writeline(
@@ -5442,9 +5524,6 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
-        if not config.abi_compatible:
-            # TODO: this should be simplified once we switch to ABI-compatible only
-            self.cpp_kernel_name = "at::native::bernoulli_"
 
 
 # Used to deal with torch.complex types
@@ -5478,9 +5557,7 @@ class InplaceCopyFallback(ExternKernel):
             inputs,
             constant_args,
             python_kernel_name="aten.copy_",
-            cpp_kernel_name=(
-                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
-            ),
+            cpp_kernel_name="aoti_torch_copy_",
         )
         V.graph.mark_buffer_mutated(inputs[0].get_name())
         self.name = V.graph.register_buffer(self)
@@ -5671,9 +5748,7 @@ class IndexPutFallback(ExternKernel):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
-        cpp_kernel_name = (
-            "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
-        )
+        cpp_kernel_name = "aoti_torch_index_put_out"
         super().__init__(
             None,
             NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
@@ -5800,26 +5875,6 @@ class AssertScalar(ExternKernel):
 class ExternKernelNode:
     name: str
     node: export_schema.Node
-
-
-has_c_shim = OrderedSet(
-    [
-        aten._embedding_bag.default,
-        aten._fft_c2c.default,
-        aten._scaled_dot_product_efficient_attention.default,
-        aten._scaled_dot_product_flash_attention.default,
-        aten._scaled_dot_product_cudnn_attention.default,
-        aten._scaled_mm.default,
-        aten.addmm.out,
-        aten.bmm.out,
-        aten.copy_.default,
-        aten.mm.out,
-        aten.repeat_interleave.Tensor,
-        aten.nonzero.default,
-        aten.view.dtype,
-        aten.view_as_real.default,
-    ]
-)
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -5988,7 +6043,7 @@ class FallbackKernel(ExternKernelAlloc):
                     raise AssertionError(f"unrecognized keypath {keypath}")
 
             def go_outer():
-                if V.graph.cpp_wrapper and config.abi_compatible:
+                if V.graph.cpp_wrapper:
                     # Special handling for the top level buffer access,
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
@@ -6159,7 +6214,7 @@ class FallbackKernel(ExternKernelAlloc):
             if V.graph.cpp_wrapper:
                 from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
-                if config.abi_compatible and str(kernel) not in inductor_fallback_ops:
+                if str(kernel) not in inductor_fallback_ops:
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
                     # If you do hit a missed op, please update fallback_ops.py.
                     log.warning(
@@ -6170,9 +6225,6 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-            if V.graph.cpp_wrapper:
-                if not config.abi_compatible:
-                    self.use_runtime_dispatch = True
         else:
             # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
@@ -6183,10 +6235,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             exported_args = None
             args = None
-            if config.abi_compatible:
-                exported_args = self.export_extern_kernel_node()
-            else:
-                args = [*self.codegen_args(), *self.codegen_kwargs()]
+            exported_args = self.export_extern_kernel_node()
 
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
