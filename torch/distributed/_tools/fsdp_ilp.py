@@ -38,7 +38,7 @@ class CommType(Enum):
 @dataclass
 class CommParams:
     latency: float  # in ms
-    bandwith: float  # in bytes / ms
+    bandwidth: float  # in bytes / ms
 
 
 def fsdp_milp(
@@ -188,14 +188,14 @@ def fsdp_milp(
     comm_model = comm_params[CommType.ALL_GATHER]
     for i in range(num_nodes):
         prob += ag[i] == comm_model.latency + p[i] * (
-            MEM_MULTIPLIER / comm_model.bandwith  # convert from bytes/ms to GiB/ms
+            MEM_MULTIPLIER / comm_model.bandwidth  # convert from bytes/ms to GiB/ms
         )
 
     # [Constraint] Express the reduce scatter communication time of each FSDP unit
     comm_model = comm_params[CommType.REDUCE_SCATTER]
     for i in range(num_nodes):
         prob += rs[i] == comm_model.latency + g[i] * (
-            MEM_MULTIPLIER / comm_model.bandwith  # convert from bytes/ms to GiB/ms
+            MEM_MULTIPLIER / comm_model.bandwidth  # convert from bytes/ms to GiB/ms
         )
 
     # [Constraint] Express the forward prefetch all gather communication time

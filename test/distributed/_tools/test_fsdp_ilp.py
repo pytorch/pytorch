@@ -24,13 +24,13 @@ class TestFSDPILP(TestCase):
     ) -> Dict[CommType, CommParams]:
         if comm_bound:
             return {
-                CommType.ALL_GATHER: CommParams(latency=0.01, bandwith=1e7),
-                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwith=1e7),
+                CommType.ALL_GATHER: CommParams(latency=0.01, bandwidth=1e7),
+                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwidth=1e7),
             }
         else:
             return {
-                CommType.ALL_GATHER: CommParams(latency=0.01, bandwith=1e8),
-                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwith=1e8),
+                CommType.ALL_GATHER: CommParams(latency=0.01, bandwidth=1e8),
+                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwidth=1e8),
             }
 
     def _get_mod_info(self) -> ModuleInfo:
