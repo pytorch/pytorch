@@ -2,6 +2,26 @@ if(NOT APPLE)
     return()
 endif()
 
+set(BFLOAT_METAL_CODE "
+  kernel void inc(device bfloat* ptr,
+                   uint idx [[thread_position_in_grid]]) {
+    ptr[idx] += 1;
+  }
+")
+if(NOT CAN_COMPILE_METAL_FOUND)
+    if(NOT EXISTS bfloat_inc.metal)
+        file(WRITE bfloat_inc.metal "${BFLOAT_METAL_CODE}")
+    endif()
+    exec_program(xcrun ARGS metal -std=metal-3.1 bfloat-inc.metal
+                       RETURN_VALUE XCRUN_RC)
+    if(${XCRUN_RC})
+        set(CAN_COMPILE_METAL YES CACHE BOOL "Host can compile metal shaders")
+    else()
+        set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
+    endif()
+    set(CAN_COMPILE_METAL_FOUND YES)
+endif()
+
 if(NOT USE_PYTORCH_METAL)
     return()
 endif()

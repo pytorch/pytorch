@@ -682,6 +682,7 @@ endif()
 list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
+  include(../cmake/Metal.cmake)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
 endif()
 
