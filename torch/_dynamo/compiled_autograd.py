@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import operator
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -305,7 +306,10 @@ class AutogradCompilerInstance:
             {},
         )
         self.rename_aot_dispatcher_nodes()
+        self.reorder_tensor_pre_hook_nodes()
+        self.reorder_pre_hook_nodes()
         self.reorder_accumulate_grad_nodes()
+        self.reorder_post_acc_grad_hook_nodes()
         self.reorder_post_hook_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
@@ -443,13 +447,85 @@ class AutogradCompilerInstance:
             op="call_function", target=torch.ops.inductor.accumulate_grad_.default
         ):
             arg = max(node.args)  # last arg
+            getitem_node = None
+            if arg.target == operator.getitem:
+                getitem_node = arg
+                arg = arg.args[0]
             if arg is not node.prev and arg.op != "placeholder":
                 arg.append(node)
+                if getitem_node is not None:
+                    arg.append(getitem_node)
+
+    def reorder_tensor_pre_hook_nodes(self):
+        """
+        Usage of AOTAutograd causes all the tensor_pre_hook nodes to get pushed
+        to the end of the graph. This differs from eager mode, which schedules
+        them as soon as possible. This pass attempts to reorder the graph to
+        mimic eager behavior.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "tensor_pre_hook":
+                continue
+
+            getitem_node = node.args[0]
+            input_node = node.args[1]  # tensor_pre_hook handle only one grad tensor
+
+            if input_node is not node.prev and input_node.op != "placeholder":
+                input_node.append(getitem_node)
+                getitem_node.append(node)
+
+    def reorder_pre_hook_nodes(self):
+        """
+        Usage of AOTAutograd causes all the pre_hook nodes to get pushed to the
+        end of the graph. This differs from eager mode, which schedules them as
+        soon as possible. This pass attempts to reorder the graph to mimic eager
+        behavior.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "pre_hook":
+                continue
+
+            getitem_node = node.args[0]
+            input_nodes = node.args[1]  # pre_hook handle a tuple of grad tensors
+
+            arg = max(input_nodes)  # last input
+            if arg is not node.prev and arg.op != "placeholder":
+                arg.append(getitem_node)
+                getitem_node.append(node)
+
+    def reorder_post_acc_grad_hook_nodes(self):
+        """
+        Usage of AOTAutograd causes all the post_acc_grad_hook nodes to get
+        pushed to the end of the graph. This differs from eager mode, which
+        schedules them as soon as possible. This pass attempts to reorder the
+        graph to mimic eager behavior.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "post_acc_grad_hook":
+                continue
+
+            getitem_node = node.args[0]
+            param_node = node.args[1]  # post_acc_grad_hook handle one param
+
+            acc_grad_node = None
+            for n in list(param_node.users.keys()):
+                if n.op == "call_function" and n.target == torch.ops.inductor.accumulate_grad_.default:
+                    acc_grad_node = n
+            assert acc_grad_node is not None, "post_acc_grad_hook must have corresponding acc grad node"
+
+            acc_grad_node.append(getitem_node)
+            getitem_node.append(node)
 
     def reorder_post_hook_nodes(self):
         """
-        Usage of AOTAutograd causes all the call_hook nodes to get pushed to the
-        end of the graph.  This differs from eager mode, which schedules them as
+        Usage of AOTAutograd causes all the post_hook nodes to get pushed to the
+        end of the graph. This differs from eager mode, which schedules them as
         soon as possible. This pass attempts to reorder the graph to mimic eager
         behavior.
         """
@@ -460,7 +536,12 @@ class AutogradCompilerInstance:
                 continue
 
             getitem_node = node.args[0]
+            output_nodes = node.args[1]
             input_nodes = node.args[2]
+
+            if len(output_nodes) > 0:
+                continue
+
             input_nodes_and_users = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
@@ -469,6 +550,18 @@ class AutogradCompilerInstance:
                         input_nodes_and_users.append(user)
 
             arg = max(input_nodes_and_users)  # last input users
+            if arg.op == "call_function" and arg.target == torch.ops.inductor.accumulate_grad_.default:
+                param_node = arg.args[0]
+                post_acc_grad_hook_node = None
+                for n in list(param_node.users.keys()):
+                    if n.op == "call_function" and n.target == call_hook and n.kwargs.get("hook_type", None) == "post_acc_grad_hook":
+                        post_acc_grad_hook_node = n
+
+                if post_acc_grad_hook_node is not None:
+                    post_acc_grad_hook_node.append(getitem_node)
+                    getitem_node.append(node)
+                    continue
+
             if arg is not node.prev and arg.op != "placeholder":
                 arg.append(getitem_node)
                 getitem_node.append(node)

@@ -251,6 +251,33 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_reorder_acc_grad(self):
+        def compiler_fn(gm):
+            return torch.compile(gm, fullgraph=True, backend="inductor")
+
+        model = torch.nn.Sequential(
+            torch.nn.Conv2d(4, 4, 3, bias=True),
+            torch.nn.Conv2d(4, 4, 3, bias=True),
+        )
+        compiled_model = torch.compile(model)
+        x = torch.randn([1, 4, 32, 32])
+
+        model(x).sum().backward()
+        ref_res = [model[0].weight.grad, model[0].bias.grad, model[1].weight.grad, model[1].bias.grad]
+
+        model[0].weight.grad = None
+        model[0].bias.grad = None
+        model[1].weight.grad = None
+        model[1].bias.grad = None
+        with compiled_autograd.enable(compiler_fn):
+            compiled_model(x).sum().backward(retain_graph=True)
+        res = [model[0].weight.grad, model[0].bias.grad, model[1].weight.grad, model[1].bias.grad]
+
+        self.assertEqual(res[0], ref_res[0])
+        self.assertEqual(res[1], ref_res[1])
+        self.assertEqual(res[2], ref_res[2])
+        self.assertEqual(res[3], ref_res[3])
+
     def test_reorder_post_hook1(self):
         def grad_div(param):
             param.grad = param.grad / 4.0
@@ -287,11 +314,129 @@ main()
         bs = 8
         ioc = 16
         model = Module(ioc)
-        model_to_train = torch.compile(model, backend="inductor")
         input = torch.randn([bs, ioc])
-        loss = model_to_train(input)
+
+        # eager ref
+        model(input).backward()
+        ref_res = [model.fc1.weight.grad, model.fc2.weight.grad]
+
+        # cag
+        model.fc1.weight.grad = None
+        model.fc2.weight.grad = None
+        model_to_train = torch.compile(model, backend="inductor")
         with compiled_autograd.enable(compiler_fn):
-            loss.backward()
+            model_to_train(input).backward()
+        res = [model_to_train.fc1.weight.grad, model_to_train.fc2.weight.grad]
+
+        self.assertEqual(res[0], ref_res[0])
+        self.assertEqual(res[1], ref_res[1])
+
+    def test_reorder_post_hook2(self):
+        def compiler_fn(gm):
+            return torch.compile(gm, fullgraph=True, backend="inductor")
+
+        x = torch.randn([1, 4, 32, 32], requires_grad=True)
+        y = torch.sigmoid(x)
+        z = torch.tanh(y)
+
+        assert isinstance(z.grad_fn, torch.autograd.graph.Node)
+        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
+        handle_z = z.grad_fn.register_hook(lambda gI, gO: (gO[0] * 2,))
+        handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0] * 2,))
+        z.sum().backward(retain_graph=True)
+        ref_res = x.grad
+
+        x.grad = None
+        with compiled_autograd.enable(compiler_fn):
+            z.sum().backward(retain_graph=True)
+        res = x.grad
+
+        self.assertEqual(res, ref_res)
+
+    def test_reorder_post_hook3(self):
+        def compiler_fn(gm):
+            return torch.compile(gm, fullgraph=True, backend="inductor")
+
+        conv = torch.nn.Conv2d(4, 4, 3, bias=False)
+        x = torch.randn([1, 4, 32, 32])
+        y = conv(x)
+
+        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
+        # this hook will mul 2.0 to the conv weight gradient
+        handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0], gI[1] * 2, gI[2]))
+        y.sum().backward(retain_graph=True)
+        ref_res = x.grad
+
+        x.grad = None
+        with compiled_autograd.enable(compiler_fn):
+            y.sum().backward(retain_graph=True)
+        res = x.grad
+
+        self.assertEqual(res, ref_res)
+
+    def test_reorder_all_bwd_hooks(self):
+        def compiler_fn(gm):
+            return torch.compile(gm, fullgraph=True, backend="inductor")
+
+        def tensor_hook(grad):
+            return grad.sub(2.)
+
+        def acc_grad_node_pre_hook(grad_out):
+            return (grad_out[0].div(5.),)
+
+        def post_acc_grad_hook(tensor):
+            tensor.grad.add_(3.0)
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(4, 4, 3, bias=False)
+                self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
+
+                self.acc_grad1 = self.conv1.weight.view_as(
+                    self.conv1.weight).grad_fn.next_functions[0][0]
+                self.conv1.weight.register_hook(tensor_hook)
+                self.conv1.weight.register_post_accumulate_grad_hook(
+                    post_acc_grad_hook)
+                self.acc_grad1.register_prehook(acc_grad_node_pre_hook)
+
+                def acc_grad_node_post_hook1(grad_in, grad_out):
+                    self.conv1.weight.grad.mul_(10.0)
+                self.acc_grad1.register_hook(acc_grad_node_post_hook1)
+
+                self.acc_grad2 = self.conv2.weight.view_as(
+                    self.conv2.weight).grad_fn.next_functions[0][0]
+                self.conv2.weight.register_hook(tensor_hook)
+                self.conv2.weight.register_post_accumulate_grad_hook(
+                    post_acc_grad_hook)
+                self.acc_grad2.register_prehook(acc_grad_node_pre_hook)
+
+                def acc_grad_node_post_hook2(grad_in, grad_out):
+                    self.conv2.weight.grad.mul_(10.0)
+                self.acc_grad2.register_hook(acc_grad_node_post_hook2)
+
+            def forward(self, x):
+                y = self.conv1(x)
+                y = self.conv2(y)
+                return y.sum()
+
+        input = torch.randn([1, 4, 32, 32])
+
+        # eager ref
+        model = TestModel()
+        model(input).backward()
+        ref_results = [model.conv1.weight.grad, model.conv2.weight.grad]
+
+        # cag
+        model.conv1.weight.grad = None
+        model.conv2.weight.grad = None
+        compiled_model = torch.compile(model, backend="inductor")
+        with compiled_autograd.enable(compiler_fn):
+            compiled_model(input).backward()
+        results = [compiled_model.conv1.weight.grad, compiled_model.conv2.weight.grad]
+
+        self.assertEqual(results[0], ref_results[0])
+        self.assertEqual(results[1], ref_results[1])
 
     def test_torch_compile(self):
         def fn():
