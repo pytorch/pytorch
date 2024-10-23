@@ -810,7 +810,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6(self):
+    def test_qconv2d_relu6_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
@@ -818,7 +818,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_relu6(self):
+    def test_qconv2d_relu6_xpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
         """
@@ -2913,4 +2913,3 @@ instantiate_parametrized_tests(TestPatternMatcher)
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()
-1
