@@ -392,10 +392,6 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(
         platform == "darwin", "file descriptor strategy is not supported on macOS"
     )
-    @unittest.skipIf(
-        TEST_WITH_ASAN,
-        "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
-    )
     def test_fd_sharing(self):
         self._test_sharing(repeat=TEST_REPEATS)
 
@@ -411,10 +407,6 @@ class TestMultiprocessing(TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN,
-        "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
-    )
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO,
         "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
