@@ -550,6 +550,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         if push:
                             self.push(value)
                         self.jump(inst)
+                elif isinstance(result, SymNodeVariable):
+                    if result.evaluate_expr():
+                        if push:
+                            self.push(value)
+                        self.jump(inst)
                 else:
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
