@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -1203,22 +1204,30 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
@@ -1230,7 +1239,7 @@ inline T abs_impl(T v) {
 }
 
 template <>
-C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
+[[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
   return v;
 }
 
@@ -3071,14 +3080,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point<T>::value, int> = 0>
+template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_h_forward(T x, T n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
-    return hermite_polynomial_h_forward(x, ((!std::isinf(n)) && (!std::isnan(n))) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
+template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+__ubsan_ignore_float_cast_overflow__ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+    return hermite_polynomial_h_forward(x, (!std::isinf(n) && !std::isnan(n)) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>
