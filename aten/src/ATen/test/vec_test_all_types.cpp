@@ -1868,13 +1868,13 @@ namespace {
 
     #define TEST_MASK_CAST(dst_t, mask_t, mask_n)                      \
       do {                                                             \
-        CACHE_ALIGN mask_t x[mask_n * size];                           \
-        CACHE_ALIGN dst_t y[mask_n * size];                            \
-        auto seed = TestSeed();                                        \
-        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);       \
         constexpr int num_dst_elements =                               \
             std::min(size, at::vec::Vectorized<dst_t>::size());        \
         constexpr int dst_n = mask_n * size / num_dst_elements;        \
+        CACHE_ALIGN mask_t x[mask_n * size];                           \
+        CACHE_ALIGN dst_t y[at::vec::VectorizedN<dst_t, dst_n>::size()]; \
+        auto seed = TestSeed();                                        \
+        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);       \
         auto vec_mask_new = vec_mask.template cast<dst_t, dst_n>();    \
         vec_mask.template to<mask_t, mask_n>().store(x);               \
         vec_mask_new.template to<dst_t, dst_n>().store(y);             \
