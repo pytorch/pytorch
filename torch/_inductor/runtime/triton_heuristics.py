@@ -1327,6 +1327,7 @@ def triton_config(
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x = min(x, size_hints[0])
 
     cfg = {"XBLOCK": x}
     if y:
