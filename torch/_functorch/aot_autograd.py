@@ -15,7 +15,11 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
-from torch._dynamo.utils import dynamo_timed, preserve_rng_state
+from torch._dynamo.utils import (
+    dynamo_timed,
+    get_chromium_event_logger,
+    preserve_rng_state,
+)
 from torch._guards import detect_fake_mode
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -634,6 +638,11 @@ def _create_aot_dispatcher_function(
                     fake_flat_args, fw_metadata
                 )
 
+                get_chromium_event_logger().add_event_data(
+                    "backend_compile",
+                    requires_subclass_dispatch=req_subclass_dispatch,
+                )
+
                 output_and_mutation_safe = not any(
                     x.requires_grad
                     # view-type operations preserve requires_grad even in no_grad.
@@ -751,10 +760,19 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             if aot_config.is_export:
                 # export uses just the "graph bits", whereas the other
                 # two dispatchers include some extra work around handling a runtime epilogue
+                get_chromium_event_logger().add_event_data(
+                    "create_aot_dispatcher_function", dispatch_mode="export"
+                )
                 return partial(aot_dispatch_export, needs_autograd=needs_autograd)
             elif needs_autograd and not aot_config.pre_dispatch:
+                get_chromium_event_logger().add_event_data(
+                    "create_aot_dispatcher_function", dispatch_mode="autograd"
+                )
                 return aot_dispatch_autograd
             else:
+                get_chromium_event_logger().add_event_data(
+                    "create_aot_dispatcher_function", dispatch_mode="inference"
+                )
                 return aot_dispatch_base
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)

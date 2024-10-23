@@ -33,6 +33,7 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
+from torch._utils_internal import log_cache_bypass
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -439,11 +440,14 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
+        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
+            chromium_log.add_event_data("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
+            chromium_log.add_event_data("backend_compile", dispatch_mode="inference")
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -453,6 +457,11 @@ class AOTAutogradCacheEntry:
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+        )
+
+        req_subclass_dispatch = self.maybe_subclass_meta is not None
+        chromium_log.add_event_data(
+            "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
         # In autograd case, functionalizedRngWrapper should not modify outs
@@ -619,6 +628,9 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             cache_state = "bypass"
             cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
@@ -638,6 +650,18 @@ class AOTAutogradCache:
         chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
+
+        chromium_log.add_event_data(
+            "backend_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_event_time,
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
+
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
