@@ -1221,6 +1221,9 @@ class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
+    # save real tensors
+    save_real_tensors = os.environ.get("TORCH_COMPILE_DEBUG_SAVE_REAL", "0") == "1"
+
     # Save debug information to a temporary directory
     # If not specified, a temp directory will be created by system
     debug_dir: Optional[str] = None

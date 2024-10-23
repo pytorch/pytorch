@@ -511,7 +511,7 @@ class NopInputReader:
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir=None, *, pbar=None):
+    def __init__(self, save_dir=None, *, pbar=None, stable_hash=False):
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem
