@@ -54,7 +54,6 @@ from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
     runtime_unwrap_tensor_subclasses,
-    unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
 from .traced_function_transforms import aot_dispatch_subclass

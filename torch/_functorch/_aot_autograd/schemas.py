@@ -225,12 +225,11 @@ class SubclassCreationMeta:
         outer_stride, _ = compute(self.outer_stride, next_idx)
         return outer_size, outer_stride
 
-    def _creation_fn(
+    def creation_fn(
         self,
         all_args,
         *,
         is_runtime: bool,
-        is_nested: bool,
     ):
         inner_tensors = {}
 
@@ -240,10 +239,9 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta._creation_fn(
+                subclass = creation_meta.creation_fn(
                     all_args,
                     is_runtime=is_runtime,
-                    is_nested=True,
                 )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
@@ -255,13 +253,10 @@ class SubclassCreationMeta:
             original_subclass_type = type(self.original_subclass)
 
         if is_runtime:
-            if is_nested:
-                outer_size, outer_stride = None, None
-            else:
-                outer_size, outer_stride = self.compute_outer_size_and_stride(
-                    all_args,
-                    curr_start_idx=curr_start_idx,
-                )
+            outer_size, outer_stride = self.compute_outer_size_and_stride(
+                all_args,
+                curr_start_idx=curr_start_idx,
+            )
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
@@ -277,14 +272,6 @@ class SubclassCreationMeta:
             torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
         return rebuilt
-
-    def creation_fn(
-        self,
-        all_args,
-        *,
-        is_runtime: bool,
-    ):
-        return self._creation_fn(all_args, is_runtime=is_runtime, is_nested=False)
 
     def make_runtime_safe(self):
         def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:

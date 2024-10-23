@@ -47,7 +47,7 @@ def create_subclass_metadata(a: Any, start_idx: int, count_symints: bool):
         new_subclass_meta, new_start_idx = create_subclass_metadata(
             getattr(a, key),
             new_start_idx,
-            count_symints=False,  # only count symints in the outer class
+            count_symints=count_symints,
         )
         attrs[key] = new_subclass_meta
 
@@ -129,8 +129,7 @@ def create_subclass_meta(
 
 
 def filter_symints(lst: Iterable[Union[int, SymInt]]):
-    # Capture all SymInts from the iterable. A SymInt is not included if it is
-    # a nested int and filter_nested_int is True
+    # Capture all SymInts from the iterable.
     def symint_check(s: Union[int, SymInt]) -> bool:
         return isinstance(s, SymInt) and not s.node.is_nested_int()
 
@@ -159,20 +158,29 @@ def unwrap_tensor_subclasses(
     *,
     append_symints: bool,
 ):
+    def flatten_subclass(t: Union[Tensor, int]):
+        # unwrap a subclass into plain tensors and their size/stride if "append_symint"
+        # is True
+        if not is_traceable_wrapper_subclass(t):
+            return [t]
+
+        attrs, _ = t.__tensor_flatten__()
+        tensors_and_sizes: List[Union[Tensor, SymInt]] = []
+
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            tensors_and_sizes.extend(flatten_subclass(inner_tensor))
+
+        if append_symints:
+            tensors_and_sizes.extend(filter_symints(t.size()))
+            tensors_and_sizes.extend(filter_symints(t.stride()))
+
+        return tensors_and_sizes
+
     xs_inner: List[Union[int, Tensor, SymInt]] = []
 
     for x in wrapped_args:
-        if not is_traceable_wrapper_subclass(x):
-            xs_inner.append(x)
-            continue
-
-        size = x.size()
-        stride = x.stride()
-        xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
-
-        if append_symints:
-            xs_inner.extend(filter_symints(size))
-            xs_inner.extend(filter_symints(stride))
+        xs_inner.extend(flatten_subclass(typing.cast(Tensor, x)))
 
     return xs_inner
 
@@ -183,6 +191,39 @@ def runtime_unwrap_tensor_subclasses(
     append_symints: bool,
     subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None,
 ):
+    def flatten_subclass(t: Union[Tensor, int], meta: Optional[SubclassCreationMeta]):
+        if not is_traceable_wrapper_subclass(t):
+            return [t]
+
+        assert isinstance(t, Tensor)
+
+        attrs, _ = t.__tensor_flatten__()
+        tensors_and_sizes: List[Union[Tensor, int]] = []
+
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            inner_meta = meta.attrs.get(attr)
+            tensors_and_sizes.extend(flatten_subclass(inner_tensor, inner_meta))
+
+        if append_symints:
+            assert isinstance(meta, SubclassCreationMeta)
+            # outer_size
+            size = t.size()
+            symint_placeholders = compute_symint_placeholders(meta.outer_size)
+            assert len(size) == len(symint_placeholders)
+            tensors_and_sizes.extend(
+                [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
+            )
+
+            # outer_stride
+            stride = x.stride()
+            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
+            assert len(stride) == len(symint_placeholders)
+            tensors_and_sizes.extend(
+                [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
+            )
+        return tensors_and_sizes
+
     xs_inner: List[Union[int, Tensor, SymInt]] = []
 
     for idx, x in enumerate(wrapped_args):
@@ -190,27 +231,13 @@ def runtime_unwrap_tensor_subclasses(
             xs_inner.append(x)
             continue
 
-        size = x.size()
-        stride = x.stride()
-        xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
-        if append_symints:
-            assert subclass_metas is not None
+        if subclass_metas is None:
+            xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
+        else:
             meta = subclass_metas[idx]
             assert isinstance(meta, SubclassCreationMeta)
+            xs_inner.extend(flatten_subclass(typing.cast(Tensor, x), meta))
 
-            # outer_size
-            symint_placeholders = compute_symint_placeholders(meta.outer_size)
-            assert len(size) == len(symint_placeholders)
-            xs_inner.extend(
-                [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
-            )
-
-            # outer_stride
-            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
-            assert len(stride) == len(symint_placeholders)
-            xs_inner.extend(
-                [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
-            )
     return xs_inner
 
 
