@@ -150,7 +150,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.wait,
         torch.as_tensor,
         torch.from_numpy,
-        torch.get_device,
         torch.tensor,
         torch.default_generator,
         torch.has_cuda,
@@ -653,6 +652,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
         torch.gcd: lambda input, other, out=None: -1,
         torch.ge: lambda input, other, out=None: -1,
+        torch.get_device: lambda input: -1,
         torch.greater_equal: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
@@ -1139,6 +1139,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sym_min: lambda a, b: -1,
         torch.sym_not: lambda input: -1,
         torch.sym_ite: lambda a, b, c: -1,
+        torch.sym_sum: lambda args: -1,
         torch._sym_sqrt: lambda input: -1,
         torch._sym_cos: lambda input: -1,
         torch._sym_cosh: lambda input: -1,
@@ -2082,6 +2083,16 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+@contextlib.contextmanager
+def _enable_torch_function():
+    old_state = torch._C._get_torch_function_state()
+    try:
+        torch._C._set_torch_function_state(torch._C._TorchFunctionState.ENABLED)
+        yield
+    finally:
+        torch._C._set_torch_function_state(old_state)
 
 
 @contextlib.contextmanager
