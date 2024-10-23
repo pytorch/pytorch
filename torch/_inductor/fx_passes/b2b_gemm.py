@@ -514,9 +514,7 @@ def create_placeholder(
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
-    input_buffer = InputBuffer(
-        name=name, layout=FixedLayout(device=device, dtype=dtype, size=[], stride=[])
-    )
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 
@@ -533,9 +531,7 @@ def tuned_b2b_gemm(
     A.realize()
     B.realize()
     C.realize()
-    layout = FixedLayout(
-        device=A.get_device(), dtype=A.get_dtype(), size=[A.shape[0], C.shape[1]]
-    )
+    layout = FixedLayout(A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]])
     subgraph_buffer = build_subgraph_buffer(
         [create_placeholder("inner_mm", A.get_dtype(), A.get_device())],
         subgraph,
