@@ -1016,3 +1016,22 @@ def searchsorted_scalar(
         side=side,
         sorter=sorter,
     )[0]
+
+#@register_decomposition(aten.rrelu_with_noise_functional)
+#def rrelu_with_noise_functional(
+#    self: torch.Tensor,
+#    lower: float = 0.125,
+#    upper: float = 0.3333333333333333,
+#    training: bool = False,
+#    generator: Optional[torch.Generator] = None,
+#) -> Tuple[torch.Tensor, torch.Tensor]:
+#    assert generator is None
+#    if training:
+#        not_positive = self <= 0
+#        r = aten.uniform(self, lower, upper)
+#        output = torch.where(not_positive, self * r, self)
+#        noise = torch.where(not_positive, r, 1)
+#        return output, noise
+#    else:
+#        negative_slope = (lower + upper) / 2
+#        return aten.leaky_relu(self, negative_slope), torch.Tensor()
