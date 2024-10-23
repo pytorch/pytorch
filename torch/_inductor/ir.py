@@ -5352,7 +5352,12 @@ class TMADescriptor(ExternKernel):
             # link back to the underlying tensor in terms of ownership
             # to avoid getting the underlying tensor deleted *before*
             # the TMADescriptor node can be deleted.
-            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            NonOwningLayout(
+                ReinterpretView(
+                    data=tensor,
+                    layout=tensor.get_layout(),
+                )
+            ),
             inputs,
             tuple(constant_args),
             None,
