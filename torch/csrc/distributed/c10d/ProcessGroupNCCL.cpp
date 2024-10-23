@@ -1569,12 +1569,31 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
   LOG(ERROR) << errorMsg;
 
-  // We perform some checks to help users debug the timeout/hang issue.
-  // 1. Check if there is a GIL deadlock (timeout after 300ms).
-  // 2. Dump the nccl trace (flight recorder) to help debug the issue
+  // We perform some checks to help users debug the timeout/hang issue:
+  // 1. Dump the nccl trace (flight recorder) to help debug the issue
   //    (timeout after waitTimeoutDumpInMilSec_, which is one minute).
+  // 2. Check if there is a GIL deadlock (timeout after 300ms).
   // 3. Try to dump the c++ stacktraces (blocking and would hang,
-  //    users can turn this off by set TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
+  //    users can turn this off by set
+  //    TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
+
+   Dump the nccl trace (flight recorder).
+  if (checkDumpSignal && shouldDump_.load()) {
+    // Store debug info to storage if no other thread does it. (By default to
+    // local disk)
+    std::future<bool> asyncDebugDump = std::async(
+        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+
+    // wait for the dump until timeout - log data
+    waitForFutureOrTimeout(
+        asyncDebugDump,
+        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+        "Flight recorder dump in heartbeatMonitor",
+        false,
+        true);
+  }
+
+  // GIL deadlock check.
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
     auto kGilCheckTimeout = std::chrono::milliseconds(300);
@@ -1592,22 +1611,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
-  
-  if (checkDumpSignal && shouldDump_.load()) {
-    // Store debug info to storage if no other thread does it. (By default to
-    // local disk)
-    std::future<bool> asyncDebugDump = std::async(
-        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
 
-    // wait for the dump until timeout - log data
-    waitForFutureOrTimeout(
-        asyncDebugDump,
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-        "Flight recorder dump in heartbeatMonitor",
-        false,
-        true);
-  }
-
+  // Dump the c++ stacktraces.
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
     LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
@@ -4898,3 +4903,4 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
+  
