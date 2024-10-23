@@ -544,7 +544,7 @@ def update_automatic_dynamic(
             if len(old_entry.size) != len(entry.size):
                 log_tup("size", "dim", "dimensionality change")
             else:
-                for i in enumerate(len(entry.size)):
+                for i in range(len(entry.size)):
                     if old_entry.size[i] != entry.size[i]:
                         log_tup("size", f"size({i})", "size change", i)
         else:
@@ -555,7 +555,7 @@ def update_automatic_dynamic(
             if len(old_entry.stride) != len(entry.stride):
                 log_tup("stride", "dim", "dimensionality change")
             else:
-                for i in enumerate(len(entry.stride)):
+                for i in range(len(entry.stride)):
                     if old_entry.stride[i] != entry.size[i]:
                         log_tup("stride", f"stride({i})", "stride change", i)
         else:
