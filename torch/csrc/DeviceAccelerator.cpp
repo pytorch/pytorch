@@ -1,4 +1,3 @@
-#include <c10/core/DeviceGuard.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
@@ -14,7 +13,7 @@ void initModule(PyObject* module) {
   });
 
   m.def("_accelerator_deviceCount", []() {
-    const auto device_type = at::accelerator::getAccelerator(false);
+    auto device_type = at::accelerator::getAccelerator(false);
     torch::utils::maybe_initialize_device(device_type);
     return at::accelerator::deviceCount();
   });
