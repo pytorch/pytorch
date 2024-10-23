@@ -37,7 +37,7 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
 from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -6170,6 +6170,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(ref, res)
 
+    @skipIfPy312("listcomp bytecode is optimized")
     def test_listcomp(self):
         class Module(torch.nn.Module):
             def __init__(self):
