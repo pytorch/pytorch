@@ -30,6 +30,10 @@
   _(cuMemGetAllocationGranularity)  \
   _(cuMemExportToShareableHandle)   \
   _(cuMemImportFromShareableHandle) \
+  _(cuDevicePrimaryCtxRetain)       \
+  _(cuCtxGetCurrent)                \
+  _(cuCtxSetCurrent)                \
+  _(cuMemsetD32Async)               \
   _(cuStreamWriteValue32)           \
   _(cuGetErrorString)
 
