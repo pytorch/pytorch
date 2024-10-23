@@ -1648,10 +1648,16 @@ def forward(self, pred_1, x_1):
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
         init = tuple(
-            [torch.ones_like(torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1))]
+            [
+                torch.ones_like(
+                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
             + [
                 torch.zeros_like(
-                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1)
+                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
+                    requires_grad=True,
                 )
             ]
         )
@@ -1812,8 +1818,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, expected_result)
 
     @requires_cuda
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_wrong_pytree(self, device):
+    def test_scan_wrong_pytree(self):
         # Init and input have same pytree
         def fct_wrong_pytree(x, y):
             return (
@@ -1829,9 +1834,9 @@ def forward(self, pred_1, x_1):
                 },
             )
 
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(3, 2, 2)
+        z = torch.randn(3, 2, 2)
         inp = {"i": x, "j": ([y], [{"o": z}])}
         inp_flat, inp_spec = pytree.tree_flatten(inp)
         init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
@@ -1841,8 +1846,8 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError,
             # r"The number of leaves of the pytree of the new carry produced by
             # the operator needs to match the length of the pytree of the init",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            RuntimeError,
+            "The number of leaves of the pytree of the new carry",
         ):
             result = scan(fct_wrong_pytree, init, inp, dim=0)
 
@@ -2307,110 +2312,135 @@ def forward(self, pred_1, x_1):
             self.assertEqual(cnt.frame_count, 6)
 
     @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_scanned_0(self, reverse, compile_mode, device):
+    def test_scan_init_scanned_0(self, compile_mode):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
-        init = torch.randn(3, 2, device=device)
+        x = torch.randn(3, 1, 2)
+        init = torch.randn(3, 2)
         dim = 1
 
         # Scan dimension is 0
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
         inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError, "Input leaves must have a scan dimension > 0"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(
-                get_scan_combine_fn("add", False),
-                init,
-                inp,
-                dim=dim,
-                reverse=reverse,
-            )
+        if compile_mode == "none":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "xs leaves must have a scan dimension > 0",
+            ):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False),
+                    init,
+                    inp,
+                    dim=dim,
+                )
+        else:
+            with self.assertRaisesRegex(
+                # Should be: RuntimeError, "Input leaves must have a scan dimension > 0"
+                torch._dynamo.exc.Unsupported,
+                "Observed exception.*",
+            ):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False),
+                    init,
+                    inp,
+                    dim=dim,
+                )
 
     @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_non_tensor(self, reverse, compile_mode, device):
+    def test_scan_init_non_tensor(self, compile_mode):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
-        x = torch.randn(3, 1, 2, device=device)
+        x = torch.randn(3, 1, 2)
         dim = 1
 
         # Init is a float and not a tensor
         init = 1.0
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError, "Init leaves must be a Tensor"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(
-                get_scan_combine_fn("add", False), init, x, dim=dim, reverse=reverse
-            )
+        if compile_mode == "none":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "All init leaves must be a Tensor",
+            ):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False), init, x, dim=dim
+                )
+        else:
+            with self.assertRaisesRegex(
+                # Should be: RuntimeError, "Init leaves must be a Tensor"
+                torch._dynamo.exc.Unsupported,
+                "Observed exception.*",
+            ):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False), init, x, dim=dim
+                )
 
     @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_wrong_shape(self, reverse, compile_mode, device):
+    def test_scan_init_wrong_shape(self, compile_mode):
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
+        x = torch.randn(3, 1, 2)
         dim = 1
 
         # Init wrong shape (Other dim different)
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
-        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
-        init = torch.tile(init, (1, 2, 1))
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError, "The size of tensor a.*"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(
-                get_scan_combine_fn("add", False),
-                init,
-                inp,
-                dim=dim,
-                reverse=reverse,
-            )
+        init = torch.randn(1, 2)
+        if compile_mode == "none":
+            with self.assertRaisesRegex(RuntimeError, "The shape of the new_carry"):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False),
+                    init,
+                    x,
+                    dim=dim,
+                )
+        else:
+            with self.assertRaisesRegex(
+                # Should be: RuntimeError, "The size of tensor a.*"
+                torch._dynamo.exc.Unsupported,
+                "Observed exception.*",
+            ):
+                result_init = scan_fct(
+                    get_scan_combine_fn("add", False),
+                    init,
+                    x,
+                    dim=dim,
+                )
 
     @requires_cuda
-    @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_init_wrong_pytree(self, reverse, compile_mode, device):
+    def test_scan_init_wrong_pytree(self, compile_mode):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
             return x[0], x
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
+        x = torch.randn(3, 1, 2)
         dim = 1
 
         # Init wrong pytree
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
         init = (
             torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
             torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
         )
 
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The number of leaves of the pytree of the new carry produced
-            # by the operator needs to match the length of the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result_init = scan_fct(add_one_carry, init, inp, dim=dim, reverse=reverse)
+        if compile_mode == "none":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "The number of leaves of the pytree of the new carry produced by the operator",
+            ):
+                result_init = scan_fct(add_one_carry, init, x, dim=dim)
+
+        else:
+            with self.assertRaisesRegex(
+                # Should be: RuntimeError: The number of leaves of the pytree of the new carry produced
+                # by the operator needs to match the length of the pytree of the init
+                torch._dynamo.exc.Unsupported,
+                "Observed exception.*",
+            ):
+                result_init = scan_fct(add_one_carry, init, x, dim=dim)
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2513,54 +2543,6 @@ def forward(self, pred_1, x_1):
             result = list(result)
             result[1] = pytree.tree_map(lambda t: t.movedim(0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
-
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_scan_carry_wrong_pytree(self, reverse, device):
-        def fct_pointwise_carry_wrong_pytree(x, y):
-            return (
-                (
-                    x["i"],
-                    {
-                        "i": x["i"] * y["i"],
-                        "j": (
-                            [x["j"][0][0] * y["j"][0][0]],
-                            [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                        ),
-                    },
-                ),
-                {
-                    "i": x["i"] * y["i"],
-                    "j": (
-                        [x["j"][0][0] * y["j"][0][0]],
-                        [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                    ),
-                },
-            )
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        z = torch.randn(3, 2, 2, device=device)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-        inp_flat, inp_spec = pytree.tree_flatten(inp)
-        init_flat = [torch._ops.ops.aten.slice(e, 0, 0, 1, 1) for e in inp_flat]
-        init = pytree.tree_unflatten(init_flat, inp_spec)
-
-        # Wrong pytree of the carry produced by the operation
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The number of leaves of the pytree of the new carry
-            # produced by the operator needs to match the length of the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            result = scan(
-                fct_pointwise_carry_wrong_pytree,
-                init,
-                inp,
-                dim=0,
-                reverse=reverse,
-            )
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2754,45 +2736,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result[1], expected_result[0])
 
     @skipIfNoDynamoSupport
-    def test_scan_simple_graph_no_carry(self):
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Wrong number of returns from function
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The pytree of the new carry produced
-            # by the operator needs to match the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            gm = make_fx(f, tracing_mode="symbolic")(
-                get_scan_combine_fn("add", True), init, x
-            )
-
-    @skipIfNoDynamoSupport
-    def test_scan_simple_graph_wrong_carry(self):
-        def add_wrong_carry(x: torch.Tensor, y: torch.Tensor):
-            return (x + y)[0, :], x + y
-
-        x = torch.randn(3, 10, 2, device=torch.device("cpu"))
-        init = torch.randn(1, 10, 2, device=torch.device("cpu"))
-
-        def f(fct, init, xs):
-            return scan(fct, init, xs, dim=0, reverse=True)
-
-        # Wrong carry shape
-        with self.assertRaisesRegex(
-            # Should be: RuntimeError: The pytree of the new carry produced by
-            # the operator needs to match the pytree of the init
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
-
-    @skipIfNoDynamoSupport
     def test_scan_simple_graph_wrong_dtype(self):
         def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
             return torch.ones_like(x + y, dtype=torch.int64), x + y
@@ -2808,10 +2751,10 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: Expected the init and
             # the new carry produced by the operator to be a tensor of
             # torch.int64 but got torch.float32 and torch.int64
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            ".*",
+            RuntimeError,
+            "The dtype of the new_carry",
         ):
-            gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
+            f(add_wrong_dtype, init, x)
 
     @skipIfNoDynamoSupport
     @skipIfCrossRef  # Arg order changes with crossref
@@ -2856,7 +2799,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     select = l_xs_.select(0, 0)
-    out_l = l_init_ + select;  out_l = None
+    new_carry = l_init_ + select;  new_carry = None
     add_1 = l_init_ + select;  select = add_1 = None
     child = l_init_.clone();  child = None
     child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
