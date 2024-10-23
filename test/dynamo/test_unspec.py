@@ -601,7 +601,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
-    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspec_roundtrip_float_input(self):
         def f(x, y):
             if y == 5.0:
