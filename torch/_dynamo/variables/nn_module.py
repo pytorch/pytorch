@@ -860,7 +860,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         if (
             not isinstance(mod, torch.fx.GraphModule)
-            and mod.__call__ is not torch.nn.Module.__call__
+            and mod.__call__.__func__ is not torch.nn.Module.__call__
         ):
             name = "__call__"
             fn = getattr(self.value_type, name)
@@ -871,8 +871,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
         if (
-            mod.__call__ is torch.nn.Module.__call__
-            and mod._call_impl is torch.nn.Module._call_impl
+            mod.__call__.__func__ is torch.nn.Module.__call__
+            and mod._call_impl.__func__ is torch.nn.Module._call_impl
             and "forward" not in mod.__dict__
         ):
             forward_method = inspect.getattr_static(mod, "forward")
