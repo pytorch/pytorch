@@ -9,6 +9,8 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     autograd_not_implemented,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -591,9 +593,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
-        # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
-        ctx._Q_BLOCK_SIZE = block_mask[8]
-        ctx._KV_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
@@ -610,21 +609,24 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 mask_mod_other_buffers,
             )
 
-        ctx.save_for_backward(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            *block_mask[:8],
-            *score_mod_other_buffers,
-            *mask_mod_other_buffers,
+        save_tensors_and_symints_for_backward(
+            ctx,
+            (
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                *block_mask[:10],
+                *score_mod_other_buffers,
+                *mask_mod_other_buffers,
+            ),
         )
         return out, logsumexp
 
     @staticmethod
     def backward(ctx: Any, grad_out: Tensor, grad_logsumexp: Tensor) -> Tuple[Optional[Tensor], ...]:  # type: ignore[override]
-        fw_args = ctx.saved_tensors
+        fw_args = saved_tensors_and_symints(ctx)
         (
             query,
             key,
@@ -639,13 +641,13 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
             *other_buffers,
         ) = fw_args
         fw_graph = ctx._fw_graph
         joint_graph = ctx._joint_graph
         mask_graph = ctx._mask_graph
-        KV_BLOCK_SIZE = ctx._KV_BLOCK_SIZE
-        Q_BLOCK_SIZE = ctx._Q_BLOCK_SIZE
         scale = ctx.scale
         kernel_options = ctx.kernel_options
         score_mod_other_buffers = tuple(
