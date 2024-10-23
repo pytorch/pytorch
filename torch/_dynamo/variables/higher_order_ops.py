@@ -764,7 +764,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
-        if not only_consist_of(args[3], (TensorVariable,)):
+        if not only_consist_of(args[3], (TensorVariable, ConstantVariable)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
