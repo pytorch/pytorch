@@ -1577,7 +1577,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   //    users can turn this off by set
   //    TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
 
-   Dump the nccl trace (flight recorder).
+  // Dump the nccl trace (flight recorder).
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
