@@ -1175,12 +1175,9 @@ def try_import_ck_lib():
     return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
 
 
-def use_ck_template(layout, m, n, k):
+def use_ck_template(layout):
     # config knobs check 1
     if not use_max_autotune():
-        return False
-    # config knobs check 2
-    if not _use_autotune_backend("CK"):
         return False
     # platform check
     if not torch.version.hip:
@@ -1201,16 +1198,8 @@ def use_ck_template(layout, m, n, k):
     if not requested_supported_archs:
         return False
     # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16]:
+    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
         return False
-    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
-    # check if shape is static and gemm size is not 0
-    from .virtualized import V
-
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0:
-        return False
-    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
 
     ck_package_dirname, _, _, _ = try_import_ck_lib()
 
@@ -1230,6 +1219,20 @@ def use_ck_template(layout, m, n, k):
         return False
 
     return True
+
+
+def use_ck_gemm_template(layout, m, n, k):
+    from .virtualized import V
+
+    return (
+        use_ck_template(layout)
+        and _use_autotune_backend("CK")
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
+def use_ck_conv_template(layout):
+    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
 
 
 def _use_template_for_cpu(layout):
