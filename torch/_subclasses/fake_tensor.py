@@ -564,7 +564,8 @@ class SymNumberMemoDescriptor:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
 
-        if isinstance(r, torch.SymFloat):
+        # If backed, it's ok to preserve memo since we know it won't renumber.
+        if r.node.hint is not None:
             return r
 
         # Version counter based tracking isn't 100% sound but it's close

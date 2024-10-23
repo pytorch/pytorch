@@ -443,8 +443,8 @@ def rebind_unbacked(
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
 
-            # We only care about rebinding unbacked SymInts
-            if not isinstance(u1, torch.SymInt):
+            # We only care about rebinding unbacked things
+            if u1.node.hint is not None:
                 continue
 
             # tensor_version ops get specialized after AOTAutograd, it's OK,
