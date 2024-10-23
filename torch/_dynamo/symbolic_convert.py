@@ -71,7 +71,7 @@ from .utils import (
     proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import wrap_fx_proxy, FrameStateSizeEntry
+from .variables.builder import FrameStateSizeEntry, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -226,7 +226,9 @@ Otherwise, please submit a bug report, ideally including the contents of TORCH_L
 
 @dataclasses.dataclass
 class LocalState:
-    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(default_factory=dict)
+    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 # Mutable box that is shared across restarts
