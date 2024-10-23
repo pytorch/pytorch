@@ -45,7 +45,11 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if self.world_size % 2 != 0:
             return
-        hsdp_mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        hsdp_mesh = init_device_mesh(
+            "cuda",
+            (self.world_size // 2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mesh": [hsdp_mesh]},
             self._test_dp_state_dict_save_load,

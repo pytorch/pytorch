@@ -1,9 +1,12 @@
 # Owner(s): ["module: c10d"]
 
+import os
+
 import torch
 import torch.distributed as dist
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -85,10 +88,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
 
+    def _get_test_alloc_args(self):
+        shape = (64, 64)
+        stride = (64, 1)
+        dtype = torch.float32
+        device = self.device
+        group_name = "0"
+        return (shape, stride, dtype, device, group_name)
+
     def _verify_symmetric_memory(self, symm_mem):
         self.assertEqual(symm_mem.world_size, 2)
 
-        buf = symm_mem.get_buffer(0, (64, 64), torch.float32)
+        buf = symm_mem.get_buffer(0, (symm_mem.buffer_size // 4,), torch.float32)
+        self.assertEqual(buf.storage_offset(), 0)
+        self.assertEqual(buf.storage().size(), symm_mem.buffer_size // 4)
+
         if symm_mem.rank == 0:
             symm_mem.wait_signal(src_rank=1)
             self.assertTrue(buf.eq(42).all())
@@ -124,14 +138,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_empty_strided_p2p(self) -> None:
         self._init_process()
 
-        shape = (64, 64)
-        stride = (64, 1)
-        dtype = torch.float32
-        device = self.device
-        group_name = "0"
-        alloc_args = (shape, stride, dtype, device, group_name)
+        alloc_args = self._get_test_alloc_args()
 
-        t = torch.empty(shape, dtype=dtype, device=device)
+        t = torch.empty((64, 64), device=self.device)
         self.assertIsNone(_SymmetricMemory.rendezvous(t))
 
         t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
@@ -146,27 +155,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_empty_strided_p2p_persistent(self) -> None:
         self._init_process()
 
-        shape = (64, 64)
-        stride = (64, 1)
-        dtype = torch.float32
-        device = self.device
-        alloc_id = 42  # Persistent allocation
-        group_name = "0"
-        alloc_args = (shape, stride, dtype, device, group_name, alloc_id)
+        alloc_args = self._get_test_alloc_args()
 
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
         data_ptr = t.data_ptr()
 
         # Verify that persistent allocation would fail if there's an active
         # allocation with the same alloc_id.
         with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p(*alloc_args)
+            _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
 
         # Verify that persistent allocation would succeed in lieu of activate
         # allocations with the same alloc_id, and the returned tensor would
         # have the same data pointer.
         del t
-        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args, alloc_id=42)
         self.assertEqual(t.data_ptr(), data_ptr)
 
         # Verify that get_symmetric_memory would fail if called before
@@ -180,6 +183,78 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         self._verify_symmetric_memory(symm_mem_0)
         dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_timeout(self) -> None:
+        self._init_process()
+
+        alloc_args = self._get_test_alloc_args()
+
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                symm_mem.barrier(timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_put_signal_timeout(self) -> None:
+        self._init_process()
+
+        alloc_args = self._get_test_alloc_args()
+
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                # First, put a signal into rank 1's signal pad. Since rank 1
+                # doesn't wait on this signal, the subsequent put will timeout.
+                symm_mem.put_signal(dst_rank=1)
+                symm_mem.put_signal(dst_rank=1, timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_wait_signal_timeout(self) -> None:
+        self._init_process()
+
+        alloc_args = self._get_test_alloc_args()
+
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                symm_mem.wait_signal(src_rank=1, timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -217,7 +292,12 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
-    def test_fused_all_gather_scaled_matmul(self, gather_dim: int) -> None:
+    @parametrize(
+        "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
+    )
+    def test_fused_all_gather_scaled_matmul(
+        self, gather_dim: int, scale_mode: str
+    ) -> None:
         self._init_process()
 
         BATCH = 8
@@ -228,16 +308,33 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         rank = self.rank
         world_size = self.world_size
 
+        if gather_dim == 0:
+            leading_dims = (BATCH // self.world_size, M)
+        elif gather_dim == 1:
+            leading_dims = (BATCH, M // self.world_size)
+        else:
+            raise AssertionError("Invalid scale_mode: {scale_mode}")
+
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda").to(
-            torch.float8_e4m3fn
-        )
-        A_scale = torch.tensor(0.1, device="cuda")
+        A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fn)
         Bs = [
             torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
         ]
-        B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
-        out_dtypes = [None, torch.bfloat16, torch.float32]
+
+        if scale_mode == "tensor-wise":
+            A_scale = torch.tensor(0.1, device="cuda")
+            B_scales = [torch.tensor(0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [None, torch.bfloat16, torch.float32]
+        elif scale_mode == "row-wise-sharded":
+            A_scale = torch.full((*leading_dims, 1), 0.1, device="cuda")
+            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [torch.bfloat16] * 3
+        elif scale_mode == "row-wise-replicated":
+            A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
+            B_scales = [torch.full((1, N), 0.1, device="cuda") for _ in range(3)]
+            out_dtypes = [torch.bfloat16] * 3
+        else:
+            raise AssertionError(f"Invalid scale_mode: {scale_mode}")
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
             A_shard,
@@ -315,7 +412,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
-    def test_fused_scaled_matmul_reduce_scatter(self, scatter_dim: int) -> None:
+    @parametrize("rowwise", [True, False])
+    def test_fused_scaled_matmul_reduce_scatter(
+        self, scatter_dim: int, rowwise: bool
+    ) -> None:
         self._init_process()
 
         BATCH = 8
@@ -328,9 +428,14 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
-        A_scale = torch.tensor(0.1, device="cuda")
         B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
-        B_scale = torch.tensor(0.1, device="cuda")
+
+        if rowwise:
+            A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
+            B_scale = torch.full((1, N), 0.1, device="cuda")
+        else:
+            A_scale = torch.tensor(0.1, device="cuda")
+            B_scale = torch.tensor(0.1, device="cuda")
 
         output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
             A,
@@ -544,12 +649,16 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
             dtype=dtype,
             device=self.device,
             group_name=group_name,
-        ).fill_(
-            1
-        )  # TODO(yifu): use random data
+        ).normal_()
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
-        self._verify_all_reduce_result(inp, res)
+
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        # Only verify that the results are close to the sum of inputs across
+        # ranks (see Note [multimem_one_shot_all_reduce]).
+        torch.testing.assert_close(
+            gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
+        )
 
         dist.destroy_process_group()
 
@@ -614,8 +723,6 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def _verify_all_reduce_result(self, inp, res):
-        from torch.distributed._functional_collectives import all_gather_tensor
-
         gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
         # Verify that the results across ranks are identical
         self.assertEqual(
