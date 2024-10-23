@@ -1649,7 +1649,7 @@ def cooperative_reduction(
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
-        configs = _persistent_reductionc_configs(
+        configs = _persistent_reduction_configs(
             [xnumel, rnumel // split], reduction_hint, inductor_meta
         )
     else:
@@ -1670,7 +1670,7 @@ def cooperative_reduction(
     )
 
 
-def _persistent_reductionc_configs(
+def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
     inductor_meta=None,
@@ -1716,7 +1716,7 @@ def persistent_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
 
-    configs = _persistent_reductionc_configs(size_hints, reduction_hint, inductor_meta)
+    configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
 
     return cached_autotune(
         size_hints,
