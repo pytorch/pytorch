@@ -15,7 +15,6 @@ from typing import (
 )
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._logging import warning_once
 from torch.autograd import Variable
@@ -30,7 +29,12 @@ from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, TrainingState
+from ._fsdp_common import (
+    _cast_fp_tensor,
+    compiled_autograd_enabled,
+    detect_compiled_autograd,
+    TrainingState,
+)
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 
@@ -119,7 +123,7 @@ class FSDPState(_State):
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
-        if not ca.compiled_autograd_enabled:
+        if not compiled_autograd_enabled():
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
@@ -154,6 +158,7 @@ class FSDPState(_State):
             raise RuntimeError(
                 f"FSDP requires a single root module but got {self._modules}"
             )
+        detect_compiled_autograd()
         root_module = self._modules[0]
         visited_states: Set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
@@ -277,17 +282,21 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(self) -> None:
-        if not ca.compiled_autograd_enabled:
+        if not compiled_autograd_enabled():
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
+                fsdp_param_group = state._fsdp_param_group
+                if fsdp_param_group and (
+                    fsdp_param_group.is_unsharded
+                    or not fsdp_param_group.unshard_in_backward
+                ):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
-                    state._fsdp_param_group.post_backward()
+                    fsdp_param_group.post_backward()
                 state._training_state = TrainingState.IDLE
-                if state._fsdp_param_group:
-                    state._fsdp_param_group._training_state = TrainingState.IDLE
+                if fsdp_param_group:
+                    fsdp_param_group._training_state = TrainingState.IDLE
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
