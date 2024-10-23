@@ -20,7 +20,11 @@
 
 namespace at::native {
 
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
 auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/TriangularOps_metallib.h>
+#endif
 
 TORCH_IMPL_FUNC(triu_mps_out)
 (const Tensor& self, int64_t k, const Tensor& output) {
