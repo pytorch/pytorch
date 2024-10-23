@@ -5581,6 +5581,30 @@ class TestHopSchema(TestCase):
         )
         self.assertEqual(schema.parse(str(schema)), schema)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_eager_run_with_item(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        x = torch.randn(10, requires_grad=True)
+        args = (
+            torch.tensor(True),
+            torch.tensor([3]),
+            torch.tensor([4]),
+            x,
+        )
+        model = M()
+        expected_output = model(*args)
+        self.assertEqual(expected_output, x * 3 * 2)
+
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
