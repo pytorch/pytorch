@@ -64,28 +64,31 @@ class ActivationSparsifier:
         >>> act_sparsifier = ActivationSparsifier(...)  # init activation sparsifier
         >>> # Initialize aggregate_fn
         >>> def agg_fn(x, y):
-        >>>     return x + y
+        ...     return x + y
         >>>
         >>> # Initialize reduce_fn
         >>> def reduce_fn(x):
-        >>>     return torch.mean(x, dim=0)
+        ...     return torch.mean(x, dim=0)
         >>>
         >>> # Initialize mask_fn
         >>> def mask_fn(data):
-        >>>     return torch.eye(data.shape).to(data.device)
-        >>>
+        ...     return torch.eye(data.shape).to(data.device)
         >>>
         >>> act_sparsifier.register_layer(
-        ...     model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn
+        ...     model.some_layer,
+        ...     aggregate_fn=agg_fn,
+        ...     reduce_fn=reduce_fn,
+        ...     mask_fn=mask_fn,
         ... )
         >>>
         >>> # start training process
         >>> for _ in [...]:
-        >>> # epoch starts
-        >>> # model.forward(), compute_loss() and model.backwards()
-        >>> # epoch ends
-        >>>     act_sparsifier.step()
-        >>> # end training process
+        ...     # epoch starts
+        ...     # model.forward(), compute_loss() and model.backwards()
+        ...     # epoch ends
+        ...     act_sparsifier.step()
+        ... # end training process
+        >>>
         >>> sparsifier.squash_mask()
     """
 
