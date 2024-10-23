@@ -838,12 +838,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
-    // If FP16/BF16 reduction is disabled, temporarily disable autocast
-    const auto device_type = query_.device().type();
-    std::unique_ptr<AutocastGuard> guard;
-    if (!ctx.allowFP16BF16ReductionMathSDP()) {
-        guard = std::make_unique<AutocastGuard>(device_type, false);
-    }
+  const auto device_type = query_.device().type();
+  // If FP16/BF16 reduction is disabled, temporarily disable autocast
+  bool should_disable = !ctx.allowFP16BF16ReductionMathSDP();
+  AutocastGuard guard(device_type, should_disable);
   auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
           (query_.scalar_type() == at::kHalf ||
            query_.scalar_type() == at::kBFloat16) &&
