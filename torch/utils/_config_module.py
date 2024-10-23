@@ -39,6 +39,7 @@ class Config:
     default: bool = True
     justknob: Optional[str] = None
 
+
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
@@ -75,7 +76,9 @@ def install_config_module(module: ModuleType) -> None:
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
-                config[name] = _ConfigEntry(default=value.default, justknob=value.justknob)
+                config[name] = _ConfigEntry(
+                    default=value.default, justknob=value.justknob
+                )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
