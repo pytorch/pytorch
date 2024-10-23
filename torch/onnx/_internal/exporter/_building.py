@@ -660,6 +660,32 @@ class OpRecorder(evaluator.Evaluator):
                     name: attr.value if isinstance(attr, ir.Attr) else attr
                     for name, attr in named_attrs.items()
                 }
+
+                # Use the type binding to resolve the dtypes of the inputs, and
+                # convert Python constants to Constant nodes
+                type_binding = _resolve_parameter_dtypes(op_signature, named_inputs)
+                try:
+                    converted_named_inputs = _process_python_constants(
+                        op_signature,
+                        named_inputs,
+                        type_binding,
+                        self.constant_farm,
+                        self.opset,
+                    )
+                    converted_named_inputs = _process_python_sequences(
+                        op_signature,
+                        converted_named_inputs,  # type: ignore[arg-type]
+                        type_binding,
+                        self.constant_farm,
+                        self.opset,
+                    )
+
+                except Exception as e:
+                    raise _errors.GraphConstructionError(
+                        f"Error processing Python constants for operator '{op_signature.domain}::{op_signature.name}'. "
+                        f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
+                    ) from e
+
                 return function.function(**named_inputs, **named_attrs)
 
             outputs = self._call_op(op_signature, named_inputs, named_attrs)
