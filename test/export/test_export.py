@@ -4227,7 +4227,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "torch.ops.aten._assert_async.msg", 1, exactly=True
         ).run(ep.graph_module.code)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_decomp_item_in_prim_after_decomposition(self):
         class M(torch.nn.Module):
             def forward(self, x):
