@@ -8,7 +8,8 @@ permissions:
   contents: read
 
 jobs:
-
+  # Don't run on forked repos
+  if: github.repository_owner == 'pytorch'
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
