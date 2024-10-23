@@ -31,35 +31,35 @@ import torch
 import triton
 import triton.language as tl
 
-# @triton.autotune(
-#     configs=[
-#         triton.Config({
-#             'BLOCK_SIZE_M': 128,
-#             'BLOCK_SIZE_N': 128,
-#             'BLOCK_SIZE_K': 32,
-#             'NUM_SM': 84,
-#         }),
-#         triton.Config({
-#             'BLOCK_SIZE_M': 128,
-#             'BLOCK_SIZE_N': 128,
-#             'BLOCK_SIZE_K': 32,
-#             'NUM_SM': 128,
-#         }),
-#         triton.Config({
-#             'BLOCK_SIZE_M': 64,
-#             'BLOCK_SIZE_N': 64,
-#             'BLOCK_SIZE_K': 32,
-#             'NUM_SM': 84,
-#         }),
-#         triton.Config({
-#             'BLOCK_SIZE_M': 64,
-#             'BLOCK_SIZE_N': 64,
-#             'BLOCK_SIZE_K': 32,
-#             'NUM_SM': 128,
-#         }),
-#     ],
-#     key=['group_size'],
-# )
+@triton.autotune(
+    configs=[
+        triton.Config({
+            'BLOCK_SIZE_M': 128,
+            'BLOCK_SIZE_N': 128,
+            'BLOCK_SIZE_K': 32,
+            'NUM_SM': 84,
+        }),
+        triton.Config({
+            'BLOCK_SIZE_M': 128,
+            'BLOCK_SIZE_N': 128,
+            'BLOCK_SIZE_K': 32,
+            'NUM_SM': 128,
+        }),
+        triton.Config({
+            'BLOCK_SIZE_M': 64,
+            'BLOCK_SIZE_N': 64,
+            'BLOCK_SIZE_K': 32,
+            'NUM_SM': 84,
+        }),
+        triton.Config({
+            'BLOCK_SIZE_M': 64,
+            'BLOCK_SIZE_N': 64,
+            'BLOCK_SIZE_K': 32,
+            'NUM_SM': 128,
+        }),
+    ],
+    key=['group_size'],
+)
 @triton.jit
 def grouped_matmul_kernel(
     b_ptr_base,
@@ -88,13 +88,8 @@ def grouped_matmul_kernel(
     gm = a_offset_1 - a_offset_0
 
     a_ptr = a_ptr_base + a_offset_0 * lda
-    # tl.device_print("a_offset_0: ", a_offset_0)
-    # tl.device_print("a_offset_1: ", a_offset_1)
     b_ptr = b_ptr_base + batch_id * gk * gn
     c_ptr = c_ptr_base + a_offset_0 * ldc
-
-    # tl.device_print("batch_id * gk * gn: ", batch_id * gk * gn)
-    # tl.device_print("batch_id * gk * gn: ", batch_id * gk * gn)
 
     num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
     num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
@@ -105,38 +100,43 @@ def grouped_matmul_kernel(
 
     # iterate through the tiles in the current gemm problem
     while tile_idx < last_problem_end:
+        # tl.device_print("tile_idx: ", tile_idx)
         # pick up a tile from the current gemm problem
-
         # figure out tile coordinates
         tile_m_idx = tile_idx // num_n_tiles
         tile_n_idx = tile_idx % num_n_tiles
 
-
         # do regular gemm here
-        offs_am = (tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % gm
+        offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         # tl.device_print("offs_am: ", offs_am)
-        offs_bn = (tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % gn
+        offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
-        a_ptrs = a_ptr + offs_am[:, None] * lda + offs_k[None, :]
-        b_ptrs = b_ptr + offs_k[:, None] * ldb + offs_bn[None, :]
+        a_ptrs = a_ptr + (offs_am[:, None] % gm) * lda + offs_k[None, :]
+        b_ptrs = b_ptr + offs_k[:, None] * ldb + (offs_bn[None, :] % gn)
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         for kk in range(0, tl.cdiv(gk, BLOCK_SIZE_K)):
             # # # hint to Triton compiler to do proper loop pipelining
-          # tl.multiple_of(a_ptrs, [16, 16])
+            # tl.multiple_of(a_ptrs, [16, 16])
             # tl.multiple_of(b_ptrs, [16, 16])
             # assume full tile for now
             a = tl.load(a_ptrs, mask=offs_k[None, :] < gk - kk * BLOCK_SIZE_K, other=0.0)
-            b = tl.load(b_ptrs)
-            accumulator += tl.dot(a, b)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < gk - kk * BLOCK_SIZE_K, other=0.0)
+            accumulator = tl.dot(a, b, accumulator, "ieee")
             a_ptrs += BLOCK_SIZE_K
             b_ptrs += BLOCK_SIZE_K * ldb
-        c = accumulator.to(tl.float16)
+        c = accumulator.to(tl.float32)
 
-        offs_cm = (tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % gm
-        offs_cn = (tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
-        c_ptrs = c_ptr + ldc * offs_cm[:, None] + offs_cn[None, :]
+        # offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        # offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
-        c_mask = ((a_offset_0 + offs_cm[:, None]) < a_offset_1) & (offs_cn[None, :] < gn)
+        offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+
+        c_ptrs = c_ptr + ldc * offs_am[:, None] + offs_bn[None, :]
+
+        c_mask = (offs_am[:, None] < gm) & (offs_bn[None, :] < gn)
+
+        # tl.device_print("c_mask: ", c_mask)
 
         # assumes full tile for now
         tl.store(c_ptrs, c, mask=c_mask)
@@ -163,11 +163,11 @@ def group_gemm_fn(tensor_a, tensor_b):
     c_offsets = a_offsets
 
     # we use a fixed number of CTA, and it's auto-tunable
-    # grid = lambda META: (META['NUM_SM'], group_size)
+    grid = lambda META: (META['NUM_SM'], group_size)
     # print("a_offsets: ", a_offsets)
-    grid = (1, group_size)
-    print("grid: ", grid)
-    print("tensor_b.size(): ", tensor_b.size())
+    # grid = (128, group_size)
+    # print("grid: ", grid)
+    # print("tensor_b.size(): ", tensor_b.size())
     grouped_matmul_kernel[grid](
         tensor_b,
         group_size,
@@ -179,10 +179,11 @@ def group_gemm_fn(tensor_a, tensor_b):
         a_values.stride(0),
         c_values.stride(0),
         c_values,
-        BLOCK_SIZE_M=128,
-        BLOCK_SIZE_N=128,
-        BLOCK_SIZE_K=128,
-        NUM_SM=1,
+        # BLOCK_SIZE_M=128,
+        # BLOCK_SIZE_N=128,
+        # BLOCK_SIZE_K=128,
+        # NUM_SM=128,
+        # num_stages=1,
     )
 
     return c_values
