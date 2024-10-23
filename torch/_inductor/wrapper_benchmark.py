@@ -294,7 +294,14 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
+
+        if torch.cuda.is_available():
+            peak_mem = torch.cuda.max_memory_allocated()
+            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
 
         if not args.profile:
             return
