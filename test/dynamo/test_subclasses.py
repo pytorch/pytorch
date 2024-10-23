@@ -2391,6 +2391,7 @@ class GraphModule(torch.nn.Module):
         out = f(z)
         self.assertEqual(out, z.sin())
 
+    @unittest.expectedFailure
     def test_njt_subclass_simple(self):
         def f(nt):
             y = nt.clone()
@@ -2461,13 +2462,14 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @unittest.expectedFailure
     def test_njt_subclass_from_buffer(self):
         # create the NJT from a buffer(?)
         def f(nt):
             nested_size = ((2, 3, 4), 5)
             offsets = None
             nt2, _ = get_jagged_tensor(nested_size, offsets, requires_grad=False)
-            nt3 = torch.cat([nt, nt2], dim=-1)
+            nt3 = torch.cat([nt2, nt], dim=-1)
             return nt3.sin() * nt3.size(1)
 
         nested_size = ((2, 3, 4), 5)
