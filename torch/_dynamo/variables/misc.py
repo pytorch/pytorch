@@ -929,7 +929,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -976,7 +976,7 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -1177,6 +1177,19 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.side_effects.load_attr(self, name)
+
+        value = getattr(self.value, name)
+        if self.source:
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(value)
+        else:
+            return SourcelessBuilder(tx, value)
+
     def as_python_constant(self):
         return self.value
 
@@ -1312,7 +1325,7 @@ class NullVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):

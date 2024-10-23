@@ -77,8 +77,10 @@ class TORCH_API Context {
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
     } else {
-      AT_ERROR(
-          c10::DeviceTypeName(device_type), " device type not an accelerator.");
+      TORCH_CHECK(
+          false,
+          c10::DeviceTypeName(device_type),
+          " device type not an accelerator.");
     }
   }
 
@@ -148,6 +150,9 @@ class TORCH_API Context {
   }
   static bool hasCuBLASLt() {
     return detail::getCUDAHooks().hasCuBLASLt();
+  }
+  static bool hasROCM() {
+    return detail::getCUDAHooks().hasROCM();
   }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
@@ -346,18 +351,28 @@ class TORCH_API Context {
 
   // Preserved for BC
   void lazyInitCUDA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
   void lazyInitHIP() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
   void lazyInitXPU() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
   void lazyInitMTIA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
   void lazyInitPrivateUse1() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
   }
 

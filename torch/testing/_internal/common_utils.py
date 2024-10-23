@@ -74,6 +74,7 @@ from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
+from torch._logging.scribe import open_source_signpost
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -2220,7 +2221,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
             if not isinstance(t, torch.Tensor):
                 return False
 
-    except TypeError as te:
+    except TypeError:
         return False
 
     return True
@@ -2329,7 +2330,7 @@ class CudaMemoryLeakCheck:
             discrepancy_detected = True
 
             # Query memory multiple items to ensure leak was not transient
-            for n in range(3):
+            for _ in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
                 driver_mem_allocated = bytes_total - bytes_free
@@ -2396,6 +2397,17 @@ def print_repro_on_failure(repro_parts):
             sample_isolation_prefix = f"PYTORCH_OPINFO_SAMPLE_INPUT_INDEX={tracked_input.index}"
 
         repro_str = " ".join(filter(None, (sample_isolation_prefix, *repro_parts)))
+
+        open_source_signpost(
+            subsystem="test_repros",
+            name="test_failure",
+            parameters=json.dumps(
+                {
+                    "repro": " ".join(filter(None, (sample_isolation_prefix, *repro_parts))),
+                }
+            ),
+        )
+
         repro_msg = f"""
 To execute this test, run the following from the base repo dir:
     {repro_str}
@@ -3032,6 +3044,8 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+
+        torch.compiler.set_stance("default")
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
@@ -4220,7 +4234,7 @@ class TestCase(expecttest.TestCase):
         # CI flag should be set in the parent process only.
         env.pop("CI", None)
         env.pop("TEST_SHOWLOCALS", None)
-        (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
+        _stdout, stderr = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
 
