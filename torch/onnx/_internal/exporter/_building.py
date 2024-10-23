@@ -686,7 +686,7 @@ class OpRecorder(evaluator.Evaluator):
                         f"named_inputs={named_inputs}, named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
                     ) from e
 
-                return function.function(**named_inputs, **named_attrs)
+                return function.function(**converted_named_inputs, **named_attrs)
 
             outputs = self._call_op(op_signature, named_inputs, named_attrs)
 
