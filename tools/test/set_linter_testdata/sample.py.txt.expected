@@ -1,0 +1,27 @@
+from torch.utils._ordered_set import OrderedSet
+a = OrderedSet()
+b = 'set()'
+c = OrderedSet
+d = c.set
+f = (
+   OrderedSet(
+   )
+)
+e = """ set()
+set() set x.set set()
+\""""
+
+# From here, every mention of set is ignored
+
+class A:
+    def set(self, x):
+        self.x = x
+
+set = A().set  # Also gets ignored!
+
+good = {}
+good = {1: 2}
+
+bad1 = {1}
+bad2 = {'hello: there', 2}
+bad3 = [{1: {i for i in range(5)}}]
