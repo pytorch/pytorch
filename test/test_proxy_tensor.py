@@ -1519,7 +1519,6 @@ def forward(self, x_1, y_1):
             z3 = x3.item()
             torch._check(z1 == z2 + z3)
             return y * 2
-
         # NB: inputs are done as CUDA to ensure they aren't queried to be
         # backed
 
