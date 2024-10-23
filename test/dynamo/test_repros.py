@@ -6170,8 +6170,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(ref, res)
 
-    # listcomp bytecode is optimized for 3.12
-    @skipIfPy312("listcomp bytecode is optimized")
+    @skipIfPy312  # listcomp bytecode is optimized
     def test_listcomp(self):
         class Module(torch.nn.Module):
             def __init__(self):
