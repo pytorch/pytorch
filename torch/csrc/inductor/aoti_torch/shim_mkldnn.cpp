@@ -364,7 +364,7 @@ aoti_torch_cpu__qlinear_pointwise_binary_tensor(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -388,6 +388,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // TODO: write a func for this c10::List conversion part
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(post_op_args_len_);
     for (int64_t i = 0; i < post_op_args_len_; i++) {
@@ -434,7 +435,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -463,6 +465,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // TODO: write a func for this c10::List conversion part
     c10::List<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {

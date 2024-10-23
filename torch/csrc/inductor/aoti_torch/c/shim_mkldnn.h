@@ -169,8 +169,7 @@ aoti_torch_cpu__qlinear_pointwise_binary_tensor(
     const char* unary_post_op_algorithm,
     AtenTensorHandle* ret0);
 
-// TODO: __qconv2d??
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -194,8 +193,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0);
 
-// TODO: __qconv2d??
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_qconv2d_pointwise_binary(
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,

@@ -617,6 +617,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.onednn.qconv2d_pointwise.default,
+            cpp_kernel_name="aoti_torch_cpu__qconv2d_pointwise_tensor",
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -740,7 +741,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
-            cpp_kernel_name=("aoti_torch_cpu_qconv2d_pointwise_binary"),
+            cpp_kernel_name=("aoti_torch_cpu__qconv2d_pointwise_binary_tensor"),
         )
         self.cpp_op_schema = """
             at::Tensor(
