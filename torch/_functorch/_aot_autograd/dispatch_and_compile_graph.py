@@ -130,7 +130,7 @@ def aot_dispatch_base_graph(
             mod_when_exporting_non_strict, assigned_buffers
         )
 
-    # TODO: Refactor the following code so detach() persisits item_memo
+    # TODO: Refactor the following code so detach() persists item_memo
     def detach_and_copy_item_memo(t):
         detached_t = t.detach()
         if hasattr(t, "item_memo"):
