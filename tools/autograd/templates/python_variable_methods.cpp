@@ -501,6 +501,29 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_mtia(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "mtia(Device? device=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "mtia(Device? device=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
+  });
+  auto& self_ = THPVariable_Unpack(self);
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::MTIA) : r.device(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
+  TORCH_CHECK(device.is_mtia(), "Invalid device, must be MTIA device");
+  torch::utils::device_lazy_init(at::kMTIA);
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -976,9 +999,6 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (device && device->is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
@@ -1058,9 +1078,6 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     device = at::Device(device_type);
   }
   torch::utils::maybe_initialize_device(device);
-  if (device.is_privateuseone()) {
-    at::globalContext().lazyInitPrivateUse1();
-  }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -1272,6 +1289,7 @@ PyMethodDef variable_methods[] = {
   {"copy_", castPyCFunctionWithKeywords(THPVariable_copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", castPyCFunctionWithKeywords(THPVariable_cpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cuda", castPyCFunctionWithKeywords(THPVariable_cuda), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"mtia", castPyCFunctionWithKeywords(THPVariable_mtia), METH_VARARGS | METH_KEYWORDS, NULL},
   {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, NULL},

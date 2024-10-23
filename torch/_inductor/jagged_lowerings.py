@@ -1,9 +1,11 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import sympy
 
 import torch
+
 from .ir import Pointwise, TensorBox
 from .lowering import fallback_handler, is_integer_type, register_lowering
 from .virtualized import ops
@@ -57,8 +59,13 @@ def get_inverse_offsets(
         idx = index[0]
         bucket = ops.bucketize(
             values=ops.index_expr(idx, dtype),
-            offsets_name=offsets.get_name(),
-            offsets_size=offsets.get_size()[0],
+            boundaries=(
+                offsets.get_name(),
+                offsets.get_size()[-1],
+                offsets.get_size()[0] * offsets.get_stride()[0],
+                offsets.get_stride()[-1],
+            ),
+            boundary_indices=0,
             indexing_dtype=dtype,
             right=True,
         )

@@ -424,12 +424,7 @@ void cuda_sparse_coo_softmax(
   auto out_values_2 = out_values.view({nnz, nvalues});
   auto out_values_accessor = out_values_2.packed_accessor64<scalar_t, 2>();
 
-  Tensor sorted_indices;
-  Tensor pool_offsets;
-  Tensor pool_sizes;
-  Tensor mx_buffer;
-
-  std::tie(sorted_indices, pool_offsets, pool_sizes, mx_buffer) =
+  auto [sorted_indices, pool_offsets, pool_sizes, mx_buffer] =
       compute_pool_max<scalar_t, true>(indices, values_2, sizes, nvalues, dim);
 
   auto pool_size = pool_offsets.size(0);
@@ -443,12 +438,12 @@ void cuda_sparse_coo_softmax(
   if (nvalues > 0 && pool_size > 0) {
     cuda_sparse_coo_softmax_kernel<scalar_t, LogSoftMax>
         <<<grid_size, block_size, 0, stream>>>(
-            sorted_indices.data_ptr<int64_t>(),
+            sorted_indices.template data_ptr<int64_t>(),
             pool_size,
-            pool_sizes.data_ptr<int64_t>(),
-            pool_offsets.data_ptr<int64_t>(),
+            pool_sizes.template data_ptr<int64_t>(),
+            pool_offsets.template data_ptr<int64_t>(),
             nvalues,
-            mx_buffer.data_ptr<scalar_t>(),
+            mx_buffer.template data_ptr<scalar_t>(),
             values_accessor,
             out_values_accessor);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -557,13 +552,9 @@ void cuda_sparse_coo_softmax_backward(
       thrust_ptr(out_offsets.data_ptr<int64_t>()) + out_offsets.size(0),
       thrust_ptr(lower_bound_values.data_ptr<int64_t>()));
 
-  Tensor sorted_indices;
-  Tensor pool_offsets;
-  Tensor pool_sizes;
-
   /* Compute independent pools of indices */
-  std::tie(
-      sorted_indices, pool_offsets, pool_sizes, std::ignore) =
+  auto [
+      sorted_indices, pool_offsets, pool_sizes, _] =
       compute_pool_max<scalar_t, false>(
           out_indices, values_2, sizes, nvalues, dim);
 
@@ -575,10 +566,10 @@ void cuda_sparse_coo_softmax_backward(
   if (nvalues > 0 && pool_size > 0) {
     cuda_sparse_coo_softmax_backward_kernel<scalar_t, LogSoftMax>
         <<<grid_size, block_size, 0, stream>>>(
-            sorted_indices.data_ptr<int64_t>(),
+            sorted_indices.template data_ptr<int64_t>(),
             pool_size,
-            pool_sizes.data_ptr<int64_t>(),
-            pool_offsets.data_ptr<int64_t>(),
+            pool_sizes.template data_ptr<int64_t>(),
+            pool_offsets.template data_ptr<int64_t>(),
             nvalues,
             grad_nnz,
             grad_offsets.data_ptr<int64_t>(),

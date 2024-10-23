@@ -60,8 +60,8 @@ class IntInfinity(Number, metaclass=Singleton):
     @_sympifyit("other", NotImplemented)
     def __add__(self, other):
         if isinstance(other, Number) and global_parameters.evaluate:
-            if other is S.NegativeInfinity:
-                return S.NegativeInfinity
+            if other in (S.Infinity, S.NegativeInfinity):
+                return other
             if other in (S.NegativeIntInfinity, S.NaN):
                 return S.NaN
             return self
@@ -74,6 +74,8 @@ class IntInfinity(Number, metaclass=Singleton):
         if isinstance(other, Number) and global_parameters.evaluate:
             if other is S.Infinity:
                 return S.NegativeInfinity
+            if other is S.NegativeInfinity:
+                return S.Infinity
             if other in (S.IntInfinity, S.NaN):
                 return S.NaN
             return self

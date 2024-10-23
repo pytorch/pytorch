@@ -17,7 +17,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         def fn():
             a = 10
             b = 20
-            c = a + b
+            # prevent LOAD_FAST_LOAD_FAST in 3.13 by wrapping b with g()
+            c = a + g(b)
             f = "linetable_writer"
             return f"Test if {f} generates correct co_linetable: {c}"
 

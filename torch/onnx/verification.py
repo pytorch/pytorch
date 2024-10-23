@@ -18,30 +18,19 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    FrozenSet,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, _exporter_states, utils
+from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, onnx_proto_utils
+from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
+
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -95,11 +84,10 @@ class VerificationOptions:
     backend: OnnxBackend = OnnxBackend.ONNX_RUNTIME_CPU
     rtol: float = 1e-3
     atol: float = 1e-7
-    remained_onnx_input_idx: Optional[Sequence[int]] = None
-    acceptable_error_percentage: Optional[float] = None
+    remained_onnx_input_idx: Sequence[int] | None = None
+    acceptable_error_percentage: float | None = None
 
 
-@_beartype.beartype
 def _flatten_tuples(elem):
     flattened = []
     for t in elem:
@@ -111,7 +99,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> Union[list, np.ndarray]:
+def _to_numpy(elem) -> list | npt.NDArray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -129,7 +117,6 @@ def _to_numpy(elem) -> Union[list, np.ndarray]:
     return elem
 
 
-@_beartype.beartype
 def _inline_flatten_list(inputs, res_list) -> list:
     for i in inputs:
         res_list.append(i) if not isinstance(
@@ -138,7 +125,6 @@ def _inline_flatten_list(inputs, res_list) -> list:
     return res_list
 
 
-@_beartype.beartype
 def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     value_unpacked = []
     for value in values:
@@ -148,7 +134,6 @@ def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     return [_to_numpy(v) for v in value_unpacked]
 
 
-@_beartype.beartype
 def _run_onnx(onnx_session, inputs) -> _OutputsType:
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
@@ -179,9 +164,8 @@ def _run_onnx(onnx_session, inputs) -> _OutputsType:
     return onnx_outs
 
 
-@_beartype.beartype
 def _ort_session(
-    model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
+    model: str | io.BytesIO, ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
     try:
         import onnxruntime  # type: ignore[import]
@@ -203,8 +187,7 @@ def _ort_session(
     return ort_session
 
 
-@_beartype.beartype
-def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
+def _onnx_reference_evaluator_session(model: str | io.BytesIO):
     try:
         import onnx
         from onnx import reference as onnx_reference  # type: ignore[attr-defined]
@@ -220,8 +203,7 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
     return onnx_session
 
 
-@_beartype.beartype
-def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
+def _onnx_backend_session(model: str | io.BytesIO, backend: OnnxBackend):
     if backend == OnnxBackend.REFERENCE:
         onnx_session = _onnx_reference_evaluator_session(model)
     elif backend in {OnnxBackend.ONNX_RUNTIME_CPU, OnnxBackend.ONNX_RUNTIME_CUDA}:
@@ -231,14 +213,13 @@ def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
     return onnx_session
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_outputs_in_np(
     onnx_outs: _OutputsType,
     pt_outs: _OutputsType,
     options: VerificationOptions,
 ):
-    assert len(onnx_outs) == len(
-        pt_outs
+    assert (
+        len(onnx_outs) == len(pt_outs)
     ), f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
@@ -281,7 +262,6 @@ def _compare_onnx_pytorch_outputs_in_np(
             raise
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_outputs(
     onnx_outs: _OutputsType,
     pt_outs: Any,
@@ -310,7 +290,6 @@ def _compare_onnx_pytorch_outputs(
     _compare_onnx_pytorch_outputs_in_np(onnx_outs, pt_outs_np, options)
 
 
-@_beartype.beartype
 def _prepare_input_for_pytorch(args, kwargs):
     """Prepare input for PyTorch model execution.
 
@@ -337,7 +316,6 @@ def _prepare_input_for_pytorch(args, kwargs):
     return args, kwargs
 
 
-@_beartype.beartype
 def _prepare_input_for_export(args, kwargs):
     """Prepare input for ONNX model export.
 
@@ -362,9 +340,8 @@ def _prepare_input_for_export(args, kwargs):
     return onnx_inputs
 
 
-@_beartype.beartype
 def _prepare_input_for_onnx(
-    args, kwargs, remained_onnx_input_idx: Optional[Sequence[int]], flatten: bool
+    args, kwargs, remained_onnx_input_idx: Sequence[int] | None, flatten: bool
 ):
     """Prepare input for ONNX model execution in ONNX backend.
 
@@ -392,7 +369,6 @@ def _prepare_input_for_onnx(
         return onnx_inputs
 
 
-@_beartype.beartype
 def _try_clone_model(model):
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -404,13 +380,12 @@ def _try_clone_model(model):
         return model
 
 
-@_beartype.beartype
 def _compare_onnx_pytorch_model(
     pt_model: _ModelType,
-    onnx_model_f: Union[str, io.BytesIO],
+    onnx_model_f: str | io.BytesIO,
     input_args: _InputArgsType,
-    input_kwargs: Optional[_InputKwargsType],
-    additional_test_inputs: Optional[Sequence[_InputArgsType]],
+    input_kwargs: _InputKwargsType | None,
+    additional_test_inputs: Sequence[_InputArgsType] | None,
     options: VerificationOptions,
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
@@ -430,7 +405,6 @@ def _compare_onnx_pytorch_model(
     """
     onnx_session = _onnx_backend_session(onnx_model_f, options.backend)
 
-    @_beartype.beartype
     def compare_onnx_pytorch_model_with_input(input_args, input_kwargs):
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
@@ -459,7 +433,6 @@ def _compare_onnx_pytorch_model(
 class _GraphDiff:
     """A class to represent the difference between two graphs."""
 
-    @_beartype.beartype
     def __init__(self, graph_a: _C.Graph, graph_b: _C.Graph):
         """Construct a _GraphDiff object.
 
@@ -470,16 +443,13 @@ class _GraphDiff:
         self.graph_a = graph_a
         self.graph_b = graph_b
 
-    @_beartype.beartype
     def __str__(self):
         """See function :func:`diff_report`."""
         return self.diff_report()
 
-    @_beartype.beartype
     def _indent(self, lines: str) -> str:
         return "\n".join(["\t" + line for line in lines.splitlines()])
 
-    @_beartype.beartype
     def diff_report(self) -> str:
         """Return a string representation of the graph difference.
 
@@ -529,15 +499,14 @@ class _GraphDiff:
         return "\n".join(graph_diff_report)
 
 
-@_beartype.beartype
 def _check_graph_diff(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    test_input_groups: Sequence[tuple[tuple[Any, ...], Mapping[str, Any]]],
     export_options: _experimental.ExportOptions,
     model_to_graph_func: Callable[
         [
             torch.nn.Module,
-            Tuple[Any, ...],
+            tuple[Any, ...],
             Mapping[str, Any],
             _experimental.ExportOptions,
         ],
@@ -571,10 +540,9 @@ def _check_graph_diff(
     return ""
 
 
-@_beartype.beartype
 def _traced_graph_from_model(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
     export_options: _experimental.ExportOptions,
 ) -> _C.Graph:
@@ -599,10 +567,9 @@ def _traced_graph_from_model(
         return jit_graph
 
 
-@_beartype.beartype
 def _onnx_graph_from_model(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
     export_options: _experimental.ExportOptions,
 ) -> _C.Graph:
@@ -664,12 +631,11 @@ def _onnx_graph_from_model(
         return onnx_graph
 
 
-@_beartype.beartype
 def _onnx_graph_from_aten_graph(
     graph: torch.Graph,
     export_options: _experimental.ExportOptions,
-    params_dict: Optional[Dict[str, Any]] = None,
-) -> Tuple[torch.Graph, Dict[str, Any]]:
+    params_dict: dict[str, Any] | None = None,
+) -> tuple[torch.Graph, dict[str, Any]]:
     if params_dict is None:
         params_dict = {}
     operator_export_type = export_options.operator_export_type
@@ -728,12 +694,11 @@ def _onnx_graph_from_aten_graph(
     return graph, params_dict
 
 
-@_beartype.beartype
 def _onnx_proto_from_onnx_graph(
     onnx_graph: torch.Graph,
     export_options: _experimental.ExportOptions,
-    params_dict: Dict[str, Any],
-) -> Tuple[bytes, Mapping[str, bytes]]:
+    params_dict: dict[str, Any],
+) -> tuple[bytes, Mapping[str, bytes]]:
     opset_version = export_options.opset_version or _constants.ONNX_DEFAULT_OPSET
     dynamic_axes = export_options.dynamic_axes or {}
     operator_export_type = export_options.operator_export_type
@@ -762,11 +727,10 @@ def _onnx_proto_from_onnx_graph(
     return proto, export_map
 
 
-@_beartype.beartype
 def check_export_model_diff(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
-    export_options: Optional[_experimental.ExportOptions] = None,
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    test_input_groups: Sequence[tuple[tuple[Any, ...], Mapping[str, Any]]],
+    export_options: _experimental.ExportOptions | None = None,
 ) -> str:
     """Verify exported model discrepancy between different groups of inputs.
 
@@ -806,25 +770,23 @@ def check_export_model_diff(
     )
 
 
-@_beartype.beartype
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
-    input_kwargs: Optional[_InputKwargsType] = None,
+    input_kwargs: _InputKwargsType | None = None,
     do_constant_folding: bool = True,
-    dynamic_axes: Optional[
-        Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
-    ] = None,
-    input_names: Optional[Sequence[str]] = None,
-    output_names: Optional[Sequence[str]] = None,
+    dynamic_axes: Mapping[str, Mapping[int, str] | Mapping[str, Sequence[int]]]
+    | None = None,
+    input_names: Sequence[str] | None = None,
+    output_names: Sequence[str] | None = None,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: Optional[int] = None,
+    opset_version: int | None = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
-    options: Optional[VerificationOptions] = None,
+    additional_test_inputs: Sequence[_InputArgsType] | None = None,
+    options: VerificationOptions | None = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
 
@@ -861,7 +823,7 @@ def verify(
     elif training == torch.onnx.TrainingMode.EVAL:
         model.eval()
     with torch.no_grad(), contextlib.ExitStack() as stack:
-        model_f: Union[str, io.BytesIO] = io.BytesIO()
+        model_f: str | io.BytesIO = io.BytesIO()
         if use_external_data:
             tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
             model_f = os.path.join(tmpdir_path, "model.onnx")
@@ -895,14 +857,13 @@ def verify(
         )
 
 
-@_beartype.beartype
 def verify_aten_graph(
     graph: torch.Graph,
-    input_args: Tuple[Any, ...],
+    input_args: tuple[Any, ...],
     export_options: _experimental.ExportOptions,
-    params_dict: Optional[Dict[str, Any]] = None,
-    verification_options: Optional[VerificationOptions] = None,
-) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
+    params_dict: dict[str, Any] | None = None,
+    verification_options: VerificationOptions | None = None,
+) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -931,9 +892,8 @@ def verify_aten_graph(
     proto, export_map = _onnx_proto_from_onnx_graph(
         graph, export_options, onnx_params_dict
     )
-    model_f: Union[str, io.BytesIO] = io.BytesIO()
-    export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
-    onnx_proto_utils._export_file(proto, model_f, export_type, export_map)
+    model_f: str | io.BytesIO = io.BytesIO()
+    onnx_proto_utils._export_file(proto, model_f, export_map)
 
     # NOTE: Verification is unstable. Try catch to emit information for debugging.
     try:
@@ -975,15 +935,15 @@ def verify_aten_graph(
 
 
 class GraphInfoPrettyPrinter:
-    graph_info: Optional[GraphInfo]
-    upper_printer: Optional[GraphInfoPrettyPrinter]
-    lower_printer: Optional[GraphInfoPrettyPrinter]
+    graph_info: GraphInfo | None
+    upper_printer: GraphInfoPrettyPrinter | None
+    lower_printer: GraphInfoPrettyPrinter | None
 
     graph_str_lambdas: Mapping[int, str]
     connector_str_lambdas: Mapping[int, str]
     children_str_lambdas: Mapping[int, str]
 
-    def __init__(self, graph_info: Optional[GraphInfo]):
+    def __init__(self, graph_info: GraphInfo | None):
         self.graph_info = graph_info
         if (
             graph_info is not None
@@ -996,7 +956,6 @@ class GraphInfoPrettyPrinter:
             self.upper_printer = None
             self.lower_printer = None
 
-    @_beartype.beartype
     def _total_rows(self) -> int:
         if self.graph_info is None:
             return 1
@@ -1006,7 +965,6 @@ class GraphInfoPrettyPrinter:
             )
         return 2  # Two lines: node count + id.
 
-    @_beartype.beartype
     def _node_count_segment_str(self) -> str:
         if self.graph_info is None:
             return "..."
@@ -1020,19 +978,16 @@ class GraphInfoPrettyPrinter:
 
         return f"{node_count} {'X' if has_mismatch else chr(0x2713)} {error_node_kind}"
 
-    @_beartype.beartype
     def _graph_id_segment_str(self) -> str:
         if self.graph_info is None:
             return ""
         return f"id: {self.graph_info.id}"
 
-    @_beartype.beartype
     def _max_segment_columns(self) -> int:
         return max(
             map(len, (self._node_count_segment_str(), self._graph_id_segment_str()))
         )
 
-    @_beartype.beartype
     def _graph_segment_str_at_line(self, line: int) -> str:
         """Get the string representation of the graph segment at the given line."""
         if line == 0:
@@ -1047,7 +1002,6 @@ class GraphInfoPrettyPrinter:
             return " " * self._max_segment_columns()
         return ""
 
-    @_beartype.beartype
     def _connector_segment_str_at_line(self, line: int) -> str:
         """Get the connector segment string at the given line."""
         if self.upper_printer is None and self.lower_printer is None:
@@ -1064,7 +1018,6 @@ class GraphInfoPrettyPrinter:
             return "    "
         return ""
 
-    @_beartype.beartype
     def _children_str_at_line(self, line: int) -> str:
         """Get the string representation of the children at the given line.
 
@@ -1086,7 +1039,6 @@ class GraphInfoPrettyPrinter:
             )
         return ""
 
-    @_beartype.beartype
     def _str_at_line(self, line: int) -> str:
         """Get the string representation of the graph at the given line."""
         return (
@@ -1114,7 +1066,7 @@ class GraphInfoPrettyPrinter:
                 ]
             )
             # Summarize node kinds with mismatch.
-            mismatch_node_kinds: Dict[str, int] = {}
+            mismatch_node_kinds: dict[str, int] = {}
             for graph_info in self.graph_info.all_mismatch_leaf_graph_info():
                 node_kinds = graph_info.essential_node_kinds()
                 if len(node_kinds) == 1:
@@ -1136,9 +1088,8 @@ class OnnxTestCaseRepro:
         )
 
     @classmethod
-    @_beartype.beartype
     def create_test_case_repro(
-        cls, proto: bytes, inputs, outputs, dir: str, name: Optional[str] = None
+        cls, proto: bytes, inputs, outputs, dir: str, name: str | None = None
     ):
         """Create a repro under "{dir}/test_{name}" for an ONNX test case.
 
@@ -1174,7 +1125,6 @@ class OnnxTestCaseRepro:
             dir,
         )
 
-    @_beartype.beartype
     def validate(self, options: VerificationOptions):
         """Run the ONNX test case with options.backend, and compare with the expected outputs.
 
@@ -1202,23 +1152,19 @@ class GraphInfo:
     """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
 
     graph: torch.Graph
-    input_args: Tuple[Any, ...]
-    params_dict: Dict[str, Any]
+    input_args: tuple[Any, ...]
+    params_dict: dict[str, Any]
     export_options: _experimental.ExportOptions = dataclasses.field(
         default_factory=_experimental.ExportOptions
     )
-    mismatch_error: Optional[AssertionError] = dataclasses.field(
-        default=None, init=False
-    )
-    pt_outs: Optional[Sequence[_NumericType]] = dataclasses.field(
-        default=None, init=False
-    )
-    upper_graph_info: Optional[GraphInfo] = dataclasses.field(default=None, init=False)
-    lower_graph_info: Optional[GraphInfo] = dataclasses.field(default=None, init=False)
+    mismatch_error: AssertionError | None = dataclasses.field(default=None, init=False)
+    pt_outs: Sequence[_NumericType] | None = dataclasses.field(default=None, init=False)
+    upper_graph_info: GraphInfo | None = dataclasses.field(default=None, init=False)
+    lower_graph_info: GraphInfo | None = dataclasses.field(default=None, init=False)
     id: str = dataclasses.field(default="")
-    _onnx_graph: Optional[torch.Graph] = dataclasses.field(init=False, default=None)
+    _onnx_graph: torch.Graph | None = dataclasses.field(init=False, default=None)
 
-    _EXCLUDED_NODE_KINDS: FrozenSet[str] = frozenset(
+    _EXCLUDED_NODE_KINDS: frozenset[str] = frozenset(
         {"prim::Constant", "prim::ListConstruct", "aten::ScalarImplicit"}
     )
 
@@ -1286,20 +1232,17 @@ class GraphInfo:
         else:
             print(" No mismatch ".center(80, "="))
 
-    @_beartype.beartype
     def has_mismatch(self) -> bool:
         """Return True if the subgraph has output mismatch between torch and ONNX."""
         return self.mismatch_error is not None
 
-    @_beartype.beartype
     def essential_node_count(self) -> int:
         """Return the number of nodes in the subgraph excluding those in `_EXCLUDED_NODE_KINDS`."""
         return sum(
             1 for n in self.graph.nodes() if n.kind() not in self._EXCLUDED_NODE_KINDS
         )
 
-    @_beartype.beartype
-    def essential_node_kinds(self) -> Set[str]:
+    def essential_node_kinds(self) -> set[str]:
         """Return the set of node kinds in the subgraph excluding those in `_EXCLUDED_NODE_KINDS`."""
         return {
             n.kind()
@@ -1307,8 +1250,7 @@ class GraphInfo:
             if n.kind() not in self._EXCLUDED_NODE_KINDS
         }
 
-    @_beartype.beartype
-    def all_mismatch_leaf_graph_info(self) -> List["GraphInfo"]:
+    def all_mismatch_leaf_graph_info(self) -> list[GraphInfo]:
         """Return a list of all leaf `GraphInfo` objects that have mismatch."""
         if not self.has_mismatch():
             return []
@@ -1330,8 +1272,7 @@ class GraphInfo:
 
         return results
 
-    @_beartype.beartype
-    def find_partition(self, id: str) -> Optional["GraphInfo"]:
+    def find_partition(self, id: str) -> GraphInfo | None:
         """Find the `GraphInfo` object with the given id."""
         if id == self.id:
             return self
@@ -1343,9 +1284,8 @@ class GraphInfo:
                 return self.lower_graph_info.find_partition(id)
         return None
 
-    @_beartype.beartype
     def export_repro(
-        self, repro_dir: Optional[str] = None, name: Optional[str] = None
+        self, repro_dir: str | None = None, name: str | None = None
     ) -> str:
         """Export the subgraph to ONNX along with the input/output data for repro.
 
@@ -1384,7 +1324,6 @@ class GraphInfo:
             proto, self.input_args, self.pt_outs, repro_dir, name
         )
 
-    @_beartype.beartype
     def _graph_partition_pivot(self) -> int:
         """Find the pivot index to partition the graph.
 
@@ -1407,7 +1346,6 @@ class GraphInfo:
             return included_node_indices[half_idx] + 1
         return -1
 
-    @_beartype.beartype
     def _partition_upper_graph(self) -> torch.Graph:
         pivot = self._graph_partition_pivot()
         if pivot == -1:
@@ -1416,13 +1354,13 @@ class GraphInfo:
         original_outputs = list(graph.outputs())
 
         def _process_bridge_value_for_upper(
-            new_outputs: List[torch.Value], bridge_value: torch.Value
+            new_outputs: list[torch.Value], bridge_value: torch.Value
         ) -> torch.Value:
             # Add bridge values as upper graph outputs.
             new_outputs.append(bridge_value)
             return bridge_value
 
-        new_outputs: List[torch.Value] = []
+        new_outputs: list[torch.Value] = []
         process_bridge_value_for_upper = functools.partial(
             _process_bridge_value_for_upper, new_outputs
         )
@@ -1451,7 +1389,6 @@ class GraphInfo:
 
         return graph
 
-    @_beartype.beartype
     def _partition_lower_graph(self) -> torch.Graph:
         pivot = self._graph_partition_pivot()
         if pivot == -1:
@@ -1506,14 +1443,13 @@ class GraphInfo:
 
         return graph
 
-    @_beartype.beartype
     def _partition_node(
         self,
         node: torch.Node,
-        complete_upper_nodes_set: Set[torch.Node],
-        complete_lower_nodes_set: Set[torch.Node],
-        original_graph_outputs: Set[torch.Value],
-        covered_bridge_values: Set[torch.Value],
+        complete_upper_nodes_set: set[torch.Node],
+        complete_lower_nodes_set: set[torch.Node],
+        original_graph_outputs: set[torch.Value],
+        covered_bridge_values: set[torch.Value],
         process_bridge_value: Callable[[torch.Value], torch.Value],
     ):
         if node in complete_lower_nodes_set:
@@ -1545,13 +1481,12 @@ class GraphInfo:
                 ):
                     covered_bridge_values.add(process_bridge_value(output))
 
-    @_beartype.beartype
     def _partition_nodes(
         self,
         graph: torch.Graph,
         pivot: int,
         process_bridge_value: Callable[[torch.Value], torch.Value],
-    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node], Set[torch.Node]]:
+    ) -> tuple[list[torch.Node], list[torch.Node], set[torch.Node], set[torch.Node]]:
         nodes = list(graph.nodes())
         upper_nodes = nodes[:pivot]
         lower_nodes = nodes[pivot:]
@@ -1585,7 +1520,6 @@ class GraphInfo:
             complete_lower_nodes_set,
         )
 
-    @_beartype.beartype
     def _bridge_kwargs(self):
         pt_outs = self.pt_outs
         graph_outputs = list(self.graph.outputs())
@@ -1595,11 +1529,10 @@ class GraphInfo:
         ), f"{len(graph_outputs)} vs {len(pt_outs)}\nGraph: {self.graph}"
         return {v.debugName(): o for v, o in zip(graph_outputs, pt_outs)}
 
-    @_beartype.beartype
     def _args_and_params_for_partition_graph(
         self,
         graph: torch.Graph,
-        bridge_kwargs: Mapping[str, Union[_NumericType, Sequence[_NumericType]]],
+        bridge_kwargs: Mapping[str, _NumericType | Sequence[_NumericType]],
         full_kwargs: Mapping[str, torch.Tensor],
         full_params: Mapping[str, torch.Tensor],
     ):
@@ -1612,10 +1545,9 @@ class GraphInfo:
         ), f"{len(args)} + {len(params)} vs {len(input_names)}: {input_names}"
         return args, params
 
-    @_beartype.beartype
     def verify_export(
         self, options: VerificationOptions
-    ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
+    ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
         """
         Verify the export from TorchScript IR graph to ONNX.
 
@@ -1642,10 +1574,9 @@ class GraphInfo:
             verification_options=options,
         )
 
-    @_beartype.beartype
     def find_mismatch(
         self,
-        options: Optional[VerificationOptions] = None,
+        options: VerificationOptions | None = None,
     ):
         """
         Find all mismatches between the TorchScript IR graph and the exported onnx model.
@@ -1722,8 +1653,7 @@ class GraphInfo:
         self.lower_graph_info.find_mismatch(options)
 
 
-@_beartype.beartype
-def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
+def _all_nodes(nodes: Collection[torch.Node]) -> set[torch.Node]:
     all_nodes = set(nodes)
     for n in nodes:
         for b in n.blocks():
@@ -1731,14 +1661,10 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
     return all_nodes
 
 
-@_beartype.beartype
 def _has_uses_by_nodes(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
-    if any(use.user in nodes for use in value.uses()):
-        return True
-    return False
+    return any(use.user in nodes for use in value.uses())
 
 
-@_beartype.beartype
 def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
     for output in node.outputs():
         if _has_uses_by_nodes(output, nodes):
@@ -1746,21 +1672,19 @@ def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]) -> bool:
     return False
 
 
-@_beartype.beartype
 def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
-@_beartype.beartype
 def find_mismatch(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args: Tuple[Any, ...],
+    model: torch.nn.Module | torch.jit.ScriptModule,
+    input_args: tuple[Any, ...],
     do_constant_folding: bool = True,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: Optional[int] = None,
+    opset_version: int | None = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
-    options: Optional[VerificationOptions] = None,
+    options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
 
@@ -1799,7 +1723,7 @@ def find_mismatch(
         ...     opset_version=opset_version,
         ... )
         >>> class Model(torch.nn.Module):
-        ...     def __init__(self):
+        ...     def __init__(self) -> None:
         ...         super().__init__()
         ...         self.layers = torch.nn.Sequential(
         ...             torch.nn.Linear(3, 4),
@@ -1858,7 +1782,7 @@ def find_mismatch(
         args = utils._decide_input_format(model, inputs_for_export)
 
         model = utils._pre_trace_quant_model(model, args)
-        graph, params, torch_out, module = utils._create_jit_graph(model, args)
+        graph, params, _torch_out, _module = utils._create_jit_graph(model, args)
         params_dict = utils._get_named_param_dict(graph, params)
 
         utils._apply_friendly_debug_names(graph, params_dict)

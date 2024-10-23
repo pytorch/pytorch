@@ -10,10 +10,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace torch::jit {
@@ -95,7 +94,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 struct THPFunction {
   PyObject_HEAD
 
-      PyObject* needs_input_grad;
+  PyObject* needs_input_grad;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were

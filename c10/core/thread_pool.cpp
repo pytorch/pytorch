@@ -1,5 +1,6 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
+#include <c10/util/thread_name.h>
 #if !defined(__powerpc__) && !defined(__s390x__)
 #include <cpuinfo.h>
 #endif
@@ -41,6 +42,7 @@ ThreadPool::ThreadPool(
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
     threads_[i] = std::thread([this, i, init_thread]() {
+      c10::setThreadName("pt_thread_pool");
       if (init_thread) {
         init_thread();
       }
@@ -60,6 +62,7 @@ ThreadPool::~ThreadPool() {
   for (auto& t : threads_) {
     try {
       t.join();
+      // NOLINTNEXTLINE(bugprone-empty-catch)
     } catch (const std::exception&) {
     }
   }

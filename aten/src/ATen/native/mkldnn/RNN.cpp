@@ -41,7 +41,7 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
   }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
@@ -68,7 +68,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
     }
 
 REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
@@ -523,8 +523,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
+  static_assert(false && sizeof(hidden_type), "pack_hidden not implemented for this type");
 }
 
 template<>

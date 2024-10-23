@@ -10,8 +10,9 @@ import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 try:
     import pydot  # noqa: F401
@@ -25,7 +26,6 @@ HAS_DOT = True if shutil.which("dot") is not None else False
 
 
 class TestGraphTransformObserver(TestCase):
-    @skipIfRocm
     def test_sdpa_rewriter(self):
         if not (
             HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION and HAS_PYDOT and HAS_DOT

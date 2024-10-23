@@ -16,7 +16,7 @@ struct DebugInfo {
     auto L = parseHeader(offset);
     parseCompileUnit(L);
   }
-  unwind::optional<uint64_t> lineNumberProgramOffset() {
+  std::optional<uint64_t> lineNumberProgramOffset() {
     return line_number_program_offset_;
   }
   uint64_t nextOffset() {
@@ -259,8 +259,9 @@ struct DebugInfo {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Sections& s_;
-  optional<uint64_t> line_number_program_offset_;
+  std::optional<uint64_t> line_number_program_offset_;
   uint64_t offset_ = 0;
   uint8_t sec_offset_size_ = 0;
   uint64_t length_ = 0;
@@ -270,10 +271,10 @@ struct DebugInfo {
 
   std::optional<std::pair<uint64_t, uint8_t>> range_ptr_;
   uint64_t lowpc_ = 0;
-  optional<uint64_t> highpc_;
+  std::optional<uint64_t> highpc_;
   uint16_t version_ = 0;
   uint64_t address_base_ = 0;
-  optional<uint64_t> rnglists_base_;
+  std::optional<uint64_t> rnglists_base_;
 };
 
 } // namespace torch::unwind

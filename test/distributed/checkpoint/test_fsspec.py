@@ -15,7 +15,7 @@ from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -54,7 +54,7 @@ def with_temp_dir(
 
 
 class MyTestModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -65,40 +65,7 @@ class MyTestModule(torch.nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
 
-class TestFSSpecNoDist(TestCase):
-    def test_fsspec_no_dist(self) -> None:
-        with tempfile.TemporaryDirectory() as path:
-            state_dict_to_save = MyTestModule().state_dict()
-
-            dcp.save_state_dict(
-                state_dict=state_dict_to_save,
-                storage_writer=FsspecWriter(path),
-                no_dist=True,
-            )
-
-            state_dict_to_load_to = MyTestModule().state_dict()
-
-            for p1, p2 in zip(
-                state_dict_to_save.items(),
-                state_dict_to_load_to.items(),
-            ):
-                self.assertNotEqual(p1, p2)
-
-            # Load from file without any resharding
-            dcp.load_state_dict(
-                state_dict=state_dict_to_load_to,
-                storage_reader=FsspecReader(path),
-                no_dist=True,
-            )
-
-            for p1, p2 in zip(
-                state_dict_to_save.items(),
-                state_dict_to_load_to.items(),
-            ):
-                self.assertEqual(p1, p2)
-
-
-class TestFSSpecWithDist(ShardedTensorTestBase):
+class TestFSSpec(ShardedTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
@@ -107,7 +74,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     @with_temp_dir
-    def test_fsspec_with_dist(self):
+    def test_fsspec(self):
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().cuda())
@@ -121,7 +88,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "optim": FSDP.optim_state_dict(model, optim),
             }
 
-            dcp.save_state_dict(
+            dcp.save(
                 state_dict=state_dict,
                 storage_writer=FsspecWriter(CHECKPOINT_DIR),
                 planner=dcp.DefaultSavePlanner(),
@@ -143,7 +110,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "model": model_2.state_dict(),
             }
 
-            dcp.load_state_dict(
+            dcp.load(
                 state_dict=state_dict,
                 storage_reader=FsspecReader(CHECKPOINT_DIR),
                 planner=dcp.DefaultLoadPlanner(),

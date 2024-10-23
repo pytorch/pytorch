@@ -30,9 +30,7 @@ std::mutex& fusionBackendLock() {
 }
 } // namespace
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
@@ -203,7 +201,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device) {
+    const at::Device& device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();
@@ -231,7 +229,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
       if (p->type()->isSubtypeOf(*FloatType::get())) {
-        flat_inputs.emplace_back(p, c10::nullopt);
+        flat_inputs.emplace_back(p, std::nullopt);
       }
       if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
@@ -297,6 +295,4 @@ std::shared_ptr<FusedKernel> compileKernel(
       spec.hasRandom());
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

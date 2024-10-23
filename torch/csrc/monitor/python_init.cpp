@@ -1,5 +1,7 @@
 #include <utility>
 
+#include <c10/util/WaitCounter.h>
+
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -13,8 +15,7 @@
 #include <torch/csrc/monitor/counters.h>
 #include <torch/csrc/monitor/events.h>
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 template <>
 struct type_caster<torch::monitor::data_value_t> {
  public:
@@ -59,11 +60,9 @@ struct type_caster<torch::monitor::data_value_t> {
     throw std::runtime_error("unknown data_value_t type");
   }
 };
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 namespace {
 class PythonEventHandler : public EventHandler {
@@ -296,7 +295,47 @@ void initMonitorBindings(PyObject* module) {
         after calling ``register_event_handler``. After this returns the event
         handler will no longer receive events.
       )DOC");
+
+  struct WaitCounterTracker {
+    explicit WaitCounterTracker(const c10::monitor::WaitCounterHandle& h)
+        : handle{h} {}
+    c10::monitor::WaitCounterHandle handle;
+    std::optional<c10::monitor::WaitCounterHandle::WaitGuard> guard;
+  };
+  py::class_<WaitCounterTracker, std::shared_ptr<WaitCounterTracker>>(
+      m, "_WaitCounterTracker")
+      .def(
+          "__enter__",
+          [](const std::shared_ptr<WaitCounterTracker>& self) {
+            self->guard.emplace(self->handle.start());
+          })
+      .def(
+          "__exit__",
+          [](const std::shared_ptr<WaitCounterTracker>& self,
+             const pybind11::args&) { self->guard.reset(); });
+
+  py::class_<c10::monitor::WaitCounterHandle>(
+      m,
+      "_WaitCounter",
+      R"DOC(
+        WaitCounter represents a named duration counter.
+        Multiple units of work can be tracked by the same WaitCounter. Depending
+        on the backend, the WaitCounter may track the number of units of work,
+        their duration etc.
+      )DOC")
+      .def(
+          py::init([](const std::string& key) {
+            return std::make_unique<c10::monitor::WaitCounterHandle>(key);
+          }),
+          py::arg("key"))
+      .def(
+          "guard",
+          [](const c10::monitor::WaitCounterHandle* self) {
+            return std::make_shared<WaitCounterTracker>(*self);
+          },
+          R"DOC(
+            Creates a guard that manages a single unit of work.
+          )DOC");
 }
 
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor

@@ -1,29 +1,34 @@
 # Owner(s): ["module: __torch_dispatch__"]
 
+import logging
+import sys
 import tempfile
 import unittest
 from copy import deepcopy
 
 import torch
-from torch import SymInt
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.cuda.jiterator import _create_jit_fn
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.library import _scoped_library, fallthrough_kernel, impl, Library
-from torch.testing._internal.common_utils import *  # noqa: F403
-import logging
-import sys
-
 import torch._dynamo
+from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
 from torch._custom_op.functional import register_functional_op
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.cuda.jiterator import _create_jit_fn
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.library import _scoped_library, fallthrough_kernel, impl, Library
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_utils import (
+    first_sample,
+    IS_WINDOWS,
+    run_tests,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.logging_tensor import (
     capture_logs,
@@ -39,6 +44,7 @@ from torch.utils._mode_utils import all_same_mode, no_dispatch
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
+    is_in_torch_dispatch_mode,
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
@@ -63,6 +69,137 @@ class TestPythonRegistration(TestCase):
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
+
+    def test_fallback(self) -> None:
+        test_key = "TESTING_ONLY_GenericMode"
+        test_keyset = torch._C.DispatchKeySet(test_key)
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with _scoped_library("_", "IMPL") as my_lib:
+            expected_op = None
+            expected_args = None
+            expected_kwargs = None
+            # Use this out shape to make sure the result from our fallback
+            # is what is returned to the user
+            out_shape = None
+
+            def my_fallback(op, *args, **kwargs):
+                # Disable our handler during checks and generating the output
+                with torch._C._ForceDispatchKeyGuard(
+                    include_to_set, exclude_to_set | test_keyset
+                ):
+                    self.assertIs(op, expected_op)
+                    self.assertEqual(args, expected_args)
+                    self.assertEqual(kwargs, expected_kwargs)
+                    # Return something specific
+                    return torch.empty(out_shape)
+
+            my_lib.fallback(my_fallback, test_key)
+
+            a, b = torch.rand(2), torch.rand(2)
+
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                # Check a factory function
+                expected_op = torch.ops.aten.empty.memory_format
+                expected_args = ((2, 2),)
+                # Extra kwargs to bypass issues with default args in factory functions
+                expected_kwargs = {
+                    "dtype": torch.float64,
+                    "pin_memory": False,
+                    "device": torch.device("cpu"),
+                }
+                out_shape = (3,)
+                out = torch.empty(*expected_args, **expected_kwargs)
+                self.assertEqual(out.size(), out_shape)
+
+                # Check a regular function
+                expected_op = torch.ops.aten.add.Tensor
+                expected_args = (a, b)
+                expected_kwargs = {}
+                out_shape = (4,)
+                out = a + b
+                self.assertEqual(out.size(), out_shape)
+
+    def test_fallback_keyset(self) -> None:
+        test_key_first = "TESTING_ONLY_GenericMode"
+        test_key_second = "TESTING_ONLY_GenericWrapper"
+        test_keyset = torch._C.DispatchKeySet(test_key_first) | torch._C.DispatchKeySet(
+            test_key_second
+        )
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with _scoped_library("_", "IMPL") as my_lib:
+            first_called = False
+            second_called = False
+
+            def first_fallback(keyset, op, *args, **kwargs):
+                nonlocal first_called
+                if second_called:
+                    # Recursive call
+                    first_called = True
+                    with torch._C._ForceDispatchKeyGuard(
+                        include_to_set, exclude_to_set | test_keyset
+                    ):
+                        return op(*args, **kwargs)
+                else:
+                    # Redispatch down
+                    keyset = keyset.remove(test_key_first)
+                    return op.redispatch(keyset, *args, **kwargs)
+
+            def second_fallback(op, *args, **kwargs):
+                nonlocal second_called
+                # Set to avoid infinite recursion
+                second_called = True
+                # New dispatcher call should hit the first callback again
+                self.assertFalse(first_called)
+                a, b = args
+                # Make a substraction here instead of add !
+                c = a - b
+                self.assertTrue(first_called)
+                return c
+
+            my_lib.fallback(first_fallback, test_key_first, with_keyset=True)
+            my_lib.fallback(second_fallback, test_key_second)
+
+            a, b = torch.rand(2), torch.rand(2)
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                c = a + b
+
+            self.assertEqual(c, a - b)
+            self.assertTrue(first_called)
+            self.assertTrue(second_called)
+
+    def test_fallback_fallthrough(self) -> None:
+        test_key_first = "TESTING_ONLY_GenericMode"
+        test_key_second = "TESTING_ONLY_GenericWrapper"
+        test_keyset = torch._C.DispatchKeySet(test_key_first) | torch._C.DispatchKeySet(
+            test_key_second
+        )
+        include_to_set = torch._C._dispatch_tls_local_include_set() | test_keyset
+        exclude_to_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with _scoped_library("_", "IMPL") as my_lib:
+            is_called = False
+
+            def my_fallback(op, *args, **kwargs):
+                nonlocal is_called
+                is_called = True
+                with torch._C._ForceDispatchKeyGuard(
+                    include_to_set, exclude_to_set | test_keyset
+                ):
+                    return op(*args, **kwargs)
+
+            my_lib.fallback(torch.library.fallthrough_kernel, test_key_first)
+            my_lib.fallback(my_fallback, test_key_second)
+
+            a, b = torch.rand(2), torch.rand(2)
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                c = a + b
+
+            self.assertEqual(c, a + b)
+            self.assertTrue(is_called)
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
@@ -98,7 +235,7 @@ class TestPythonRegistration(TestCase):
                 self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
                 # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-                # combination if someone overrided the behavior for the same before them
+                # combination if someone overridden the behavior for the same before them
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
@@ -1067,7 +1204,8 @@ def forward(self, x_a_1, x_b_1, y_1):
             x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([LoggingTensor]):
+                x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
             self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
@@ -1508,7 +1646,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
         sub_count = 0
 
         class PoliteMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.pre_count = 0
                 self.post_count = 0
 
@@ -1613,6 +1751,35 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
+    def test_mode_detection(self):
+        class InfraMode(TorchDispatchMode):
+            @classmethod
+            def is_infra_mode(cls):
+                return True
+
+        class NonInfraMode(TorchDispatchMode):
+            pass
+
+        with InfraMode():
+            self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+            with NonInfraMode():
+                self.assertTrue(is_in_torch_dispatch_mode())
+                self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
+                with InfraMode():
+                    self.assertTrue(is_in_torch_dispatch_mode())
+                    self.assertTrue(
+                        is_in_torch_dispatch_mode(include_infra_modes=False)
+                    )
+
+                self.assertTrue(is_in_torch_dispatch_mode())
+                self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
+            self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+
+        self.assertFalse(is_in_torch_dispatch_mode())
+        self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(
@@ -1625,6 +1792,23 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
+
+    # See https://github.com/pytorch/pytorch/issues/136064
+    def test_view_returns_alias_under_torch_dispatch(self):
+        class MyMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **kwargs)
+                if func == torch.ops.aten.view.dtype:
+                    # view should return a fresh TensorImpl
+                    self.testcase.assertTrue(out is not args[0])
+                return out
+
+        with MyMode(self):
+            x = torch.ones(4, dtype=torch.float32)
+            out = x.view(torch.float32)
 
     def test_record_stream(self) -> None:
         class TestMode(TorchDispatchMode):
@@ -1699,7 +1883,10 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
                 )
                 logging.getLogger("NonWrapperSubclass").info(
-                    f"{func.__module__}.{func.__name__}", args, kwargs, rs  # noqa: G004
+                    f"{func.__module__}.{func.__name__}",  # noqa: G004
+                    args,
+                    kwargs,
+                    rs,
                 )
                 return rs
 
@@ -2407,6 +2594,28 @@ def forward(self, x_1):
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
+
+    def test_wrapper_subclass_reentrant_dispatch_with_mode(self):
+        # Tests the interaction between a wrapper subclass using reentrant dispatch
+        # and a TorchDispatchMode. See https://github.com/pytorch/pytorch/issues/136565
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        # derive from TwoTensor to minimize boilerplate
+        class MySubclass(TwoTensor):
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func(args[0].a)
+
+        t = MySubclass(torch.rand(2), torch.rand(2))
+        with CustomDispatchMode():
+            res = t.clone()
+
+        self.assertEqual(res, t.a)
+        self.assertIs(type(res), torch.Tensor)
 
 
 class TestPythonDispatcher(TestCase):

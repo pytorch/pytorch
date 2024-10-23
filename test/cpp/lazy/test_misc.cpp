@@ -66,7 +66,7 @@ TEST(HashTest, Sanity) {
   // std::optional
   test_hash_repeatable_sensitive(
       std::optional<std::string>("I have value!"),
-      std::optional<std::string>(c10::nullopt));
+      std::optional<std::string>(std::nullopt));
 
   // Containers
   auto a = std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8});

@@ -3,7 +3,7 @@
 #include <ATen/functorch/Macros.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <bitset>
 #include <utility>
 #include <variant>
@@ -149,7 +149,7 @@ struct Interpreter {
   }
   void clearSavedLocalDispatchKeySet() {
     TORCH_INTERNAL_ASSERT(savedLocalDispatchKeySet_.has_value());
-    savedLocalDispatchKeySet_ = c10::nullopt;
+    savedLocalDispatchKeySet_ = std::nullopt;
   }
   c10::impl::LocalDispatchKeySet getSavedLocalDispatchKeySet() const {
     TORCH_INTERNAL_ASSERT(savedLocalDispatchKeySet_.has_value());
@@ -179,7 +179,7 @@ struct Interpreter {
   // fields
   TransformType type_{};
   int64_t level_{};
-  optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
+  std::optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
   std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;
 };

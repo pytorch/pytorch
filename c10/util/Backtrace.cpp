@@ -1,7 +1,8 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -16,7 +17,10 @@
 #endif
 
 #if SUPPORTS_BACKTRACE
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-dynamic-exception-spec")
 #include <cxxabi.h>
+C10_CLANG_DIAGNOSTIC_POP()
 #ifdef C10_ANDROID
 #include <dlfcn.h>
 #include <unwind.h>
@@ -150,19 +154,19 @@ std::optional<FrameInformation> parse_frame_information(
 
   auto function_name_start = frame_string.find('(');
   if (function_name_start == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   function_name_start += 1;
 
   auto offset_start = frame_string.find('+', function_name_start);
   if (offset_start == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   offset_start += 1;
 
   const auto offset_end = frame_string.find(')', offset_start);
   if (offset_end == std::string::npos) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   frame.object_file = frame_string.substr(0, function_name_start - 1);
@@ -186,7 +190,7 @@ std::optional<FrameInformation> parse_frame_information(
       skip >> frame.offset_into_function;
 #else
 #warning Unknown standard library, backtraces may have incomplete debug information
-  return c10::nullopt;
+  return std::nullopt;
 #endif // defined(__GLIBCXX__)
 
   // Some system-level functions don't have sufficient debug information, so
@@ -277,6 +281,7 @@ class GetBacktraceImpl {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool skip_python_frames_;
   std::vector<void*> callstack_;
 };

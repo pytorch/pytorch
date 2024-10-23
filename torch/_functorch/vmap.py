@@ -16,7 +16,6 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-
 from torch._C._functorch import (
     _add_batch_dim,
     _remove_batch_dim,
@@ -32,13 +31,14 @@ from torch.utils._pytree import (
     TreeSpec,
 )
 
+
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 
 def doesnt_support_saved_tensors_hooks(f):
     message = (
-        "torch.func transforms don't yet support saved tensor hooks. "
+        "torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. "
         "Please open an issue with your use case."
     )
 
@@ -469,7 +469,6 @@ def vmap_increment_nesting(batch_size, randomness):
         _vmap_decrement_nesting()
 
 
-@doesnt_support_saved_tensors_hooks
 def _flat_vmap(
     func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
 ):
@@ -501,7 +500,6 @@ def _flat_vmap(
 # - vmap couples the tensor-wrapping code with error checking
 # - vmap's tensor unwrapping code is in C++; we would need to rewrite part of it
 #   in python because it overlaps with unwrap_batched
-@doesnt_support_saved_tensors_hooks
 def restore_vmap(func, in_dims, batch_size, randomness):
     def inner(*args, **kwargs):
         with vmap_increment_nesting(batch_size, randomness) as vmap_level:

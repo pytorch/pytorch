@@ -87,13 +87,15 @@ class _FSDPDeviceHandle:
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return an device handle corresponding to the device, and through this handle,
+        Return a device handle corresponding to the device, and through this handle,
         operations with the same semantics as CUDA can be performed on the device.
         Just return torch.cuda if the device is cuda to make attribute-access faster.
         Custom backend must first register a module with the same name with {device.type} on torch.
         """
         if device.type == "cuda":
             return cast(_FSDPDeviceHandle, torch.cuda)
+        elif device.type == "mtia":
+            return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
     def __getattr__(self, __name: str) -> Any:
@@ -106,7 +108,7 @@ class _FSDPDeviceHandle:
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __getattribute__(self, __name: str) -> Any:
@@ -142,7 +144,7 @@ class _FSDPState(_State):
         self._gradient_postdivide_factor: int = 0
         self._comm_hook: Optional[Callable] = None
         self._comm_hook_state: Optional[Any] = None
-        self._unshard_event: Optional[torch.cuda.Event] = None
+        self._unshard_event: Optional[torch.Event] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -272,7 +274,7 @@ def _named_parameters_with_duplicates(
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
-    except AssertionError as e:
+    except AssertionError:
         kwargs.pop("remove_duplicate")
         ret = list(module.named_parameters(**kwargs))
     return ret
@@ -533,8 +535,12 @@ def _override_module_mixed_precision(
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
-    # FIXME record_stream doesn't work with non-cuda tensors
-    if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
+    # FIXME record_stream doesn't work with non-cuda/mtia tensors
+    if tensor.device.type not in [
+        "cuda",
+        "mtia",
+        torch._C._get_privateuse1_backend_name(),
+    ]:
         return
 
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():

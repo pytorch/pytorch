@@ -5,6 +5,7 @@ import logging
 import torch
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
@@ -13,6 +14,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from ..virtualized import V
+
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()

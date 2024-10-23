@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
+#include <optional>
 
 #include <thread>
 #include <unordered_set>
@@ -115,7 +115,7 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
   }
 
   std::vector<c10::xpu::XPUStream> streams{};
-  for (C10_UNUSED const auto _ : c10::irange(200)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(200)) {
     streams.emplace_back(c10::xpu::getStreamFromPool());
   }
 

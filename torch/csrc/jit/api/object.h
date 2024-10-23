@@ -2,8 +2,8 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
+#include <optional>
 
 #include <utility>
 
@@ -108,7 +108,7 @@ struct TORCH_API Object {
     if (auto method = find_method(name)) {
       return *method;
     }
-    AT_ERROR("Method '", name, "' is not defined.");
+    TORCH_CHECK(false, "Method '", name, "' is not defined.");
   }
 
   const std::vector<Method> get_methods() const {
@@ -129,7 +129,7 @@ struct TORCH_API Object {
   const Property get_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
-        std::optional<Method> setter = c10::nullopt;
+        std::optional<Method> setter = std::nullopt;
         if (prop.setter) {
           setter = Method(_ivalue(), prop.setter);
         }
@@ -137,12 +137,12 @@ struct TORCH_API Object {
             prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
       }
     }
-    AT_ERROR("Property '", name, "' is not defined.");
+    TORCH_CHECK(false, "Property '", name, "' is not defined.");
   }
 
   const std::vector<Property> get_properties() const {
     return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      std::optional<Method> setter = c10::nullopt;
+      std::optional<Method> setter = std::nullopt;
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }

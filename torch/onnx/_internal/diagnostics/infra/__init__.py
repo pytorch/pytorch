@@ -14,6 +14,7 @@ from ._infra import (
 )
 from .context import Diagnostic, DiagnosticContext, RuntimeErrorWithDiagnostic
 
+
 __all__ = [
     "Diagnostic",
     "DiagnosticContext",

@@ -18,6 +18,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 
+
 __all__ = [
     "get_embedding_operators_config",
     "EmbeddingQuantizer",
@@ -41,7 +42,7 @@ def get_embedding_operators_config() -> OperatorConfig:
 
 
 class EmbeddingQuantizer(Quantizer):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     @classmethod

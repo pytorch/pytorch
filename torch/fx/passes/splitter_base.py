@@ -1,46 +1,51 @@
 # mypy: allow-untyped-defs
 import argparse
 import copy
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
-import logging
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 import torch
-from torch.fx.passes.graph_manipulation import get_size_of_node
-from torch.fx.node import map_arg
 from torch.fx._compatibility import compatibility
+from torch.fx.node import map_arg
+from torch.fx.passes.graph_manipulation import get_size_of_node
 
-from .operator_support import (
-    get_node_target,
-    OperatorSupportBase,
-)
 from .graph_drawer import FxGraphDrawer
+from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp
 from .split_utils import split_by_tags
 from .tools_common import (
-    FxNetAccFusionsFinder,
     CALLABLE_NODE_OPS,
-    Tensors,
+    FxNetAccFusionsFinder,
+    is_node_output_tensor,
     NodeList,
     NodeSet,
-    is_node_output_tensor,
+    Tensors,
 )
 
 
-__all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
+__all__ = [
+    "FxNetAccNodesFinder",
+    "FxNetSplitterInternalError",
+    "Subgraph",
+    "SplitResult",
+    "generate_inputs_for_submodules",
+]
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MIN_ACC_MODULE_SIZE = 1
 DEFAULT_SKIP_FUSION = False
 DEFAULT_ALLOW_NON_TENSOR = False
 
+
 class _SplitterSettingBase:
     def __init__(
         self,
         min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
         skip_fusion=DEFAULT_SKIP_FUSION,
-        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
+        max_acc_splits: int = -1,
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -49,6 +54,13 @@ class _SplitterSettingBase:
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
+        )
+        parser.add_argument(
+            "--max-acc-splits",
+            "--max_acc_splits",
+            required=False,
+            type=int,
+            help="Enforce a maximum number of split subgraphs.",
         )
         parser.add_argument(
             "--skip-fusion",
@@ -72,11 +84,18 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
-        args, unknown = parser.parse_known_args()
+        args, _unknown = parser.parse_known_args()
 
-        self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
+        self.min_acc_module_size: int = (
+            args.min_acc_module_size
+            if args.min_acc_module_size
+            else min_acc_module_size
+        )
         self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
-        self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
+        self.allow_non_tensor: bool = (
+            args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
+        )
+        self.max_acc_splits: int = max_acc_splits
 
 
 @compatibility(is_backward_compatible=False)
@@ -105,9 +124,7 @@ class FxNetAccNodesFinder:
         self.allow_non_tensor = allow_non_tensor
         self.acc_nodes: NodeSet = set()
 
-    def reduce_acc_nodes_non_tensor_input_helper(
-        self, cpu_worklist: NodeList
-    ):
+    def reduce_acc_nodes_non_tensor_input_helper(self, cpu_worklist: NodeList):
         """
         Transitively excludes nodes from ACC supported set.
         For every node in the worklist:
@@ -181,9 +198,11 @@ class FxNetAccNodesFinder:
 
         return self.acc_nodes
 
+
 @compatibility(is_backward_compatible=False)
 class FxNetSplitterInternalError(Exception):
     pass
+
 
 @compatibility(is_backward_compatible=False)
 @dataclass
@@ -191,6 +210,7 @@ class Subgraph:
     is_acc: bool
     nodes: NodeList
     device_ordinal: Optional[int] = None
+
 
 @compatibility(is_backward_compatible=False)
 class SplitResult(NamedTuple):
@@ -234,7 +254,9 @@ def generate_inputs_for_submodules(
     submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
-        results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs
+        results[submodule_to_names[module]] = (
+            copy.deepcopy(module_inputs) if deepcopy else module_inputs
+        )
 
     for name, mod in model.named_modules():
         if name in target_submodules:
@@ -299,7 +321,7 @@ class _SplitterBase:
     """
 
     # PCIe bandwidth for the backend, default to 100 GB/s
-    PCIe_BW = 100 * 2 ** 30
+    PCIe_BW = 100 * 2**30
 
     def __init__(
         self,
@@ -326,7 +348,9 @@ class _SplitterBase:
         self.settings = settings
         self.operator_support = operator_support
         self.sample_input = sample_input
-        self.acc_nodes = FxNetAccNodesFinder(self.module, self.operator_support, self.settings.allow_non_tensor)()
+        self.acc_nodes = FxNetAccNodesFinder(
+            self.module, self.operator_support, self.settings.allow_non_tensor
+        )()
 
         if self.settings.skip_fusion:
             self.fusions = {}
@@ -348,11 +372,11 @@ class _SplitterBase:
     # ===============================================================
 
     def get_node_submodule_map(self) -> Dict[str, str]:
-        """ Returns a map from node name to submodule name, e.g.
-            node: main_module_impl_impl_over_arch_unary_multiple_embedding
-              _pooling_embedding_pooling_sparse_entity_equivalence_key
-              _proxy_embedding_bag
-            maps to submodule name of: _run_on_acc_1
+        """Returns a map from node name to submodule name, e.g.
+        node: main_module_impl_impl_over_arch_unary_multiple_embedding
+          _pooling_embedding_pooling_sparse_entity_equivalence_key
+          _proxy_embedding_bag
+        maps to submodule name of: _run_on_acc_1
         """
         return self._node_submodule_map
 
@@ -402,9 +426,7 @@ class _SplitterBase:
 
         return mod
 
-    def _find_culprit(
-        self, mod: torch.fx.GraphModule, inputs: Tensors
-    ) -> str:
+    def _find_culprit(self, mod: torch.fx.GraphModule, inputs: Tensors) -> str:
         """
         When an error occurs during lowering or running the lowered mod, we use this
         function to find culprits in the `mod` that causes the error.
@@ -483,7 +505,9 @@ class _SplitterBase:
                 supported_nodes.append(node)
                 supported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
             else:
-                unsupported_node_types[target].add((arg_dtypes_tuple, kwarg_dtypes_tuple))
+                unsupported_node_types[target].add(
+                    (arg_dtypes_tuple, kwarg_dtypes_tuple)
+                )
 
         if dump_graph:
             self._draw_graph_based_on_node_support(self.module, supported_nodes)
@@ -518,7 +542,11 @@ class _SplitterBase:
         reports += f" {acc_subgraphs_num} acc subgraphs and {cpu_subgraphs_num} cpu subgraphs.\n"
 
         for i, subgraph in enumerate(subgraphs):
-            reports += f"_run_on_acc_{i}: " if subgraph.is_acc else f"{self.non_acc_submodule_name}{i}: "
+            reports += (
+                f"_run_on_acc_{i}: "
+                if subgraph.is_acc
+                else f"{self.non_acc_submodule_name}{i}: "
+            )
             reports += f"{len(subgraph.nodes)} node(s)\n"
 
         self.tag(subgraphs)
@@ -526,9 +554,7 @@ class _SplitterBase:
         split_mod.eval()
 
         if dump_graph:
-            drawer = FxGraphDrawer(
-                split_mod, "preview", ignore_getattr=True
-            )
+            drawer = FxGraphDrawer(split_mod, "preview", ignore_getattr=True)
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
                 # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
@@ -555,9 +581,7 @@ class _SplitterBase:
                     handle.remove()
                     return sub_inputs
 
-                submod_inputs = get_submod_inputs(
-                    split_mod, submod, self.sample_input
-                )
+                submod_inputs = get_submod_inputs(split_mod, submod, self.sample_input)
                 ShapeProp(submod).propagate(*submod_inputs)
 
                 total_input_bytes = 0
@@ -640,9 +664,7 @@ class _SplitterBase:
 
         return result
 
-    def update_reverse_deps_for_fusions(
-        self, deps: Dict[torch.fx.Node, NodeSet]
-    ):
+    def update_reverse_deps_for_fusions(self, deps: Dict[torch.fx.Node, NodeSet]):
         processed_node = set()
 
         for node, fusion in self.fusions.items():
@@ -844,7 +866,11 @@ class _SplitterBase:
     def tag(self, subgraphs: List[Subgraph]):
         self.tags = []
         for subgraph in subgraphs:
-            tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
+            tag = (
+                f"_run_on_acc_{len(self.tags)}"
+                if subgraph.is_acc
+                else f"{self.non_acc_submodule_name}{len(self.tags)}"
+            )
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):
@@ -854,26 +880,42 @@ class _SplitterBase:
                 self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
-        split_module = split_by_tags(self.module, self.tags, return_tuple=self._return_tuple)
+        split_module = split_by_tags(
+            self.module, self.tags, return_tuple=self._return_tuple
+        )
         if remove_tag:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):
                     del node.tag
-        return split_module
+        return split_module  # type: ignore[return-value]
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
-        print(f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs")
+        print(
+            f"Got {acc_subgraphs_count} acc subgraphs and {non_acc_subgraphs_count} non-acc subgraphs"
+        )
         self.tag(subgraphs)
         return self.split()
 
     def generate_split_results(self) -> SplitResult:
         split_module = self()
         submodule_names = []
-        for name, mod in split_module.named_children():
+        for name, _mod in split_module.named_children():
             submodule_names.append(name)
-        submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
+        if (
+            self.settings.max_acc_splits > 0
+            and len(submodule_names) > self.settings.max_acc_splits
+        ):
+            raise ValueError(
+                "Cannot fulfill max_acc_splits limit. "
+                "This may cause split fragmentation and "
+                "result in performance issues."
+            )
+
+        submodule_inputs = generate_inputs_for_submodules(
+            split_module, self.sample_input, submodule_names
+        )
         return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)

@@ -2,6 +2,7 @@ import difflib
 import io
 
 import numpy as np
+
 import onnx
 import onnx.helper
 
@@ -377,7 +378,7 @@ def verify(
 
     with torch.onnx.select_model_mode_for_export(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(
+        torch_out = torch.onnx.utils._export(
             model,
             args,
             proto_bytes,
@@ -397,7 +398,7 @@ def verify(
 
         def run(args, remained_onnx_input_idx):
             alt_proto_bytes = io.BytesIO()
-            torch_out = torch.onnx._export(
+            torch_out = torch.onnx.utils._export(
                 model,
                 args,
                 alt_proto_bytes,

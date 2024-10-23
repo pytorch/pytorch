@@ -85,15 +85,25 @@ runs:
       with:
         docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-    - name: Check if in a ARC runner
+    - name: Check if in a container runner
       shell: bash
-      id: check_arc_runner
-      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      id: check_container_runner
+      run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
     - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
       id: install-nvidia-driver
       uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-      if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+
+    - name: Setup GPU_FLAG for docker run
+      id: setup-gpu-flag
+      run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
+      if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+
+    - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
+      id: setup-sscache-port-flag
+      run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
 
     - name: Lock NVIDIA A100 40GB Frequency
       shell: bash
@@ -101,7 +111,7 @@ runs:
         sudo nvidia-smi -pm 1
         sudo nvidia-smi -ac 1215,1410
         nvidia-smi
-      if: contains(matrix.runner, 'a100')
+      if: ${{ contains(matrix.runner, 'a100') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
     - name: Start monitoring script
       id: monitor-script
@@ -167,10 +177,12 @@ runs:
         REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
         VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+        TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
         NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
         NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
         TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
         SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
         SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
         DOCKER_IMAGE: ${{ inputs.docker-image }}
@@ -180,6 +192,9 @@ runs:
         PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
+        SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+        IS_A100_RUNNER: ${{ contains(matrix.runner, 'a100') && '1' || '0' }}
+
       shell: bash
       run: |
         set -x
@@ -198,6 +213,7 @@ runs:
         # shellcheck disable=SC2086,SC2090
         container_name=$(docker run \
           ${GPU_FLAG:-} \
+          ${SCCACHE_SERVER_PORT_DOCKER_FLAG:-} \
           -e BUILD_ENVIRONMENT \
           -e PR_NUMBER \
           -e GITHUB_ACTIONS \
@@ -226,6 +242,7 @@ runs:
           -e PR_LABELS \
           -e MAX_JOBS="$(nproc --ignore=2)" \
           -e SCCACHE_BUCKET \
+          -e SCCACHE_REGION \
           -e SCCACHE_S3_KEY_PREFIX \
           -e XLA_CUDA \
           -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -233,7 +250,9 @@ runs:
           -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
           -e SKIP_SCCACHE_INITIALIZATION=1 \
           -e HUGGING_FACE_HUB_TOKEN \
+          -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
           -e DASHBOARD_TAG \
+          -e IS_A100_RUNNER \
           --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
           --security-opt seccomp=unconfined \
           --cap-add=SYS_PTRACE \
@@ -304,7 +323,7 @@ runs:
 
     - name: Teardown Linux
       uses: pytorch/test-infra/.github/actions/teardown-linux@main
-      if: always()
+      if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
 
     # NB: We are currently having an intermittent GPU-related issue on G5 runners with
     # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does

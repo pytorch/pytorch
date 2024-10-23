@@ -135,11 +135,13 @@ class InlineOptionalStreamGuard {
   explicit InlineOptionalStreamGuard()
       : guard_() // See Note [Explicit initialization of optional fields]
   {}
+  ~InlineOptionalStreamGuard() = default;
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit InlineOptionalStreamGuard(optional<Stream> stream_opt) : guard_() {
+  explicit InlineOptionalStreamGuard(std::optional<Stream> stream_opt)
+      : guard_() {
     if (stream_opt.has_value()) {
       guard_.emplace(stream_opt.value());
     }
@@ -150,6 +152,9 @@ class InlineOptionalStreamGuard {
   explicit InlineOptionalStreamGuard(Args&&... args)
       : guard_(std::in_place, std::forward<Args>(args)...) {}
 
+  InlineOptionalStreamGuard(const InlineOptionalStreamGuard<T>& other) = delete;
+  InlineOptionalStreamGuard& operator=(const InlineOptionalStreamGuard& other) =
+      delete;
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
 
@@ -172,17 +177,17 @@ class InlineOptionalStreamGuard {
 
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> original_stream() const {
-    return guard_.has_value() ? make_optional(guard_->original_stream())
-                              : nullopt;
+  std::optional<Stream> original_stream() const {
+    return guard_.has_value() ? std::make_optional(guard_->original_stream())
+                              : std::nullopt;
   }
 
   /// Returns the most recent stream that was set using this stream guard,
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> current_stream() const {
-    return guard_.has_value() ? make_optional(guard_->current_stream())
-                              : nullopt;
+  std::optional<Stream> current_stream() const {
+    return guard_.has_value() ? std::make_optional(guard_->current_stream())
+                              : std::nullopt;
   }
 
   /// Restore the original device and stream, resetting this guard to
@@ -192,7 +197,7 @@ class InlineOptionalStreamGuard {
   }
 
  private:
-  optional<InlineStreamGuard<T>> guard_;
+  std::optional<InlineStreamGuard<T>> guard_;
 };
 
 template <typename T>
@@ -229,7 +234,7 @@ class InlineMultiStreamGuard {
   }
 
  protected:
-  optional<T> impl_;
+  std::optional<T> impl_;
 
  private:
   /// The original streams that were active on all devices.

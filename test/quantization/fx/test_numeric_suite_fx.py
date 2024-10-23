@@ -100,7 +100,7 @@ from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_h
 # across various different files, speed of debugging on individual test cases
 # decreases.
 class LinearReluFunctional(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.w1 = nn.Parameter(torch.empty(4, 4))
         self.b1 = nn.Parameter(torch.zeros(4))
@@ -113,7 +113,7 @@ class LinearReluFunctional(nn.Module):
 
 
 class LinearFunctional(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.w1 = nn.Parameter(torch.empty(4, 4))
         self.b1 = nn.Parameter(torch.zeros(4))
@@ -125,7 +125,7 @@ class LinearFunctional(nn.Module):
 
 
 class LinearReluLinearFunctional(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.w = nn.Parameter(torch.Tensor(4, 4))
         self.b = nn.Parameter(torch.zeros(4))
@@ -150,7 +150,7 @@ class AddMulFunctional(nn.Module):
 
 
 class AllConvAndLinearFusionModules(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         # conv1d
         self.conv1d_0 = nn.Conv1d(1, 1, 1)
@@ -331,7 +331,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_fun(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = nn.Parameter(torch.empty(1, 4))
                 self.b = nn.Parameter(torch.zeros(1))
@@ -495,7 +495,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_nodes_with_equal_types_get_matched(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
@@ -1241,7 +1241,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         Verifies that logging inputs works correctly
         """
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
 
@@ -1263,7 +1263,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         signature for fp32 and int8 tensors.
         """
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.max_pool_2d = nn.MaxPool2d(2)
 
@@ -1347,7 +1347,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         int8 inputs.
         """
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = nn.ReLU()
 
@@ -1401,7 +1401,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 return (x1, x2)
 
         class M2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m1 = M1()
 
@@ -1446,7 +1446,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 return x
 
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(1, 1)
                 self.user_module = UserModule()
@@ -1682,7 +1682,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         Verify that NS APIs work on user defined functions
         """
         class M1(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.empty(1, 1))
                 self.b1 = nn.Parameter(torch.zeros(1))
@@ -1695,7 +1695,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 return x
 
         class M2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.empty(1, 1))
                 self.b1 = nn.Parameter(torch.zeros(1))
@@ -1881,7 +1881,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     @skipIfNoFBGEMM
     def test_int8_shadows_fp32_coverage(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.adaptive_avg_pool = nn.AdaptiveAvgPool2d(1)
                 self.conv = nn.Conv2d(1, 1, 1)
@@ -2048,7 +2048,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_linear_kwargs_shadow(self):
 
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.empty(4, 4))
                 self.b1 = nn.Parameter(torch.zeros(4))
@@ -2104,7 +2104,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_linear_mod(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 2)
 
@@ -2122,7 +2122,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_linear_relu_mod(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 2)
                 self.fc2 = nn.Linear(2, 2)
@@ -2148,7 +2148,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_conv_bn_relu_mod(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
                 self.bn = nn.BatchNorm2d(1)
@@ -2173,7 +2173,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_functions(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.randn(2, 2))
                 self.b1 = nn.Parameter(torch.zeros(2))
@@ -2212,7 +2212,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_partial_qconfig_mapping(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc = nn.Linear(2, 2)
                 self.w1 = nn.Parameter(torch.randn(2, 2))
@@ -2504,7 +2504,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_custom_functions_and_tracer(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 2)
                 self.fc2 = nn.Linear(2, 2)
@@ -2571,7 +2571,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_extract_weights_linear(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.randn(2, 2))
                 self.b1 = nn.Parameter(torch.randn(2))
@@ -2710,7 +2710,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     @withQNNPACKBackend
     def test_add_loggers_functions(self):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = nn.Parameter(torch.randn(2, 2))
                 self.b1 = nn.Parameter(torch.randn(2))

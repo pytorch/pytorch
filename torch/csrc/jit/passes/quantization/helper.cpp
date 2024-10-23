@@ -325,7 +325,7 @@ std::optional<Use> getClampScalarInputUse(Value* v) {
       }
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void cloneMethod(
@@ -503,7 +503,7 @@ std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
   if (isAtenFunc(n, fixed_qparam_funcs)) {
     return _fixed_qparams_map.at(n->kind());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool userDefinedCallFunction(Node* n) {
@@ -534,13 +534,13 @@ bool nodeQuantizable(Node* n, QuantType quant_type) {
 bool useQuantizable(const Use& use, QuantType quant_type) {
   if (quant_type == QuantType::STATIC) {
     for (const auto& func_input : _observe_inputs_aten_func) {
-      if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      if (matchAtenFuncToUse(use, func_input.func_name, std::nullopt)) {
         return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
 
     for (const auto& func_input : _observe_inputs_call_func) {
-      if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
+      if (matchCallFuncToUse(use, func_input.func_name, std::nullopt)) {
         return use.offset == static_cast<size_t>(func_input.arg_index);
       }
     }
@@ -653,7 +653,7 @@ std::optional<Module> getInvokedModuleOpt(
     if (m.attr(p).isModule()) {
       m = m.attr(p).toModule();
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   return m;
@@ -691,7 +691,7 @@ std::optional<std::string> getModuleName(Value* value) {
   if (type && type->name()) {
     return removeTorchMangle(type->name()->qualifiedName());
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 static bool is_module(

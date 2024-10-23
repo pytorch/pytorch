@@ -1,6 +1,7 @@
 import json
 import sys
 
+
 data_file_path = sys.argv[1]
 commit_hash = sys.argv[2]
 

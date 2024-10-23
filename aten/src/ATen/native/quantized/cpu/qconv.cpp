@@ -452,7 +452,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                 .memory_format(c10::MemoryFormat::ChannelsLast),
             output_scale,
             output_zero_point,
-            c10::nullopt)
+            std::nullopt)
       : at::native::fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
             output_shape[0],
             output_shape[1],
@@ -659,9 +659,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
       weight_tensor = at::native::empty_affine_quantized(
           weight_contig.sizes(),
           c10::CppTypeToScalarType<scalar_t>::value,
-          c10::nullopt /* layout */,
+          std::nullopt /* layout */,
           c10::kCPU,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* pin_memory */,
           w_scales_data[0],
           w_zp,
           c10::MemoryFormat::ChannelsLast);
@@ -672,9 +672,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
           at::zeros(w_scales.sizes(), at::kInt), /* see comment above about w_zp */
           weight_contig.q_per_channel_axis(),
           c10::CppTypeToScalarType<scalar_t>::value,
-          c10::nullopt /* layout */,
+          std::nullopt /* layout */,
           c10::kCPU,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* pin_memory */,
           c10::MemoryFormat::ChannelsLast);
     }
 
@@ -763,9 +763,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
       c10::CppTypeToScalarType<scalar_t>::value,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       c10::kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       c10::MemoryFormat::ChannelsLast);
@@ -905,7 +905,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8).memory_format(channels_last),
         weight_scales_data[0],
         w_zero_points[0],
-        c10::nullopt);
+        std::nullopt);
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
@@ -973,9 +973,9 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
       c10::kQUInt8,
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       c10::kCPU,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
       channels_last);
@@ -1117,7 +1117,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(input, c10::nullopt, output_scale, output_zero_point);
+  return apply_impl<false>(input, std::nullopt, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -1125,7 +1125,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(input, c10::nullopt, output_scale, output_zero_point);
+  return apply_impl<true>(input, std::nullopt, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -1232,7 +1232,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
               c10::MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
   if (output.numel() == 0) {
     return output;
   }
@@ -1793,7 +1793,9 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
+#endif
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
@@ -1905,8 +1907,8 @@ class QConvoneDNN final {
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
         groups, output_scale, output_zero_point,
-        /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
-        /*output_dtype*/output_dtype, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
+        /*accum*/std::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
+        /*output_dtype*/output_dtype, /*binary_attr*/std::nullopt, /*binary_alpha*/std::nullopt,
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else

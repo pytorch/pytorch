@@ -6,7 +6,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/jit_type_base.h>
 
@@ -314,7 +314,7 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key) const;
+  [[nodiscard]] size_t erase(const Key& key) const;
 
   /**
    * Returns the mapped value of the element with key equivalent to key.
@@ -364,7 +364,7 @@ public:
   bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
-  // instead of optional<TypePtr> once types are mandatory.
+  // instead of std::optional<TypePtr> once types are mandatory.
   TypePtr keyType() const;
   TypePtr valueType() const;
 

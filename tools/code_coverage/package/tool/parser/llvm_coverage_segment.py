@@ -1,4 +1,6 @@
-from typing import List, NamedTuple, Optional, Tuple
+from __future__ import annotations
+
+from typing import NamedTuple
 
 
 class LlvmCoverageSegment(NamedTuple):
@@ -7,7 +9,7 @@ class LlvmCoverageSegment(NamedTuple):
     segment_count: int
     has_count: int
     is_region_entry: int
-    is_gap_entry: Optional[int]
+    is_gap_entry: int | None
 
     @property
     def has_coverage(self) -> bool:
@@ -18,8 +20,8 @@ class LlvmCoverageSegment(NamedTuple):
         return self.has_count > 0
 
     def get_coverage(
-        self, prev_segment: "LlvmCoverageSegment"
-    ) -> Tuple[List[int], List[int]]:
+        self, prev_segment: LlvmCoverageSegment
+    ) -> tuple[list[int], list[int]]:
         # Code adapted from testpilot.testinfra.runners.gtestcoveragerunner.py
         if not prev_segment.is_executable:
             return [], []
@@ -32,12 +34,12 @@ class LlvmCoverageSegment(NamedTuple):
         return (lines_range, []) if prev_segment.has_coverage else ([], lines_range)
 
 
-def parse_segments(raw_segments: List[List[int]]) -> List[LlvmCoverageSegment]:
+def parse_segments(raw_segments: list[list[int]]) -> list[LlvmCoverageSegment]:
     """
     Creates LlvmCoverageSegment from a list of lists in llvm export json.
     each segment is represented by 5-element array.
     """
-    ret: List[LlvmCoverageSegment] = []
+    ret: list[LlvmCoverageSegment] = []
     for raw_segment in raw_segments:
         assert (
             len(raw_segment) == 5 or len(raw_segment) == 6

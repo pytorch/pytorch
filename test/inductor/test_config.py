@@ -3,9 +3,7 @@ import math
 import unittest
 
 import torch
-
 from torch._inductor import config
-
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -32,7 +30,7 @@ class TestInductorConfig(TestCase):
     def test_set(self):
         config.max_fusion_size = 13337
         self.assertEqual(config.max_fusion_size, 13337)
-        self.assertEqual(config.shallow_copy_dict()["max_fusion_size"], 13337)
+        self.assertEqual(config.get_config_copy()["max_fusion_size"], 13337)
         config.max_fusion_size = 32
         self.assertEqual(config.max_fusion_size, 32)
 
@@ -40,7 +38,7 @@ class TestInductorConfig(TestCase):
         prior = config.triton.cudagraphs
         config.triton.cudagraphs = not prior
         self.assertEqual(config.triton.cudagraphs, not prior)
-        self.assertEqual(config.shallow_copy_dict()["triton.cudagraphs"], not prior)
+        self.assertEqual(config.get_config_copy()["triton.cudagraphs"], not prior)
 
     def test_save_load(self):
         config.max_fusion_size = 123
@@ -226,12 +224,6 @@ class TestInductorConfig(TestCase):
             )(inp)
             torch._dynamo.reset()
             self.assertEqual(call_count, 1)
-
-        # TypeError: eager() got an unexpected keyword argument 'mode'
-        self.assertRaises(
-            torch._dynamo.exc.BackendCompilerFailed,
-            lambda: torch.compile(fn, backend="eager", mode="nope")(inp),
-        )
 
 
 if __name__ == "__main__":

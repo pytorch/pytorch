@@ -59,7 +59,7 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
 
 inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return scales->at(idx);
 }
@@ -103,7 +103,9 @@ DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
-inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -131,7 +133,9 @@ inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef in
   return {nbatch, channels, output_width};
 }
 
-inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 4> upsample_2d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -167,8 +171,9 @@ inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
-inline C10_UNUSED
-std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 5> upsample_3d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -489,8 +494,7 @@ void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t siz
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gin_bvec = bVec::loadu(gin + d);
-    fVec gin_fvec0, gin_fvec1;
-    std::tie(gin_fvec0, gin_fvec1) = convert_to_float<scalar_out>(gin_bvec);
+    auto [gin_fvec0, gin_fvec1] = convert_to_float<scalar_out>(gin_bvec);
     gin_fvec0 += fVec::loadu(buffer_ptr + d);
     gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
     fVec(0).store(buffer_ptr + d);

@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -52,7 +51,7 @@ std::deque<std::string> findSubModuleAttr(
 Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
   auto schema = function->getSchema();
   auto args = schema.arguments();
-  args.emplace_back(name, nullptr, c10::nullopt, attr);
+  args.emplace_back(name, nullptr, std::nullopt, attr);
   auto new_schema = FunctionSchema(
       schema.name(),
       schema.overload_name(),
@@ -191,5 +190,4 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   return std::make_pair(moduleClone, parameterIValues);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -2,9 +2,9 @@
 
 import torch
 import torch._dynamo.config
-
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn
 import torch.utils.checkpoint
 
 
@@ -55,6 +55,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.cos(x)
             finally:
                 x = torch.cos(x)
+
+            return x
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_exception4(self):
+        def fn(x):
+            for i in range(10):
+                if i == 5:
+                    return x
+                try:
+                    x = torch.sin(x)
+                    raise NotImplementedError
+                except Exception:
+                    x = torch.sigmoid(x)
 
             return x
 
@@ -170,9 +189,31 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_dynamo_undo_kw_names(self):
+        def g(x, k=None):
+            if k:
+                raise TypeError("error")
+            return x.sin()
+
+        def fn(x):
+            d = {"a": x}
+            try:
+                g(x, k=True)
+            except Exception:
+                y = 0
+                for _, b in d.items():  # noqa: PERF102
+                    y += b.sum()
+            return y
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got = opt_fn(x)
+        self.assertEqual(expected, got)
+
     def test_nn_module_getattr(self):
         class A:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._b = 20
 
             def __getattr__(self, name):
@@ -182,7 +223,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise AttributeError(f"{name} absent")
 
         class B(A):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 10
 
             def __getattr__(self, name):
@@ -226,6 +267,140 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
+
+    def test_attribute_error_from_getattr(self):
+        class Mock:
+            def __init__(self):
+                self.a = 5
+
+            def __getattr__(self, name):
+                if name != "a":
+                    raise AttributeError("missing")
+                return self.__dict__["a"]
+
+        mock = Mock()
+
+        def fn(x):
+            if hasattr(mock, "b"):
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_stop_iteration(self):
+        def zip_longest(*iterables, fillvalue=None):
+            # Get the iterators for each iterable
+            iterators = [iter(it) for it in iterables]
+
+            result = []
+            while True:
+                for it in iterators:
+                    try:
+                        value = next(it)
+                    except StopIteration:
+                        result.append(fillvalue)
+                        return result
+                    result.append(value)
+
+        def fn(x, y):
+            torch.cos(torch.randn(4))
+            return tuple(zip_longest(x, y))
+
+        x = [1, 2, 3, 4]
+        y = [10, 11, 12]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nn_reraise(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("woof")
+                return x + 2
+
+        m = M()
+        m.register_forward_pre_hook(lambda m, go: None)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        opt_call = torch.compile(lambda x: m(x), backend="eager")
+        self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertEqual(metrics[0].fail_reason, "Observed exception")
+
+    def test_key_error(self):
+        def fn(x, d):
+            try:
+                a = d["b"]
+            except KeyError:
+                a = 2
+            return x * a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d = {"a": 1}
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
+    def test_atrribute_error(self):
+        class Mock:
+            def __init__(self):
+                self.a = 1
+
+        mock = Mock()
+
+        def fn(x):
+            try:
+                c = 2
+                mock.b
+            except AttributeError:
+                c = 3
+            return torch.sin(x) * c
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_raise_from_None(self):
+        # Inspired from os.environ
+        class MyMapping:
+            def __init__(self, d):
+                self._d = d
+
+            def __getitem__(self, key):
+                try:
+                    value = self._d[key]
+                except KeyError:
+                    raise KeyError(key) from None
+                return value
+
+        d = MyMapping({"a": 10, "b": 20})
+
+        def mapping_get(obj, key, value=None):
+            try:
+                return obj.__getitem__(key)
+            except KeyError:
+                return value
+
+        def fn(x, d, key):
+            x = torch.sin(x + 1)
+            return x, mapping_get(d, key)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(2, 3)
+        ref = fn(x, d, "m")
+        res = opt_fn(x, d, "m")
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List
-import torch
-import time
-from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
-import os
-from dlrm_utils import get_dlrm_model, get_valid_name  # type: ignore[import]
-import copy
-import zipfile
-from zipfile import ZipFile
-import pandas as pd  # type: ignore[import]
 import argparse
+import copy
+import os
+import time
+import zipfile
+from typing import Dict, List
+from zipfile import ZipFile
+
+import pandas as pd  # type: ignore[import]
+from dlrm_utils import get_dlrm_model, get_valid_name  # type: ignore[import]
+
+import torch
+from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
 
 
 def create_attach_sparsifier(model, **sparse_config):
@@ -26,13 +28,20 @@ def create_attach_sparsifier(model, **sparse_config):
     """
     data_norm_sparsifier = DataNormSparsifier(**sparse_config)
     for name, parameter in model.named_parameters():
-        if 'emb_l' in name:
+        if "emb_l" in name:
             valid_name = get_valid_name(name)
             data_norm_sparsifier.add_data(name=valid_name, data=parameter)
     return data_norm_sparsifier
 
 
-def save_model_states(state_dict, sparsified_model_dump_path, save_file_name, sparse_block_shape, norm, zip=True):
+def save_model_states(
+    state_dict,
+    sparsified_model_dump_path,
+    save_file_name,
+    sparse_block_shape,
+    norm,
+    zip=True,
+):
     """Dumps the state_dict() of the model.
 
     Args:
@@ -53,15 +62,15 @@ def save_model_states(state_dict, sparsified_model_dump_path, save_file_name, sp
 
     # save model only states
     folder_str = f"config_{sparse_block_shape}"
-    model_state = state_dict['state_dict']
+    model_state = state_dict["state_dict"]
     model_state_path = os.path.join(folder_name, folder_str, save_file_name)
 
     os.makedirs(os.path.dirname(model_state_path), exist_ok=True)
     torch.save(model_state, model_state_path)
 
     if zip:
-        zip_path = model_state_path.replace('.ckpt', '.zip')
-        with ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip:
+        zip_path = model_state_path.replace(".ckpt", ".zip")
+        with ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip:
             zip.write(model_state_path, save_file_name)
         os.remove(model_state_path)  # store it as zip, remove uncompressed
         model_state_path = zip_path
@@ -97,7 +106,7 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
     norms = ["L1", "L2"]
     sparse_block_shapes = [(1, 1), (1, 4)]
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     print("Running for sparsity levels - ", sparsity_levels)
     print("Running for sparse block shapes - ", sparse_block_shapes)
@@ -105,20 +114,28 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
 
     orig_model = get_dlrm_model()
     saved_state = torch.load(path_to_model, map_location=device)
-    orig_model.load_state_dict(saved_state['state_dict'])
+    orig_model.load_state_dict(saved_state["state_dict"])
 
     orig_model = orig_model.to(device)
     step_time_dict = {}
 
-    stat_dict: Dict[str, List] = {'norm': [], 'sparse_block_shape': [], 'sparsity_level': [],
-                                  'step_time_sec': [], 'zip_file_size': [], 'path': []}
+    stat_dict: Dict[str, List] = {
+        "norm": [],
+        "sparse_block_shape": [],
+        "sparsity_level": [],
+        "step_time_sec": [],
+        "zip_file_size": [],
+        "path": [],
+    }
     for norm in norms:
         for sbs in sparse_block_shapes:
             if norm == "L2" and sbs == (1, 1):
                 continue
             for sl in sparsity_levels:
                 model = copy.deepcopy(orig_model)
-                sparsifier = create_attach_sparsifier(model, sparse_block_shape=sbs, norm=norm, sparsity_level=sl)
+                sparsifier = create_attach_sparsifier(
+                    model, sparse_block_shape=sbs, norm=norm, sparsity_level=sl
+                )
 
                 t1 = time.time()
                 sparsifier.step()
@@ -132,19 +149,21 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
 
                 sparsifier.squash_mask()
 
-                saved_state['state_dict'] = model.state_dict()
-                file_name = f'criteo_model_norm={norm}_sl={sl}.ckpt'
-                state_path, file_size = save_model_states(saved_state, sparsified_model_dump_path, file_name, sbs, norm=norm)
+                saved_state["state_dict"] = model.state_dict()
+                file_name = f"criteo_model_norm={norm}_sl={sl}.ckpt"
+                state_path, file_size = save_model_states(
+                    saved_state, sparsified_model_dump_path, file_name, sbs, norm=norm
+                )
 
-                stat_dict['norm'].append(norm)
-                stat_dict['sparse_block_shape'].append(sbs)
-                stat_dict['sparsity_level'].append(sl)
-                stat_dict['step_time_sec'].append(step_time)
-                stat_dict['zip_file_size'].append(file_size)
-                stat_dict['path'].append(state_path)
+                stat_dict["norm"].append(norm)
+                stat_dict["sparse_block_shape"].append(sbs)
+                stat_dict["sparsity_level"].append(sl)
+                stat_dict["step_time_sec"].append(step_time)
+                stat_dict["zip_file_size"].append(file_size)
+                stat_dict["path"].append(state_path)
 
     df = pd.DataFrame(stat_dict)
-    filename = 'sparse_model_metadata.csv'
+    filename = "sparse_model_metadata.csv"
     df.to_csv(filename, index=False)
 
     print(f"Saved sparsified metadata file in {filename}")
@@ -152,8 +171,10 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model-path', '--model_path', type=str)
-    parser.add_argument('--sparsified-model-dump-path', '--sparsified_model_dump_path', type=str)
+    parser.add_argument("--model-path", "--model_path", type=str)
+    parser.add_argument(
+        "--sparsified-model-dump-path", "--sparsified_model_dump_path", type=str
+    )
     args = parser.parse_args()
 
     sparsify_model(args.model_path, args.sparsified_model_dump_path)

@@ -299,7 +299,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       dilation,
       groups,
       transpose,
-      c10::nullopt, /* input_scale */
+      std::nullopt, /* input_scale */
       kernel_dim,
       w_scales,
       std::move(w_zero_points),
@@ -342,6 +342,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
       stride.size() == kSpatialDim,
       "stride should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      std::all_of(stride.begin(), stride.end(), [](bool s) { return s > 0; }),
+      "quantized::conv_prepack: stride should be positive.");
   TORCH_CHECK(
       padding.size() == kSpatialDim,
       "Specify front/top/left padding only. "
@@ -458,7 +461,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
   // Bias
-  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -631,7 +634,7 @@ class QConvPackWeightInt8 final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
+    for ([[maybe_unused]] const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
