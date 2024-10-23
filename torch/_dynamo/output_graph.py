@@ -281,10 +281,6 @@ class OutputGraph:
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
 
-        # List of symbols for which we have exact bindings in the arguments
-        # already
-        self.bound_symbols: Set[sympy.Symbol] = set()
-
         shape_env = ShapeEnv(
             # Reference Cycle!
             # Share a reference to the list of TrackedFake.
@@ -540,6 +536,10 @@ class OutputGraph:
     def real_value_cache(self):
         return self.current_tracer.real_value_cache
 
+    @property
+    def bound_symbols(self):
+        return self.current_tracer.bound_symbols
+
     # If you are here, and you're looking for create_graph_input,
     # to avoid ambiguity, please call one of the following:
     # - self.current_tracer.create_graph_input
@@ -665,7 +665,6 @@ class OutputGraph:
             s0 = s.node.expr
             if s0 in self.bound_symbols:
                 return
-            self.bound_symbols.add(s0)
             log.debug("bind_symint %s %s", s, prop.name())
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
@@ -675,6 +674,7 @@ class OutputGraph:
                 before=True,
                 source=prop,
             )
+            self.root_tracer.bound_symbols[s0] = proxy
             set_example_value(proxy.node, s)
             assert isinstance(s, torch.SymInt)
             proxy.node.meta["grapharg"] = GraphArg(
@@ -1864,6 +1864,10 @@ class SubgraphTracer(fx.Tracer):
         # rewrite the HigherOrderOperator call using the traced body_fn.
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
+
+        # map symbols to their bound proxy placeholders.
+        self.bound_symbols: Dict[sympy.Symbol, torch.fx.Proxy] = {}
+
         self.prev_inst = None
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
