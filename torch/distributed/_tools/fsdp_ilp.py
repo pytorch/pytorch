@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 
-from torch.distributed._tools.ilp_utils import Graph
+from torch.distributed._tools.ilp_utils import display_bytes, Graph
 
 
 try:
@@ -49,7 +49,7 @@ def fsdp_milp(
     fsdp_units: Optional[List[str]] = None,
 ) -> Tuple[Set[str], float, int]:
     """
-    MILP to decide FSDP units. TODO: incorporate AC decisions.
+    MILP to decide FSDP units.
     The objective is to minimize exposed computation time.
     The constraint is to ensure peak memory is under budget.
 
@@ -70,7 +70,7 @@ def fsdp_milp(
     """
 
     num_nodes = len(graph.nodes)
-    BIG_M = 10
+    BIG_M = 1000
     MEM_MULTIPLIER = 2**30
 
     # Create a MILP problem
@@ -110,20 +110,20 @@ def fsdp_milp(
     # bw_rs_i: reduce scatter communication time at module i during backward
     # this is the prefetch for the next fsdp unit
     bw_rs = LpVariable.matrix("bw_rs", list(range(num_nodes)), 0)
-    # t3_i: helpr variable for the exposed computation time in the forward pass
+    # t3_i: helpr variable for the exposed communication time in the forward pass
     t3 = LpVariable.matrix("t3", list(range(num_nodes)), 0)
-    # fw_e_i: exposed comm time in the forward pass for module i if fsdp unit
+    # fw_e_i: exposed communication time in the forward pass for module i if fsdp unit
     fw_e = LpVariable.matrix("fw_e", list(range(num_nodes)), 0)
-    # t4_i: helper variable for the exposed computation time in the backward pass
+    # t4_i: helper variable for the exposed communication time in the backward pass
     t4 = LpVariable.matrix("t4", list(range(num_nodes)), 0)
-    # bw_e_i: exposed comm time in the backward pass for module i if fsdp unit
+    # bw_e_i: exposed communication time in the backward pass for module i if fsdp unit
     bw_e = LpVariable.matrix("bw_e", list(range(num_nodes)), 0)
 
     # Add constraints
     # [Constraint] Root module is always an FSDP unit
     prob += x[0] == 1
 
-    # [Constraint] Use user specified FSDP units
+    # [Constraint] Use user specified FSDP units if provided
     if fsdp_units:
         fsdp_units_set = set(fsdp_units)
         for i in range(1, num_nodes):
@@ -133,8 +133,8 @@ def fsdp_milp(
                 prob += x[i] == 0
 
     # [Constraint] No nested FSDP unit
-    # this is not a necessary constraint for the application of FSDP. But having it
-    # improves the speed of the solver, and enables the formulation for runtime.
+    # This is not a necessary constraint for the application of FSDP. But having it does not
+    # significantly affect the solution qulity and improves the speed of the solver.
     for i in range(1, num_nodes):
         for j in range(i + 1, num_nodes):
             if graph.ad_matrix[i][j] == 1:
@@ -161,6 +161,7 @@ def fsdp_milp(
         prob += a[i] == TA_i + AG_i
 
     # [Constraint] Express the total amount memory at each module
+    # It includes: sharded parameters and gradients; unsharded parameters and gradients, activations
     for i in range(num_nodes):
         TG_i = graph.nodes[i]["grad_total"] / MEM_MULTIPLIER
         coeff = [0] * num_nodes
@@ -175,7 +176,7 @@ def fsdp_milp(
     for i in range(num_nodes):
         prob += max_m >= m[i]
 
-    # [Constraint] Express maximum FSDP shard
+    # [Constraint] Express the maximum size of an FSDP shard
     for i in range(num_nodes):
         prob += max_p >= p[i]
 
@@ -187,17 +188,23 @@ def fsdp_milp(
     comm_model = comm_params[CommType.ALL_GATHER]
     for i in range(num_nodes):
         prob += ag[i] == comm_model.latency + p[i] * (
-            MEM_MULTIPLIER / comm_model.bandwith
+            MEM_MULTIPLIER / comm_model.bandwith  # convert from bytes/ms to GiB/ms
         )
 
     # [Constraint] Express the reduce scatter communication time of each FSDP unit
     comm_model = comm_params[CommType.REDUCE_SCATTER]
     for i in range(num_nodes):
         prob += rs[i] == comm_model.latency + g[i] * (
-            MEM_MULTIPLIER / comm_model.bandwith
+            MEM_MULTIPLIER / comm_model.bandwith  # convert from bytes/ms to GiB/ms
         )
 
     # [Constraint] Express the forward prefetch all gather communication time
+    # E.g., each FSDP unit will prefetch the parameters for the next FSDP unit
+    # The constraints below are to linearize the following non-linear constraints:
+    #    t0_i = ag_i * x_i + t0_{i+1} * (1 - x_i)
+    #    fw-ag_i = t0_{i+1} * x_i
+    # Note that t0 is a helper decision variable, expressing the all-gather communication
+    # time of the next fsdp unit (self included).
     prob += t0[num_nodes - 1] == ag[num_nodes - 1]
     for i in range(1, num_nodes - 1):
         prob += t0[i] <= t0[i + 1] + BIG_M * x[i]
@@ -211,7 +218,14 @@ def fsdp_milp(
         prob += fw_ag[i] >= t0[i + 1] - BIG_M * (1 - x[i])
 
     # [Constraint] Express the backward prefetch all gather communication time
-    # this is the index of modules in the backward pre order
+    # E.g., each FSDP unit will prefetch the parameters for the next FSDP unit
+    # The constraints below are to linearize the following non-linear constraints:
+    #    t1_{o1(k)} = ag_{o1(k)} * x_{o1(k)} + t1_{o1(k+1)} * (1 - x_{o1(k)})
+    #    bw-ag_i = t1_{o1(k+1)} * x_{o1(k)}
+    # Note that t1 is a helper decision variable, expressing the all-gather communication
+    # time of the next fsdp unit (self included).
+    # Note the order of module traversal is different in the backward pass. Thus, needing
+    # ``o1`` which is the index of modules in the backward pre order.
     o1 = [graph.name2node[fqn]["index"] for fqn in reversed(graph.fw_post_order)]
     prob += t1[o1[num_nodes - 1]] == ag[o1[num_nodes - 1]]
     for k in range(1, num_nodes - 1):
@@ -230,6 +244,12 @@ def fsdp_milp(
         prob += bw_ag[i] >= t1[i_next] - BIG_M * (1 - x[i])
 
     # [Constraint] Express the previous module's reduce scatter communication time
+    # E.g., each FSDP unit's all-gather call follows the reduce-scatter call of the previous FSDP unit
+    # The constraints below are to linearize the following non-linear constraints:
+    #    t2_i = rs_i * x_i + t2_{i+1} * (1 - x_i)
+    #    bw-rs_i = t2_{i+1} * x_i
+    # Note that t2 is a helper decision variable, expressing the reduce communication
+    # time of the next fsdp unit (self included).
     prob += t2[num_nodes - 1] == rs[num_nodes - 1]
     for i in range(1, num_nodes - 1):
         prob += t2[i] <= t2[i + 1] + BIG_M * x[i]
@@ -242,7 +262,10 @@ def fsdp_milp(
         prob += bw_rs[i] <= t2[i + 1]
         prob += bw_rs[i] >= t2[i + 1] - BIG_M * (1 - x[i])
 
-    # [Constraint] Express the exposed computation time in the forward pass
+    # [Constraint] Express the exposed communication time in the forward pass for
+    # The constraints below are to linearize the following non-linear constraints:
+    #    t3_i = max(0, fw-ag_i - FCP_i)
+    #    fw_e_i = t3_i * x_i
     for i in range(1, num_nodes):
         FCP_i = graph.nodes[i]["fw_runtime_per_module"]
         prob += t3[i] >= fw_ag[i] - FCP_i
@@ -251,7 +274,10 @@ def fsdp_milp(
         prob += fw_e[i] >= t3[i] - BIG_M * (1 - x[i])
     prob += fw_e[0] == 0
 
-    # [Constraint] Express the exposed computation time in the backward pass
+    # [Constraint] Express the exposed communication time in the backward pass
+    # The constraints below are to linearize the following non-linear constraints:
+    #    t4_i = max(0, bw-ag_i + bw-rs_i - FCP_i)
+    #    bw_e_i = t4_i * x_i
     for i in range(1, num_nodes):
         BCP_i = graph.nodes[i]["bw_runtime_per_module"]
         prob += t4[i] >= bw_ag[i] + bw_rs[i] - BCP_i
@@ -260,7 +286,7 @@ def fsdp_milp(
         prob += bw_e[i] >= t4[i] - BIG_M * (1 - x[i])
     prob += bw_e[0] == 0
 
-    # Set Objeictive (total exposed comm time)
+    # Set objeictive -- minimize total exposed communication time
     prob += lpSum(fw_e[1:]) + lpSum(bw_e[1:]) + ag[0] + rs[0] + fw_ag[0] + bw_rs[0]
 
     # Solve
@@ -279,5 +305,44 @@ def fsdp_milp(
             fsdp_decisions.add(graph.nodes[i]["fqn"])
     peak_mem = round((max_m.varValue + 2 * max_p.varValue) * MEM_MULTIPLIER)
     exposed_comm_time = round(value(prob.objective), 4)
+
+    # debugging info
+    fqn_len = min(30, max(len(graph.nodes[i]["fqn"]) for i in range(num_nodes)))
+    for i in range(num_nodes):
+        fqn = graph.nodes[i]["fqn"][-fqn_len:].ljust(fqn_len)
+        x_i = value(x[i]) if x[i] else 0
+        p_i = p[i].varValue * MEM_MULTIPLIER
+        g_i = g[i].varValue * MEM_MULTIPLIER
+        TG_i = graph.nodes[i]["grad_total"]
+        a_i = a[i].varValue * MEM_MULTIPLIER
+        m_i = m[i].varValue * MEM_MULTIPLIER
+        ag_i = ag[i].varValue if ag[i] else 0
+        fw_ag_i = fw_ag[i].varValue if fw_ag[i] else 0
+        bw_ag_i = bw_ag[i].varValue if bw_ag[i] else 0
+        rs_i = rs[i].varValue if rs[i] else 0
+        bw_rs_i = bw_rs[i].varValue if bw_rs[i] else 0
+        FCP_i = graph.nodes[i]["fw_runtime_per_module"]
+        BCP_i = graph.nodes[i]["bw_runtime_per_module"]
+        fw_e_i = fw_e[i].varValue if fw_e[i] else 0
+        bw_e_i = bw_e[i].varValue if bw_e[i] else 0
+        debug_str = (
+            ("FSDP" if round(x_i) == 1 else "    ")
+            + f" {fqn} : "
+            + f"p_i = {display_bytes(p_i, 'GiB'):<10} "
+            + f"g_i = {display_bytes(g_i, 'GiB'):<10} "
+            + f"TG_i = {display_bytes(TG_i, 'GiB'):<10} "
+            + f"a_i = {display_bytes(a_i, 'GiB'):<10} "
+            + f"m_i = {display_bytes(m_i, 'GiB'):<10} "
+            + f"ag_i = {round(ag_i, 2):5.2f} ms "
+            + f"fw_ag_i = {round(fw_ag_i, 2):5.2f} ms "
+            + f"bw_ag_i = {round(bw_ag_i, 2):5.2f} ms "
+            + f"rs_i = {round(rs_i, 2):5.2f} ms "
+            + f"bw_rs_i = {round(bw_rs_i, 2):5.2f} ms "
+            + f"FCP_i = {FCP_i:8.2f} ms "
+            + f"BCP_i = {BCP_i:8.2f} ms "
+            + f"fw_e_i = {round(fw_e_i, 2):5.2f} ms "
+            + f"bw_e_i = {round(bw_e_i, 2):5.2f} ms "
+        )
+        logger.debug(debug_str)
 
     return fsdp_decisions, exposed_comm_time, peak_mem

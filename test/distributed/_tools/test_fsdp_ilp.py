@@ -1,15 +1,8 @@
 # Owner(s): ["module: unknown"]
 from typing import Dict
 
+from torch.distributed._tools.fsdp_ilp import CommParams, CommType, fsdp_milp
 from torch.distributed._tools.ilp_utils import ModuleInfo, parse_module_info
-
-
-from torch.distributed._tools.fsdp_ilp import (
-    fsdp_milp,
-    CommType,
-    CommParams,
-)
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -22,14 +15,23 @@ class TestFSDPILP(TestCase):
     def setUp(self):
         super().setUp()
         self.comm_params = self._get_test_comm_params()
+        self.comm_params_low_bw = self._get_test_comm_params(True)
         self.mod_info = self._get_mod_info()
         self.g = parse_module_info(self.mod_info)
 
-    def _get_test_comm_params(self) -> Dict[CommType, CommParams]:
-        return {
-            CommType.ALL_GATHER: CommParams(latency=0.01, bandwith=107374182),
-            CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwith=107374182),
-        }
+    def _get_test_comm_params(
+        self, comm_bound: bool = False
+    ) -> Dict[CommType, CommParams]:
+        if comm_bound:
+            return {
+                CommType.ALL_GATHER: CommParams(latency=0.01, bandwith=1e7),
+                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwith=1e7),
+            }
+        else:
+            return {
+                CommType.ALL_GATHER: CommParams(latency=0.01, bandwith=1e8),
+                CommType.REDUCE_SCATTER: CommParams(latency=0.01, bandwith=1e8),
+            }
 
     def _get_mod_info(self) -> ModuleInfo:
         mod_info = {
@@ -310,7 +312,6 @@ class TestFSDPILP(TestCase):
             comm_params=self.comm_params,
             memory_budget=4.75,
         )
-
         self.assertEqual(
             fsdp_decisions,
             {
@@ -323,7 +324,7 @@ class TestFSDPILP(TestCase):
                 "Transformer.output",
             },
         )
-        self.assertAlmostEqual(exposed_comm_time / 3.728, 1, delta=0.05)
+        self.assertAlmostEqual(exposed_comm_time / 4.0, 1, delta=0.05)
         self.assertAlmostEqual(peak_mem / 4672410203, 1, delta=0.05)
 
     def test_fsdp_ilp_case2(self):
@@ -353,7 +354,7 @@ class TestFSDPILP(TestCase):
                 "Transformer.output",
             },
         )
-        self.assertAlmostEqual(exposed_comm_time / 9.3542, 1, delta=0.05)
+        self.assertAlmostEqual(exposed_comm_time / 10.041, 1, delta=0.05)
         self.assertAlmostEqual(peak_mem / 4672311956, 1, delta=0.05)
 
     def test_fsdp_ilp_case3(self):
@@ -380,7 +381,7 @@ class TestFSDPILP(TestCase):
                 "Transformer.output",
             },
         )
-        self.assertAlmostEqual(exposed_comm_time / 3.7308, 1, delta=0.05)
+        self.assertAlmostEqual(exposed_comm_time / 4.0029, 1, delta=0.05)
         self.assertAlmostEqual(peak_mem / 4274145874, 1, delta=0.05)
 
     def test_fsdp_ilp_case4(self):
@@ -392,9 +393,30 @@ class TestFSDPILP(TestCase):
             comm_params=self.comm_params,
             memory_budget=3.5,
         )
-        print(fsdp_decisions, exposed_comm_time, peak_mem)
         self.assertEqual(fsdp_decisions, set())
         self.assertEqual(peak_mem, -1)
+
+    def test_fsdp_ilp_case5(self):
+        """a case similar to case 1 but with low communication bandwidth"""
+
+        fsdp_decisions, exposed_comm_time, peak_mem = fsdp_milp(
+            self.g,
+            world_size=4,
+            comm_params=self.comm_params_low_bw,
+            memory_budget=4.75,
+        )
+        self.assertEqual(
+            fsdp_decisions,
+            {
+                "Transformer",
+                "Transformer.layers.0",
+                "Transformer.layers.1",
+                "Transformer.layers.2",
+                "Transformer.layers.3",
+            },
+        )
+        self.assertAlmostEqual(exposed_comm_time / 303.0618, 1, delta=0.05)
+        self.assertAlmostEqual(peak_mem / 4873638548, 1, delta=0.05)
 
 
 if __name__ == "__main__":
