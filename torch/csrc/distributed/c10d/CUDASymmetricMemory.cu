@@ -386,6 +386,49 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       .make_tensor();
 }
 
+at::Tensor CUDASymmetricMemory::get_signal_pad(
+    int rank,
+    c10::IntArrayRef sizes,
+    std::optional<c10::ScalarType> dtype,
+    int64_t storage_offset) {
+  // If the dtype is unspecified, default it to UInt32, as it
+  // is the most common type for signaling purposes.
+  if (!dtype.has_value()) {
+    dtype = c10::ScalarType::UInt32;
+  }
+
+  // If the shape is unspecified, treat the signal pad as a 1d tensor.
+  const auto element_size = c10::elementSize(*dtype);
+  std::vector<int64_t> shape;
+  if (sizes.size() != 0) {
+    shape = std::move(sizes.vec());
+  } else {
+    shape.push_back(signal_pad_size / element_size);
+  }
+
+  const size_t numel = std::accumulate(
+      shape.begin(),
+      shape.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
+  const auto req_size = (numel + storage_offset) * element_size;
+  TORCH_CHECK(
+      req_size <= buffer_size_,
+      "CUDASymmetricMemory::get_signal_pad: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      buffer_size_,
+      " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+      storage_offset * element_size;
+  auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
+  auto options = at::TensorOptions().dtype(*dtype).device(device);
+  return at::for_blob(data_ptr, shape)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
 void check_channel(int channel, int world_size) {
   TORCH_CHECK(
       channel >= 0,

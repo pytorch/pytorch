@@ -1080,6 +1080,13 @@ This class does not support ``__members__`` property.)");
           py::arg("dtype"),
           py::arg("storage_offset") = 0)
       .def(
+          "get_signal_pad",
+          &SymmetricMemory::get_signal_pad,
+          py::arg("rank"),
+          py::arg("sizes") = py::list(),
+          py::arg("dtype") = py::none(),
+          py::arg("storage_offset") = 0)
+      .def(
           "barrier",
           &SymmetricMemory::barrier,
           py::arg("channel") = 0,
