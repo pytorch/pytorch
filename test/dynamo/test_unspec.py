@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
-from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -621,6 +621,38 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
         self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision(self):
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for dtype in dtypes:
+
+            def fn(x, y):
+                return x * y
+
+            cnt = CompileCounterWithBackend("aot_eager")
+            fn_opt = torch._dynamo.optimize(cnt)(fn)
+            x = torch.tensor(9.734375, dtype=dtype, requires_grad=True)
+            y1 = 1.00048828125
+            y2 = 1.00048828126
+
+            self.assertEqual(fn_opt(x, y1), fn(x, y1))
+            self.assertEqual(fn_opt(x, y2), fn(x, y2))
+            self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspec_float_input_f64(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.zeros(3, dtype=torch.float64)
+        # 17 digits of precision so unrepresentable in float32
+        flt = 1.2345678901234567
+        self.assertEqual(f(x, flt), cf(x, flt))
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):

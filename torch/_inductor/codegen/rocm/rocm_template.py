@@ -41,7 +41,7 @@ class ROCmTemplate(KernelTemplate):
         """
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
 
@@ -159,7 +159,11 @@ class ROCmTemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = hip_bfloat16;
+
+                // as long as there is no custom arithmetic it's fine
+                using bfloat16 = uint16_t;
+                using float8_e4m3fnuz = uint8_t;
+                using float8_e5m2fnuz = uint8_t;
             """
         )
         return res
