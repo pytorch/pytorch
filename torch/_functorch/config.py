@@ -162,6 +162,10 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+
+# Run aot eager decomp partition with CrossRefFakeMode
+fake_tensor_crossref = False
+
 # This mode specifies that we should also keep track of the real
 # tensor along with the fake tensor, and do real compute.  While
 # seemingly this eliminates the whole point of fake tensors, there are
