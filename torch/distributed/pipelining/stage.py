@@ -618,7 +618,7 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> Tuple[Any]:
         """
         Perform forward pass on the stage with one microbatch.
         `args` and `kwargs` are the inputs from *external* to this stage.

@@ -357,7 +357,9 @@ class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
-        loss_fn: Optional[Callable[..., torch.Tensor]] = None,
+        loss_fn: Optional[
+            Callable[[Tuple[Any, ...], torch.Tensor], torch.Tensor]
+        ] = None,
         args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
@@ -383,9 +385,11 @@ class _PipelineSchedule(ABC):
         self._internal_losses: List[torch.Tensor] = []
         logger.info("Using %s", self.__class__.__name__)
 
-    def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
+    def _maybe_compute_loss(
+        self, stage, outputs: Tuple[Any, ...], target_mbs, mb_index
+    ):
         if stage.is_last and self._has_backward:
-            loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
+            loss = self._compute_loss(outputs, target_mbs[mb_index])  # type: ignore[index]
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
@@ -493,8 +497,8 @@ class _PipelineSchedule(ABC):
 
         return arg_mbs, kwarg_mbs
 
-    def _compute_loss(self, output, target):
-        return self._loss_fn(output, target)  # type: ignore[misc]
+    def _compute_loss(self, outputs: Tuple[Any, ...], target):
+        return self._loss_fn(outputs, target)  # type: ignore[misc]
 
     def _split_inputs(
         self,
