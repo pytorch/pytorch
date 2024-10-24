@@ -4547,9 +4547,10 @@ class TestMemPool(TestCase):
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
         self.assertEqual(called_dummy_alloc.value, 0)
+        nelem_1mb = 1024 * 1024 // 4
 
         with torch.cuda.use_mem_pool(pool):
-            out_0 = torch.randn(1, device="cuda")
+            out_0 = torch.randn(nelem_1mb, device="cuda")
 
             # pool's use count should be 2 at this point as use_mem_pool
             # holds a reference
@@ -4562,6 +4563,23 @@ class TestMemPool(TestCase):
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
+
+        with torch.cuda.use_mem_pool(pool):
+            # pool should have 1 segment since we made a small allocation (1 MB)
+            # above and so the CUDACachingAllocator packed it into a 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_1 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool should still have 1 segment since we made another small allocation
+            # (1 MB) that got packed into the existing 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_2 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool now should have 2 segments since the CUDACachingAllocator had
+            # to make a new 2 MB buffer to accomodate out_2
+            self.assertEqual(len(pool.snapshot()), 2)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
