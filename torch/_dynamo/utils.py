@@ -3229,6 +3229,11 @@ def clear_torch_function_mode_stack():
         _pop_torch_function_stack()
 
 
+# call from C dynamo in order to inspect values in pdb
+def _breakpoint_for_c_dynamo(*args):
+    breakpoint()
+
+
 def verify_guard_fn_signature(value):
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
