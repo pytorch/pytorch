@@ -96,6 +96,20 @@ void initCudartBindings(PyObject* module) {
         py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(cudaStreamDestroy((cudaStream_t)ptr));
       });
+    cudart.def(
+      "cuda"
+      "GetLastError",
+      []() -> cudaError_t {
+        py::gil_scoped_release no_gil;
+        return C10_CUDA_ERROR_HANDLED(cudaGetLastError());
+      });
+      cudart.def(
+      "cuda"
+      "PeekAtLastError",
+      []() -> cudaError_t {
+        py::gil_scoped_release no_gil;
+        return C10_CUDA_ERROR_HANDLED(cudaPeekAtLastError());
+      });
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
   // cudaProfilerInitialize is no longer needed after CUDA 12:
   // https://forums.developer.nvidia.com/t/cudaprofilerinitialize-is-deprecated-alternative/200776/3
