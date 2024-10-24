@@ -347,8 +347,7 @@ class TritonTemplateKernel(TritonKernel):
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
-        else:
-            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+        return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -971,8 +970,7 @@ class ExternKernelCaller(ChoiceCaller):
         fn = self.choice.to_callable()
         if self.kwargs:
             return functools.partial(fn, **self.kwargs)
-        else:
-            return fn
+        return fn
 
     def hash_key(self):
         return "-".join(
