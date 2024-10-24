@@ -3,13 +3,24 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch._subclasses.meta_utils import is_sparse_any
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -346,6 +357,14 @@ class FunctionalTensorMode(TorchDispatchMode):
             torch.storage.UntypedStorage, Optional[FunctionalTensor]
         ] = weakref.WeakKeyDictionary()
 
+        # used for export only
+        # Map from FunctionalTensor's storage to the mutation counter
+        # when the storage was aliased with aten.to
+        self._partial_frozen_storage: Dict[StorageWeakRef, int] = {}
+        # input/output of aten.to that's mutated after aten.to.
+        # these storage cannot be used in computation anymore
+        self._mutated_partial_frozen_storage: Set = set()
+
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -537,6 +556,17 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # Check args before the operation
+                    for arg in args:
+                        if isinstance(arg, torch.Tensor):
+                            arg_storage = StorageWeakRef(arg.untyped_storage())
+                            if (
+                                arg_storage in self._mutated_partial_frozen_storage
+                            ):  # type: ignore[attr-defined]
+                                raise RuntimeError(
+                                    "Cannot do computation on mutated frozen tensor"
+                                )
+
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
@@ -547,16 +577,45 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout or _to_copy
-                    if self.export:
-                        if func in (
-                            torch.ops.aten.dropout.default,
-                            torch.ops.aten._to_copy.default,
-                        ):
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
+
+                    if self.export:
+                        # check all args. If any of them is an alias to the result of aten.to and is mutated,
+                        # we mark it in _mutated_partial_frozen_storage.
+                        for arg in args:
+                            if isinstance(
+                                arg, FunctionalTensor
+                            ) and torch._is_functional_tensor(arg.elem):
+                                arg_storage = StorageWeakRef(arg.untyped_storage())
+                                arg_mutation_counter = torch._mutation_counter(arg.elem)  # type: ignore[attr-defined]
+                                if (
+                                    arg_mutation_counter
+                                    > self._partial_frozen_storage.get(
+                                        arg_storage, float("inf")
+                                    )
+                                ):
+                                    # store tensor aliases that's partial frozen and also mutated after it's partial
+                                    # frozen
+                                    self._mutated_partial_frozen_storage.add(
+                                        arg_storage
+                                    )
+
+                        # TODO: allow it in draft export mode and attach to FailureReport
+                        if func == torch.ops.aten._to_copy.default:
+                            # set input and ouput of aten.to to be alias of each other
+                            torch._functionalize_unsafe_set(outs_wrapped, args[0])
+                            storage = StorageWeakRef(outs_wrapped.untyped_storage())
+                            mutation_count = torch._mutation_counter(outs_unwrapped)  # type: ignore[attr-defined]
+                            if storage not in self._partial_frozen_storage:
+                                self._partial_frozen_storage[storage] = mutation_count
+
+                        # We don't allow any mutation on result of dropout
+                        if func == torch.ops.aten.dropout.default:
+                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]

@@ -156,6 +156,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return inductor_storage_resized_;
   }
 
+  uint64_t mutation_counter() const {
+    return mutation_counter_;
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.

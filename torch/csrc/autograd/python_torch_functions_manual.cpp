@@ -734,7 +734,8 @@ void initTorchFunctions(PyObject* module) {
             src.storage(),
             dst.sym_storage_offset(),
             dst.sym_sizes(),
-            dst.sym_strides());
+            dst.sym_strides(),
+            /*check_device =*/false);
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
@@ -747,6 +748,9 @@ void initTorchFunctions(PyObject* module) {
   });
   py_module.def("_freeze_functional_tensor", [](const at::Tensor& t) {
     at::functionalization::impl::freeze_functional_tensor(t);
+  });
+  py_module.def("_mutation_counter", [](const at::Tensor& t) {
+    return at::functionalization::impl::mutation_counter(t);
   });
   py_module.def(
       "_enable_functionalization",

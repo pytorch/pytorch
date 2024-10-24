@@ -112,7 +112,7 @@ inline void checkInBoundsForStorage(
 
 template <typename T>
 inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
-                                   ArrayRef<T> size, ArrayRef<T> stride) {
+                                   ArrayRef<T> size, ArrayRef<T> stride, bool check_device = true) {
   // FIXME: stride should be optional
   if (stride.data()) {
     TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
@@ -131,12 +131,14 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
     TORCH_INTERNAL_ASSERT(storage);
     TORCH_INTERNAL_ASSERT(result.storage());
 
-    // We used to allow this, but this breaks device caching.
-    // Let's put an actual error message for this one.
-    TORCH_CHECK(result.storage().device() == storage.device(),
-                "Attempted to set the storage of a tensor on device \"", result.storage().device(),
-                "\" to a storage on different device \"", storage.device(),
-                "\".  This is no longer allowed; the devices must match.");
+    if (check_device){
+      // We used to allow this, but this breaks device caching.
+      // Let's put an actual error message for this one.
+      TORCH_CHECK(result.storage().device() == storage.device(),
+                  "Attempted to set the storage of a tensor on device \"", result.storage().device(),
+                  "\" to a storage on different device \"", storage.device(),
+                  "\".  This is no longer allowed; the devices must match.");
+    }
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 
