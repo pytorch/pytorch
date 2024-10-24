@@ -168,6 +168,7 @@ NON_STRICT_SUFFIX = "_non_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_non_strict"
 SERDES_SUFFIX = "_serdes"
+SERDES_NON_STRICT_SUFFIX = "_serdes_non_strict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_non_strict"
@@ -184,7 +185,9 @@ def is_retracebility_test(test_name):
 
 
 def is_serdes_test(test_name):
-    return test_name.endswith(SERDES_SUFFIX)
+    return test_name.endswith(SERDES_SUFFIX) or test_name.endswith(
+        SERDES_NON_STRICT_SUFFIX
+    )
 
 
 def is_training_ir_test(test_name):
@@ -1011,6 +1014,7 @@ graph():
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
+    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1022,6 +1026,7 @@ graph():
             ep = export(model, inputs, strict=False)
 
     @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1175,6 +1180,7 @@ graph():
         self.assertEqual(actual_result, expected_result)
 
     @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
+    @testing.expectedFailureSerDerNonStrict
     def test_hoo_inline_users_issue(self):
         # This came from an issue where replace_with_hop passes would inline subgraphs,
         # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
@@ -2620,6 +2626,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -2820,6 +2827,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), (t,), strict=strict)
 
     @testing.expectedFailureSerDer  # T195866111
+    @testing.expectedFailureSerDerNonStrict
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
@@ -3101,6 +3109,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
     @testing.expectedFailureRetraceability  # T183144629
+    @testing.expectedFailureSerDerNonStrict
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -3330,6 +3339,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
+    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     @testing.expectedFailureRetraceabilityNonStrict
@@ -6155,6 +6165,7 @@ graph():
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
+    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 
@@ -7740,6 +7751,7 @@ def forward(self, x, y):
 
     # TODO requires_grad doesn't seem to work with serialization.
     @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -8632,6 +8644,7 @@ def forward(self, x):
             _load_dynamic_shapes(spec, from_dict=True)
 
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
@@ -8711,6 +8724,7 @@ def forward(self, x):
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
+    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
     def test_hints_wrapper(self):
         class M(torch.nn.Module):

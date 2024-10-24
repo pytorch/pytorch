@@ -306,6 +306,7 @@ def tensorify_python_scalars(
 
             if (
                 callable(node.target)
+                and len(args) > 0
                 and all(isinstance(arg, (float)) for arg in args)
                 and (type(result := node.target(*args, **kwargs)) == float)
             ):
