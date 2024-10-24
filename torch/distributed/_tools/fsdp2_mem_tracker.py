@@ -570,7 +570,6 @@ class FSDPMemTracker(MemTracker):
         self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
-        pass
 
     def __enter__(self) -> "FSDPMemTracker":
         self._in_fake_mode = True if active_fake_mode() else False

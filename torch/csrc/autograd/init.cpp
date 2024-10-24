@@ -311,6 +311,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_prepare_profiler",
       prepareProfiler,
       py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_toggle_collection_dynamic",
+      toggleCollectionDynamic,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -1254,17 +1258,29 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+PyObject* THPModule_increment_version(
+    PyObject* _unused,
+    PyObject* tensor_list) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
-  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  auto iterator = THPObjectPtr(PyObject_GetIter(tensor_list));
+  TORCH_CHECK(iterator, "increment_version expect a Iterable[Tensor] as input");
+  auto item = THPObjectPtr(PyIter_Next(iterator));
+  while (item) {
+    TORCH_CHECK(
+        THPVariable_Check(item),
+        "increment_version expects each element of the iterable to be a tensor");
+    auto t = THPVariable_Unpack(item);
+    if (!t.is_inference()) {
+      torch::autograd::increment_version(t);
+    }
+    item = THPObjectPtr(PyIter_Next(iterator));
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
+static PyMethodDef methods[] = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,

@@ -52,7 +52,7 @@ Overall, the ``pipelining`` package provides the following features:
 
 * Splitting of model code based on simple specification.
 * Rich support for pipeline schedules, including GPipe, 1F1B,
-  Interleaved 1F1B and Looped BFS, and providing the infrastruture for writing
+  Interleaved 1F1B and Looped BFS, and providing the infrastructure for writing
   customized schedules.
 * First-class support for cross-host pipeline parallelism, as this is where PP
   is typically used (over slower interconnects).
@@ -149,7 +149,7 @@ model.
 
           self.tok_embeddings = nn.Embedding(...)
 
-          # Using a ModuleDict lets us delete layers witout affecting names,
+          # Using a ModuleDict lets us delete layers without affecting names,
           # ensuring checkpoints will correctly save and load.
           self.layers = torch.nn.ModuleDict()
           for layer_id in range(model_args.n_layers):
@@ -414,7 +414,7 @@ You can implement your own pipeline schedule by extending one of the following t
 ``PipelineScheduleMulti`` is for schedules that assigns multiple stages per rank.
 
 For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
-Whereas, ``ScheduleFlexibleInterleaved1F1B``, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS``
+Whereas, ``ScheduleInterleaved1F1B``, ``ScheduleLoopedBFS``, and ``ScheduleInterleavedZeroBubble``
 are subclasses of ``PipelineScheduleMulti``.
 
 
@@ -483,11 +483,11 @@ Pipeline Schedules
 
 .. autoclass:: Schedule1F1B
 
-.. autoclass:: ScheduleFlexibleInterleaved1F1B
-
 .. autoclass:: ScheduleInterleaved1F1B
 
 .. autoclass:: ScheduleLoopedBFS
+
+.. autoclass:: ScheduleInterleavedZeroBubble
 
 .. autoclass:: PipelineScheduleSingle
   :members:

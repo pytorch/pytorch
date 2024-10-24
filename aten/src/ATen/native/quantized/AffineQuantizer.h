@@ -16,15 +16,15 @@ Tensor& quantize_tensor_per_tensor_affine(
 Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 
 Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
 Tensor& dequantize_tensor_per_tensor_affine(
@@ -35,14 +35,14 @@ Tensor& dequantize_tensor_per_tensor_affine(
 Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
 using quantize_tensor_per_tensor_affine_fn =

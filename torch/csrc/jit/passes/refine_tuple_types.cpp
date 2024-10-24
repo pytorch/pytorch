@@ -5,8 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 static void VisitTupleNode(Node* node) {
@@ -40,5 +39,4 @@ void RefineTupleTypes(std::shared_ptr<Graph>& graph) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

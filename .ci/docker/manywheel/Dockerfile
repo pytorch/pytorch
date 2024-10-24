@@ -10,6 +10,7 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=9
+
 # Note: This is required patch since CentOS have reached EOL
 # otherwise any yum install setp will fail
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
@@ -196,7 +197,7 @@ RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
 # Install AOTriton
 COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/aotriton_version.txt aotriton_version.txt
+COPY ./aotriton_version.txt aotriton_version.txt
 COPY ./common/install_aotriton.sh install_aotriton.sh
 RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
 ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton

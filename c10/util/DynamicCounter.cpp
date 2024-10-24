@@ -2,6 +2,7 @@
 
 #include <c10/util/Synchronized.h>
 
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
