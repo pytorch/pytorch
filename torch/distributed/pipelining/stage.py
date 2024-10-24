@@ -554,7 +554,7 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> Tuple[Any]:
         """
         Perform forward pass on the stage with one microbatch.
         `args` and `kwargs` are the inputs from *external* to this stage.
@@ -615,7 +615,7 @@ class _PipelineStageBase(ABC):
             map_debug_info(output),
         )
         self._validate_fwd_outputs(output_tuple)
-        return output
+        return output_tuple
 
     def backward_one_chunk(
         self, bwd_chunk_id: int, loss=None, full_backward: bool = True
