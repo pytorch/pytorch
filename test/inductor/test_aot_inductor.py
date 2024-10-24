@@ -143,6 +143,7 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         {
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
