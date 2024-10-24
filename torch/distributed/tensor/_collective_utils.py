@@ -248,7 +248,7 @@ class MeshTopoInfo:
         # 1. we assume the mesh is homogeneous, and it's gpu/nccl model
         # 2. we assume gpu arch is Ampere or Hopper
         # 3. we assume collectives are all ring base algo for now
-        num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
+        num_devices_per_host = _mesh_resources.num_devices_per_host()
         # the base bw number (intra-node), GB/s
         base_bw = 87.7
         mesh_dim_bandwidth = [base_bw] * mesh.ndim

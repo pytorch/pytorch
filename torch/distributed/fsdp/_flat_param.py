@@ -1455,7 +1455,7 @@ class FlatParamHandle:
             # unshard stream for all-gather
             _no_dispatch_record_stream(
                 sharded_flat_param,
-                self._device_handle.current_stream(),  # unshard_stream
+                torch.acc.current_stream(),  # unshard_stream
             )
         return padded_unsharded_flat_param
 
@@ -1511,7 +1511,7 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard, torch.acc.current_stream()  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1787,9 +1787,7 @@ class FlatParamHandle:
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(
-            unsharded_flat_param, self._device_handle.current_stream()
-        )
+        _no_dispatch_record_stream(unsharded_flat_param, torch.acc.current_stream())
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
