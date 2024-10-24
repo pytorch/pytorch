@@ -387,11 +387,13 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             user_stack_formatted,
         )
     )
-    # TODO: add more structure to this in the future
     torch._logging.trace_structured(
-        "dynamo_graph_break_reason",
-        payload_fn=lambda: "%s\n%s"
-        % (user_stack_trace, traceback.format_exc() if exc_info else ""),
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "dynamo_graph_break_reason",
+            "encoding": "string",
+        },
+        payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc() if exc_info else ''}",
     )
 
     # torch._dynamo.explain() formats this a little nicer, and presents a slightly
