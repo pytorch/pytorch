@@ -36,6 +36,9 @@ python3 -m tools.pyi.gen_pyi \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
 python3 torch/utils/data/datapipes/gen_pyi.py
 
+# Also check generated pyi files
+find torch -name '*.pyi' -exec git add --force {} \;
+
 RC=0
 # Run lintrunner on all files
 if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then

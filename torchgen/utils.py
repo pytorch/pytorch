@@ -173,11 +173,24 @@ class FileManager:
                     ),
                 }
             template = _read_template(template_path)
-            return template.substitute(env)
-        elif isinstance(env, str):
+            substitute_out = template.substitute(env)
+            # Ensure an extra blank line before the class/function definition
+            # if it is followed by a docstring
+            return re.sub(
+                r'''
+                (""")\n+             # match triple quotes
+                (
+                    ([ ]*@.+\n)*     # match decorators if any
+                    [ ]*(class|def)  # match class/function definition
+                )
+                ''',
+                r"\g<1>\n\n\g<2>",
+                substitute_out,
+                flags=re.VERBOSE,
+            )
+        if isinstance(env, str):
             return env
-        else:
-            assert_never(env)
+        assert_never(env)
 
     def write_with_template(
         self,
