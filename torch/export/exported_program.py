@@ -47,7 +47,6 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
-    _decomp_table_to_post_autograd_aten,
     _detect_fake_mode_from_gm,
     _get_decomp_for_cia,
     _is_preservable_cia_op,
@@ -1021,7 +1020,6 @@ class ExportedProgram:
     def run_decompositions(
         self,
         decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None,
-        _preserve_ops: Tuple[torch._ops.OpOverload, ...] = (),
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1056,30 +1054,9 @@ class ExportedProgram:
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._inductor import config
-
-        # FIXME delete this option after PTC, Executorch syncing is
-        # bit annoying so can't get rid of it easily
-        if _preserve_ops != ():
-            warnings.warn(
-                "This API is deprecated and soon will be removed. "
-                "Please look at the docstring to see how to preserve "
-                "an operator."
-            )
-
         _decomp_table = (
             default_decompositions() if decomp_table is None else dict(decomp_table)
         )
-
-        if config.is_fbcode():
-            # This means the decomp_table would only be containing post-autograd ops
-            # We should manually add CIA decomps
-            for k, v in _decomp_table_to_post_autograd_aten().items():
-                _decomp_table[k] = v
-
-        for op in _preserve_ops:
-            if op in _decomp_table:
-                del _decomp_table[op]
 
         if isinstance(_decomp_table, CustomDecompTable):
             _decomp_table = _decomp_table.materialize()
