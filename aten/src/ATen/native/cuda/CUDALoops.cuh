@@ -271,7 +271,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   }
   auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
   constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
-  launch_legacy_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(int idx) {
+  launch_legacy_kernel<128, unroll_factor>(numel, [&] GPU_LAMBDA(int idx) {
     auto offsets = offset_calc.get(idx);
     arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
     *out = invoke(f, &data.data[1], &offsets.data[1], 1);
@@ -334,7 +334,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
       dtypes[i] = iter.dtype(i);
     }
     auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-    launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(int idx) {
+    launch_legacy_kernel<128, 4>(numel, [&] GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
       void* out = data[0] + offsets[0];
       arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
