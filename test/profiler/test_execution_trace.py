@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfTorchDynamo,
     TEST_HPU,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils._triton import has_triton
@@ -130,6 +131,7 @@ class TestExecutionTrace(TestCase):
 
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.XPU in supported_activities()
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace and kineto data.
@@ -201,6 +203,7 @@ class TestExecutionTrace(TestCase):
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
+            or torch.profiler.ProfilerActivity.XPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
@@ -240,8 +243,10 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
-    @skipIfHpu
+    @unittest.skipIf(
+        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        "need triton and device(CUDA or XPU) availability to run",
+    )
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -289,6 +294,7 @@ class TestExecutionTrace(TestCase):
     def test_execution_trace_start_stop(self, device):
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.XPU in supported_activities()
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
@@ -327,6 +333,7 @@ class TestExecutionTrace(TestCase):
     def test_execution_trace_repeat_in_loop(self, device):
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
+            or torch.profiler.ProfilerActivity.XPU in supported_activities()
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         iter_list = {3, 4, 6, 8}
@@ -360,8 +367,7 @@ class TestExecutionTrace(TestCase):
             assert found_root_node
         assert event_count == expected_loop_events
 
-    @skipIfHpu
-    def test_execution_trace_no_capture(self, device):
+    def test_execution_trace_no_capture(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
         et = ExecutionTraceObserver().register_callback(fp.name)
@@ -376,8 +382,7 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
-    @skipIfHpu
-    def test_execution_trace_nested_tensor(self, device):
+    def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
 
@@ -403,9 +408,13 @@ class TestExecutionTrace(TestCase):
 
 
 devices = ["cpu", "cuda"]
+if TEST_XPU:
+    devices.append("xpu")
 if TEST_HPU:
     devices.append("hpu")
-instantiate_device_type_tests(TestExecutionTrace, globals(), only_for=devices)
+instantiate_device_type_tests(
+    TestExecutionTrace, globals(), allow_xpu="xpu" in devices, only_for=devices
+)
 
 if __name__ == "__main__":
     run_tests()
