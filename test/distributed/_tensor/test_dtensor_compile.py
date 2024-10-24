@@ -176,6 +176,25 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_dynamic(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            return (
+                torch.mul(x, x)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()[0]
+            )
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -603,6 +622,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     def test_graph_input_is_async(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
@@ -614,6 +635,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
         x2 = x2.to_local()
+        self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         out = opt_fn(x2)
         # The important part: we get a wait_tensor() in the graph.
         # At runtime, the input to the graph is an AsyncCollectiveTensor,

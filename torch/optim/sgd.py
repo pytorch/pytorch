@@ -12,9 +12,11 @@ from .optimizer import (
     _foreach_doc,
     _fused_doc,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     DeviceDict,
     Optimizer,
+    ParamsT,
 )
 
 
@@ -24,12 +26,12 @@ __all__ = ["SGD", "sgd"]
 class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
-        nesterov=False,
+        nesterov: bool = False,
         *,
         maximize: bool = False,
         foreach: Optional[bool] = None,
@@ -184,13 +186,13 @@ SGD.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
-        nesterov (bool, optional): enables Nesterov momentum (default: False)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        nesterov (bool, optional): enables Nesterov momentum. Only applicable
+            when momentum is non-zero. (default: False)
         {_maximize_doc}
         {_foreach_doc}
         {_differentiable_doc}

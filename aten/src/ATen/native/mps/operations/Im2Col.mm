@@ -149,10 +149,6 @@ static void im2col_out_mps_template(Tensor& output,
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
-
-      if (getMPSProfiler().isCaptureEnabled()) {
-        getMPSProfiler().startCapture("im2col", stream);
-      }
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
       mtl_setBuffer(computeEncoder, input, 0);
@@ -164,9 +160,6 @@ static void im2col_out_mps_template(Tensor& output,
       mtl_setBytes(computeEncoder, input_sizes, 6);
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-      if (getMPSProfiler().isCapturing()) {
-        getMPSProfiler().stopCapture(stream);
-      }
       getMPSProfiler().endProfileKernel(im2colPSO);
     }
   });

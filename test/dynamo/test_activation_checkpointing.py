@@ -86,7 +86,7 @@ def count_ops(
 
 
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
-    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
+    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region():  # fwd graph
         return_node = list(graph.nodes)[-1]
         assert return_node.target == "output"
         for x in return_node.args[0]:
@@ -1214,7 +1214,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         def gn(*args):
             return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
 
-        with torch.cuda.amp.autocast():
+        with torch.autocast(device_type="cuda"):
             x = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
             y = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
             z = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)

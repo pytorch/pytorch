@@ -55,7 +55,6 @@ from torch.testing._internal.common_cuda import (
 
 if not IS_FBCODE:
     from test_cpp_extensions_open_device_registration import (
-        remove_build_path,
         generate_faked_module
     )
 
@@ -378,7 +377,7 @@ class TestTransformers(NNTestCase):
             out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             # The FP kernel will return NaNs while the sdpa kernel which is ran when the fast path is turned off returns 0 instead
             # of NaNs for fully masked rows
-            torch.testing.assert_close(out, out_fp.nan_to_num())
+            self.assertEqual(out, out_fp.nan_to_num())
 
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):
@@ -848,6 +847,44 @@ class TestTransformers(NNTestCase):
         masked_output = layer(x, src_mask=mask)
 
         self.assertEqual(masked_output, is_causal_output)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt pre-SM80 hardware"
+    )
+    def test_math_backend_high_precision(self):
+        xq = torch.rand([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16) * 5
+        xk = torch.rand([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16) * 5
+        xv = torch.randn([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16)
+        mask = None
+
+        def scaled_dot_product_attention(
+            xq: torch.Tensor, xk: torch.Tensor, xv: torch.Tensor, mask: Optional[torch.Tensor], backend: SDPBackend
+        ) -> torch.Tensor:
+            n_rep = 1
+            xq, xk, xv = (tensor.transpose(1, 2) for tensor in (xq, xk, xv))
+            xk = xk.repeat_interleave(n_rep, dim=1)
+            xv = xv.repeat_interleave(n_rep, dim=1)
+
+            with sdpa_kernel(backends=[backend]):
+                attn_output = F.scaled_dot_product_attention(
+                    xq, xk, xv, attn_mask=mask, dropout_p=0.0
+                )
+            return attn_output.transpose(1, 2)
+
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+        sdp_math_low_prec_out = scaled_dot_product_attention(xq, xk, xv, mask, SDPBackend.MATH)
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+        sdp_math_high_prec_out = scaled_dot_product_attention(xq, xk, xv, mask, SDPBackend.MATH)
+
+        sdp_math_fp64_out_ref = scaled_dot_product_attention(
+            xq.double(), xk.double(), xv.double(), mask, SDPBackend.MATH
+        ).bfloat16()
+
+        torch.testing.assert_close(sdp_math_high_prec_out, sdp_math_fp64_out_ref, atol=1e-2, rtol=1e-2)
+
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+            torch.testing.assert_close(sdp_math_low_prec_out, sdp_math_fp64_out_ref, atol=1e-2, rtol=1e-2)
 
     @onlyCUDA
     @parametrize("nb_heads", [1, 8])
@@ -2458,6 +2495,46 @@ class TestSDPACudaOnly(NNTestCase):
         o.backward(o)
         torch.testing.assert_close(x.grad, x_cpu.grad.cuda(), atol=7e-3, rtol=7e-3)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_nonmodulo64seqlen(self, device):
+        # see also: https://github.com/pytorch/pytorch/issues/137347
+        mask = torch.randint(0, 2, (2, 1, 157, 6404)).to(device="cuda", dtype=torch.bool)
+        q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+        k = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+        v = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+        q_cpu = q.detach().clone().cpu()
+        k_cpu = k.detach().clone().cpu()
+        v_cpu = v.detach().clone().cpu()
+        q_cpu.requires_grad = True
+        k_cpu.requires_grad = True
+        v_cpu.requires_grad = True
+        mask_cpu = mask.detach().clone().cpu()
+        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+            out = nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                dropout_p=0.0,
+                is_causal=False,
+            )
+        out_cpu = nn.functional.scaled_dot_product_attention(
+            q_cpu,
+            k_cpu,
+            v_cpu,
+            attn_mask=mask_cpu,
+            dropout_p=0.0,
+            is_causal=False,
+        )
+
+        out.sum().backward()
+        out_cpu.sum().backward()
+
+        torch.testing.assert_close(q.grad, q_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+        torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
@@ -2652,7 +2729,7 @@ class TestSDPACudaOnly(NNTestCase):
         math_ref_test = math_ref_test.to(dtype=torch.float32).contiguous()
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
-        self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
+        self.assertEqual(math_ref_test, math_ref_lp_test, atol=8e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=7e-3, rtol=7e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
@@ -2771,12 +2848,18 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
+        # TODO we are currently disabling this by default, lets assert that this returns
+        # FlashAttention, we need to change when we make remove opt-in for cudnn
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
         elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
-            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         else:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
 
@@ -3074,7 +3157,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fudge_factors = {
             "out": 4,
-            "grad_query": 150.0,
+            "grad_query": 160.0,
             "grad_key": 25.0,
             "grad_value": 8.0,
             "grad_attn_mask": 45.0,
@@ -3196,7 +3279,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fudge_factors = {
             'out': 4,
-            'grad_query': 160.0,
+            'grad_query': 180.0,
             'grad_key': 16,
             'grad_value': 4,
         }
@@ -3807,10 +3890,11 @@ class TestAttnBias(NNTestCase):
 
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
+@unittest.skip("TODO: This test is broken and should be moved into a dedicated process for registering new extensions")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[

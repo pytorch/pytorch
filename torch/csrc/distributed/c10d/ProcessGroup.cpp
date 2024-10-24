@@ -11,24 +11,9 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+#include <utility>
 
 namespace c10d {
-
-static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
-  if (backend == "undefined") {
-    return ProcessGroup::BackendType::UNDEFINED;
-  } else if (backend == "gloo") {
-    return ProcessGroup::BackendType::GLOO;
-  } else if (backend == "nccl") {
-    return ProcessGroup::BackendType::NCCL;
-  } else if (backend == "ucc") {
-    return ProcessGroup::BackendType::UCC;
-  } else if (backend == "mpi") {
-    return ProcessGroup::BackendType::MPI;
-  } else {
-    return ProcessGroup::BackendType::CUSTOM;
-  }
-}
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -117,15 +102,13 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
 }
 
 ProcessGroup::ProcessGroup(
-    const c10::intrusive_ptr<::c10d::Store>& store,
+    c10::intrusive_ptr<::c10d::Store> store,
     int rank,
-    int size,
-    c10::intrusive_ptr<Options> options)
-    : store_(store),
+    int size)
+    : store_(std::move(store)),
       rank_(rank),
       size_(size),
-      options_(std::move(options)),
-      backendType_(strToBackendType(options_->backend)),
+      backendType_(BackendType::UNDEFINED),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
