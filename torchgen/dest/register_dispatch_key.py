@@ -611,6 +611,7 @@ void set_output_{name}(
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
             DispatchKey.MPS,
+            DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]:
             maybe_set_guard = """
