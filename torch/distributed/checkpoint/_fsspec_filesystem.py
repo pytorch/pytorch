@@ -1,5 +1,5 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
-# mypy: ignore-errors
+
 
 import io
 import os

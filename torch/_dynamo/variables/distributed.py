@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 import functools
 import inspect
 from typing import Dict, List, TYPE_CHECKING
