@@ -134,12 +134,36 @@ W1023 18:01:43.487000 1873218 torch/_dynamo/repro/after_aot.py:342] Copying repr
 Wrote minimal repro out to repro.py
 ```
 
+Here's `repro.py`. You can see that it successfully identified the `relu` node that we purposefully error on.
+
+```python
+from torch.nn import *
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
 
 
 
+    def forward(self, x):
+        relu = torch.ops.aten.relu.default(x);  x = None
+        return (relu,)
+
+def load_args(reader):
+    buf0 = reader.storage('db41273a3f311fd0658a07f88e73563410d83758', 320, device=device(type='cuda', index=0))
+    reader.tensor(buf0, (8, 10), is_leaf=True)  # x
+load_args._version = 0
+mod = Repro()
+options=None
+if __name__ == '__main__':
+    from torch._dynamo.repro.aoti import run_repro
+    with torch.no_grad():
+        run_repro(mod, load_args, config_patches=options, accuracy=False, command='run', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_24_10_24_17_588042-pid_2167585/minifier/checkpoints', check_str=None)
+```
 
 
+[Question]: What should the device in aot_load be? Currently it's an arg to re_repro.
 
+[TODO]: write some test cases
 
 [TODO]: If we have ` self.fc1 = torch.nn.Linear(10, 16)`, it doesn't work yet. The same error exists for Inductor Minifier.
 

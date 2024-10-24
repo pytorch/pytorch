@@ -233,10 +233,14 @@ def repro_run(options, mod, load_args, config_patches):
 
     mod, args = repro_common(options, mod, load_args)
 
+    device = options.device
+    if device != "cpu" and not device.startswith("cuda"):
+        raise RuntimeError("Unsupported device " + device)
+
     from torch.cuda import synchronize
 
     so_path = compile_fx_aot(mod, args, config_patches=config_patches)
-    compiled = torch._export.aot_load(so_path, device=options.device)
+    compiled = torch._export.aot_load(so_path, device=device)
     assert not isinstance(compiled, str)
 
     if options.accuracy != "":
@@ -271,18 +275,21 @@ def repro_minify(options, mod, load_args, config_patches):
     mod, args = repro_common(options, mod, load_args)
     compiler_name = "aot_inductor"
 
+    device = options.device
+    if device != "cpu" and not device.startswith("cuda"):
+        raise RuntimeError("Unsupported device " + device)
+
     def module_fails(gm, flat_example_inputs, check_str=None):
         try:
             so_path = compile_fx_aot(
                 gm, flat_example_inputs, config_patches=config_patches
             )
-            compiled_model = torch._export.aot_load(so_path, device=options.device)
+            compiled_model = torch._export.aot_load(so_path, device=device)
             compiled_model(*flat_example_inputs)
             return False
         except Exception as e:
             if check_str is not None and check_str not in repr(e):
                 return False
-            print(repr(e))
             return True
 
     minifier(
@@ -290,7 +297,9 @@ def repro_minify(options, mod, load_args, config_patches):
         args,
         module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
-            dump_compiler_graph_state, compiler_name=compiler_name
+            dump_compiler_graph_state,
+            compiler_name=compiler_name,
+            save_graph_repro_func=save_graph_repro,
         ),
         save_dir=options.save_dir,
         offload_to_disk=options.offload_to_disk,
@@ -356,9 +365,8 @@ default settings on this script:
         )
         parser.add_argument(
             "--device",
-            dest="device",
-            action="store_const",
-            const="cpu",
+            type=str,
+            default="cpu",
             help="The device used in _export.aot_load. Default is cpu.",
         )
 
