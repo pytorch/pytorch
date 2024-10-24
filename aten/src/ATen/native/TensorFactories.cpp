@@ -246,6 +246,10 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, std::optional<ScalarType> dtype_opt, std::optional<Layout> layout_opt,
                  std::optional<Device> device_opt, std::optional<bool> pin_memory_opt, std::optional<c10::MemoryFormat> memory_format_opt) {
+  // Input validation
+  TORCH_CHECK(size.size() > 0, "Size must be greater than 0");
+  TORCH_CHECK(size.size() <= INT_MAX, "Size is too large");
+
   Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
@@ -318,6 +322,12 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, s
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, std::optional<ScalarType> dtype_opt,
                          std::optional<Layout> layout_opt, std::optional<Device> device_opt, std::optional<bool> pin_memory_opt) {
+  // Input validation
+  TORCH_CHECK(size.size() > 0, "Size must be greater than 0");
+  TORCH_CHECK(size.size() <= INT_MAX, "Size is too large");
+  TORCH_CHECK(stride.size() > 0, "Stride must be greater than 0");
+  TORCH_CHECK(stride.size() <= INT_MAX, "Stride is too large");
+
   Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
   if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
