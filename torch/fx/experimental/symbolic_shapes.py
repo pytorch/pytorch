@@ -6290,14 +6290,44 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def _defer_runtime_assert_inner(
-        self,
-        expr: SympyBoolean,
-        orig_expr: SympyBoolean,
-        msg: str,
-        fx_node: Optional[torch.fx.Node],
+    def defer_runtime_assert(
+        self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
     ) -> bool:
+        """Create an assert that is checked at runtime
+
+        Args:
+            orig_expr (sympy.Expr): Boolean expression to assert is true
+            msg (str): Message to display on assertion failure
+            fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
+                to the expression, if applicable
+
+        """
+        expr = orig_expr
+
+        # TODO: split conjunctions and evaluate them separately
+
+        static_expr = self._maybe_evaluate_static(expr)
+        if static_expr is not None:
+            self.log.debug(
+                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+            )
+            # TODO: assert bool(static_expr)
+            return bool(static_expr)
+
+        # Attempt to eliminate the unbacked SymInt
+        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+        assert new_expr is not None
+        if (
+            not self.prefer_deferred_runtime_asserts_over_guards
+            and new_expr.free_symbols <= self.var_to_val.keys()
+        ):
+            # Do a normal guard
+            return self.evaluate_expr(new_expr, fx_node=fx_node)
+        # NB: Don't use new_expr as expr; it could contain gunk like shape0
+        # which we don't want to guard on
+
         if (
             self._translation_validation_enabled
             and fx_node is not None
@@ -6341,45 +6371,6 @@ class ShapeEnv:
             )
 
         return True
-
-    def defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
-    ) -> bool:
-        """Create an assert that is checked at runtime
-
-        Args:
-            orig_expr (sympy.Expr): Boolean expression to assert is true
-            msg (str): Message to display on assertion failure
-            fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
-                to the expression, if applicable
-
-        """
-        expr = orig_expr
-
-        # TODO: split conjunctions and evaluate them separately
-
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug(
-                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-            )
-            # TODO: assert bool(static_expr)
-            return bool(static_expr)
-
-        # Attempt to eliminate the unbacked SymInt
-        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        assert new_expr is not None
-        if (
-            not self.prefer_deferred_runtime_asserts_over_guards
-            and new_expr.free_symbols <= self.var_to_val.keys()
-        ):
-            # Do a normal guard
-            return self.evaluate_expr(new_expr, fx_node=fx_node)
-        # NB: Don't use new_expr as expr; it could contain gunk like shape0
-        # which we don't want to guard on
-
-        # OK, we're definitely doing a runtime assert now
-        return self._defer_runtime_assert_inner(expr, orig_expr, msg, fx_node)
 
     # Refines the ranges of the variables present in 'guard'.
     #

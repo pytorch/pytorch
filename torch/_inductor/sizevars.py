@@ -418,15 +418,28 @@ class SizeVarAllocator:
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
 
-        assert self.shape_env.defer_runtime_assert(
-            sympy.Eq(left, right), "guard_equals"
-        )
+        expr = sympy.Eq(left, right)
+        static_expr = self.shape_env._maybe_evaluate_static(expr)
+
+        if static_expr is not None:
+            # TODO: assert bool(static_expr)
+            assert bool(static_expr)
+            return left
+
+        assert self.shape_env.defer_runtime_assert(expr, "guard_equals")
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
+        expr = sympy.Lt(left, right)
+        static_expr = self.shape_env._maybe_evaluate_static(expr)
+
+        if static_expr is not None:
+            assert bool(static_expr)
+            return
+
         assert self.shape_env.defer_runtime_assert(sympy.Lt(left, right), "guard_lt")
 
     def guarded_order(self, seq):
@@ -895,9 +908,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(self, inner, var_ranges: VarRanges) -> None:
         super().__init__(inner)
         self.name = "SimplifyIndexing"
-        self._simplify: Callable[[Expr], Expr] = (
-            lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
-        )
+        self._simplify: Callable[
+            [Expr], Expr
+        ] = lambda index: V.graph.sizevars.simplify_with_ranges(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr):
         return self._inner.load(name, self._simplify(index))
