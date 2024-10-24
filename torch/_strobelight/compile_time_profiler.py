@@ -93,7 +93,7 @@ class StrobelightCompileTimeProfiler:
     profiler: Optional[Any] = None
 
     max_stack_length: int = int(
-        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 127)
+        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 500)
     )
     max_profile_time: int = int(
         os.environ.get("COMPILE_STROBELIGHT_MAX_PROFILE_TIME", 60 * 30)

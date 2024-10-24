@@ -9,13 +9,13 @@ from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
+from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
 
 
 def should_unwrap_unspec_arg(name: str):
     if V.graph.is_unspec_arg(name):
         # Unwrap on all devices except CPU
-        if V.graph.scheduler.get_current_device_or_throw().type != "cpu":
+        if V.graph.get_current_device_or_throw().type != "cpu":
             return True
         # Only unwrap on CPU if the input is not used as an output
         if name not in V.graph.mutated_buffers:
@@ -70,7 +70,9 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         else:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
-        return "*i8"
+        return _type_of(arg.dtype)
+    if isinstance(arg, TMADescriptorArg):
+        return "nvTmaDesc"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
@@ -150,6 +152,8 @@ def config_of(
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True
+        if isinstance(x, TMADescriptorArg):
+            return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
