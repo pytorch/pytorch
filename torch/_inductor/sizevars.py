@@ -440,7 +440,7 @@ class SizeVarAllocator:
             assert bool(static_expr)
             return
 
-        assert self.shape_env.defer_runtime_assert(sympy.Lt(left, right), "guard_lt")
+        assert self.shape_env.defer_runtime_assert(expr, "guard_lt")
 
     def guarded_order(self, seq):
         """
