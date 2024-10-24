@@ -1152,6 +1152,7 @@ void brgemm(
 void brgemm_release() {
 #if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
   dnnl::ukernel::brgemm::release_hw_context();
+  Brgemm::get_current() = nullptr;
 #endif
 }
 

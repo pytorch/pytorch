@@ -44,6 +44,11 @@ def _is_avx512_bf16_supported() -> bool:
     return torch._C._cpu._is_avx512_bf16_supported()
 
 
+def _is_avx512_fp16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512_BF16."""
+    return torch._C._cpu._is_avx512_fp16_supported()
+
+
 def _is_vnni_supported() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
     # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
@@ -53,6 +58,11 @@ def _is_vnni_supported() -> bool:
 def _is_amx_tile_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AMX_TILE."""
     return torch._C._cpu._is_amx_tile_supported()
+
+
+def _is_amx_fp16_supported() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX FP16."""
+    return torch._C._cpu._is_amx_fp16_supported()
 
 
 def _init_amx() -> bool:
