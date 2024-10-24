@@ -51,7 +51,7 @@ class FSDPCommContext:
 
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
-        if device.type not in ["cuda", "hpu"]:
+        if device.type not in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]:
             raise RuntimeError("FSDP requires streams support")
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
