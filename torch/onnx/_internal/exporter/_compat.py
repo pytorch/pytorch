@@ -132,7 +132,7 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool | None = None,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -209,7 +209,7 @@ def export_compat(
     onnx_program.model = onnxscript_apis.convert_version(
         onnx_program.model, opset_version
     )
-    if optimize:
+    if optimize or (optimize is None and f is not None):
         onnx_program.optimize()
 
     if f is not None:
