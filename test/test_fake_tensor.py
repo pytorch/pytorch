@@ -28,6 +28,7 @@ from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     DynamicOutputShapeException,
     extract_tensor_metadata,
+    FakeRealKernelMismatchException,
     FakeTensor,
     FakeTensorConverter,
     FakeTensorMode,
@@ -1367,12 +1368,15 @@ class FakeTensorOperatorInvariants(TestCase):
             try:
                 with torch._subclasses.CrossRefFakeMode():
                     Repro()(*args)
-            except RuntimeError as e:
+            except FakeRealKernelMismatchException as e:
                 # We expect the cross ref to succed for the first output to fail
                 # for the rng state, see Note [Seed and Offset]
+                self.assertTrue(
+                    self.__class__.__name__.startswith("PropagateRealTensors")
+                )
                 self.assertTrue("output[0]" not in str(e))
                 self.assertTrue(
-                    "found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!"
+                    "Real tensor propagation found a metadata mismatch"
                     in str(e)
                 )
 
