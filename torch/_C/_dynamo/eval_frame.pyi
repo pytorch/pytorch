@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import types
-from typing import NewType, Tuple
+from typing import NewType
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -8,12 +8,19 @@ from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 # exposes the same interface.
 _PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
 
+# For typechecking
+SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
+CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
+# Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
+skip_code_recursive_flag: SkipCodeRecursiveFlag
+cache_limit_hit_flag: CacheLimitHitFlag
+
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
+def get_eval_frame_callback() -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
 def unsupported(obj1: object, obj2: object) -> object: ...
 def skip_code(code: types.CodeType) -> None: ...
 def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
-def set_context_frame(context: Tuple[int, int, int]) -> None: ...
 
 class _CacheEntry:
     def check_fn(self, *args, **kwargs): ...

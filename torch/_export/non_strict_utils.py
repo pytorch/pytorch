@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,7 +26,7 @@ from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
     _process_dynamic_shapes,
-    _transform_shapes_for_default_dynamic,
+    _RelaxedConstraint,
     _tree_map_with_path,
 )
 from torch.export.graph_signature import CustomObjArgument
@@ -38,6 +38,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     EqualityConstraint,
     GuardOnDataDependentSymNode,
+    RelaxedUnspecConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
     ValueRanges,
@@ -94,17 +95,32 @@ def fakify(
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
+    dynamic_sizes = []
+    constraint_sizes = [None] * n_dims
+    for i in range(n_dims):
+        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+        elif i in getattr(t, "_dynamo_dynamic_indices", {}):
+            # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
+            # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
+            # are raised when specializing.
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+        else:
+            dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=[DimDynamic.DYNAMIC] * n_dims,
-        constraint_sizes=[None] * n_dims,
+        dynamic_sizes=dynamic_sizes,
+        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
     )
     t_id = id(t)
     assert mode.shape_env is not None
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
-            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
+            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
@@ -136,10 +152,7 @@ def make_fake_inputs(
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    _dynamic_shapes = _transform_shapes_for_default_dynamic(
-        combined_args, dynamic_shapes
-    )
-    constraints = _process_dynamic_shapes(combined_args, _dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -199,6 +212,7 @@ def make_fake_inputs(
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
+        relaxed_sources: Set[Source] = set()
         for constraint in constraints:
             torch.export.dynamic_shapes._process_equalities(
                 constraint,
@@ -208,15 +222,24 @@ def make_fake_inputs(
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
+                relaxed_sources,
             )
 
         equalities_inputs = EqualityConstraint(
             source_pairs=source_pairs,
             derived_equalities=derived_equalities,
             phantom_symbols=list(phantom_symbols.values()),
+            relaxed_sources=relaxed_sources,
             warn_only=False,
         )
-        return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
+        return (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            equalities_inputs,
+            original_signature,
+            dynamic_shapes,
+        )
 
 
 def _flatten_dynamic_shapes(
@@ -231,6 +254,18 @@ def _flatten_dynamic_shapes(
 
     _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
+
+
+def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
+    for attr in [
+        "_dynamo_weak_dynamic_indices",
+        "_dynamo_dynamic_indices",
+        "_dynamo_dynamic_range",
+        "_dynamo_static_indices",
+        "_dynamo_unbacked_indices",
+    ]:
+        if hasattr(tensor, attr):
+            delattr(tensor, attr)
 
 
 def produce_guards_and_solve_constraints(
@@ -283,9 +318,9 @@ def produce_guards_and_solve_constraints(
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
             original_signature,
-            dynamic_shapes,
+            dynamic_shapes,  # type: ignore[arg-type]
             constraint_violation_error,
-            forced_specializations,
+            forced_specializations,  # type: ignore[arg-type]
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
@@ -322,6 +357,11 @@ def make_constraints(
     }
     if not dynamic_shapes:
         return range_constraints
+
+    # clean up dynamic markers from tensors
+    for arg in pytree.tree_flatten(combined_args)[0]:
+        if isinstance(arg, torch.Tensor):
+            _clean_dynamic_markers(arg)
 
     # get individual dynamic shapes spec for each input
     if not isinstance(dynamic_shapes, dict):
@@ -499,7 +539,11 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if log.isEnabledFor(logging.DEBUG) and config.extended_debug_current_loc:
+        if (
+            not torch.compiler.is_dynamo_compiling()
+            and log.isEnabledFor(logging.DEBUG)
+            and config.extended_debug_current_loc
+        ):
             frame = _find_user_code_frame()
             if frame is not None:
                 log.debug(
