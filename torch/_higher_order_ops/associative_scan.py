@@ -176,8 +176,8 @@ def associative_scan(
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
-    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
-    sliced_shape = shape[1:]
+    sliced_leaves = [first_slice_copy(leaf, dim) for leaf in leaves]
+    sliced_shape = sliced_leaves[0].shape
 
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -308,7 +308,7 @@ def trace_associative_scan(
     proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor], dim: int
 ):
     with disable_proxy_modes_tracing():
-        sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
+        sample_xs = [first_slice_copy(x, dim) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
 
     outputs = None
