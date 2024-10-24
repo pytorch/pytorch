@@ -28,6 +28,39 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def normalize_model_output_as_tuple(output: Any) -> Tuple[Any]:
+    """[Note: pipeline model output type]
+
+    The output of the model passed to pipelining can be any type, controlled by the user.
+
+    However, there are 2 API surfaces that complicate this.
+    (1) the outputs of intermediate stages are passed via Send/Recv ops to subsequent stages. The implicit assumption
+    is that each element of the outputs is a tensor.  Otherwise, Send/Recv would not be supported.  The exception
+    is the last layer of the model, which can output anything any which won't be communicated via Send/Recv.
+    (2) the outputs of the last layer of the model are returned to the user, or, passed to the loss function.
+    The loss function can be written in any way, such that its inputs match the outputs of the model.
+
+    It would be convenient if we could strictly type the output signature of the pipeline stage wrapping the model,
+    but we do not want to impose an unnecessary constraint on user provided models.
+
+    Currently, we let user provided models return either a Tensor or a tuple of Tensors from each stage. Due to
+    torch.export tracing, compiled models may also return a list instead of a Tuple, which we will normalize back to a
+    tuple for consistency.
+
+    TODO: should we be stricter about asserting that stage modules (intermediate and output) all return only Tensor
+    values?
+    """
+    if type(output) is list:
+        # HACK: this is a hacky workaround for the fact that export creates
+        # output in list format
+        output = tuple(output)
+
+    # Unify output form to tuple for easy correspondance with
+    # `act_send_info`
+    output_tuple = output if type(output) is tuple else (output,)
+    return output_tuple
+
+
 class _RootArgPlaceholder:
     """
     Placeholder for model-level inputs.
@@ -316,11 +349,12 @@ class _PipelineStageBase(ABC):
     should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
     """
 
-    def set_local_fwd_input(self, prev_stage_outputs: Tuple[Any], mb_index: int):
+    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
         recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[mb_index]
-        assert isinstance(
-            prev_stage_outputs, tuple
-        ), f"Expected tuple, got {type(prev_stage_outputs)}"
+
+        # See [Note: pipeline model output type]
+        prev_stage_outputs = normalize_model_output_as_tuple(prev_stage_outputs)
+
         for info, tensor in zip(recv_infos, prev_stage_outputs):
             assert isinstance(
                 tensor, torch.Tensor
@@ -329,10 +363,11 @@ class _PipelineStageBase(ABC):
                 # TODO: when would info not be a _RecvInfo? should this be an error?
                 continue
 
-            # TODO(whc) we shouldn't need a copy here, and this feels hacky.  But i need to ensure 'tensor' is
-            # a leaf tensor that requires_grad and i'm not allowed to modify requires_grad-ness of existing tensor
-            # with torch.no_grad():
-            # info.buffer.copy_(tensor)
+            # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
+            # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
+            # as the input tensor for a fresh autograd graph, not part of the previous stage's autograd graph.
+            # TODO: confirm, do we use this activation as the root of the backward call for the previous stage? does
+            # detach have any affect on that?
             info.buffer = tensor.detach().requires_grad_(True)
 
     def get_local_bwd_output(self, mb_index):
@@ -618,7 +653,7 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Any]:
+    ):
         """
         Perform forward pass on the stage with one microbatch.
         `args` and `kwargs` are the inputs from *external* to this stage.
@@ -652,14 +687,9 @@ class _PipelineStageBase(ABC):
             """
             raise RuntimeError(exc_msg) from e
 
-        if type(output) is list:
-            # HACK: this is a hacky workaround for the fact that export creates
-            # output in list format
-            output = tuple(output)
+        # See [Note: pipeline model output type]
+        output_tuple = normalize_model_output_as_tuple(output)
 
-        # Unify output form to tuple for easy correspondance with
-        # `act_send_info`
-        output_tuple = output if type(output) is tuple else (output,)
         # Prepare for final output merge or reduction
         self.output_chunks.append(output)
 
@@ -679,7 +709,10 @@ class _PipelineStageBase(ABC):
             map_debug_info(output),
         )
         self._validate_fwd_outputs(output_tuple)
-        return output_tuple
+
+        # We return the original user-provied output, not normalized to tuple.
+        # See [Note: pipeline model output type]
+        return output
 
     def backward_one_chunk(
         self, bwd_chunk_id: int, loss=None, full_backward: bool = True
