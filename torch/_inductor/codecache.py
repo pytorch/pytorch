@@ -522,9 +522,17 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, include_non_inlined: bool = True) -> None:
+        """
+        Create an FX graph pickler. If include_non_inlined=True, then pickling will
+        include the _values_ for all Tensors. (Note that any tensors are constants
+        attached as attributes to the GraphModule). Otherwise, pickling will include
+        only the metadata for these tensors.
+        """
         self._stream = io.BytesIO()
         super().__init__(self._stream)
+
+        self.include_non_inlined = include_non_inlined
 
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
@@ -554,35 +562,38 @@ class FxGraphCachePickler(pickle.Pickler):
     def _reduce_tensor(
         self,
         t: Tensor,
-    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+    ) -> Tuple[Callable[[T], T], Tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
-        stored as attributes on the GraphModule. Include the values in the key
-        calculation. Small tensors will be inlined, so we can't serve the same cache
-        entry for different values anyway. Large constants are treated as parameters, so
-        we could conceivably reuse a cache entry. To do that, however, PyCodeCache would
-        need more complexity to create a new module from its cache, but with the right
-        constants attached as attributes.
+        stored as attributes on the GraphModule.
         """
+        from .graph import GraphLowering
+
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
             # graph containing them. Just fail now. If mkldnn tensors get pickling
             # support, we can remove this.
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
-        # Very large tensors could be expensive to copy to cpu and hash. Let's at least
-        # report if we find slowness.
-        start = time()
-        values = t.tolist()
-        elapsed = time() - start
-        if elapsed > 1.0:
-            warnings.warn(
-                f"FX graph cache handling of a large constant took {elapsed:.1}s. "
-                "Please file an issue."
-            )
-
+        # If this is an inlined constant or include_non_inlined=True, then we include
+        # the metadata and the values.
         metadata = extract_tensor_metadata_for_cache_key(t)
-        return (_ident, (TensorMetadataAndValues(metadata, values),))
+        if GraphLowering.can_inline_constant(t) or self.include_non_inlined:
+            # Very large tensors will be expensive to copy to cpu and hash. Let's at
+            # least report any slowness.
+            start = time()
+            values = t.tolist()
+            elapsed = time() - start
+            if elapsed > 1.0:
+                warnings.warn(
+                    f"FX graph cache copying of a large constant took {elapsed:.1}s. "
+                    "Please file an issue."
+                )
+
+            return (_ident, (TensorMetadataAndValues(metadata, values),))
+
+        # Otherwise, we just include the metadata.
+        return (_ident, (metadata,))
 
     def _reduce_symint(self, s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
         """
@@ -800,6 +811,10 @@ class FxGraphHashDetails:
         return custom_pass.uuid()
 
 
+def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
+    return "_frozen_param" in str(gm)
+
+
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -809,8 +824,13 @@ def compiled_fx_graph_hash(
     """
     Generate a unique hash of the FX graph for caching.
     """
+    # To support caching when the graph has frozen params, we ignore the tensor values
+    # of non-inlined constants since they won't be included in the cache entry. Without
+    # freezing, we want to include the values of any constant attribute.
+    include_non_inlined = not has_frozen_params(gm)
+
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
-    pickler = FxGraphCachePickler()
+    pickler = FxGraphCachePickler(include_non_inlined)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
@@ -824,6 +844,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
+    gm: Optional[torch.fx.GraphModule],
 ) -> None:
     """
     Checks for any reasons not to run cudagraphs and then
@@ -869,7 +890,7 @@ def cudagraph_post_compile(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=tuple(compiled_graph.constants.values()),
+            constants=tuple(compiled_graph.get_constants(gm).values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
@@ -1026,6 +1047,7 @@ class FxGraphCache:
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
+        gm: Optional[torch.fx.GraphModule],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1122,7 +1144,7 @@ class FxGraphCache:
                 graph.cache_key,
                 artifact_path,
                 graph.cache_linemap,
-                graph.constants,
+                graph.get_constants(gm),
             ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
@@ -1164,6 +1186,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
+        gm: Optional[torch.fx.GraphModule] = None,
     ) -> CompiledFxGraph:
         """
         Run a set of post processing steps after loading from the cache. These involve:
@@ -1193,6 +1216,7 @@ class FxGraphCache:
                     example_inputs,
                     compiled_graph,
                     cudagraphs,
+                    gm,
                 )
         inputs_to_check = compiled_graph.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
@@ -1281,9 +1305,15 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
-        if config.freezing or config.aot_inductor.use_runtime_constant_folding:
+        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
+            "pytorch/inductor:allow_freezing_with_caching"
+        ):
+            raise BypassFxGraphCache("Skipping graph with frozen constants")
+
+        if config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
-                "Freezing may introduce constants that aren't static across runs"
+                "Runtime constant folding can introduce constants that aren't "
+                "static across runs"
             )
 
         from torch._inductor.bisect_helper import BisectionManager
@@ -1373,6 +1403,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
+        gm: Optional[torch.fx.GraphModule] = None,
     ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -1380,7 +1411,7 @@ class FxGraphCache:
         differently from FXGraphCache.
         """
         compiled_graph = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache
+            key, example_inputs, local, remote_cache, gm
         )
         cache_info = {
             "key": key,
@@ -1439,6 +1470,7 @@ class FxGraphCache:
                 local,
                 remote_cache,
                 is_backward=fx_kwargs.get("is_backward", False),
+                gm=gm,
             )
 
         # CACHE BYPASS: Compile the graph, don't save it to the cache
@@ -1532,7 +1564,15 @@ class CompiledFxGraph:
     device_idxs: Set[int]
     mutated_inputs: Set[str]
     mutated_input_idxs: Set[int]
-    constants: Dict[str, torch.Tensor]
+    # We populate exactly one of the next two fields. In the common case, we store the
+    # constant attirbutes in the cache entry and re-attach them to the module created in
+    # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
+    # however, we save the mapping from attribute names in the GraphLowering to the
+    # original name of the attribute in the GraphModule. When we create the module from
+    # the cache entry, we then look up the constants from the current GraphModule. This
+    # scheme allows us to support caching with freezing.
+    allocated_constant_name: Optional[Dict[str, str]]
+    constants: Optional[Dict[str, torch.Tensor]]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
@@ -1574,7 +1614,12 @@ class CompiledFxGraph:
         self.device_idxs = set(graph.device_idxs)
         self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
-        self.constants = graph.constants
+        if has_frozen_params(graph.orig_gm):
+            self.allocated_constant_name = graph.allocated_constant_name
+            self.constants = None
+        else:
+            self.allocated_constant_name = None
+            self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
@@ -1592,6 +1637,26 @@ class CompiledFxGraph:
             return self.current_callable(inputs)
         finally:
             AutotuneCacheBundler.end_compile()
+
+    def get_constants(
+        self, gm: Optional[torch.fx.GraphModule]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Get the constant attributes.
+        """
+        # Normal case: The constants are stored in the entry.
+        if self.constants is not None:
+            return self.constants
+
+        # Freezing case: Look up the constants from attributes on the GraphModule using
+        # the allocated_constant_name map.
+        assert gm is not None
+        assert self.allocated_constant_name is not None
+        constants = {
+            name: getattr(gm, orig_name)
+            for name, orig_name in self.allocated_constant_name.items()
+        }
+        return constants
 
 
 def run_command_and_check(cmd_: str) -> None:
@@ -2957,9 +3022,13 @@ def touch(filename: str):  # type: ignore[no-untyped-def]
 
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
+    # Track the loaded modules so we can remove the on-disk artifacts when
+    # clearing the cache. Note also that we may load the same path more
+    # than once, but attach different attributes, i.e., due to different
+    # constant values.
+    modules: List[ModuleType] = []
     cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
-    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> Tuple[str, str]:
@@ -2986,24 +3055,33 @@ class PyCodeCache:
     ) -> ModuleType:
         if linemap is None:
             linemap = []
-        if key not in cls.cache:
-            mod = _reload_python_module(key, path)
 
-            # another thread might set this first
-            cls.cache.setdefault(key, mod)
-            # unzip into separate lines/nodes lists
-            cls.linemaps[path] = list(zip(*linemap))
+        mod = _reload_python_module(key, path)
 
-            if attrs is not None:
-                for k, v in attrs.items():
-                    setattr(mod, k, v)
+        # unzip into separate lines/nodes lists
+        cls.linemaps[path] = list(zip(*linemap))
 
-            if not (linemap or attrs):
-                mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                    _reload_python_module_in_subproc, key, path
-                )
+        if attrs is not None:
+            for k, v in attrs.items():
+                setattr(mod, k, v)
 
-        return cls.cache[key]
+        if not (linemap or attrs):
+            mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
+                _reload_python_module_in_subproc, key, path
+            )
+
+        cls.modules.append(mod)
+        return mod
+
+    @classmethod
+    def cache_clear(cls) -> None:
+        for mod in cls.modules:
+            try:
+                assert mod.__file__
+                os.remove(mod.__file__)
+            except FileNotFoundError:
+                pass
+        cls.modules.clear()
 
     @classmethod
     @functools.lru_cache(None)

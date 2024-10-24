@@ -716,7 +716,7 @@ def _compile_fx_inner(
                 # to return the string directly.
                 return compiled_graph
             compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs
+                compiled_graph, example_inputs, cudagraphs, gm
             )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
