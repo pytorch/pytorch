@@ -772,6 +772,7 @@ class SymmMemUtilTest(TestCase):
         torch.cuda.set_device("cuda:0")
         t = torch.zeros(64, dtype=torch.uint32, device="cuda")
 
+        print(torch.ops.quantization._Bfloat16QuantizedToFloat)
         print(torch.ops.symm_mem.memset32_)
 
         _SymmetricMemory.memset32(t, offset=32, val=1, count=16)

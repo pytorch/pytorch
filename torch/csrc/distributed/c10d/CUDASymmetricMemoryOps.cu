@@ -546,49 +546,15 @@ at::Tensor memset32_(
   return input;
 }
 
-TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
-  m.def(
-      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
-      {at::Tag::pt2_compliant_tag});
-
-  // NOTE: [multimem_one_shot_all_reduce]
-  // multimem.ld_reduce does not guarantee a fixed accumulation order. This
-  // means that while multimem_one_shot_all_reduce is faster and has higher
-  // numerical accuracy than one_shot_all_reduce, it doesn't guarantee
-  // identical results across ranks. There may be use cases that can take
-  // advantage of this property, but it should not be used without
-  // understanding the caveats.
-  m.def(
-      "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
-      torch::dispatch(
-          c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce_out),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce_out),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::memset32_),
-      {at::Tag::pt2_compliant_tag});
+TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
+  m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
+  m.impl("multimem_one_shot_all_reduce", ::multimem_one_shot_all_reduce);
+  m.impl(
+      "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
+  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
+  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("memset32_", ::memset32_);
 }
 
 } // namespace
