@@ -690,8 +690,14 @@ inline Tensor max_unpool1d(
   auto output_size_ =
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
   output_size_.push_back(1);
+  ExpandingArray<2> stride_(stride);
+  ExpandingArray<2> padding_(padding);
   return torch::max_unpool2d(
-             input.unsqueeze(-1), indices.unsqueeze(-1), output_size_)
+             input.unsqueeze(-1),
+             indices.unsqueeze(-1),
+             output_size_,
+             stride_,
+             padding_)
       .squeeze(-1);
 }
 } // namespace detail
@@ -735,7 +741,7 @@ inline Tensor max_unpool2d(
   auto output_size_ =
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
 
-  return torch::max_unpool2d(input, indices, output_size_);
+  return torch::max_unpool2d(input, indices, output_size_, stride, padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

@@ -113,18 +113,92 @@ __global__ void max_unpooling3d_backward_kernel(
   }
 }
 
+static void max_unpooling2d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    const char *fn_name) {
+  TORCH_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64 but got: ", indices.scalar_type());
+  TORCH_CHECK(
+      (input.ndimension() == 3 || input.ndimension() == 4),
+      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with dim ", input.ndimension());
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
+  TORCH_CHECK(
+      stride.size() == 2,
+      "There should be exactly two elements in stride, but got: ", stride.size(), " elements.");
+  TORCH_CHECK(
+      padding.size() == 2,
+      "There should be exactly two elements in padding, but got: ", padding.size(), " elements.");
+  TORCH_CHECK(
+      input.sizes() == indices.sizes(),
+      "Expected shape of indices to be: ", input.sizes(), " but got: ", indices.sizes());
+
+  for (int64_t i = 1; i < input.ndimension(); ++i) {
+    TORCH_CHECK(input.size(i) > 0, fn_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(), " with dimension ", i , " being empty.");
+  }
+
+  TORCH_CHECK(
+      stride[0] > 0 && stride[1] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+
+  int64_t oH = output_size[0];
+  int64_t oW = output_size[1];
+
+  int dimw = 2;
+  int dimh = 1;
+  int dimn = 0;
+
+  if (input.ndimension() == 4) {
+    dimw++;
+    dimh++;
+    dimn++;
+  }
+
+  int nslices = input.size(dimn);
+
+  if (gradOutput.defined()) {
+    if (oH != gradOutput.size(dimh) || oW != gradOutput.size(dimw)) {
+      TORCH_CHECK(false,
+          "Inconsistent gradOutput size. oH= ",
+          oH,
+          ", oW= ",
+          oW,
+          ". gradOutput: ",
+          gradOutput.size(dimh),
+          "x",
+          gradOutput.size(dimw));
+    }
+    TORCH_CHECK(
+        gradOutput.ndimension() == input.ndimension() &&
+            gradOutput.size(dimn) == nslices,
+        "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
+  }
+}
+
 Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     Tensor& output) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic with duplicate indices
   at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
 
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64 but got: ", indices_.scalar_type());
+  max_unpooling2d_shape_check(
+    self_, Tensor(), indices_, output_size, stride, padding, "max_unpooling2d_forward_out_cuda()");
+
   auto oheight = output_size[0];
   auto owidth = output_size[1];
 
@@ -132,22 +206,6 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
       indices_arg{indices_, "indices_", 3};
   checkAllSameGPU(
       "max_unpooling2d_forward_out_cuda", {output_arg, self_arg, indices_arg});
-
-  for (int64_t i = 1; i < self_.ndimension(); ++i) {
-    TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cuda(): ",
-                "Expected input to have non-zero size for non-batch dimensions, but got ",
-                self_.sizes(), " with dimension ", i , " being empty.");
-  }
-
-  TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ", self_.ndimension());
-  TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
-      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
 
   int64_t dimw = 2;
   int64_t dimh = 1;
@@ -203,9 +261,11 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
 Tensor max_unpooling2d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling2d_forward_out_cuda(self, indices, output_size, output);
+  at::native::max_unpooling2d_forward_out_cuda(self, indices, output_size, stride, padding, output);
   return output;
 }
 
@@ -217,9 +277,6 @@ static void max_unpooling3d_shape_check(
     IntArrayRef stride,
     IntArrayRef padding,
     const char *fn_name) {
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
   TORCH_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got: ", indices.scalar_type());
@@ -249,6 +306,10 @@ static void max_unpooling3d_shape_check(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "strides should be greater than zero, but got stride: ",
       stride);
+
+  int64_t oT = output_size[0];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
 
   int dimw = 3;
   int dimh = 2;
@@ -401,13 +462,13 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     Tensor& grad_input) {
-  int64_t oheight = output_size[0];
-  int64_t owidth = output_size[1];
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64 but got type: ", indices_.scalar_type());
+  max_unpooling2d_shape_check(
+    self_, grad_output_, indices_, output_size, stride, padding, "max_unpooling2d_backward_out_cuda()");
+
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2},
       self_arg{self_, "self_", 3}, indices_arg{indices_, "indices_", 4};
@@ -415,18 +476,10 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
       "max_unpooling2d_backward_out_cuda",
       {grad_input_arg, grad_output_arg, self_arg, indices_arg});
 
-  TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, instead got: ",
-      self_);
-
-  TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
-      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
-
-  TORCH_CHECK(output_size.size() == 2, "output_size must have two elements, got size: ", output_size.size());
-
   int64_t nInputCols, nInputRows, nInputPlane;
+
+  int64_t oheight = output_size[0];
+  int64_t owidth = output_size[1];
 
   int dimw = 2;
   int dimh = 1;
@@ -486,14 +539,17 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
       }));
   return grad_input;
 }
+
 at::Tensor max_unpooling2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   at::native::max_unpooling2d_backward_out_cuda(
-      grad_output, self, indices, output_size, grad_input);
+      grad_output, self, indices, output_size, stride, padding, grad_input);
   return grad_input;
 }
 
@@ -505,18 +561,8 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
     IntArrayRef padding,
     Tensor& grad_input) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  int64_t oT = output_size[0];
-  int64_t oH = output_size[1];
-  int64_t oW = output_size[2];
-
   max_unpooling3d_shape_check(
     self_, grad_output_, indices_, output_size, stride, padding, "max_unpooling3d_backward_out_cuda()");
-
-  int batchSize = 0;
-  int inputSlices = 0;
-  int inputTime = 0;
-  int64_t inputHeight = 0;
-  int64_t inputWidth = 0;
 
   TensorArg self_arg{self_, "self_", 1}, indices_arg{indices_, "indices_", 2},
       grad_output_arg{grad_output_, "grad_output_", 3},
@@ -524,6 +570,16 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
   checkAllSameGPU(
       "max_unpooling3d_backward_out_cuda",
       {self_arg, indices_arg, grad_output_arg, grad_input_arg});
+
+  int64_t oT = output_size[0];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
+
+  int batchSize = 0;
+  int inputSlices = 0;
+  int inputTime = 0;
+  int64_t inputHeight = 0;
+  int64_t inputWidth = 0;
 
   auto self = self_.contiguous();
   auto indices = indices_.contiguous();
