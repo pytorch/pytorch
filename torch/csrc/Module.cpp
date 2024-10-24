@@ -2173,16 +2173,6 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::DeviceIndex(-1);
       });
 
-  py_module.def(
-      "_get_accelerator",
-      [](std::optional<bool> check = std::nullopt) {
-        return c10::Device(
-            at::getAccelerator(check.value_or(false))
-                .value_or(c10::DeviceType::CPU),
-            -1);
-      },
-      py::arg("check") = nullptr);
-
 #ifdef USE_CUDA
   PyObject* has_cuda = Py_True;
 #else
