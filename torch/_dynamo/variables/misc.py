@@ -929,7 +929,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -976,7 +976,7 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -1325,7 +1325,7 @@ class NullVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):
