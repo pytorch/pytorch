@@ -4,6 +4,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -83,6 +84,8 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at::native {
+DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(fp16_gemv_trans_stub);
 
 namespace blas_impl {
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -292,36 +295,6 @@ bool gemv_use_fast_path<at::BFloat16>(
       beta == 0.0;
 }
 
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-
-/*
- * NOTE [ GGML Copyright Notice ]
- * The below reduce overload and fp16_dot_with_fp16_arith function is
- * adapted from llama.cpp's ggml_vec_dot_f16 and surrounding utility
- * functions, so here is the required copyright notice:
- *
- * MIT License
- *
- * Copyright (c) 2023-2024 The ggml authors
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
 // We need the shift for reduce(), hence the extra constants.
 static constexpr auto kF16ElementsPerIterationShift = 7;
 static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
@@ -334,50 +307,6 @@ static_assert(kF16ElementsPerRegister == 8);
 static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
 static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
 static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
-
-static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
-  int offset = kF16RegistersPerIteration;
-  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
-    offset /= 2;
-    for (int i = 0; i < offset; ++i) {
-      x[i] = x[i] + x[offset + i];
-    }
-  });
-  const auto [t0, t1] = vec::convert_half_float(x[0]);
-  return vaddvq_f32(t0 + t1);
-}
-
-static float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
-  vec::VectorizedN<Half, kF16RegistersPerIteration> sum(0);
-
-  const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
-  for (int j = 0; j < len_aligned ; j += kF16ElementsPerIteration) {
-    for (int k = 0; k < kF16RegistersPerIteration; ++k) {
-      const auto temp_x = vec::Vectorized<Half>::loadu(x + j + k * vec::Vectorized<Half>::size());
-      const auto temp_a = vec::Vectorized<Half>::loadu(a + j + k * vec::Vectorized<Half>::size());
-      sum[k] = vec::fmadd(temp_x, temp_a, sum[k]);
-    }
-  }
-  auto reduced_sum = reduce(sum);
-
-  for (int j = len_aligned; j < len; ++j) {
-    reduced_sum += x[j] * a[j];
-  }
-  return reduced_sum;
-}
-
-// Rather than unrolling to process multiple rows (transposed columns)
-// of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
-// along an individual dot product.
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
-    }
-  });
-}
-
-#endif // __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted
 // from llama.cpp's ggml_vec_dot_f32 and surrounding utility
@@ -398,54 +327,6 @@ static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration 
 static constexpr auto kF32RegistersPerIterationShift = 3;
 static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
 static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
-
-static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
-  int offset = kF32RegistersPerIteration;
-  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
-    offset /= 2;
-    for (int i = 0; i < offset; ++i) {
-      x[i] = vaddq_f32(x[i], x[offset + i]);
-    }
-  });
-  return vaddvq_f32(x[0]);
-}
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-  const Half* vec1,
-  const Half* vec2,
-  vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-  int registerPairIndex) {
-  // Load a pair of f32 registers at a time.
-  const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[registerPairIndex * vec::Vectorized<Half>::size()]);
-  const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[registerPairIndex * vec::Vectorized<Half>::size()]);
-
-  const auto [result_low, result_high] = vec::fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
-  sum[2 * registerPairIndex] = result_low;
-  sum[2 * registerPairIndex + 1] = result_high;
-}
-
-
-static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
-#ifdef __ARM_FEATURE_FP16_FML
-  // NOTE: this instruction is an optional instruction in ARM v8.2 and
-  // v8.3, but mandatory in v8.4 per
-  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
-  // I'm not certain that I have the right feature test macro.
-  return vfmlalq_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
-#else
-  return vec::fmadd(vec::Vectorized<float>(vcvt_f32_f16(b)), vec::Vectorized<float>(vcvt_f32_f16(c)), vec::Vectorized<float>(a));
-#endif
-}
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const Half* vec1,
-    const Half* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1_f16(reinterpret_cast<const float16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_f16(reinterpret_cast<const float16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_f16(*tail_sum, temp_vec1, temp_vec2);
-}
 
 static float32x4_t to_bfloat16(uint16x4_t u16) {
   int32x4_t shift = vdupq_n_s32(16);
@@ -546,6 +427,17 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_
 }
 
 namespace {
+static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
+  int offset = kF32RegistersPerIteration;
+  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f32(x[i], x[offset + i]);
+    }
+  });
+  return vaddvq_f32(x[0]);
+}
+
 #if COMPILER_SUPPORTS_BF16_TARGET
 template <int n>
 struct ForcedUnrollTargetBFloat16 {
@@ -666,10 +558,6 @@ dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
 #undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
 } // namespace
 
-float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) {
-  return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
-}
-
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
 #if COMPILER_SUPPORTS_BF16_TARGET
   if (cpuinfo_has_arm_bf16()) {
@@ -681,23 +569,19 @@ float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec
   }
 }
 
-// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
-// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
-// equivalent performance to the fp16-native kernel.
-static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
-    }
-  });
-}
-
 static void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
     for (int i = begin; i < end; ++i) {
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
     }
   });
+}
+
+float fp16_dot_with_fp32_arith(
+  const Half* x,
+  const Half* a,
+  int64_t len) {
+  return fp16_dot_with_fp32_arith_stub(kCPU, x, a, len);
 }
 
 void fp16_gemv_trans(
@@ -711,13 +595,7 @@ void fp16_gemv_trans(
     const float beta,
     Half* y,
     const int incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-  if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
-  }
-#endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void bf16_gemv_trans(
