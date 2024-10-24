@@ -35,7 +35,7 @@ jobs:
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        cuda_version: ["11.8", "12.1", "12.4", "cpu"]
+        cuda_version: ["11.8", "12.1", "12.4", "12.6", "cpu"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
@@ -62,5 +62,11 @@ jobs:
           fi
       - name: Build Docker Image
         if: env.WITH_PUSH == 'true'
-        run: |
-          .ci/docker/conda/build.sh conda-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/conda/build.sh conda-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}

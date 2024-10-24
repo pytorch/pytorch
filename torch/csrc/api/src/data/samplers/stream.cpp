@@ -6,9 +6,7 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 BatchSize::BatchSize(size_t size) : size_(size) {}
 size_t BatchSize::size() const noexcept {
@@ -56,6 +54,4 @@ void StreamSampler::load(serialize::InputArchive& archive) {
   examples_retrieved_so_far_ = tensor.item<int64_t>();
 }
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers
