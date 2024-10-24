@@ -6290,7 +6290,6 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
-    @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
     ) -> bool:
@@ -6328,50 +6327,58 @@ class ShapeEnv:
         # which we don't want to guard on
 
         # OK, we're definitely doing a runtime assert now
-        if (
-            self._translation_validation_enabled
-            and fx_node is not None
-            and not self._suppress_guards_tls()
-        ):
-            node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
-            assert node is not None
-            if fresh:
-                self._add_fx_node_metadata(node)
+        @record_shapeenv_event(save_tracked_fakes=True)
+        def inner(expr: SympyBoolean, orig_expr: SympyBoolean) -> bool:
+            if (
+                self._translation_validation_enabled
+                and fx_node is not None
+                and not self._suppress_guards_tls()
+            ):
+                node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
+                assert node is not None
+                if fresh:
+                    self._add_fx_node_metadata(node)
 
-        if not self._suppress_guards_tls():
-            # If you're here because of this assert, read Note [Backwards runtime asserts]
-            # in torch/_inductor/graph.py
-            assert not self.runtime_asserts_frozen, expr
+            if not self._suppress_guards_tls():
+                # If you're here because of this assert, read Note [Backwards runtime asserts]
+                # in torch/_inductor/graph.py
+                if self.runtime_asserts_frozen:
+                    log.warning("runtime_asserts_frozen but then got %s", expr)
+                self._check_frozen(expr, sympy.true)
 
-            self._check_frozen(expr, sympy.true)
+                # eliminate symbols on equality tests / refine ranges
+                if isinstance(expr, sympy.Rel):
+                    self._maybe_guard_rel(expr)
 
-            # eliminate symbols on equality tests / refine ranges
-            if isinstance(expr, sympy.Rel):
-                self._maybe_guard_rel(expr)
+                # canonicalise to remove equations that are trivially equal
+                orig_expr = expr
+                expr = canonicalize_bool_expr(expr)
+                stack = CapturedTraceback.extract(skip=1)
+                ra = RuntimeAssert(expr, msg, stack)
+                # TODO: Do this in a way that is less janky than int(s.name[1:])
+                cands = sorted(
+                    (
+                        s
+                        for s in expr.free_symbols
+                        if symbol_is_type(s, SymT.UNBACKED_INT)
+                    ),
+                    key=lambda s: int(s.name[1:]),
+                )
+                # Is None when prefer_deferred_runtime_asserts_over_guards=True
+                # and the guard in question has no unbacked SymInts in front
+                ix = cands[-1] if cands else None
+                self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
+                self.num_deferred_runtime_asserts += 1
+                self._update_version_counter()
+                self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
+            else:
+                self._log_guard(
+                    "runtime_assert [guard suppressed]", orig_expr, forcing_spec=False
+                )
 
-            # canonicalise to remove equations that are trivially equal
-            orig_expr = expr
-            expr = canonicalize_bool_expr(expr)
-            stack = CapturedTraceback.extract(skip=1)
-            ra = RuntimeAssert(expr, msg, stack)
-            # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted(
-                (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
-                key=lambda s: int(s.name[1:]),
-            )
-            # Is None when prefer_deferred_runtime_asserts_over_guards=True
-            # and the guard in question has no unbacked SymInts in front
-            ix = cands[-1] if cands else None
-            self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
-            self.num_deferred_runtime_asserts += 1
-            self._update_version_counter()
-            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
-        else:
-            self._log_guard(
-                "runtime_assert [guard suppressed]", orig_expr, forcing_spec=False
-            )
+            return True
 
-        return True
+        return inner(expr, orig_expr)
 
     # Refines the ranges of the variables present in 'guard'.
     #
