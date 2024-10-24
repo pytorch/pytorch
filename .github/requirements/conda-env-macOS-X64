@@ -1,0 +1,16 @@
+mkl=2021.2.0
+mkl-include=2021.2.0
+numpy=1.21.2
+pyyaml=5.3
+setuptools=46.0.0
+cmake=3.22.*
+typing-extensions=4.9.0
+dataclasses=0.8
+pip=22.2.2
+pillow=10.0.1
+libuv=1.40.0
+pkg-config=0.29.2
+wheel=0.37.1
+
+# Not pinning certifi so that we can always get the latest certificates
+certifi
