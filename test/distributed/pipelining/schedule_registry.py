@@ -13,8 +13,9 @@ from torch.distributed.pipelining.stage import _PipelineStageBase
 
 
 F = _ComputationType.FORWARD
-B = _ComputationType.BACKWARD
-W = _ComputationType.WEIGHT
+B = _ComputationType.FULL_BACKWARD
+W = _ComputationType.BACKWARD_WEIGHT
+I = _ComputationType.BACKWARD_INPUT
 
 
 class ScheduleVShaped(PipelineScheduleMulti):
@@ -139,6 +140,8 @@ class ScheduleWithW(PipelineScheduleMulti):
         self.use_full_backward = False
 
         # Go through two microbatches
+        # TODO(whc) unify the semantics of the IR for old runtime with new runtime.
+        # make 'I' a supported action in old runtime
         self.pipeline_order = {
             0: [
                 _Action(0, F, 0),
