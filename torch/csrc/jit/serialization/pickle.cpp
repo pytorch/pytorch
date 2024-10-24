@@ -96,7 +96,8 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
       writer);
   return container_data;
 #else
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "pickle_save not supported on mobile "
       "(see https://github.com/pytorch/pytorch/pull/30108)");
 #endif
@@ -136,7 +137,8 @@ IValue pickle_load(const std::vector<char>& data) {
       /*device=*/std::nullopt,
       reader);
 #else
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "pickle_load not supported on mobile "
       "(see https://github.com/pytorch/pytorch/pull/30108)");
 #endif
@@ -156,7 +158,8 @@ c10::IValue pickle_load_obj(std::string_view data) {
       /*device=*/c10::nullopt,
       reader);
 #else
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "pickle_load not supported on mobile "
       "(see https://github.com/pytorch/pytorch/pull/30108)");
 #endif
