@@ -84,24 +84,6 @@ class TORCH_API Context {
     }
   }
 
-  bool isPinnedPtr(
-      const void* data,
-      std::optional<c10::DeviceType> device_type = std::nullopt) {
-    auto opt_device_type =
-        device_type.has_value() ? device_type : at::getAccelerator();
-    if (!opt_device_type.has_value() || // there is no accelerator
-        !at::isAccelerator(
-            opt_device_type.value())) { // passed device not an accelerator
-      return false;
-    }
-    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
-  }
-
-  Allocator* getPinnedMemoryAllocator(
-      std::optional<c10::DeviceType> device_type = std::nullopt) {
-    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
-  }
-
   void lazyInitDevice(c10::DeviceType device_type) {
     if (device_type != at::kCPU) {
       c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
