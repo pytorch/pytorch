@@ -776,6 +776,10 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
 
+# Adds NVTX annotations aroung training phases
+annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
