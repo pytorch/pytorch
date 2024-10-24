@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
@@ -13,6 +14,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -594,6 +596,22 @@ struct ConvParams {
       return false;
     }
     return true;
+#else
+    return false;
+#endif
+  }
+
+  bool use_mps_with_fallback(const at::Tensor& input, const at::Tensor& weight) const {
+#ifdef USE_MPS
+    // MPS does not support channel sizes > 2^16 https://github.com/pytorch/pytorch/issues/129207
+    std::vector<T> output_size;
+    if (transposed) {
+      output_size = conv_input_size(at::symint::sizes<T>(input), at::symint::sizes<T>(weight), padding, output_padding, stride, dilation, groups);
+    } else {
+      output_size = conv_output_size(at::symint::sizes<T>(input), at::symint::sizes<T>(weight), padding, stride, dilation);
+    }
+    auto max_output_size = *std::max_element(output_size.begin(), output_size.end());
+    return use_mps(input, weight) && mps::is_mps_fallback_enabled() && max_output_size > (1 << 16);
 #else
     return false;
 #endif
@@ -1259,7 +1277,7 @@ ConvBackend _select_conv_backend(
       !params.is_dilated()) {
     // fast path for grouped conv3d
     return ConvBackend::Slow3d;
-  } else if (input.device().is_cpu() || input.is_cuda()) {
+  } else if (input.device().is_cpu() || input.is_cuda() || params.use_mps_with_fallback(input, weight)) {
     // backends without support for groups
     if (params.transposed) {
       if (input.ndimension() == 4) {
