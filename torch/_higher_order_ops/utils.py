@@ -111,7 +111,7 @@ def _maybe_reenter_make_fx(fn):
                     # trace the graph with data-dependent calls e.g. .item()
                     return make_fx(fn, tracing_mode="fake")(*args)
                 # Tracing with real if all inputs have been fakfied
-                return make_fx(fn)
+                return make_fx(fn)(*args)
 
             return wrapped
 
