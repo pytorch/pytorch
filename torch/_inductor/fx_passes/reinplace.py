@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
+from torch._dispatch.python import enable_python_dispatcher
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -496,23 +497,46 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
 
     def log_inplace_results(
-        node_name,
-        old_tensors_to_clone,
-        tensors_to_clone,
-        possibly_missed_reinplacing_opportunities,
+        node_name, old_tensors_to_clone, tensors_to_clone, missed_args, missed_nodes
     ):
+        # Total size of possibly_missed_reinplacing_opportunities for tensors with static shapes.
+        missed_bytes = 0
+
+        def bytes(node):
+            t = node.meta.get("val", None)
+            if (
+                t is not None
+                and isinstance(t.element_size(), int)
+                and isinstance(t.numel(), int)
+            ):
+                return t.element_size() * t.numel()
+            else:
+                return 0
+
+        for node in missed_nodes:
+            if isinstance(node, (list, tuple)):
+                for n in node:
+                    missed_bytes += bytes(n)
+            else:
+                missed_bytes += bytes(node)
+
         log.info(
             "For node %s, attempted to reinplace %s. We were unable to reinplace %s; "
             "%s (if non-empty) are possible missed reinplacing opportunities that may be bad for "
-            "memory usage and performance.",
+            "memory usage and performance. Total size of missed opportunities with static shapes is"
+            " : %s bytes.",
             node_name,
             old_tensors_to_clone,
             tensors_to_clone,
-            possibly_missed_reinplacing_opportunities,
+            missed_args,
+            missed_bytes,
         )
         torch._dynamo.utils.counters["inductor"][
             "possibly_missed_reinplacing_opportunities"
-        ] += len(possibly_missed_reinplacing_opportunities)
+        ] += len(missed_args)
+        torch._dynamo.utils.counters["inductor"][
+            "possibly_missed_reinplacing_bytes"
+        ] += missed_bytes
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -521,7 +545,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     ):
         tensors_to_clone: List[str] = []
         storage_of_reinplaced_args = set()
-        possibly_missed_reinplacing_opportunities = []
+
+        # Those used to count possibly_missed_reinplacing_opportunities
+        missed_nodes = []
+        missed_args = []
 
         def tensor_with_same_storage_already_reinplaced(arg):
             if isinstance(arg, (list, tuple)):
@@ -569,14 +596,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     storage_of_reinplaced_args.add(get_node_storage(mutated_arg))
             else:
                 if should_attempt_reinplace:
-                    possibly_missed_reinplacing_opportunities.append(arg)
+                    missed_args.append(arg)
+                    missed_nodes.append(mutated_arg)
+
                 tensors_to_clone.append(arg)
 
         log_inplace_results(
-            node_name,
-            old_tensors_to_clone,
-            tensors_to_clone,
-            possibly_missed_reinplacing_opportunities,
+            node_name, old_tensors_to_clone, tensors_to_clone, missed_args, missed_nodes
         )
         return tensors_to_clone
 
@@ -683,6 +709,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
 
 def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
-    canonicalize_view_scatter_ops(graph)
-    reinplace_inplaceable_ops_core(graph)
-    decompose_generalized_scatter(graph)
+    with enable_python_dispatcher():
+        canonicalize_view_scatter_ops(graph)
+        reinplace_inplaceable_ops_core(graph)
+        decompose_generalized_scatter(graph)

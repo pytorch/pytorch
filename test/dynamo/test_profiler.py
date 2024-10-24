@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import logging
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-import torch._logging
 from torch._dynamo.utils import dynamo_timed
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -165,16 +163,14 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_profiler_dynamo_compiled_region(self):
-        torch._logging.set_logs(dynamo=logging.INFO)
-
         def fn(x, y):
             r = y.sum(dim=1)
             print(r.shape)
             return x * r
 
-        fn_c = torch.compile(fn)
+        with torch.profiler.profile() as prof:
+            fn_c = torch.compile(fn)
 
-        with torch.profiler.profile(record_shapes=True) as prof:
             fn_c(
                 torch.randn(10),
                 torch.randn(10, 10),
@@ -185,20 +181,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 torch.randn(10, 15),
             )
 
-        for e in prof.events():
-            if e.name == "Torch-Compiled Region":
-                print(e.kwinputs)
-        self.assertTrue(
-            any(
-                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "0/0_1"
-                for e in prof.events()
-            )
-        )
-        self.assertTrue(
-            any(
-                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "1/0"
-                for e in prof.events()
-            )
+        annotations = [e.name for e in prof.events() if "Compiled" in e.name]
+        self.assertEqual(
+            annotations,
+            [
+                "Torch-Compiled Region: 0/0",
+                "Torch-Compiled Region: 1/0",
+                "Torch-Compiled Region: 0/1",
+                "Torch-Compiled Region: 1/0",
+            ],
         )
 
 

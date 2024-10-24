@@ -619,7 +619,7 @@ void GroupNormKernelImplInternal(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     auto iter = TensorIteratorConfig()
-                    .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                    .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * C, HxW}))
                     .add_owned_const_input(X.view({N * C, HxW}))
@@ -716,7 +716,7 @@ void GroupNorm1dBackward(
 
     if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N, G, D}))
                       .add_owned_const_input(dY.view({N, G, D}))
@@ -736,7 +736,7 @@ void GroupNorm1dBackward(
           });
     } else {
       auto iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D}))
                       .add_owned_const_input(dY.view({N * G, D}))
@@ -863,7 +863,7 @@ void GroupNormBackwardKernelImplInternal(
 
     if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .add_output(c1)
                       .add_owned_const_input(rstd.view({N, G, 1}))
                       .add_owned_const_input(gamma.view({1, G, D}))
@@ -892,7 +892,7 @@ void GroupNormBackwardKernelImplInternal(
 
     if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D, HxW}))
                       .add_owned_const_input(dY.view({N * G, D, HxW}))
@@ -908,7 +908,7 @@ void GroupNormBackwardKernelImplInternal(
           });
     } else {
       auto iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                      .check_all_same_dtype(std::is_same_v<T, T_ACC>)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D * HxW}))
                       .add_owned_const_input(dY.view({N * G, D * HxW}))

@@ -334,7 +334,7 @@ class MaskedTensor(torch.Tensor):
         class GetData(torch.autograd.Function):
             @staticmethod
             def forward(ctx, self):
-                return self._masked_data
+                return self._masked_data.detach()
 
             @staticmethod
             def backward(ctx, grad_output):

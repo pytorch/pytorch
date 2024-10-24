@@ -21,8 +21,6 @@ C10_DECLARE_string(torch_lazy_metrics_percentiles);
 
 C10_DECLARE_int(torch_lazy_shape_cache_size);
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 TORCH_API std::string& getLTCForceFallback();
 }
-} // namespace torch
