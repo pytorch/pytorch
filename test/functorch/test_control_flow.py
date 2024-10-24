@@ -5602,6 +5602,19 @@ class TestHopSchema(TestCase):
             x,
         )
         model = M()
+        ep = torch.export.export(model, args)
+        self.assertExpectedInline(
+            ep.module().code.strip(),
+            """\
+def forward(self, a, b1, b2, c):
+    a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+    getitem = cond[0];  cond = None
+    mul = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+    return pytree.tree_unflatten((mul,), self._out_spec)""",   # noqa: B950
+        )
         expected_output = model(*args)
         self.assertEqual(expected_output, x * 3 * 2)
 
