@@ -1956,6 +1956,20 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
 
+    def test_export_cond_warns_constant_pred(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                return torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+        mod = Mod()
+        with self.assertWarnsRegex(UserWarning, "Pred is a Python constant"):
+            ep = export(mod, (True, torch.randn(3, 3)))
+
+        nodes = ep.module().graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(len(nodes), 1)
+
     def test_export_custom_decomp_table_basic_pop(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
