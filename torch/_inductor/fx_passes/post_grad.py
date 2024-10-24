@@ -1,10 +1,15 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING, Union
+
+
+if TYPE_CHECKING:
+    from sympy import Expr
 
 import torch
 import torch._inductor as inductor
@@ -486,6 +491,90 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
     match.replace_by_example(repl, list(shape))
+
+
+def shape_of_mm(a, b):
+    m, _ = a.get_size()
+    _, n = b.get_size()
+    return [m, n]
+
+
+@register_lowering_pattern(
+    CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
+)
+def cat_mm(match, inputs, dim):
+    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of_mm)
+
+
+@register_lowering_pattern(
+    CallFunction(
+        aten.cat, ListOf(CallFunction(aten.addmm, Arg(), Arg(), Arg())), Arg()
+    ),
+)
+def cat_addmm(match, inputs, dim):
+    def shape_of(bias, a, b):
+        m, _ = a.get_size()
+        _, n = b.get_size()
+        return [m, n]
+
+    return cat_tuned_op(match, inputs, dim, op=L[aten.addmm], shape_of=shape_of)
+
+
+def cat_tuned_op(match, inputs, dim, *, op, shape_of):
+    """
+    Memory planning to remove cat. We can't use the stock memory
+    planner since autotuning matmuls needs to know the output layout.
+    """
+    if len(inputs) == 1:
+        return op(*inputs[0])
+
+    # TODO(jansel): rewrite this as a bmm?
+    if dim < 0:
+        dim += len(shape_of(*inputs[0]))
+    assert dim in (0, 1)
+    notdim = 1 - dim
+
+    new_size: Optional[Union[List[Expr], List[int]]] = None
+    offsets_start = []
+    offsets_end = []
+
+    # compute output sizes
+    for i in range(len(inputs)):
+        shape = shape_of(*inputs[i])
+        if new_size is None:
+            new_size = shape
+        else:
+            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
+                shape[notdim], new_size[notdim]
+            )
+            new_size[dim] += shape[dim]
+        offsets_start.append(new_size[dim] - shape[dim])
+        offsets_end.append(new_size[dim])
+
+    assert new_size is not None
+    dtype = functools.reduce(
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
+    )
+    device = inputs[0][0].get_device()
+    kernel = ir.ConcatKernel(
+        name=None,
+        layout=ir.FixedLayout(device=device, dtype=dtype, size=new_size),
+        inputs=[],
+    )
+    kernel_tensor = ir.TensorBox.create(kernel)
+
+    for i in range(len(inputs)):
+        dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
+        src = op(*inputs[i], layout=dst.get_layout()).data.data
+        assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
+        src.layout = ir.NonOwningLayout(dst)
+        kernel.inputs.append(ir.TensorBox(src))
+
+    kernel.name = V.graph.register_buffer(kernel)
+    kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
+    V.graph.register_operation(kernel)
+    return kernel_tensor
 
 
 _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)

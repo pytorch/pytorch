@@ -36,7 +36,7 @@ Expr = sympy.Expr
 def construct_strides(
     sizes: Sequence[int],
     fill_order: Sequence[int],
-) -> Sequence[int]:
+) -> List[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
     assert len(sizes) == len(
@@ -70,7 +70,9 @@ def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(
+        name=name, layout=FixedLayout(device=device, dtype=dtype, size=[], stride=[])
+    )
     return TensorBox.create(input_buffer)
 
 
@@ -796,9 +798,9 @@ def flex_attention(
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
-        query.get_device(),
-        query.get_dtype(),
-        [B, Hq, seq_len_q, v_head_dim],
+        device=query.get_device(),
+        dtype=query.get_dtype(),
+        size=[B, Hq, seq_len_q, v_head_dim],
         stride=out_strides,
     )
     # see NOTE:[TritonTemplates with multiple outputs]
@@ -1726,10 +1728,10 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     layout_broadcasted_k = FixedLayout(
-        key.get_device(),
-        key.get_dtype(),
-        [Bq, Hkv, seq_len_kv, qk_head_dim],
-        key.get_stride(),
+        device=key.get_device(),
+        dtype=key.get_dtype(),
+        size=[Bq, Hkv, seq_len_kv, qk_head_dim],
+        stride=key.get_stride(),
     )
 
     # Create delta which will is needed for the bwd's kernel

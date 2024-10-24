@@ -770,10 +770,11 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name]
         if buffer_name in self.constants:
             data = V.graph.constants[buffer_name]
+            size, stride = V.graph.static_sizes_strides(data)
             return ir.ConstantBuffer(
                 name=buffer_name,
                 layout=ir.FixedLayout(
-                    data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                    device=data.device, dtype=data.dtype, size=size, stride=stride
                 ),
             )
 
@@ -925,11 +926,12 @@ class GraphLowering(torch.fx.Interpreter):
         self, data: Tensor, name: Optional[str] = None
     ) -> TensorBox:
         new_name = self.allocate_non_dup_const_name(name, data)
+        size, stride = V.graph.static_sizes_strides(data)
         return TensorBox.create(
             ir.ConstantBuffer(
                 name=new_name,
                 layout=FixedLayout(
-                    data.device, data.dtype, *self.static_sizes_strides(data)
+                    device=data.device, dtype=data.dtype, size=size, stride=stride
                 ),
             )
         )
@@ -987,7 +989,12 @@ class GraphLowering(torch.fx.Interpreter):
         tensor = TensorBox.create(
             InputBuffer(
                 name=target,
-                layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                layout=FixedLayout(
+                    device=example.device,
+                    dtype=example.dtype,
+                    size=sizes,
+                    stride=strides,
+                ),
             )
         )
         self.graph_inputs[target] = tensor
@@ -1257,11 +1264,11 @@ class GraphLowering(torch.fx.Interpreter):
                 new_stride[i] = meta_strides[i]
 
         new_layout = torch._inductor.ir.FixedLayout(
-            old_layout.device,
-            old_layout.dtype,
-            old_layout.size,
-            new_stride,
-            old_layout.offset,
+            device=old_layout.device,
+            dtype=old_layout.dtype,
+            size=old_layout.size,
+            stride=new_stride,
+            offset=old_layout.offset,
         )
         return ir.TensorBox(
             torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)

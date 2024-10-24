@@ -499,10 +499,10 @@ def tuned_sparse_semi_structured_mm(
         from torch._inductor.ir import FixedLayout
 
         layout = FixedLayout(
-            mat2.get_device(),
-            out_dtype if out_dtype else mat2.get_dtype(),
-            [m, n],
-            [n, 1],
+            device=mat2.get_device(),
+            dtype=out_dtype if out_dtype else mat2.get_dtype(),
+            size=[m, n],
+            stride=[n, 1],
         )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."

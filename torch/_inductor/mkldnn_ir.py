@@ -166,10 +166,10 @@ def _prepare_convolution_fusion_create(
     inputs = [x, weight]
 
     kernel_layout = FixedLayout(
-        x.get_device(),
-        x.get_dtype(),
-        convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        size=convert_shape_to_inductor(output_size),
+        stride=convert_shape_to_inductor(output_stride),
     )
     constant_args = [padding, stride, dilation, groups]
     if transposed:
@@ -212,10 +212,10 @@ def _prepare_linear_fusion_create(
 
     output_stride = FlexibleLayout.contiguous_strides(output_size)
     kernel_layout = FixedLayout(
-        x.get_device(),
-        x.get_dtype(),
-        output_size,
-        output_stride,
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        size=output_size,
+        stride=output_stride,
     )
     constant_args: List[Any] = []
 
@@ -1115,7 +1115,10 @@ class MKLPackedLinear(ExternKernelAlloc):
 
         return MKLPackedLinear(
             layout=FixedLayout(
-                x.get_device(), x.get_dtype(), output_size, output_stride
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=output_size,
+                stride=output_stride,
             ),
             inputs=inputs,
             constant_args=constant_args,
@@ -1842,10 +1845,10 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         output_ir = [
             MultiOutput(
                 FixedLayout(
-                    x.get_device(),
-                    x.get_dtype(),
-                    output_size,
-                    output_stride,
+                    device=x.get_device(),
+                    dtype=x.get_dtype(),
+                    size=output_size,
+                    stride=output_stride,
                 ),
                 packed,
                 [(tuple, i)],

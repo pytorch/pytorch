@@ -1116,11 +1116,11 @@ def as_strided(x, size, stride, storage_offset=None):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
-        [sympy.expand(s) for s in size],
-        [sympy.expand(s) for s in stride],
-        sympy.expand(storage_offset or 0),
+        device=old_layout.device,
+        dtype=old_layout.dtype,
+        size=[sympy.expand(s) for s in size],
+        stride=[sympy.expand(s) for s in stride],
+        offset=sympy.expand(storage_offset or 0),
     )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
@@ -1908,10 +1908,10 @@ def philox_rand(size, seed, offset, stride, device, dtype):
     # stride arg is optional and will be used in future for distributed random
     # ops. Currently, its unused.
     random_pos = ir.FixedLayout(
-        device,
-        dtype,
-        size,
-        ir.FlexibleLayout.contiguous_strides(size),
+        device=device,
+        dtype=dtype,
+        size=size,
+        stride=ir.FlexibleLayout.contiguous_strides(size),
     ).make_indexer()
     seed_loader = seed.make_loader()
     offset_loader = offset.make_loader()
@@ -2057,7 +2057,11 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     dtype = torch.float32
     device = seed.get_device()
     random_pos = ir.FixedLayout(
-        device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
+        device=device,
+        dtype=dtype,
+        size=size,
+        stride=ir.FlexibleLayout.contiguous_strides(size),
+        offset=offset,
     ).make_indexer()
     seed_loader = seed.make_loader()
 
@@ -2086,7 +2090,7 @@ def inductor_randint(
     dtype = torch.int64
     device = seed.get_device()
     random_pos = ir.FixedLayout(
-        device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
+        device=device, dtype=dtype, size=size, offset=offset
     ).make_indexer()
     seed_loader = seed.make_loader()
 
@@ -6326,7 +6330,9 @@ def resize(x, size, *, memory_format=None):
     )
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
-    out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
+    out_indexer = ir.FixedLayout(
+        device=device, dtype=dtype, size=size, stride=out_stride
+    ).make_indexer()
 
     def inner_fn(idx):
         flat_index = out_indexer(idx)
