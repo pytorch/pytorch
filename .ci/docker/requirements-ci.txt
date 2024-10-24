@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -118,7 +118,7 @@ numba==0.55.2 ; python_version == "3.10"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.20
+#Pinned versions: 1.26.2
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -128,6 +128,10 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
+numpy==1.21.2; python_version == "3.9"
+numpy==1.22.4; python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==2.1.2; python_version >= "3.13"
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -322,7 +326,6 @@ lxml==5.0.0
 
 PyGithub==2.3.0
 
-sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
 #Pinned versions:
@@ -342,3 +345,26 @@ parameterized==0.8.1
 #Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
 #test that import:
+
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 1.24.0
+#test that import: test_sac_estimator.py
+
+pwlf==2.2.1 ; python_version >= "3.8"
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 2.2.1
+#test that import: test_sac_estimator.py
+
+
+# To build PyTorch itself
+astunparse
+PyYAML
+setuptools
+
+ninja==1.11.1 ; platform_machine == "aarch64"
+scons==4.5.2 ; platform_machine == "aarch64"
+
+pulp==2.9.0 ; python_version >= "3.8"
+#Description: required for testing ilp formulaiton under torch/distributed/_tools
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py
