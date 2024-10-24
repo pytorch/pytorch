@@ -546,7 +546,7 @@ at::Tensor memset32_(
   return input;
 }
 
-TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+TORCH_LIBRARY(symm_mem, m) {
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
