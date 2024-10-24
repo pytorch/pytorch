@@ -196,16 +196,26 @@ class SparseSemiStructuredTensor(torch.Tensor):
             requires_grad=requires_grad,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
-        if func._overloadpacket not in cls.SPARSE_DISPATCH:
-            raise NotImplementedError(
-                f"{cls.__name__} only supports a specific set of operations, "
-                f"can't perform requested op ({func.__name__})"
-            )
-        return cls.SPARSE_DISPATCH[func._overloadpacket](func, types, args, kwargs)
+
+        if func._overloadpacket in cls.SPARSE_DISPATCH:
+            return cls.SPARSE_DISPATCH[func._overloadpacket](func, types, args, kwargs)
+        
+        raise NotImplementedError(
+            f"{cls.__name__} only supports a specific set of operations, "
+            f"can't perform requested op ({func.__name__})"
+        )
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+
+        if func in cls.SPARSE_DISPATCH:
+            return cls.SPARSE_DISPATCH[func](func, types, args, kwargs)
+
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
 
     @classmethod
     def _load_dispatch_table(cls, custom_dispatch_table=None) -> None:
@@ -227,6 +237,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.linear: semi_sparse_linear,
                 torch.ops.aten._to_copy: fallback_dispatcher,
                 torch.ops.aten._scaled_mm: semi_sparse_scaled_mm,
+                torch.nn.functional.linear: semi_sparse_linear,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -573,7 +584,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to cuSPARSELT semi-structured -> packed
         [1 2 6 2]                       [0 0 6 2]
 
-                                                  -> pack to transposed cuSPARSELt      -> packed_t
+                                                -> pack to transposed cuSPARSELt      -> packed_t
                                                      semi-structured representation
 
                                                   -> compute swizzled bitmask           -> compressed_swizzled_bitmask
