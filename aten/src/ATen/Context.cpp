@@ -145,6 +145,14 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+bool Context::allowFP16BF16ReductionMathSDP() const {
+  return allow_fp16_bf16_reduction_mathSDP;
+}
+
+void Context::setAllowFP16BF16ReductionMathSDP(bool e) {
+  allow_fp16_bf16_reduction_mathSDP = e;
+}
+
 bool Context::userEnabledCuDNNSDP() const {
   return enabled_cudnnSDP;
 }
@@ -282,7 +290,12 @@ at::BlasBackend Context::blasPreferredBackend() {
 #ifdef USE_ROCM
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
-      static const std::vector<std::string> archs = {"gfx90a", "gfx940", "gfx941", "gfx942"};
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx940", "gfx941", "gfx942",
+#if ROCM_VERSION >= 60300
+          "gfx1100", "gfx1101"
+#endif
+      };
       for (auto index: c10::irange(getNumGPUs())) {
         if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
           TORCH_WARN_ONCE(
@@ -308,6 +321,8 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
+  TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
+      "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
   if (b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "

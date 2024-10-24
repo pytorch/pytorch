@@ -1438,19 +1438,29 @@ class AutogradLazyBackwardCompileInfo:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def _force_contiguous(x):
+    def coerce_runtime_tangent_tracing_memory_format(x, memory_format):
         if not isinstance(x, torch.Tensor):
             return x
-        x = x.contiguous()
-        if not is_traceable_wrapper_subclass(x):
+
+        is_subclass: bool = is_traceable_wrapper_subclass(x)
+        mem_format = memory_format[0] if is_subclass else memory_format
+
+        if not x.is_contiguous(memory_format=mem_format):
+            x = x.contiguous(memory_format=mem_format)
+
+        if not is_subclass:
             return x
-        for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(x, attr)
-            if not elem.is_contiguous():
-                setattr(x, attr, elem.contiguous())
+            new_elem = AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                elem, memory_format[1 + i]
+            )
+            if new_elem is not elem:
+                setattr(x, attr, new_elem)
+
         return x
 
-    # See Note [Tangents must be contiguous, Part 2]
+    # See Note [Tangents memory format, Part 2]
     @staticmethod
     def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
@@ -1844,13 +1854,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                     "The grad inputs should be same tensor subclass type as forward output"
                                 )
 
-                    # Get the number of tangents after unwrapping
-                    len_tangents = len(
-                        unwrap_tensor_subclasses(
-                            tangents,
-                            is_joint_structure=False,
-                        )
-                    )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
@@ -1865,31 +1868,53 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         for i, t in enumerate(all_args)
                     ]
+                    # Coercing tangents memory format before unwrapping tensor subclasses,
+                    # As we have to coerce Subclass tangent first and then its Tensor attributes.
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
+                    )
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
+                        )
+                        for i, t in enumerate(all_args)
+                    ]
                     all_args = unwrap_tensor_subclasses(
                         all_args, is_joint_structure=False
                     )
-                    tangents_start_idx = (
-                        len(all_args) - len_tangents - len(rng_args) - len(bw_tokens)
+                else:
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
                     )
-                    tangents_end_idx = tangents_start_idx + len_tangents
-
-                # Make the tangents contiguous. Note that we must do this after subclass desugaring
-                # because inputs to inductor have to be contiguous
-                all_args = [
-                    (
-                        AOTDispatchAutograd._force_contiguous(t)
-                        if (tangents_start_idx <= i < tangents_end_idx)
-                        else t
-                    )
-                    for i, t in enumerate(all_args)
-                ]
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if (tangents_start_idx <= i < tangents_end_idx)
+                            else t
+                        )
+                        for i, t in enumerate(all_args)
+                    ]
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
                         if lazy_backward_info is None:
                             raise RuntimeError(
                                 """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
                             )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
@@ -1957,7 +1982,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:
                                 try_save_cache_entry(
-                                    CompiledFunction.compiled_bw, fw_metadata
+                                    CompiledFunction.compiled_bw,
+                                    fw_metadata,
+                                    aot_config,
                                 )
 
                     if (

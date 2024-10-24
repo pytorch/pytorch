@@ -3,6 +3,7 @@ import contextlib
 import functools
 import logging
 import os
+import re
 import unittest.mock
 
 import torch
@@ -29,6 +30,13 @@ requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
+
+
+def munge_shape_guards(s: str) -> str:
+    def munge(s):
+        return re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s)
+
+    return "\n".join([munge(l) for l in s.splitlines() if "LAMBDA_GUARD" in l])
 
 
 def example_fn(a):
@@ -189,15 +197,6 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
-torch._inductor.exc.LoweringException: AssertionError:
-  target: aten.round.default
-  args[0]: TensorBox(StorageBox(
-    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default
@@ -535,6 +534,24 @@ print("arf")
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
+    def test_trace_call_prefix(self, records):
+        def fn(x, y):
+            return (x * 2) @ (y * 3)
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        msg0 = munge_exc(records[0].getMessage())
+        self.assertExpectedInline(
+            msg0,
+            """\
+TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_prefix.fn)
+            return (x * 2) @ (y * 3)
+                    ~~^~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
     def test_trace_call_inline_call(self, records):
         def g(x):
             return x * 2
@@ -561,12 +578,14 @@ print("arf")
             return x * 2
                    ~~^~~""",
         )
-        self.assertExpectedInline(
-            messages[2],
-            """\
-            return g(g(x))
-                   ~^^^^^^""",
-        )
+        # skip this check since 3.13 removed carets for this case
+        # see https://github.com/python/cpython/issues/99180
+        # self.assertExpectedInline(
+        #     messages[2],
+        #     """\
+        #     return g(g(x))
+        #            ~^^^^^^""",
+        # )
         self.assertExpectedInline(
             messages[3],
             """\
@@ -631,6 +650,48 @@ print("arf")
             record_str,
         )
 
+    @make_logging_test(guards=True)
+    def test_guards_sloc(self, records):
+        @torch.compile(dynamic=True, backend="eager")
+        def f(x, y, z):
+            x = x * 3
+            if x.size(0) % 3 == 0:
+                return x + torch.cat([y, z])
+            else:
+                return x * 2
+
+        f(torch.randn(6), torch.randn(3), torch.randn(3))
+
+        record = self.getRecord(records, "TREE_GUARD_MANAGER")
+        self.assertExpectedInline(
+            munge_shape_guards(record.getMessage()),
+            """\
++- LAMBDA_GUARD: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- LAMBDA_GUARD: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- LAMBDA_GUARD: Eq(Mod(2*L['z'].size()[0], 3), 0)  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- LAMBDA_GUARD: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
+        )
+
+    @make_logging_test(guards=True)
+    def test_guards_sloc_vr(self, records):
+        @torch.compile(dynamic=True, backend="eager")
+        def f(x, y):
+            torch._check(x.size(0) > 5)
+            torch._check(x.size(0) < 30)
+            torch._check(x.size(0) == y.size(0) * 2)
+            return torch.tensor(True)
+
+        f(torch.randn(6), torch.randn(3))
+
+        record = self.getRecord(records, "TREE_GUARD_MANAGER")
+        self.assertExpectedInline(
+            munge_shape_guards(record.getMessage()),
+            """\
++- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
++- LAMBDA_GUARD: 3 <= L['y'].size()[0]  # torch._check(x.size(0) > 5)  # #:# in # #:# in #
++- LAMBDA_GUARD: L['y'].size()[0] <= 14  # torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
+        )
+
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
         @torch.compile(mode="reduce-overhead")
@@ -642,6 +703,18 @@ print("arf")
         fn(x)
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
+
+    @make_logging_test(perf_hints=True)
+    @requires_cuda
+    def test_optimizer_non_static_param(self, records):
+        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        for param in params:
+            param.grad = torch.zeros_like(param)
+        opt = torch.optim.Adam(params)
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")
+        compiled_opt_step()
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 3)
 
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
@@ -704,6 +777,40 @@ fn(torch.randn(5))
                     empty_line_normalizer(lines),
                     empty_line_normalizer(stderr.decode("utf-8")),
                 )
+
+    @make_settings_test("torch._dynamo.eval_frame")
+    def test_log_traced_frames(self, records):
+        # Test program
+        @torch.compile()
+        def foo():
+            x = torch.ones([10])
+
+            def bar():
+                y = x + x
+                torch._dynamo.graph_break()
+                z = y * x
+                return z
+
+            return bar(), bar
+
+        foo()
+
+        # `_log_traced_frames` is registered as an atexit callback, so we invoke
+        # it explicitly for testing.
+        torch._dynamo.eval_frame._log_traced_frames()
+
+        # Get the relevant log.
+        record = self.getRecord(records, "TorchDynamo attempted to trace")
+
+        # Check
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+TorchDynamo attempted to trace the following frames: [
+  * foo test_logging.py:N
+  * bar test_logging.py:N
+]""",
+        )
 
 
 # single record tests

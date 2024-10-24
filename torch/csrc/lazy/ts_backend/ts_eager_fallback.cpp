@@ -12,8 +12,7 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 std::vector<at::Tensor> _to_eager(
@@ -107,15 +106,15 @@ c10::DispatchKey dispatch_key(c10::DeviceType device_type) {
       return c10::DispatchKey::CUDA;
     }
     default: {
-      AT_ERROR("Unsupported device type: ", device_type);
+      TORCH_CHECK(false, "Unsupported device type: ", device_type);
     }
   }
 }
 
 std::optional<c10::Device> compute_target_device(
     std::vector<at::Tensor>& t_args,
-    std::vector<c10::List<at::Tensor>> tlist_args,
-    std::vector<c10::List<std::optional<at::Tensor>>> opt_tlist_args) {
+    const std::vector<c10::List<at::Tensor>>& tlist_args,
+    const std::vector<c10::List<std::optional<at::Tensor>>>& opt_tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the
   // device Barring that, we take the first tensor from a TensorList arg.
@@ -214,7 +213,7 @@ void ts_eager_fallback(
   const auto arguments_begin = stack->size() - num_arguments;
 
   std::vector<at::Tensor> tensor_args;
-  std::vector<int> tensor_args_indices;
+  std::vector<size_t> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<c10::List<std::optional<at::Tensor>>> opt_tensorlist_args;
@@ -368,5 +367,4 @@ void ts_eager_fallback(
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

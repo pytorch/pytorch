@@ -8,8 +8,7 @@
 #include <limits>
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename integer>
 constexpr inline integer ceil_div(integer n, integer m) {
@@ -456,4 +455,4 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

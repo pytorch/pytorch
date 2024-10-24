@@ -36,6 +36,9 @@ typedef struct ExtraState ExtraState;
 
 #ifdef __cplusplus
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
+    "-Wdeprecated-copy-with-user-provided-dtor")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 typedef struct VISIBILITY_HIDDEN CacheEntry {
   // check the guards: lambda: <locals of user function>: bool
   py::object check_fn;
@@ -51,6 +54,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
   std::list<CacheEntry>::iterator _owner_loc;
+  // Reference to string representation of the CompileContext
+  std::string trace_annotation;
 
   CacheEntry(const py::handle& guarded_code, PyObject* backend);
   ~CacheEntry();
@@ -58,11 +63,16 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Warning: returns a reference whose lifetime is controlled by C++
   py::object next();
 } CacheEntry;
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 #endif
 
 // Returns borrowed reference
 PyCodeObject* CacheEntry_get_code(CacheEntry* e);
+
+// Returns borrowed string representation of CompileContext
+const char* CacheEntry_get_trace_annotation(CacheEntry* e);
 
 // Returns a borrowed reference to CacheEntry as a PyObject
 // Warning: lifetime is controlled by C++
