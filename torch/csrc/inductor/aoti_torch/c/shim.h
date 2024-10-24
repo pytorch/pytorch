@@ -411,6 +411,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm_v2(
     int8_t use_fast_accum,
     AtenTensorHandle* ret0);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int8pack_mm(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle scales,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
