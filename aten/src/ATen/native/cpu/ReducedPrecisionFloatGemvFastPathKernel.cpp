@@ -104,12 +104,26 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
 // Rather than unrolling to process multiple rows (transposed columns)
 // of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
 // along an individual dot product.
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
-    }
-  });
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, const float beta, Half* y, int incy) {
+  if (beta == 0.0f) {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
+      }
+    });
+  } else if (beta == 1.0f) {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        y[i * incy] += fp16_dot_with_fp16_arith(x, a + lda * i, m);
+      }
+    });
+  } else {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        y[i * incy] = beta * y[i * incy] + fp16_dot_with_fp16_arith(x, a + lda * i, m);
+      }
+    });
+  }
 }
 
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
@@ -270,12 +284,27 @@ float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) 
 // On my Apple M1 Macbook (which is ARM v8.5 and thus has the
 // instructions f32_fma_{low,high}_f16 is targeting), this kernel has
 // equivalent performance to the fp16-native kernel.
-void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
-    }
-  });
+void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, const float beta, Half* y, int incy) {
+  if (beta == 0.0f) {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
+      }
+    });
+  } else if (beta == 1.0f) {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        // We need to accumulate in fp32; y[i * incy] += ... gets wrong results.
+        y[i * incy] = static_cast<float>(y[i * incy]) + fp16_dot_with_fp32_arith(x, a + lda * i, m);
+      }
+    });
+  } else {
+    parallel_for(0, n, 1, [&](int begin, int end) {
+      for (int i = begin; i < end; ++i) {
+        y[i * incy] = beta * y[i * incy] + fp16_dot_with_fp32_arith(x, a + lda * i, m);
+      }
+    });
+  }
 }
 
 void fp16_gemv_trans(
@@ -289,13 +318,13 @@ void fp16_gemv_trans(
     const float beta,
     Half* y,
     const int incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0);
 #if !defined(__aarch64__) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
   if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
+    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
   }
 #endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
 #endif // !defined(C10_MOBILE)
 
