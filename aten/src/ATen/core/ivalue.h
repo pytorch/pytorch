@@ -1189,14 +1189,11 @@ struct TORCH_API IValue final {
     // the "wrong" one of as_tensor and as_intrusive_ptr and 2) enable
     // the compiler to generate the same code for each case. It is
     // surprisingly difficult to get this right.
-    if (isTensor() || isIntrusivePtr()) {
-      c10::intrusive_ptr_target* p = isTensor()
-          ? payload.as_tensor.unsafeGetTensorImpl()
-          : payload.u.as_intrusive_ptr;
-      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::
-          reclaim(p);
-      // No need to make this destructor call!
-      // payload.as_tensor.~Tensor();
+    if (isIntrusivePtr() &&
+        payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+      c10::raw::intrusive_ptr::decref(payload.u.as_intrusive_ptr);
+    } else if (isTensor()) {
+      payload.as_tensor.~Tensor();
     }
   }
 
