@@ -183,14 +183,15 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     # Note that this limits us to per-tensor scalig only.
     assert A_scale.numel() == 1 and B_scale.numel() == 1
     assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
-    # only cuSPARSELt supports float8_e4m3fn currentl
+    # only cuSPARSELt supports float8_e4m3fn currently
     if isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
         assert A.packed is not None
         row, col = B.shape
-        B_padded = A._pad_dense_input(B).contiguous().t()
+        B_padded = A._pad_dense_input(B).contiguous()#.t()
         sparse_result = torch._cslt_sparse_mm(
             A.packed,
-            B_padded,
+            B,
+            # B_padded.t(),
             alpha=A_scale * B_scale,
             out_dtype=out_dtype,
             bias=bias,

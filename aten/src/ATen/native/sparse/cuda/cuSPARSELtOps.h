@@ -19,6 +19,14 @@
 
 namespace at::native {
 
+// Ideally we would use the same DeviceThreadHandlePool mechanism as used in aten/src/ATen/cuda/CuSparseHandlePool.cpp
+// which would handle this for us. However, the cuSPARSELt handle signature is different from that of cuSPARSE/cuBLAS,
+// so it's not possible to reuse the existing pooling mechanism. Instead we have to handle our handles ourselves, which
+// is why these variables are thread local. Once cuSPARSELt updates their handle signature to be consistent with the rest
+// of CUDA, we can switch to using DeviceThreadHandlePool.
+thread_local cusparseLtHandle_t handle;
+thread_local bool handle_initialized = false;
+
 at::Tensor _cslt_compress(const Tensor& sparse_input);
 
 TORCH_CUDA_CPP_API std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(

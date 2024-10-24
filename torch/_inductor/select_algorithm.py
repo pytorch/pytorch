@@ -1436,7 +1436,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
-                for i, x in enumerate(input_nodes)
+                for i, x in enumerate(input_nodes) if not isinstance(x, NoneAsConstantBuffer)
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
@@ -1459,7 +1459,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         ),
                     )
                 )
-                for input_node in input_nodes
+                for input_node in input_nodes if not isinstance(input_node, NoneAsConstantBuffer)
             ]
 
             out = cls.benchmark_example_value(layout)
@@ -1598,7 +1598,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         ),
                     )
                 )
-                for n in input_nodes
+                for n in input_nodes if not isinstance(n, NoneAsConstantBuffer)
             ]
         )
 
