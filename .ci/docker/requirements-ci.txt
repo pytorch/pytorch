@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -354,3 +354,17 @@ pwlf==2.2.1 ; python_version >= "3.8"
 #Description: required for testing torch/distributed/_tools/sac_estimator.py
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
+
+
+# To build PyTorch itself
+astunparse
+PyYAML
+setuptools
+
+ninja==1.11.1 ; platform_machine == "aarch64"
+scons==4.5.2 ; platform_machine == "aarch64"
+
+pulp==2.9.0 ; python_version >= "3.8"
+#Description: required for testing ilp formulaiton under torch/distributed/_tools
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py

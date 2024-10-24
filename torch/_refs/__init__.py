@@ -305,6 +305,7 @@ __all__ = [
     "tensor_split",
     "transpose",
     "transpose_copy",
+    "unbind_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -422,12 +423,12 @@ def _broadcast_shapes(*_shapes):
                     )
                 common_shape[idx] = shape[idx]
             elif guard_size_oblivious(shape[idx] != 1):
-                if common_shape[idx] != shape[idx]:
-                    raise RuntimeError(
-                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
-                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
-                        f"should be broadcastable to {common_shape}"
-                    )
+                torch._check(
+                    common_shape[idx] == shape[idx],
+                    lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                    f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                    f"should be broadcastable to {common_shape}",
+                )
 
     return common_shape
 
@@ -6382,6 +6383,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
+unbind_copy = _make_copy_from_view(aten.unbind)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
