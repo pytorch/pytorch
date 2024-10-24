@@ -70,8 +70,8 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
-from .variables.builder import VariableBuilder, wrap_fx_proxy
+from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.builder import wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -547,6 +547,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     result.value, (bool, int)
                 ):
                     if truth_fn(result.value):
+                        if push:
+                            self.push(value)
+                        self.jump(inst)
+                elif isinstance(result, SymNodeVariable):
+                    if result.evaluate_expr():
                         if push:
                             self.push(value)
                         self.jump(inst)
@@ -1224,15 +1229,14 @@ class InstructionTranslatorBase(
         except KeyError:
             return self.load_builtin(inst)
 
-        source = GlobalSource(name)
-        self.push(VariableBuilder(self, source)(value))
+        self.push(VariableTracker.build(self, value, GlobalSource(name)))
 
     @functools.cached_property
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
         fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
-        return VariableBuilder(self, module_source)(fglobals_value)
+        return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
@@ -1374,7 +1378,7 @@ class InstructionTranslatorBase(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
             var_source = GetItemSource(builtins_source, argval)
-            self.push(VariableBuilder(self, var_source)(val))
+            self.push(VariableTracker.build(self, val, var_source))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable.create(value=val))
@@ -3373,12 +3377,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # `UserFunctionVariable::bind_args`.
             return self.symbolic_locals[name]
 
-    def check_replace_is_safe(self, oldvar):
-        if not is_side_effect_safe(oldvar.mutable_local):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
-            )
-
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
 
@@ -3403,7 +3401,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
                 fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
-            fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
+            fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
@@ -3411,7 +3409,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
-            fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
+            fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
             global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
@@ -3430,7 +3428,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 except KeyError:
                     return self.load_builtin(inst)
 
-                self.push(VariableBuilder(self, global_source)(value))
+                self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
         if self.f_globals is self.parent.f_globals:
