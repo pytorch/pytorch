@@ -302,6 +302,8 @@ force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
 
+
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
@@ -951,6 +953,12 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
+    # should we use tf32x3 for matmul when possible?
+    # Note: This only applied to fp32 matmuls
+    use_tf32x3 = (
+        os.environ.get("TORCHINDUCTOR_USE_TF32X3", "0") == "1"
+    )
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
