@@ -96,11 +96,11 @@ class IntrusivePtrNoGilDestructor {
  public:
   IntrusivePtrNoGilDestructor() = default;
   IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
-  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) noexcept = default;
   IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
       default;
-  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) =
-      default;
+  IntrusivePtrNoGilDestructor& operator=(
+      IntrusivePtrNoGilDestructor&&) noexcept = default;
   /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
       : impl_(std::move(impl)) {}
   // This ctor is very important; see
@@ -909,7 +909,7 @@ This class does not support ``__members__`` property.)");
       "_register_process_group",
       [](const std::string& group_name,
          c10::intrusive_ptr<::c10d::ProcessGroup> group) {
-        ::c10d::register_process_group(group_name, std::move(group));
+        ::c10d::register_process_group(group_name, group);
       },
       py::arg("group_name"),
       py::arg("group"));
@@ -928,7 +928,7 @@ This class does not support ``__members__`` property.)");
          const c10::intrusive_ptr<::c10d::Work>& work) {
         dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
             ->ref_py_object();
-        ::c10d::register_work(tensor, std::move(work));
+        ::c10d::register_work(tensor, work);
       },
       py::arg("tensor"),
       py::arg("work"));
@@ -2179,7 +2179,7 @@ communication mechanism.
                 // python-related libs.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
+                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
