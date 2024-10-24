@@ -157,6 +157,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
@@ -223,10 +224,24 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  void* ptr_;
+  void* ptr_{nullptr};
   std::function<void(void*)> deleter_;
   InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
       : ptr_(ptr), deleter_(std::move(deleter)) {}
+  InefficientStdFunctionContext(const InefficientStdFunctionContext&) = delete;
+  InefficientStdFunctionContext(InefficientStdFunctionContext&& rhs) noexcept
+      : ptr_(std::exchange(rhs.ptr_, nullptr)),
+        deleter_(std::move(rhs.deleter_)) {}
+  InefficientStdFunctionContext& operator=(
+      const InefficientStdFunctionContext&) = delete;
+  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
+  InefficientStdFunctionContext& operator=(
+      InefficientStdFunctionContext&& rhs) {
+    this->~InefficientStdFunctionContext();
+    ptr_ = std::exchange(rhs.ptr_, nullptr);
+    deleter_ = std::move(rhs.deleter_);
+    return *this;
+  }
   ~InefficientStdFunctionContext() {
     if (deleter_) {
       deleter_(ptr_);
@@ -270,9 +285,6 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
-  MemoryReportingInfoBase();
-  ~MemoryReportingInfoBase() override = default;
-
   /**
    * alloc_size corresponds to the size of the ptr.
    *
@@ -312,6 +324,7 @@ C10_API void reportOutOfMemoryToProfiler(
     Device device);
 
 // used to hold traceback information in allocators
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct GatheredContext {
   virtual ~GatheredContext() = default;
 };
