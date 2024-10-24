@@ -389,8 +389,8 @@ struct ScaledGemmParams : OpParams {
   const void* c_scale_ptr;
   int64_t ldc;
   ScalarType c_dtype;
-  void* amax_ptr;
   bool use_fast_accum;
+  bool use_rowwise;
 private:
   bool duplicate_inputs_;
 };
