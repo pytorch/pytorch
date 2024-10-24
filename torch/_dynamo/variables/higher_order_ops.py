@@ -2188,7 +2188,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = torch.empty_like(
                 query_meta, memory_format=torch.contiguous_format
             )
-            lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
+            # TODO: Figure out a better way to handle this for NJT than using sum()
+            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:

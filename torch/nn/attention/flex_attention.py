@@ -29,6 +29,7 @@ __all__ = [
     "flex_attention",
     "create_block_mask",
     "create_mask",
+    "create_njt_block_mask",
     "or_masks",
     "and_masks",
     "noop_mask",
@@ -895,6 +896,131 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
+def _njt_mod_func_adapter(
+    orig_mod_func: Union[_score_mod_signature, _mask_mod_signature],
+    njt: torch.Tensor,
+    is_score_mod: bool,
+) -> Union[_score_mod_signature, _mask_mod_signature]:
+    r"""Adapter to convert a score_mod / mask_mod to be NJT-compatible. The given mod func
+    should be written as if operating over a single sequence at a item. This adapter will
+    handle conversion from indices operating over a "stacked sequence" of length ``sum(S)``
+    for sequence length ``S`` in the NJT to "sequence relative" indices in range ``[0, S)``.
+
+    Args:
+        orig_mod_func (Callable): Function to modify attention scores. It takes four or five
+            arguments, depending on whether a mask_mod or score_mod func is passed.
+        njt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query / key / value.
+        is_score_mod (bool): Indicates whether the mod function is a score_mod.
+
+    Returns:
+        njt_score_mod: An NJT-compatible version of orig_score_mod
+    """
+
+    # Used to convert indices within the "stacked" sequence (range [0, sum(*)))
+    # to "sequence local" indices (range [0, S) for each S).
+    def _build_seq_idx(offsets, total_length):
+        range_tensor = torch.arange(
+            total_length, device=offsets.device, dtype=torch.int32
+        )
+
+        # Use searchsorted to find the index for each position
+        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
+        # If we ever loosen this restriction, this logic will need to be updated.
+        seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
+        return seq_idx
+
+    offsets = njt._offsets  # type: ignore[attr-defined]
+    total_length = njt._values.shape[njt._ragged_idx - 1]  # type: ignore[attr-defined]
+    seq_idx = _build_seq_idx(offsets, total_length)
+
+    # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
+    # to the sequence length for each sequence in the NJT, for use in given
+    # score_mod. This allows the user to write a score_mod as if it were
+    # operating on a single sequence and the "stacked sequence" is split
+    # automatically into individual sequences for them.
+    if is_score_mod:
+
+        def njt_score_mod(score, b, h, q_idx, kv_idx):
+            q_nested = q_idx - offsets[seq_idx[q_idx]]
+            kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+            is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+            return torch.where(
+                is_same_sequence,
+                orig_mod_func(score, b, h, q_nested, kv_nested),  # type: ignore[call-arg]
+                # don't allow inter-sequence attention
+                float("-inf"),
+            )
+
+        return njt_score_mod
+    else:
+
+        def njt_mask_mod(b, h, q_idx, kv_idx):
+            q_nested = q_idx - offsets[seq_idx[q_idx]]
+            kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+            # don't allow inter-sequence attention
+            is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+            return orig_mod_func(b, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
+
+        return njt_mask_mod
+
+
+def create_njt_block_mask(
+    njt_mask_mod: _mask_mod_signature,
+    B: Optional[int],
+    H: Optional[int],
+    njt: torch.Tensor,
+    BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    _compile=False,
+) -> BlockMask:
+    r"""This function creates a block mask tuple from a mask_mod function. The given mask_mod
+    is expected to be NJT-compatible (i.e. an output from ``njt_mask_mod_adapter()``). The
+    returned BlockMask will be on the device specified by the input NJT.
+
+    Args:
+        njt_mask_mod (Callable): mask_mod function. This is a callable that defines the
+            masking pattern for the attention mechanism. It takes four arguments:
+            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
+            It should return a boolean tensor indicating which attention connections are allowed
+            (True) or masked out (False).
+        B (int): Batch size.
+        H (int): Number of query heads.
+        njt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
+            structure for query / key / value. The block mask will be constructed to operate on
+            a "stacked sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is
+            provided it is used for both query and key/value.
+
+    Returns:
+        BlockMask:  A BlockMask object that contains the block mask information.
+
+    Example Usage:
+        .. code-block:: python
+
+            def causal_mask(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+            njt_causal_mask = njt_mask_mod_adapter(causal_mask, njt)
+            block_mask = create_njt_block_mask(njt_causal_mask, 1, 1, njt, device="cuda")
+            query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            output = flex_attention(query, key, value, block_mask=block_mask)
+    """
+    return create_block_mask(
+        _njt_mod_func_adapter(njt_mask_mod, njt, is_score_mod=False),  # type: ignore[arg-type]
+        B,
+        H,
+        njt._values.shape[njt._ragged_idx - 1],  # type: ignore[attr-defined]
+        njt._values.shape[njt._ragged_idx - 1],  # type: ignore[attr-defined]
+        device=njt.device,  # type: ignore[arg-type]
+        # compile is important so we don't materialize a mask_tensor of
+        # shape (1, 1, total_seqlen, total_seqlen)
+        BLOCK_SIZE=BLOCK_SIZE,
+        _compile=_compile,
+    )
+
+
 def _apply_kernel_options(
     query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
 ):
@@ -941,6 +1067,25 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             "FlexAttention is only supported on CUDA devices. "
             f"Found input tensors on {query.device.type} device."
+        )
+
+
+def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
+    # Currently, inputs can only be all nested or no nested.
+    if query.is_nested != key.is_nested or key.is_nested != value.is_nested:
+        raise ValueError(
+            "FlexAttention does not support mixed nested tensor / non-nested tensor inputs. "
+            "Please file an issue requesting this if it is important to you."
+        )
+
+    if (
+        (query.is_nested and query._lengths is not None)  # type: ignore[attr-defined]
+        or (key.is_nested and key._lengths is not None)  # type: ignore[attr-defined]
+        or (value.is_nested and value._lengths is not None)  # type: ignore[attr-defined]
+    ):
+        raise ValueError(
+            "FlexAttention does not support nested tensors that are non-contiguous with holes. "
+            "Please file an issue requesting this if it is important to you."
         )
 
 
@@ -1011,6 +1156,7 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
+    _validate_nestedness(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -1030,15 +1176,29 @@ def flex_attention(
 
     if score_mod is None:
         score_mod = _identity
+    elif query.is_nested:
+        score_mod = _njt_mod_func_adapter(score_mod, query, is_score_mod=True)  # type: ignore[assignment]
+
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
-    elif (
+    elif not query.is_nested and (
         query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
         or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
     ):
         new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
         new_kv_len = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
         block_mask = block_mask._adjust(new_q_len, new_kv_len)
+    elif query.is_nested and (
+        block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
+        != _round_up_to_multiple(
+            query._values.size(query._ragged_idx - 1), block_mask.BLOCK_SIZE[0]  # type: ignore[attr-defined]
+        )
+    ):
+        # TODO: Maybe we want to auto-adjust for this case as well?
+        raise RuntimeError(
+            f"block_mask of shape {block_mask.shape} is not compatible with nested tensor input "
+            f"with total sequence length of {query._values.size(query._ragged_idx - 1)}"  # type: ignore[attr-defined]
+        )
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 

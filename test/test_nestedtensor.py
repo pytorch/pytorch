@@ -4,6 +4,7 @@ import ast
 import io
 import itertools
 import math
+import random
 import sys
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
+from torch.nn.attention.flex_attention import create_njt_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -7022,6 +7025,121 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         attn_output_eager.sum().backward()
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
+
+    # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
+    # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have
+    # both offsets and lengths specified).
+    def _rand_qkv(self, device, dtype, noncontig_with_holes=False):
+        batch_size = 8
+        n_heads = 8
+        D = 16
+
+        sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
+        total = sum(sentence_lengths)
+
+        # shape (B, *, D_total) where D_total = n_heads * D
+        query = torch.nested.nested_tensor(
+            [
+                torch.randn(l, n_heads * D, device=device, dtype=dtype)
+                for l in sentence_lengths
+            ],
+            layout=torch.jagged,
+        )
+        if noncontig_with_holes:
+            query = torch.nested.nested_tensor_from_jagged(
+                query._values,
+                query._offsets,
+                # -1 to introduce holes
+                lengths=query._offsets.diff() - 1,
+                jagged_dim=query._ragged_idx,
+                min_seqlen=query._min_seqlen,
+                max_seqlen=query._max_seqlen,
+            )
+        # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+
+        # shape (B, *, D_total) -> (B, n_heads, *, D)
+        query = (
+            query.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+        key = key.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        value = (
+            value.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+
+        return query, key, value
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    # non-contiguous with holes not supported yet
+    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
+    @parametrize("noncontig_with_holes", [False, True])
+    def test_flex_attention(self, device, dtype, noncontig_with_holes):
+        query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
+
+        # Run FlexAttention with a causal mask
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_njt_block_mask(causal_mask, 1, 1, query, _compile=True)
+        out_flex = flex_attention(query, key, value, block_mask=block_mask)
+        grad_out = torch.randn_like(out_flex)
+        grads_flex = torch.autograd.grad(
+            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs = [out_flex, *grads_flex]
+
+        # Run FlexAttention with a score_mod that represents causal attention
+        def causal_score_mod(score, b, h, q_idx, kv_idx):
+            return torch.where(q_idx >= kv_idx, score, float("-inf"))
+
+        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
+        grads_flex2 = torch.autograd.grad(
+            out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs2 = [out_flex2, *grads_flex2]
+
+        # Run causal SDPA for comparison
+        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
+        grads_sdpa = torch.autograd.grad(
+            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        sdpa_outs = [out_sdpa, *grads_sdpa]
+
+        # Compare flex vs. SDPA output and grads
+        for flex, flex2, sdpa in zip(flex_outs, flex_outs2, sdpa_outs):
+            self.assertTrue(flex.is_nested and flex2.is_nested and sdpa.is_nested)
+            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
+            self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
+        # This test verifies that a score_mod function written to operate within
+        # NJT sequence index space, such as a lookup table, works correctly. This
+        # validates that FlexAttention properly converts indices within the
+        # "stacked sequence" space used for NJT -> sequence-relative indices.
+        query, key, value = self._rand_qkv(device, dtype)
+
+        # Test with score_mod
+        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
+
+        def my_score_mod(score, b, h, q_idx, kv_idx):
+            return score_mod_table[q_idx]
+
+        flex_attention(query, key, value, score_mod=my_score_mod)
+
+        # Test with mask_mod
+        mask_mod_table = score_mod_table > 0.0
+
+        def my_mask_mod(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx]
+
+        block_mask = create_njt_block_mask(my_mask_mod, 1, 1, query, _compile=True)
+        flex_attention(query, key, value, block_mask=block_mask)
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
