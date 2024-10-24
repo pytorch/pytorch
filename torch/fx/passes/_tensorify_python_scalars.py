@@ -284,7 +284,7 @@ def tensorify_python_scalars(
                     and "val" in a.meta
                     and isinstance(zf := a.meta["val"], torch.SymFloat)
                     and isinstance(zf.node.expr, Symbol)
-                    and zf.node.hint != None
+                    and zf.node.hint is not None
                 ):
                     transform = True
                     args.append(float(zf))
@@ -297,7 +297,7 @@ def tensorify_python_scalars(
                     and "val" in v.meta
                     and isinstance(zf := v.meta["val"], torch.SymFloat)
                     and isinstance(zf.node.expr, Symbol)
-                    and zf.node.hint != None
+                    and zf.node.hint is not None
                 ):
                     transform = True
                     kwargs[k] = float(zf)
