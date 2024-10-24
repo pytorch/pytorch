@@ -5,6 +5,12 @@ import yaml
 
 import torch
 
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+        from yaml import CSafeLoader as safeLoader
+except ImportError:
+        from yaml import SafeLoader as safeLoader #type:ignore[assignment, misc]
+
 
 def get_ops_for_key(key):
     # Needs modified PyTorch C++ code to work
@@ -27,7 +33,7 @@ def gen_data(special_op_lists, analysis_name):
 
     ops = yaml.load(
         open("../../aten/src/ATen/native/native_functions.yaml").read(),
-        Loader=yaml.CLoader,
+        Loader=safeLoader,
     )
 
     annotated_ops = {
