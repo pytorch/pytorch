@@ -1001,7 +1001,8 @@ typedef enum {
     MZ_ZIP_FLAG_VALIDATE_HEADERS_ONLY = 0x2000,     /* validate the local headers, but don't decompress the entire file and check the crc32 */
     MZ_ZIP_FLAG_WRITE_ZIP64 = 0x4000,               /* always use the zip64 file format, instead of the original zip file format with automatic switch to zip64. Use as flags parameter with mz_zip_writer_init*_v2 */
     MZ_ZIP_FLAG_WRITE_ALLOW_READING = 0x8000,
-    MZ_ZIP_FLAG_ASCII_FILENAME = 0x10000
+    MZ_ZIP_FLAG_ASCII_FILENAME = 0x10000,
+    MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32 = 0x20000, /* don't compute the crc32 of file data that's being added. */
 } mz_zip_flags;
 
 typedef enum {
