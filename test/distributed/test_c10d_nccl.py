@@ -854,6 +854,30 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_eager_init_subgroup(self):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # default PG comm is not initialized yet
+        pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend._is_initialized(), False)
+
+        tensor = torch.full((1,), self.rank).cuda(device)
+        new_group = c10d.new_group([0, 1], device_id=device)
+        self.assertEqual(backend.comm_split_count(), 0)
+
+        new_backend = new_group._get_backend(torch.device(device))
+        self.assertEqual(new_backend._is_initialized(), True)
+        dist.broadcast(tensor, 0, group=new_group)
+        self.assertEqual(new_backend.comm_split_count(), 0)
+        self.assertEqual(backend._is_initialized(), False)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
