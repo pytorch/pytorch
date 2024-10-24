@@ -9,17 +9,20 @@ set(BFLOAT_METAL_CODE "
   }
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
-    if(NOT EXISTS bfloat_inc.metal)
-        file(WRITE bfloat_inc.metal "${BFLOAT_METAL_CODE}")
-    endif()
-    exec_program(xcrun ARGS metal -std=metal-3.1 bfloat-inc.metal
-                       RETURN_VALUE XCRUN_RC)
-    if(${XCRUN_RC})
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
+    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+                    OUTPUT_VARIABLE XCRUN_OUTPUT
+                    ERROR_VARIABLE XCRUN_OUTPUT
+                    RESULT_VARIABLE XCRUN_RC)
+    if(${XCRUN_RC} EQUAL 0)
+        message(STATUS "Machine can compile metal shaders")
         set(CAN_COMPILE_METAL YES CACHE BOOL "Host can compile metal shaders")
     else()
+        message(WARNING "Machine can not compile metal shaders, fails with ${XCRUN_OUTPUT}")
         set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
     endif()
-    set(CAN_COMPILE_METAL_FOUND YES)
+    set(CAN_COMPILE_METAL_FOUND YES CACHE INTERNAL "Run check for shader compiler")
 endif()
 
 if(NOT USE_PYTORCH_METAL)

@@ -578,6 +578,7 @@ if(USE_MPS)
                            VERBATIM)
     endfunction()
 
+    include(../../../cmake/Metal.cmake)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
