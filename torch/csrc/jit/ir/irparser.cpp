@@ -132,7 +132,8 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
   }
   if (L.nextIf(':')) {
     auto type_alias = type_parser.parseType();
-    AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+    TORCH_INTERNAL_ASSERT(
+        !type_alias.second, "Parsing IR with Alias Info not handled");
     r.type = type_alias.first;
   }
   return r;
@@ -240,7 +241,8 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       // Type literal
       r.k = AttributeKind::ty;
       type_alias = type_parser.parseType();
-      AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+      TORCH_INTERNAL_ASSERT(
+          !type_alias.second, "Parsing IR with Alias Info not handled");
       r.ty = type_alias.first;
       return r;
     case '<': {
