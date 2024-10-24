@@ -43,15 +43,15 @@ def _generate_square_subsequent_mask(
 def _get_seq_len(src: Tensor, batch_first: bool) -> Optional[int]:
     if src.is_nested:
         return None
-    else:
-        src_size = src.size()
-        if len(src_size) == 2:
-            # unbatched: S, E
-            return src_size[0]
-        else:
-            # batched: B, S, E if batch_first else S, B, E
-            seq_len_pos = 1 if batch_first else 0
-            return src_size[seq_len_pos]
+
+    src_size = src.size()
+    if len(src_size) == 2:
+        # unbatched: S, E
+        return src_size[0]
+
+    # batched: B, S, E if batch_first else S, B, E
+    seq_len_pos = int(batch_first)
+    return src_size[seq_len_pos]
 
 
 class Transformer(Module):
@@ -1143,12 +1143,11 @@ def _get_clones(module, N):
 
 
 def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
-    if activation == "relu":
-        return F.relu
-    elif activation == "gelu":
-        return F.gelu
+    callable = ('relu', 'gelu')
+    if activation in callable:
+        return getattr(F, activation)
 
-    raise RuntimeError(f"activation should be relu/gelu, not {activation}")
+    raise RuntimeError(f"activation should be {"/".join(callable)}, not {activation}")
 
 
 def _detect_is_causal_mask(
