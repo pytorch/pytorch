@@ -161,8 +161,8 @@ def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
     return pytree.tree_structure(dummy_tree)
 
 
-def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    if spec.type == list and spec.num_children == 1:
+def _open_top_level_sequence_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
+    if spec.type in (tuple, list) and spec.num_children == 1:
         return spec.child(0)
     return spec
 
@@ -187,8 +187,8 @@ def _assert_identical_pytree_spec(
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
         lambda: _replace_list_with_tuple(spec1) == _replace_list_with_tuple(spec2),
         # FIXME: Bug in `dynamo.export`. Sometimes single function return is wrapped in list.
-        lambda: _open_top_level_list_if_single_element(spec1) == spec2,
-        lambda: spec1 == _open_top_level_list_if_single_element(spec2),
+        lambda: _open_top_level_sequence_if_single_element(spec1) == spec2,
+        lambda: spec1 == _open_top_level_sequence_if_single_element(spec2),
     ]
 
     if not any(check() for check in pass_if_any_checks):
