@@ -53,8 +53,14 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
+from .common import (
+    CodeGen,
+    DeferredLine,
+    IndentedBuffer,
+    PythonPrinter,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -68,9 +74,10 @@ pexpr = PythonPrinter().doprint
 
 
 ReuseKey = Tuple[torch.device, torch.dtype, str]
+BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
-def buffer_reuse_key(node: ir.Buffer) -> ReuseKey:
+def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     return (
         node.get_device(),
         node.get_dtype(),
@@ -181,13 +188,16 @@ def user_defined_kernel_grid_fn_code(
         sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
-            wrapper.codegen_shape_tuple(
-                tuple(
-                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+            (
+                wrapper.codegen_shape_tuple(
+                    tuple(
+                        wrapper.generate_example_arg_value(g, type(g))
+                        for g in sympy_grid
+                    )
                 )
-            )
-            if config.triton.autotune_at_compile_time
-            else None,
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
 
     def writeline(line: str, example_grid: Optional[str] = None):
@@ -300,17 +310,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
                 if self.last_seen_device_guard_index is None:
-                    if config.abi_compatible:
-                        code.writeline(
-                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
-                        )
-                    else:
-                        code.writeline(
-                            maybe_hipify_code_wrapper(
-                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
-                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
-                            )
-                        )
+                    code.writeline(
+                        f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
+                    )
                 else:
                     assert (
                         self.last_seen_device_guard_index == self.device_idx
@@ -319,10 +321,6 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
                         f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                        if config.abi_compatible
-                        else maybe_hipify_code_wrapper(
-                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
-                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -368,7 +366,7 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
-    node: ir.Buffer
+    node: BufferLike
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
@@ -398,7 +396,7 @@ class AllocateLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
-    node: ir.Buffer
+    node: BufferLike
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
@@ -421,8 +419,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class ReuseLine(MemoryPlanningLine):
-    node: ir.Buffer
-    reused_as: ir.Buffer
+    node: BufferLike
+    reused_as: BufferLike
     delete_old: bool = True
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
@@ -840,6 +838,18 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_kernel_call(
             kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
+
+    def generate_tma_descriptor(self, desc):
+        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
+        prefix = "triton.tools.experimental_descriptor"
+        fn_name = f"create_{desc.rank}d_tma_descriptor"
+        call = f"{prefix}.{fn_name}"
+        args = f"{ptr}, {dims}, {block_dims}, {element_size}"
+        line = f"{desc.name} = {call}({args})"
+        self.writeline(line)
 
     def generate_scatter_fallback(
         self,
@@ -1290,7 +1300,7 @@ class PythonWrapperCodegen(CodeGen):
 
         original_name = kernel.__name__
 
-        from .common import KernelArgType, SizeArg, TensorArg
+        from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
 
         signature: List[KernelArgType] = []
         constants: Dict[str, Any] = {}
@@ -1302,9 +1312,17 @@ class PythonWrapperCodegen(CodeGen):
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
+            elif kwargs[key] is None:
+                constants[key] = None
             else:
                 non_constant_indices.append(idx)
-                if isinstance(arg, ir.Buffer):
+                if isinstance(arg, ir.TMADescriptor):
+                    signature.append(
+                        TMADescriptorArg(
+                            name=key,
+                        )
+                    )
+                elif isinstance(arg, ir.Buffer):
                     signature.append(
                         TensorArg(
                             name=key,
@@ -1339,9 +1357,7 @@ class PythonWrapperCodegen(CodeGen):
                 indices=non_constant_indices,
                 argdefs=kernel.arg_names,
             ),
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1481,7 +1497,7 @@ class PythonWrapperCodegen(CodeGen):
 
         traverse(kernel)
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
+        current_device = V.graph.get_current_device_or_throw()
         compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1514,20 +1530,43 @@ class PythonWrapperCodegen(CodeGen):
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
 
-    def generate_workspace_allocation(self, nbytes, device, zero_fill):
-        if isinstance(nbytes, sympy.Expr):
-            nbytes = V.graph.sizevars.size_hint(nbytes)
-        line = self.make_allocation(
-            "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
-        )
-        zline = self.make_zero_buffer("workspace")
-        self.writeline(line)
+    def generate_workspace_allocation(self, ws: WorkspaceArg):
+        name = ws.get_name()
+        line = AllocateLine(self, ws)
+        if ws.zero_mode == WorkspaceZeroMode.UNINITIALIZED:
+            self.writeline(line)
+        elif ws.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
+            self.writeline(line)
+            self.writeline(self.make_zero_buffer(name))
+        elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
+            prior = V.graph.allocated_workspaces.get(name)
+            if prior:
+                assert isinstance(prior, AllocateLine)
+                # expand existing allocation
+                prior.node = WorkspaceArg.maximum(prior.node, ws)
+            else:
+                self.writeline(line)
+                self.writeline(self.make_zero_buffer(name))
+                V.graph.allocated_workspaces[name] = line
+        else:
+            raise AssertionError(ws.zero_mode)
+
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(line)
-        if zero_fill:
-            self.writeline(zline)
-            if config.triton.autotune_at_compile_time:
-                self.kernel_autotune_calls.writeline(zline)
+            self.kernel_autotune_calls.writeline(
+                self.make_allocation(
+                    name,
+                    ws.device,
+                    ws.dtype,
+                    shape=(V.graph.sizevars.size_hint(ws.count),),
+                    stride=(1,),
+                )
+            )
+            if ws.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
+                self.kernel_autotune_calls.writeline(self.make_zero_buffer(name))
+
+    def generate_workspace_deallocation(self, ws: WorkspaceArg):
+        if ws.zero_mode != WorkspaceZeroMode.ZERO_PER_GRAPH:
+            self.writeline(FreeIfNotReusedLine(self, ws))
 
     def make_zero_buffer(self, name):
         return f"{name}.zero_(){self.ending}"
@@ -1606,7 +1645,7 @@ class PythonWrapperCodegen(CodeGen):
         call_args = [wrap_arg(arg) for arg in call_args]
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
 
         return device_index, call_args
@@ -1765,8 +1804,8 @@ class PythonWrapperCodegen(CodeGen):
                 if isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
-                    if arg == "workspace":
-                        arg_str = "workspace"
+                    if re.match(r"^(workspace|semaphore)", arg):
+                        arg_str = arg
                         tensor_args[arg] = arg_str
                     elif arg not in tensor_args:
                         arg_str = self.generate_example_arg_value(
@@ -1837,7 +1876,7 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(self, buffer):
+    def make_buffer_allocation(self, buffer: BufferLike):
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
@@ -1864,7 +1903,7 @@ class PythonWrapperCodegen(CodeGen):
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
-    def make_buffer_free(self, buffer):
+    def make_buffer_free(self, buffer: BufferLike):
         return f"del {buffer.get_name()}"
 
     def make_free_by_names(self, names_to_del: List[str]):
@@ -1873,7 +1912,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
-    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
+    def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
         old_name = old.get_name()
         new_name = new.get_name()
@@ -2211,10 +2250,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
         self.launcher_fn_name = self.subgraph_name
-
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        # No need to insert the asserts for the subgraph inputs.
-        pass
 
     def write_header(self) -> None:
         pass
