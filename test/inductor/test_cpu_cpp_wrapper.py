@@ -304,6 +304,12 @@ if RUN_CPU:
             if func.startswith("test_qlinear")
         ],
         BaseTest(
+            "test_qconv2d_with_concat",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+        ),
+        BaseTest(
             "test_dynamic_qlinear",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
