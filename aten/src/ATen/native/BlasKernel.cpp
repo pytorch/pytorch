@@ -284,7 +284,55 @@ INSTANTIATE(int8_t);
 INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
-#if defined(__aarch64__) && !defined(C10_MOBILE)
+#if !defined(C10_MOBILE)
+#if !defined(__aarch64__)
+// Currently, only fp16_gemv_trans is built for non-aarch64.
+template <>
+bool gemv_use_fast_path<at::Half>(
+    char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
+    at::Half alpha,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    at::Half beta,
+    [[maybe_unused]] int64_t incy) {
+  // clang is capable of constant-folding fp16_ieee_from_fp32_value,
+  // so use it to get simple integer comparisons.
+  // https://godbolt.org/z/v936hroYb
+  using c10::detail::fp16_ieee_from_fp32_value;;
+  return (trans == 'T' || trans == 't') && incx == 1 &&
+    alpha.x == fp16_ieee_from_fp32_value(1.0f) &&
+    beta.x == fp16_ieee_from_fp32_value(0.0f);
+}
+template <>
+void gemv_fast_path<at::Half>(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const at::Half* alpha,
+    const at::Half* a,
+    const int* lda,
+    const at::Half* x,
+    const int* incx,
+    const at::Half* beta,
+    at::Half* y,
+    const int* incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(trans[0] == 'T' || trans[0] == 't');
+  fp16_gemv_trans(
+      *m,
+      *n,
+      *alpha,
+      a,
+      *lda,
+      x,
+      *incx,
+      *beta,
+      y,
+      *incy);
+}
+INSTANTIATE(c10::BFloat16);
+#else
 template <>
 bool scal_use_fast_path<at::Half>(
     [[maybe_unused]] int64_t n,
@@ -709,24 +757,24 @@ void gemv_fast_path<at::Half>(
     fp16_gemv_trans(
         *m,
         *n,
-        fp16_from_bits(alpha->x),
+        *alpha,
         a,
         *lda,
         x,
         *incx,
-        fp16_from_bits(beta->x),
+        *beta,
         y,
         *incy);
   } else {
     fp16_gemv_notrans(
         *m,
         *n,
-        fp16_from_bits(alpha->x),
+        *alpha,
         a,
         *lda,
         x,
         *incx,
-        fp16_from_bits(beta->x),
+        *beta,
         y,
         *incy);
   }
@@ -758,10 +806,12 @@ void gemv_fast_path<at::BFloat16>(
     y,
     *incy);
 }
-#else // defined(__aarch64__) && !defined(C10_MOBILE)
+// Note that the above block was an else, so it's active if __aarch64__ *is* defined.
+#endif // !defined(__aarch64__)
+#else // !defined(C10_MOBILE))
 INSTANTIATE(c10::Half);
 INSTANTIATE(c10::BFloat16);
-#endif // defined(__aarch64__) && !defined(C10_MOBILE)
+#endif // !defined(C10_MOBILE)
 #undef INSTANTIATE
 
 } // namespace blas_impl
