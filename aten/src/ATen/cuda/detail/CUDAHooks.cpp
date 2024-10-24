@@ -14,6 +14,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
@@ -38,7 +39,6 @@
 
 #include <sstream>
 #include <cstddef>
-#include <functional>
 #include <memory>
 
 namespace c10::cuda::_internal {
@@ -60,7 +60,7 @@ namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags;
+  unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
   int ctx_is_active = 0;
@@ -79,30 +79,19 @@ struct _Initializer {
 } initializer;
 } // anonymous namespace
 
-// Sets the CUDA_MODULE_LOADING environment variable
-// if it's not set by the user.
-void maybe_set_cuda_module_loading(const std::string &def_value) {
-  auto value = std::getenv("CUDA_MODULE_LOADING");
-  if (!value) {
-#ifdef _WIN32
-    auto env_var = "CUDA_MODULE_LOADING=" + def_value;
-    _putenv(env_var.c_str());
-#else
-    setenv("CUDA_MODULE_LOADING", def_value.c_str(), 1);
-#endif
-  }
-}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-void CUDAHooks::initCUDA() const {
+void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  maybe_set_cuda_module_loading("LAZY");
+  // Sets the CUDA_MODULE_LOADING environment variable
+  // if it's not set by the user.
+  c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
@@ -134,7 +123,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
-  cudaPointerAttributes attr;
+  cudaPointerAttributes attr{};
   // We do not believe that CUDA needs mutable access to the data
   // here.
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
@@ -241,6 +230,9 @@ DeviceIndex current_device() {
   return -1;
 }
 
+/**
+ * DEPRECATED: use getCurrentDevice() instead
+ */
 DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
@@ -307,7 +299,7 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
 }
 
@@ -332,10 +324,10 @@ bool CUDAHooks::hasCUDART() const {
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
-  int runtimeVersion;
+  int runtimeVersion = 0;
   cudaRuntimeGetVersion(&runtimeVersion);
 
-  auto printCudaStyleVersion = [&](int v) {
+  auto printCudaStyleVersion = [&](size_t v) {
 #ifdef USE_ROCM
     // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
     if(v < 500) {
@@ -376,7 +368,7 @@ std::string CUDAHooks::showConfig() const {
 #if AT_CUDNN_ENABLED()
 
 
-  auto printCudnnStyleVersion = [&](int v) {
+  auto printCudnnStyleVersion = [&](size_t v) {
     oss << (v / 1000) << "." << (v / 100 % 10);
     if (v % 100 != 0) {
       oss << "." << (v % 100);
@@ -415,7 +407,7 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  AT_ERROR(
+  TORCH_CHECK(false,
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
 }
@@ -436,8 +428,19 @@ void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
+/**
+ * DEPRECATED: use deviceCount() instead
+ */
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::deviceCount() const {
+  return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return at::cuda::detail::current_device();
 }
 
 #ifdef USE_ROCM
