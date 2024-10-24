@@ -3,7 +3,7 @@
 import itertools
 import operator
 import sys
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, TYPE_CHECKING, Union, Iterable
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -517,12 +517,12 @@ class FilterVariable(IteratorVariable):
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         it = None
-        if isinstance(it, list):
+        if isinstance(self.iterable, list):
             it = self.iterable[self.index :]
         else:
             it = self.iterable.unpack_var_sequence(tx)
-        filtered = filter(self.fn, it)
-        return variables.TupleVariable(list(filtered))
+        filtered = self.fn.call_function(tx, it, {})
+        return [variables.TupleVariable([filtered])]
 
     def next_variable(self, tx):
         def _next():
@@ -539,8 +539,7 @@ class FilterVariable(IteratorVariable):
             item = _next()
             self.index += 1
             res = self.fn.call_function(tx, [item], {})
-            # TODO: polyfills
-            if res.is_python_constant() and res.as_python_constant():
+            if polyfills.filter_is_true(res):
                 return item
 
     def reconstruct_items(self, codegen):

@@ -184,3 +184,7 @@ def foreach_pow_scalar(scalar, exps):
 
 def addcmul_inplace(self, tensor1, tensor2, value):
     return self.add_(tensor1 * tensor2 * value)
+
+
+def filter_is_true(res):
+    return res.is_python_constant() and res.as_python_constant()

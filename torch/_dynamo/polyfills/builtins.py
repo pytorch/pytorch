@@ -7,7 +7,7 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
-from typing import Callable, Iterable, TypeVar
+from typing import Iterable, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -16,7 +16,6 @@ __all__ = [
     "all",
     "any",
     "enumerate",
-    # "filter",
     "sum",
 ]
 
@@ -55,15 +54,3 @@ def enumerate(iterable: Iterable[_T], start: int = 0) -> Iterable[tuple[int, _T]
 @substitute_in_graph(builtins.sum, can_constant_fold_through=True)  # type: ignore[arg-type]
 def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignment]
     return functools.reduce(operator.add, iterable, start)
-
-
-# TODO: infinite iterators
-# Reference: https://docs.python.org/3/library/functions.html#filter
-# @substitute_in_graph(builtins.filter, is_embedded_type=True)  # type: ignore[arg-type]
-def filter(function: Callable[[_T], bool], iterable: Iterable[_T]) -> _T:  # type: ignore[assignment]
-    if function is None:
-        function = bool
-
-    for x in iterable:
-        if function(x):
-            yield x
