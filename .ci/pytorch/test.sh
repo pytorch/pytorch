@@ -1355,7 +1355,7 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
-  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+  source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
 
