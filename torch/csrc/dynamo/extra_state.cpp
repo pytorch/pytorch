@@ -126,14 +126,8 @@ void lookup(
 
     if (valid) {
       try {
-        // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is
-        // True by default
-        if (cache_entry.root_mgr != nullptr) {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
-        } else {
-          valid = cache_entry.check_fn(locals).cast<bool>();
-        }
+        valid = torch::dynamo::run_root_guard_manager(
+            cache_entry.root_mgr, f_locals);
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
