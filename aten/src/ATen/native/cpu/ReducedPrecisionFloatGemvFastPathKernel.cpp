@@ -294,7 +294,8 @@ void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const 
   } else if (beta == 1.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
       for (int i = begin; i < end; ++i) {
-        y[i * incy] += fp16_dot_with_fp32_arith(x, a + lda * i, m);
+        // We need to accumulate in fp32; y[i * incy] += ... gets wrong results.
+        y[i * incy] = static_cast<float>(y[i * incy]) + fp16_dot_with_fp32_arith(x, a + lda * i, m);
       }
     });
   } else {

@@ -290,13 +290,13 @@ INSTANTIATE(int64_t);
 template <>
 bool gemv_use_fast_path<at::Half>(
     char trans,
-    C10_UNUSED int64_t m,
-    C10_UNUSED int64_t n,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
     at::Half alpha,
-    C10_UNUSED int64_t lda,
-    C10_UNUSED int64_t incx,
-    C10_UNUSED at::Half beta,
-    C10_UNUSED int64_t incy) {
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    [[maybe_unused]] at::Half beta,
+    [[maybe_unused]] int64_t incy) {
   // clang is capable of constant-folding fp16_ieee_from_fp32_value,
   // so use it to get simple integer comparisons.
   // https://godbolt.org/z/v936hroYb
