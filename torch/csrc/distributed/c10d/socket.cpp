@@ -220,11 +220,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
         return fmt::format("[{}]:{}", ip, psai->sin6_port);
       }
     }
-
-    C10_THROW_ERROR(
-        DistNetworkError,
-        fmt::format(
-            "failed to format addr, unknown family={}", addr->sa_family));
+    return "?UNKNOWN?";
   }
   if (addr->sa_family == AF_INET) {
     return fmt::format("{}:{}", host, port);
@@ -591,6 +587,11 @@ bool SocketListenOp::tryListen(int family) {
     }
   }
 
+  recordError(
+      "The server could not be initialized on any address for port={}, family={}",
+      port_,
+      family);
+
   return false;
 }
 
@@ -598,7 +599,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   SocketImpl::Handle hnd =
       ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
   if (hnd == SocketImpl::invalid_socket) {
-    recordError(
+    C10D_DEBUG(
         "The server socket cannot be initialized on {} {}.",
         addr,
         getSocketError());
@@ -820,7 +821,7 @@ bool SocketConnectOp::tryConnect(int family) {
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
-  bool retry; // NOLINT(cppcoreguidelines-init-variables)
+  bool retry = false;
   do {
     retry = false;
 
@@ -923,6 +924,11 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
           "The server socket on {} is not yet listening {}, will retry.",
           addr,
           err);
+
+      return ConnectResult::Retry;
+    } else if (err == std::errc::timed_out) {
+      C10D_WARNING(
+          "The server socket on {} has timed out, will retry.", addr, err);
 
       return ConnectResult::Retry;
     } else {

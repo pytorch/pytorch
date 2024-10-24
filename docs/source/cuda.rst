@@ -123,6 +123,15 @@ Memory management
      MemPool
      MemPoolContext
 
+.. currentmodule:: torch.cuda.memory
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    caching_allocator_enable
+
+.. currentmodule:: torch.cuda
 .. autoclass:: torch.cuda.use_mem_pool
 
 .. FIXME The following doesn't seem to exist. Is it supposed to?

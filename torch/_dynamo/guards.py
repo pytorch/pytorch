@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 from __future__ import annotations
 
 import ast
@@ -36,6 +37,7 @@ from typing import (
 from weakref import ReferenceType
 
 import torch
+import torch.overrides
 import torch.utils._device
 from torch._C._dynamo.guards import (
     check_obj_id,
@@ -293,7 +295,10 @@ class GuardManager:
 
 def from_numpy(a):
     # If not numpy array, piggy back on e.g. tensor guards to check type
-    return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
+    # Re-enable torch function since we disable it on leaf guards
+    # we need it to properly construct the tensor if a default device is set
+    with torch.overrides._enable_torch_function():
+        return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
 # For user stack printing
@@ -1844,6 +1849,7 @@ class GuardBuilder(GuardBuilderBase):
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
+            relaxed_sources: Set[Source] = set()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -1854,6 +1860,7 @@ class GuardBuilder(GuardBuilderBase):
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
+                        relaxed_sources,
                     )
                 else:
                     log.warning("Untracked tensor used in export constraints")
@@ -1861,11 +1868,12 @@ class GuardBuilder(GuardBuilderBase):
                 source_pairs=source_pairs,
                 derived_equalities=derived_equalities,
                 phantom_symbols=list(phantom_symbols.values()),
+                relaxed_sources=relaxed_sources,
                 warn_only=False,
             )
         else:
             equalities_inputs = None
-        guards = output_graph.shape_env.produce_guards(
+        code_parts, verbose_code_parts = output_graph.shape_env.produce_guards_verbose(
             [a.fake for a in fs],
             [a.source for a in fs],
             input_contexts=input_contexts,
@@ -1879,22 +1887,21 @@ class GuardBuilder(GuardBuilderBase):
         if not self.check_fn_manager.output_graph.export:
             output_graph.shape_env.freeze()
 
-        for shape_guard in guards:
-            self._set_guard_export_info(guard, [shape_guard])
+        for code in code_parts:
+            self._set_guard_export_info(guard, [code])
 
         if config.enable_cpp_guard_manager:
             # Install all the symbolic guards in one lambda guard. These are run
             # at the very end of the RootGuardManager via epilogue guards.
             # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-            code_parts = guards
             self.add_python_lambda_leaf_guard_to_root(
                 code_parts,
-                get_verbose_code_parts(code_parts, guard),
+                verbose_code_parts,
                 closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
             )
         else:
-            for shape_guard in guards:
-                self._produce_guard_code(guard, [shape_guard], shape_env=True)
+            for code in code_parts:
+                self._produce_guard_code(guard, [code], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For FSDP modules, we can skip guards on nn module tensors because FSDP
@@ -2086,8 +2093,9 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        # See D64140537 for why we are checking for tuple.
         if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, enum.Enum
+            guarded_object, (enum.Enum, tuple)
         ):
             obj_ref = weakref.ref(guarded_object)
 
@@ -2356,15 +2364,12 @@ class CheckFunctionManager:
         )
 
         if config.enable_cpp_guard_manager:
-            from .variables.torch_function import IGNORED_MODES
-
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
 
             self.guard_manager.root.add_torch_function_mode_stack_guard(
                 self.torch_function_mode_stack,
-                list(IGNORED_MODES),
                 ["___check_torch_function_mode_stack()"],
             )
             # Clear references to torch_function modes held in the list
@@ -2671,18 +2676,14 @@ def is_recompiles_verbose_enabled():
 # this will only be used if cpp guards are disabled
 def make_torch_function_mode_stack_guard(intial_stack):
     types = [type(x) for x in intial_stack]
-    from .variables.torch_function import IGNORED_MODES
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
 
-        types_ = [ty for ty in types if ty not in IGNORED_MODES]
-        cur_stack_ = [mode for mode in cur_stack if type(mode) not in IGNORED_MODES]
-
-        if len(cur_stack_) != len(types_):
+        if len(cur_stack) != len(types):
             return False
 
-        for ty, mode in zip(types_, cur_stack_):
+        for ty, mode in zip(types, cur_stack):
             if ty != type(mode):
                 return False
 

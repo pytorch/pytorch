@@ -742,6 +742,60 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)
+    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+    @parametrize("batch_size", (256,))
+    @parametrize("in_features", (3,))
+    @parametrize("out_features", (1024,))
+    @parametrize("out_features2", (2,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_local_and_global_buffer_dynamic_shapes(
+        self, batch_size, in_features, out_features, out_features2, bias, dtype
+    ):
+        # Reproducer from soft_actor_critic
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(out_features, out_features, bias)
+                self.linear2 = torch.nn.Linear(out_features, out_features2, bias)
+
+            def forward(self, arg7_1):
+                addmm_3 = self.linear(arg7_1)
+                relu_2 = torch.ops.aten.relu.default(addmm_3)
+
+                addmm_4 = self.linear1(relu_2)
+                relu_3 = torch.ops.aten.relu.default(addmm_4)
+
+                addmm_5 = self.linear2(relu_3)
+
+                split_1 = torch.ops.aten.split.Tensor(addmm_5, 1, 1)
+                getitem_2 = split_1[0]
+                getitem_3 = split_1[1]
+
+                tanh_1 = torch.ops.aten.tanh.default(getitem_3)
+
+                add_62 = torch.ops.aten.add.Tensor(tanh_1, 1)
+
+                mul_36 = torch.ops.aten.mul.Tensor(add_62, 6.0)
+                add_69 = torch.ops.aten.add.Tensor(mul_36, -10.0)
+
+                exp_1 = torch.ops.aten.exp.default(add_69)
+                return (getitem_2, exp_1)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @parametrize("batch_size", (1024,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024, 1025))
@@ -1567,6 +1621,111 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": False})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True,))
+    @dtypes(
+        torch.float,
+    )
+    def test_aoti_linear(self, batch_size, in_features, out_features, bias, dtype):
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self, bias=bias) -> None:
+                super().__init__()
+                self.mlp = torch.nn.Sequential(
+                    torch.nn.Linear(in_features, out_features, bias=bias),
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.mlp(x)
+
+        assert torch._inductor.config.freezing is False
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(0)
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(v)
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (v,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": False})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @dtypes(
+        torch.float,
+    )
+    def test_aoti_linear_multi_view_operations(
+        self, batch_size, in_features, out_features, dtype
+    ):
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bias = torch.randn(out_features)
+                self.weight = torch.randn(out_features // 2, 2, in_features)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                tmp = torch.addmm(
+                    self.bias,
+                    x,
+                    self.weight.permute(2, 0, 1).view(in_features, out_features),
+                )
+                return self.relu(tmp)
+
+        assert torch._inductor.config.freezing is False
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(0)
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(v)
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (v,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 

@@ -1,19 +1,6 @@
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
-#include <ATen/cuda/CUDAConfig.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/Half.h>
-#include <cusparse.h>
-#include <cstdint>
+#include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 
 #if AT_CUSPARSELT_ENABLED()
-
-#include <cusparseLt.h>
 
 namespace at::native {
 
@@ -53,6 +40,12 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+        case at::ScalarType::Float8_e4m3fn:
+            type = CUDA_R_8F_E4M3;
+            compression_factor = 10;
+            break;
+#endif
         default:
             TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
             break;
@@ -98,7 +91,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
+std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -106,6 +99,8 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
+    int split_k,
+    bool split_k_one_kernel,
     bool search_alg_id
 )
 {
@@ -123,15 +118,16 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   float beta = 0.0;
   cudaDataType input_type;
   cudaDataType output_type;
+  cudaDataType C_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-
 
   switch(compressed_A.scalar_type())
   {
     case at::ScalarType::Char:
         input_type = CUDA_R_8I;
         output_type = CUDA_R_8I;
+        C_type = CUDA_R_8I;
         compute_type = CUSPARSE_COMPUTE_32I;
         compression_factor = 10;
         break;
@@ -141,61 +137,112 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
+        C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::BFloat16:
         input_type = CUDA_R_16BF;
         output_type = CUDA_R_16BF;
+        C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::Float:
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
+        C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
-
+// if cuSPARSELt >= 6.2.3, we can add Float8 support
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+    case at::ScalarType::Float8_e4m3fn:
+        input_type = CUDA_R_8F_E4M3;
+        output_type = CUDA_R_8F_E4M3;
+        C_type = CUDA_R_16F;
+        compute_type = CUSPARSE_COMPUTE_32F;
+        compression_factor = 10;
+        break;
+#endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
+        C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::BFloat16:
         input_type = CUDA_R_16BF;
         output_type = CUDA_R_16BF;
+        C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::Float:
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
+        C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
 #endif
-
     default:
         TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
         break;
   }
   ScalarType out_dtype = dense_B.scalar_type();
-  // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
+  // special check for mixed dtype support for 8 bit dtypes
+  // cslt 0.5.2+: int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
-    switch (out_dtype)
+    if (input_type == CUDA_R_8I)
     {
-        case at::ScalarType::Half:
-            output_type = CUDA_R_16F;
-            break;
-        case at::ScalarType::BFloat16:
-            output_type = CUDA_R_16BF;
-            break;
-        case at::ScalarType::Int:
-            output_type = CUDA_R_32I;
-            break;
-        default:
-            TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
-            break;
+        switch (out_dtype)
+        {
+            case at::ScalarType::Half:
+                C_type = CUDA_R_16F;
+                output_type = CUDA_R_16F;
+                break;
+            case at::ScalarType::BFloat16:
+                C_type = CUDA_R_16BF;
+                output_type = CUDA_R_16BF;
+                break;
+            case at::ScalarType::Int:
+                C_type = CUDA_R_32I;
+                output_type = CUDA_R_32I;
+                break;
+            default:
+                TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32} for int8 inputs");
+                break;
+        }
+    }
+// cslt 0.6.2+: fp8 fp8 -> {fp8, fp16, bf16, fp32} support
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
+    else if (input_type == CUDA_R_8F_E4M3)
+    {
+        switch (out_dtype)
+        {
+            case at::ScalarType::Float8_e4m3fn:
+                output_type = CUDA_R_8F_E4M3;
+                C_type = CUDA_R_16F;
+                break;
+            case at::ScalarType::Half:
+                output_type = CUDA_R_16F;
+                C_type = CUDA_R_16F;
+                break;
+            case at::ScalarType::BFloat16:
+                output_type = CUDA_R_16BF;
+                C_type = CUDA_R_16BF;
+                break;
+            case at::ScalarType::Float:
+                output_type = CUDA_R_32F;
+                C_type = CUDA_R_32F;
+                break;
+            default:
+                TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, float32} for fp8 inputs");
+                break;
+        }
+    }
+#endif
+    else {
+        TORCH_CHECK(false, "out_dtype support only available for int8/fp8 inputs");
     }
   }
 
@@ -244,6 +291,18 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       output_type,
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
+  // For float8, need fp16 C_descriptor, can't use FP8 for this matrix
+  cusparseLtMatDescriptor_t C_descriptor;
+  TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+      &handle,
+      &C_descriptor,
+      m,
+      n,
+      (transpose_result) ? m: n,
+      16,
+      C_type,
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
+
   // initialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
       &handle,
@@ -252,7 +311,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       (dense_B.is_contiguous()) ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE,
       &sparse_input_descriptor,
       &dense_input_descriptor,
-      &res_descriptor,
+      &C_descriptor,
       &res_descriptor,
       compute_type));
 
@@ -267,17 +326,34 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
       &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
 
-  // set alg_id
+  // set matmul search params
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
       &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
 
+  cusparseLtSplitKMode_t splitKMode;
+  int max_alg_id;
+  if (split_k != 1) {
+     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K, &split_k, sizeof(split_k)));
+
+    splitKMode = split_k_one_kernel ? CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL : CUSPARSELT_SPLIT_K_MODE_TWO_KERNELS;
+     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_SPLIT_K_MODE, &splitKMode, sizeof(splitKMode)));
+  }
+
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
-  const auto alpha_ptr = alpha_opt.has_value() ? alpha_tensor.data_ptr(): &alpha;
+  auto alpha_ptr = &alpha;
   if (alpha_opt.has_value()) {
-    tensor_alpha_mode = 1;
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-        &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+    if (alpha_tensor.numel() == 1) {
+        alpha = alpha_tensor.item<float>();
+    }
+    else {
+        tensor_alpha_mode = 1;
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+            &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+        alpha_ptr = static_cast<float*>(alpha_tensor.data_ptr());
+    }
   }
 
   TORCH_CUDASPARSE_CHECK(
@@ -307,9 +383,23 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         &stream,
         1));
 
-    // get alg_id used
+    // get matmul params used
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_SPLIT_K,
+                                       &split_k, sizeof(split_k)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_SPLIT_K_MODE,
+                                       &splitKMode, sizeof(splitKMode)));
+
+    TORCH_CUDASPARSE_CHECK( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                       CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+                                       &max_alg_id, sizeof(max_alg_id)));
+
+
   }
   else {
     // do normal matmul
@@ -337,7 +427,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
-  return {alg_id, res};
+  return {res, alg_id, split_k, splitKMode == CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL, max_alg_id};
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -347,7 +437,9 @@ at::Tensor _cslt_sparse_mm(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
-    int64_t alg_id
+    int64_t alg_id,
+    int64_t split_k,
+    bool split_k_one_kernel
 )
 {
     auto result = _cslt_sparse_mm_impl(
@@ -358,8 +450,10 @@ at::Tensor _cslt_sparse_mm(
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
+        (int) split_k,
+        split_k_one_kernel,
         false);
-    return std::get<1>(result);
+    return std::get<0>(result);
 }
 
 int64_t _cslt_sparse_mm_search(
@@ -371,7 +465,10 @@ int64_t _cslt_sparse_mm_search(
     bool transpose_result
 )
 {
+    TORCH_WARN_ONCE("torch._cslt_sparse_mm_search is deprecated and will be removed in a future PyTorch release. Please use torch._C._cusparselt.mm_search instead.");
     int alg_id_int = 0;
+    int split_k = 1;
+    bool split_k_one_kernel= true;
     auto result = _cslt_sparse_mm_impl(
         compressed_A,
         dense_B,
@@ -380,10 +477,11 @@ int64_t _cslt_sparse_mm_search(
         out_dtype_opt,
         transpose_result,
         alg_id_int,
+        split_k,
+        split_k_one_kernel,
         true);
-    return (int64_t) std::get<0>(result);
+    return (int64_t) std::get<1>(result);
 }
-
 
 } // namespace at::native
 
@@ -402,7 +500,9 @@ at::Tensor _cslt_sparse_mm(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result,
-    int64_t alg_id)
+    int64_t alg_id,
+    int64_t split_k,
+    bool split_k_one_kernel)
 {
     TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }

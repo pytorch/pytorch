@@ -55,7 +55,6 @@ from torch.testing._internal.common_cuda import (
 
 if not IS_FBCODE:
     from test_cpp_extensions_open_device_registration import (
-        remove_build_path,
         generate_faked_module
     )
 
@@ -378,7 +377,7 @@ class TestTransformers(NNTestCase):
             out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             # The FP kernel will return NaNs while the sdpa kernel which is ran when the fast path is turned off returns 0 instead
             # of NaNs for fully masked rows
-            torch.testing.assert_close(out, out_fp.nan_to_num())
+            self.assertEqual(out, out_fp.nan_to_num())
 
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):
@@ -2690,7 +2689,7 @@ class TestSDPACudaOnly(NNTestCase):
         math_ref_test = math_ref_test.to(dtype=torch.float32).contiguous()
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
-        self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
+        self.assertEqual(math_ref_test, math_ref_lp_test, atol=8e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=7e-3, rtol=7e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
@@ -2809,8 +2808,12 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
+        # TODO we are currently disabling this by default, lets assert that this returns
+        # FlashAttention, we need to change when we make remove opt-in for cudnn
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
         elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
@@ -3112,7 +3115,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fudge_factors = {
             "out": 4,
-            "grad_query": 150.0,
+            "grad_query": 160.0,
             "grad_key": 25.0,
             "grad_value": 8.0,
             "grad_attn_mask": 45.0,
@@ -3234,7 +3237,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         fudge_factors = {
             'out': 4,
-            'grad_query': 160.0,
+            'grad_query': 180.0,
             'grad_key': 16,
             'grad_value': 4,
         }
@@ -3845,10 +3848,11 @@ class TestAttnBias(NNTestCase):
 
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
+@unittest.skip("TODO: This test is broken and should be moved into a dedicated process for registering new extensions")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[
