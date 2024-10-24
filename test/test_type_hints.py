@@ -90,7 +90,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = Path(__file__).resolve().parent / "generated_type_hints_smoketest.py"
+        fn = Path(__file__).absolute().parent / "generated_type_hints_smoketest.py"
         fn.write_text(get_all_examples())
 
         # OK, so here's the deal.  mypy treats installed packages
@@ -131,7 +131,7 @@ class TestTypeHints(TestCase):
                 )
             except OSError:
                 raise unittest.SkipTest("cannot symlink") from None
-            repo_rootdir = Path(__file__).resolve().parent.parent
+            repo_rootdir = Path(__file__).absolute().parent.parent
             # TODO: Would be better not to chdir here, this affects the
             # entire process!
             with set_cwd(str(repo_rootdir)):
