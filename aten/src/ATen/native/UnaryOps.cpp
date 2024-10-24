@@ -541,6 +541,8 @@ Tensor& arctan_(Tensor& self) { return self.atan_(); }
 // complex input. This makes sense mathematically since the absolute value
 // and angle of a complex number has no imaginary part.
 Tensor& abs_out(const Tensor& self, Tensor& result) {
+  std::cout << "[self]: " << self.scalar_type() << std::endl;
+  std::cout << "[result]: " << result.scalar_type() << std::endl;
   return unary_op_impl_with_complex_to_float_out(result, self, abs_stub, /*promotes_integer_to_float=*/false);
 }
 Tensor abs(const Tensor& self) {

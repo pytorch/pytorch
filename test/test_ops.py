@@ -120,6 +120,121 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
+meta_consistency_out_dtype_mismatch_xfails = {
+    xfail("abs"),
+    xfail("addbmm"),
+    xfail("addmm"),
+    xfail("addmm", "decomposed"),
+    xfail("addmv"),
+    xfail("alias_copy"),
+    xfail("all"),
+    xfail("amax"),
+    xfail("amin"),
+    xfail("aminmax"),
+    xfail("any"),
+    xfail("as_strided_copy"),
+    xfail("baddbmm"),
+    xfail("bucketize"),
+    xfail("ceil"),
+    xfail("conj_physical"),
+    xfail("cross"),
+    xfail("cummax"),
+    xfail("cummin"),
+    xfail("diag"),
+    xfail("diagonal_copy"),
+    xfail("dot"),
+    xfail("expand_copy"),
+    xfail("fft.ihfft2"),
+    xfail("fft.ihfftn"),
+    xfail("floor"),
+    xfail("frac"),
+    xfail("frexp"),
+    xfail("geqrf"),
+    xfail("heaviside"),
+    xfail("histc"),
+    xfail("index_add"),
+    xfail("index_copy"),
+    xfail("index_select"),
+    xfail("isin"),
+    xfail("isneginf"),
+    xfail("isposinf"),
+    xfail("kthvalue"),
+    xfail("lerp"),
+    xfail("linalg.cross"),
+    xfail("linalg.eigh"),
+    xfail("linalg.eigvalsh"),
+    xfail("linalg.ldl_factor"),
+    xfail("linalg.ldl_factor_ex"),
+    xfail("linalg.ldl_solve"),
+    xfail("linalg.lu"),
+    xfail("linalg.lu_factor"),
+    xfail("linalg.lu_factor_ex"),
+    xfail("linalg.lu_solve"),
+    xfail("linalg.matrix_power"),
+    xfail("linalg.qr"),
+    xfail("linalg.slogdet"),
+    xfail("linalg.solve"),
+    xfail("linalg.solve_ex"),
+    xfail("linalg.solve_triangular"),
+    xfail("log_softmax"),
+    xfail("logcumsumexp"),
+    xfail("lu_solve"),
+    xfail("lu_unpack"),
+    xfail("matmul"),
+    xfail("mean"),
+    xfail("mm"),
+    xfail("mode"),
+    xfail("msort"),
+    xfail("multinomial"),
+    xfail("mv"),
+    xfail("nan_to_num"),
+    xfail("nanmean"),
+    xfail("narrow_copy"),
+    xfail("native_batch_norm"),
+    xfail("neg"),
+    xfail("nn.functional.avg_pool3d"),
+    xfail("nn.functional.gelu"),
+    xfail("nn.functional.hardshrink"),
+    xfail("nn.functional.linear"),
+    xfail("nn.functional.logsigmoid"),
+    xfail("nn.functional.softplus"),
+    xfail("nn.functional.softshrink"),
+    xfail("ormqr"),
+    xfail("qr"),
+    xfail("renorm"),
+    xfail("round"),
+    xfail("round", "decimals_0"),
+    xfail("scatter_reduce", "amax"),
+    xfail("scatter_reduce", "amin"),
+    xfail("scatter_reduce", "mean"),
+    xfail("scatter_reduce", "prod"),
+    xfail("scatter_reduce", "sum"),
+    xfail("searchsorted"),
+    xfail("sgn"),
+    xfail("sign"),
+    xfail("signbit"),
+    xfail("slice_scatter"),
+    xfail("softmax"),
+    xfail("sort"),
+    xfail("sparse.sampled_addmm"),
+    xfail("square"),
+    xfail("squeeze_copy"),
+    xfail("t_copy"),
+    xfail("take"),
+    xfail("transpose_copy"),
+    xfail("tril"),
+    xfail("triu"),
+    xfail("trunc"),
+    xfail("unfold_copy"),
+    xfail("unsqueeze_copy"),
+    xfail("vdot"),
+    xfail("view_copy"),
+    xfail("where"),
+    # Output has dynamic shape.
+    # Does not have a meta kernel implementation.
+    skip("linalg.lstsq"),
+}
+
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -1580,6 +1695,87 @@ class TestCommon(TestCase):
                 self.fail(
                     f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
                 )
+
+    # Checks whether running the operations on both CPU and meta devices raise errors
+    # when the output tensors have mismatching data-types (i.e. data-types that are
+    # different from the expected one).
+    #
+    # The idea is that the meta implementations should correctly reflect on the behavior
+    # of other concrete devices (e.g. CPU and CUDA).
+    @onlyCPU
+    @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
+    @skipOps(
+        "TestCommon",
+        "test_meta_consistency_out_dtype_mismatch",
+        meta_consistency_out_dtype_mismatch_xfails,
+    )
+    def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        for i, sample in enumerate(samples):
+            input, args, kwargs = (sample.input, sample.args, sample.kwargs)
+
+            try:
+                # Call the functional version of the operation, using a real device, so that
+                # we get the actual expected result.
+                expected = op(input, *args, **kwargs)
+
+                if isinstance(expected, tuple):
+                    # Some operations return named tuples. However, pytree does not work well
+                    # with that, so we turn it into a plain tuple.
+                    expected = tuple(expected)
+            except Exception:
+                # If that doesn't work out, go to the next sample.
+                continue
+
+            def run_on(dev):
+                # Create new outputs in the desired device, with a mismatching data type of
+                # the same kind.
+                out = pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda t: torch.empty_like(t, device=dev, dtype=torch.float64),
+                    expected,
+                )
+
+                # Move inputs to the desired device.
+                arguments = (input, args, kwargs)
+                arguments = pytree.tree_map_only(
+                    torch.Tensor, lambda t: t.to(dev), arguments
+                )
+                # Also, replace every instance of 'cpu' arguments by whatever the desired
+                # device really should be.
+                arguments = pytree.tree_map_only(
+                    torch.device, lambda d: torch.device(dev), arguments
+                )
+                arguments = pytree.tree_map_only(
+                    str, lambda v: dev if v == device else v, arguments
+                )
+                input_, args_, kwargs_ = arguments
+
+                # Try running the operation, and return the raised error, if any.
+                try:
+                    op(input_, *args_, **kwargs_, out=out)
+                except Exception as e:
+                    return e
+                else:
+                    print(f"[{dev}] {input_=} {args_=} {kwargs_=} {out=}")
+
+            # Run the operation with the sample arguments on both CPU and meta devices, capturing
+            # the raised error, if any.
+            device_err = run_on(device)
+            meta_err = run_on("meta")
+
+            # Check whether they disagree on the result.
+            #
+            # In case there is an inconsistency of whether an error was raised using the real device,
+            # but not when using the meta device, we raise a RuntimeError, chaining with the captured
+            # one.
+            #
+            # We could just assertEquals here, but chaining the errors is more informative.
+            if device_err is None and meta_err is not None:
+                raise RuntimeError(f"{device} didn't fail, but meta did.") from meta_err
+            elif device_err is not None and meta_err is None:
+                raise RuntimeError(f"{device} failed, but meta didn't.") from device_err
 
 
 @unMarkDynamoStrictTest
