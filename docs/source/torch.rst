@@ -184,20 +184,7 @@ Random sampling
     initial_seed
     get_rng_state
     set_rng_state
-
-.. autoattribute:: torch.default_generator
-   :annotation:  Returns the default CPU torch.Generator
-
-.. The following doesn't actually seem to exist.
-   https://github.com/pytorch/pytorch/issues/27780
-   .. autoattribute:: torch.cuda.default_generators
-      :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
-                    The number of CUDA torch.Generator-s returned is equal to the number of
-                    GPUs available in the system.
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
+    default_generator
     bernoulli
     multinomial
     normal
