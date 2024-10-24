@@ -4,6 +4,7 @@ import os
 
 import torch
 import torch.distributed as dist
+from torch._C import FileCheck
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
@@ -818,6 +819,57 @@ class LoweringTest(MultiProcessTestCase):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
+
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_planning(self):
+        self._init_process()
+
+        arg = torch.rand(4, 4, device=self.device)
+
+        def func(x):
+            a = x + 1
+            b = x + 2
+            c = x + 3
+
+            a = torch.ops._c10d_functional.all_reduce(a, "sum", "0")
+            a = torch.ops._c10d_functional.wait_tensor(a)
+
+            b = torch.ops._c10d_functional.all_reduce(b, "sum", "0")
+            b = torch.ops._c10d_functional.wait_tensor(b)
+
+            c = torch.ops._c10d_functional.all_reduce(c, "sum", "0")
+            c = torch.ops._c10d_functional.wait_tensor(c)
+
+            d = a + b + c
+            d = torch.ops._c10d_functional.all_reduce(d, "sum", "0")
+            d = torch.ops._c10d_functional.wait_tensor(d)
+            return d
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, arg)
+
+        # After lowering the all_reduces to one_shot_all_reduces, the
+        # all-reduce results becomes symm_mem buffers. We expect the pool size
+        # to be sizeof(arg) * 3, since at most 3 all-reduce results overlap in
+        # lifetime.
+        pool_size = arg.numel() * arg.element_size() * 3
+        (
+            FileCheck()
+            .check(
+                f"symm_mem_pool_0 = empty_strided_p2p(({pool_size}, ), (1, ), torch.uint8"
+            )
+            # All symm_mem buffers should be allocated from pool (as opposed to
+            # allocated via empty_strided_p2p or inplace reused).
+            .check("alloc_from_pool")
+            .check("alloc_from_pool")
+            .check("alloc_from_pool")
+            .check("alloc_from_pool")
+            # The pool should be deleted so that the associated persistent
+            # allocation can be reused by the next subgraph.
+            .check("del symm_mem_pool_0")
+            .run(code)
+        )
 
 
 if __name__ == "__main__":

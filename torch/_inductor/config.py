@@ -589,6 +589,7 @@ _micro_pipeline_tp: bool = False
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
+    plan_comm_buffers: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
