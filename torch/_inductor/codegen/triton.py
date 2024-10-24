@@ -1946,6 +1946,10 @@ class TritonKernel(SIMDKernel):
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+        elif (
+            mode == "atomic_add_bf16"
+        ):  # Triton doesn't support bf16 atomic add, use inline asm in this case
+            line = "hi"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
