@@ -1096,7 +1096,7 @@ class cuda:
     # enable generation of inline standalone runner in CUDA CPP generated code
     # which allows to compile the generated code into a standalone executable.
     generate_test_runner: bool = (
-        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern

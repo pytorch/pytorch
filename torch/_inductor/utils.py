@@ -1597,7 +1597,7 @@ def is_dynamic(*args):
                 hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
             ):
                 return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)):
             assert hasattr(t, "get_size") and hasattr(t, "get_stride")
             if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
