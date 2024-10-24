@@ -118,7 +118,10 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-if [[ $USE_CUSPARSELT == "1" ]]; then
+# only CUDA 11.8 ships the libcusparseLt.so.0 with the binary
+# since nvidia-cusparselt-cu12 is available and
+# nvidia-cusparselt-cu11 is not available
+if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         DEPS_SONAME+=(
             "libcusparseLt.so.0"
         )
