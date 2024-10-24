@@ -84,23 +84,13 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at::native {
+#if !defined(C10_MOBILE)
 DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
+#endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
-#if defined(__aarch64__) && !defined(C10_MOBILE)
-void fp16_gemv_notrans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy);
-
+#if !defined(C10_MOBILE)
 void fp16_gemv_trans(
     const int m,
     const int n,
@@ -118,6 +108,41 @@ float fp16_dot_with_fp32_arith(
     const Half* vec2,
     int64_t len);
 
+float fp16_dot_with_fp32_arith(
+  const Half* x,
+  const Half* a,
+  int64_t len) {
+  return fp16_dot_with_fp32_arith_stub(kCPU, x, a, len);
+}
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy) {
+  fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+#endif // !defined(C10_MOBILE)
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
+
 void bf16_gemv_trans(
     const int m,
     const int n,
@@ -134,7 +159,7 @@ float bf16_dot_with_fp32_arith(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
     int64_t len);
-#endif
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
 bool scal_use_fast_path(
@@ -575,27 +600,6 @@ static void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n,
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
     }
   });
-}
-
-float fp16_dot_with_fp32_arith(
-  const Half* x,
-  const Half* a,
-  int64_t len) {
-  return fp16_dot_with_fp32_arith_stub(kCPU, x, a, len);
-}
-
-void fp16_gemv_trans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy) {
-  fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void bf16_gemv_trans(
