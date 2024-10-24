@@ -8,6 +8,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -128,7 +129,7 @@ class TestSchedulePlan(TestCase):
 
     @parametrize(
         "ScheduleClass",
-        [ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+        [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleZBVZeroBubble],
     )
     def test_pipeline_order(self, ScheduleClass):
         for num_local_stages, num_microbatches, group_size in self.test_cases:
@@ -137,7 +138,10 @@ class TestSchedulePlan(TestCase):
                 num_microbatches=num_microbatches,
                 group_size=group_size,
             ):
-                if num_microbatches % group_size != 0:
+                if ScheduleClass is ScheduleZBVZeroBubble:
+                    if num_local_stages % 2 != 0:
+                        continue
+                elif num_microbatches % group_size != 0:
                     continue
 
                 logger.info(
@@ -156,6 +160,7 @@ class TestSchedulePlan(TestCase):
                 formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
+
                 # print(formatted_pipeline_order)
                 _validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
