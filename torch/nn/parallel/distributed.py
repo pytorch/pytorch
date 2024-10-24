@@ -897,25 +897,7 @@ class DistributedDataParallel(Module, Joinable):
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
         self._accum_grad_hooks: List[RemovableHandle] = []
-        optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
-        self._use_python_reducer = optimize_ddp in (
-            "python_reducer",
-            "python_reducer_without_compiled_forward",
-        )
-        if self._use_python_reducer:
-            torch._inductor.config._fuse_ddp_communication = True
-            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
-            # Directly adding this to the trace rule will disturb the users
-            # who are using DDPOptimizer.
-            torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
-                "torch.nn.parallel.distributed"
-            )
-            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
-        self._force_to_disable_cpp_reducer = (
-            optimize_ddp == "python_reducer_without_compiled_forward"
-        )
-        if self._use_python_reducer:
-            self._register_accum_grad_hook()
+        self._use_python_reducer: Optional[bool] = None
 
         # Whether or not DDPSink performs a clone.
         self._ddp_sink_clone = True
@@ -1485,20 +1467,33 @@ class DistributedDataParallel(Module, Joinable):
         self._setup_in_backward_optimizers()
         self._lazy_init_ran = True
 
-    def _should_disable_cpp_reducer(self) -> bool:
-        return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
-        )
+    def _maybe_use_python_reducer(self) -> bool:
+        if self._use_python_reducer is None:
+            import torch._dynamo.compiled_autograd as ca
+
+            self._use_python_reducer = (
+                ca.compiled_autograd_enabled
+                or ca.compiled_autograd_enabled_force_eager
+                or ca.in_compiled_autograd_region
+            )
+            if self._use_python_reducer:
+                torch._inductor.config._fuse_ddp_communication = True
+                torch._inductor.config._fuse_ddp_bucket_size = (
+                    self.bucket_bytes_cap // (1024**2)
+                )
+                # Directly adding this to the trace rule will disturb the users
+                # who are using DDPOptimizer.
+                torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
+                    "torch.nn.parallel.distributed"
+                )
+                torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
+                self._register_accum_grad_hook()
+
+        return self._use_python_reducer
 
     def _pre_forward(self, *inputs, **kwargs):
-        if self._should_disable_cpp_reducer():
+        if self._maybe_use_python_reducer():
             return inputs, kwargs
-
-        # Disable the python reducer if compiled_autograd is not enabled.
-        if self._accum_grad_hooks:
-            for h in self._accum_grad_hooks:
-                h.remove()
-            self._accum_grad_hooks.clear()
 
         if not self._lazy_init_ran and not torch._utils.is_compiling():
             self._lazy_init()
@@ -1566,7 +1561,7 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
     def _post_forward(self, output):
-        if self._should_disable_cpp_reducer():
+        if self._use_python_reducer:
             return output
 
         if self._delay_all_reduce_all_params:

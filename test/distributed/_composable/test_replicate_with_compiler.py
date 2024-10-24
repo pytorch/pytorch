@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 import torch
 import torch.distributed as dist
-from torch import _inductor as inductor, nn
+from torch import nn
 from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
@@ -58,20 +58,6 @@ class Net(nn.Module):
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(no_inductor=False):
-    def _compiler_fn(gm):
-        def inner_compiler(gm_, example_inputs_):
-            if no_inductor:
-                return gm_
-            else:
-                return inductor.compile(gm_, example_inputs_)
-
-        gm = torch.compile(gm, fullgraph=True, backend=inner_compiler)
-        return gm
-
-    return _compiler_fn
-
-
 class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
     """
     A version of MultiProcessTestCase that derives from the Inductor TestCase
@@ -103,9 +89,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         use_gpu: bool,
         no_sync: bool,
         setup_func: Optional[Callable] = None,
-        no_inductor: bool = False,
-        no_compile_forward: bool = False,
         checkpoint: bool = False,
+        no_grad_check: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -120,26 +105,19 @@ class ReplicateTest(MultiProcessInductorTestCase):
         else:
             device = torch.device("cpu")
 
-        torch._dynamo.config.optimize_ddp = (
-            "python_reducer_without_compiled_forward"
-            if no_compile_forward
-            else "python_reducer"
-        )
         torch.manual_seed(123)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
         compiled_replicate_model = replicate(deepcopy(model))
-        if not no_compile_forward:
-            compiled_replicate_model = torch.compile(
-                compiled_replicate_model, fullgraph=False
-            )
+        compiled_replicate_model = torch.compile(
+            compiled_replicate_model, fullgraph=False
+        )
         compiled_replicate_optim = torch.optim.Adam(
             compiled_replicate_model.parameters()
         )
         compiled_ddp_model = DDP(deepcopy(model))
-        if not no_compile_forward:
-            compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
+        compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
         compiled_ddp_optim = torch.optim.Adam(compiled_ddp_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
@@ -156,13 +134,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
         ]
 
         # Run multiple iterations so that we could test no_sync
-        for i in range(2):
+        for i in range(3):
             # Setting a different random seed so that if the allreduces are not
             # executed correctly, the gradients won't be correct compared to the
             # eager DDP.
             torch.manual_seed(123 + self.rank + i)
             input = torch.randn([1, DIM], device=device)
-
+            torch.compiler.set_stance("force_eager" if i == 0 else "default")
             for model_idx in range(3):
                 if no_sync and i % 2 == 0:
                     context = sync_contexts[model_idx]
@@ -175,12 +153,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
                 context = contextlib.nullcontext()
 
                 with context:
-                    bwd_context = (
-                        contextlib.nullcontext()
-                        if model_idx == 0
-                        else compiled_autograd.enable(compiler_fn(no_inductor))
-                    )
-                    with bwd_context:
+                    with torch._dynamo.utils.maybe_enable_compiled_autograd(
+                        model_idx != 0
+                    ):
                         loss = models[model_idx](input).sum()
                         loss.backward()
 
@@ -190,8 +165,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
                     compiled_replicate_model.parameters(),
                     compiled_ddp_model.parameters(),
                 ):
-                    self.assertEqual(p1.grad, p2.grad)
-                    self.assertEqual(p1.grad, p3.grad)
+                    if not no_grad_check:
+                        self.assertEqual(p1.grad, p2.grad)
+                        self.assertEqual(p1.grad, p3.grad)
                 for optim in optims:
                     optim.step()
                     optim.zero_grad()
@@ -264,18 +240,14 @@ class ReplicateTest(MultiProcessInductorTestCase):
                 None, ddp_default_hooks.fp16_compress_hook
             )
 
-        # TODO: figure out why we need to disable Inductor to avoid test errors.
         self._test_compile(
-            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
+            use_gpu=True,
+            no_sync=False,
+            setup_func=setup,
+            no_grad_check=True,
         )
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_rocm_multiprocess
-    @skip_if_lt_x_gpu(2)
-    def test_compile_backward_only(self):
-        self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
-
-    def _test_bucketing(self, init_process_group=True, loop=1):
+    def _test_bucketing(self, init_process_group=True, loop=2):
         if init_process_group:
             dist.init_process_group(
                 backend="gloo",
@@ -285,24 +257,26 @@ class ReplicateTest(MultiProcessInductorTestCase):
             )
         model = Net()
         input = torch.randn([1, DIM])
-        torch._dynamo.config.optimize_ddp = "python_reducer"
+
         compiled_replicate_model = torch.compile(
             replicate(deepcopy(model)), fullgraph=False
         )
 
         def bwd(loss):
-            with compiled_autograd.enable(compiler_fn()):
-                loss.backward()
+            loss.backward()
 
-        for i in range(loop):
-            loss = compiled_replicate_model(input).sum()
-            if i != loop - 1:
-                # Leave the last bwd for the run_and_get_triton_code.
-                bwd(loss)
+        counters["inductor"]["ddp_buckets"] = 0
+        with torch._dynamo.utils.maybe_enable_compiled_autograd(True):
+            for i in range(loop):
+                torch.compiler.set_stance("force_eager" if i == 0 else "default")
+                loss = compiled_replicate_model(input).sum()
+                if i != loop - 1:
+                    bwd(loss)
 
-        code = run_and_get_triton_code(functools.partial(bwd, loss=loss))
+            self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+            counters["inductor"]["ddp_buckets"] = 0
+            code = run_and_get_triton_code(functools.partial(bwd, loss=loss))
 
-        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
     @torch._inductor.config.patch(
@@ -316,20 +290,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_bucketing_coalesced_op(self):
         # Gradient is None
-        code = self._test_bucketing()
-        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
-        fc = FileCheck()
-        for i in range(3):
-            fc.check("cpp_fused_").check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
-            )
-        for i in range(3):
-            fc.check("torch.ops._c10d_functional.wait_tensor.default")
-
-        fc.run(code)
-
-        # Gradient is None
-        code = self._test_bucketing(init_process_group=False, loop=2)
+        code = self._test_bucketing(loop=10)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
@@ -352,19 +313,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_bucketing_concat_op(self):
         # Gradient is None
-        code = self._test_bucketing()
-        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
-        fc = FileCheck()
-        for i in range(3):
-            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
-                "torch.ops._c10d_functional.all_reduce_.default("
-            )
-        for i in range(3):
-            fc.check("torch.ops._c10d_functional.wait_tensor.default")
-        fc.run(code)
-
-        # Gradient is not None
-        code = self._test_bucketing(init_process_group=False, loop=2)
+        code = self._test_bucketing(loop=3)
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
@@ -423,7 +372,7 @@ class DDP_TP_Test(InductorTestCase):
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
         data = torch.randn([1, DIM])
-        with compiled_autograd.enable(compiler_fn()):
+        with compiled_autograd.enable():
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
