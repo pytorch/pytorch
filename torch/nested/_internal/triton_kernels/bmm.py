@@ -31,47 +31,46 @@ import torch
 import triton
 import triton.language as tl
 
+import itertools
+
+def gen_configs():
+    products = itertools.product([32, 64, 128], [54, 84, 108, 128, 216, 432, 864], [1, 2, 4, 8, 16])
+    configs=[]
+    for BLOCK_SIZE_K, NUM_SM, num_warps in products:
+        configs += [
+        triton.Config({
+            'BLOCK_SIZE_M': 128,
+            'BLOCK_SIZE_N': 128,
+            'BLOCK_SIZE_K': BLOCK_SIZE_K,
+            'NUM_SM': NUM_SM,
+            'num_stages': num_warps,
+        }),
+        triton.Config({
+            'BLOCK_SIZE_M': 64,
+            'BLOCK_SIZE_N': 64,
+            'BLOCK_SIZE_K': BLOCK_SIZE_K,
+            'NUM_SM': NUM_SM,
+            'num_stages': num_warps,
+        }),
+        ]
+    return configs
+
 @triton.autotune(
-    configs=[
-        triton.Config({
-            'BLOCK_SIZE_M': 128,
-            'BLOCK_SIZE_N': 128,
-            'BLOCK_SIZE_K': 32,
-            'NUM_SM': 84,
-        }),
-        triton.Config({
-            'BLOCK_SIZE_M': 128,
-            'BLOCK_SIZE_N': 128,
-            'BLOCK_SIZE_K': 32,
-            'NUM_SM': 128,
-        }),
-        triton.Config({
-            'BLOCK_SIZE_M': 64,
-            'BLOCK_SIZE_N': 64,
-            'BLOCK_SIZE_K': 32,
-            'NUM_SM': 84,
-        }),
-        triton.Config({
-            'BLOCK_SIZE_M': 64,
-            'BLOCK_SIZE_N': 64,
-            'BLOCK_SIZE_K': 32,
-            'NUM_SM': 128,
-        }),
-    ],
+    configs=gen_configs(),
     key=['group_size'],
 )
 @triton.jit
 def grouped_matmul_kernel(
-    b_ptr_base,
+    b_ptr,
     group_size,
     gn,
     gk,
     ldb,
     a_offsets_ptr,
-    a_ptr_base,
+    a_ptr,
     lda,
     ldc,
-    c_ptr_base,
+    c_ptr,
     # number of virtual SM
     NUM_SM: tl.constexpr,
     # tile sizes
@@ -83,60 +82,65 @@ def grouped_matmul_kernel(
     batch_id = tl.program_id(1)
 
     # get the gemm size of the current problem
-    a_offset_0 = tl.load(a_offsets_ptr + batch_id)
-    a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1)
+    a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
+    a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
     gm = a_offset_1 - a_offset_0
-
-    a_ptr = a_ptr_base + a_offset_0 * lda
-    b_ptr = b_ptr_base + batch_id * gk * gn
-    c_ptr = c_ptr_base + a_offset_0 * ldc
 
     num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
     num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
     num_tiles = num_m_tiles * num_n_tiles
     last_problem_end = num_tiles
 
-    offs_k = tl.arange(0, BLOCK_SIZE_K)
-
     # iterate through the tiles in the current gemm problem
     while tile_idx < last_problem_end:
-        # tl.device_print("tile_idx: ", tile_idx)
         # pick up a tile from the current gemm problem
         # figure out tile coordinates
+
+        # Rematerialize in an effort to save registers
+        a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
+        a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
+        gm = a_offset_1 - a_offset_0
+        num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
+        num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
+        num_tiles = num_m_tiles * num_n_tiles
         tile_m_idx = tile_idx // num_n_tiles
         tile_n_idx = tile_idx % num_n_tiles
 
-        # do regular gemm here
         offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-        # tl.device_print("offs_am: ", offs_am)
         offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
-        a_ptrs = a_ptr + (offs_am[:, None] % gm) * lda + offs_k[None, :]
-        b_ptrs = b_ptr + offs_k[:, None] * ldb + (offs_bn[None, :] % gn)
+        offs_am = offs_am % gm
+        offs_bn = offs_bn % gn
+
+        # Rematerialize on each loop
+        offs_k = tl.arange(0, BLOCK_SIZE_K)
+        a_ptrs = a_ptr + a_offset_0 * lda + (offs_am[:, None]) * lda + offs_k[None, :]
+        b_ptrs = b_ptr + batch_id * gk * gn + offs_k[:, None] * ldb + (offs_bn[None, :])
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         for kk in range(0, tl.cdiv(gk, BLOCK_SIZE_K)):
             # # # hint to Triton compiler to do proper loop pipelining
-            # tl.multiple_of(a_ptrs, [16, 16])
-            # tl.multiple_of(b_ptrs, [16, 16])
-            # assume full tile for now
+            tl.multiple_of(a_ptrs, [16, 16])
+            tl.multiple_of(b_ptrs, [16, 16])
             a = tl.load(a_ptrs, mask=offs_k[None, :] < gk - kk * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < gk - kk * BLOCK_SIZE_K, other=0.0)
-            accumulator = tl.dot(a, b, accumulator, "ieee")
+            accumulator += tl.dot(a, b) #, accumulator) #, "ieee")
             a_ptrs += BLOCK_SIZE_K
             b_ptrs += BLOCK_SIZE_K * ldb
-        c = accumulator.to(tl.float32)
+        c = accumulator.to(tl.float16)
 
         # offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         # offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
+        # Trying to save registers by recomputing indices
         offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
-        c_ptrs = c_ptr + ldc * offs_am[:, None] + offs_bn[None, :]
+        a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
+        a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
+        gm = a_offset_1 - a_offset_0
 
+        c_ptrs = c_ptr + a_offset_0 * ldc + ldc * offs_am[:, None] + offs_bn[None, :]
         c_mask = (offs_am[:, None] < gm) & (offs_bn[None, :] < gn)
-
-        # tl.device_print("c_mask: ", c_mask)
 
         # assumes full tile for now
         tl.store(c_ptrs, c, mask=c_mask)
