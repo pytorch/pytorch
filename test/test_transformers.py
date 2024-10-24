@@ -2465,6 +2465,31 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_fused_attention_different_dk_dv(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 128, 64
+        seq_len = 640
+        q_shape = SdpaShape(batch, num_heads, 1, head_dim_k)
+        k_shape = SdpaShape(batch, num_heads, 2, head_dim_k)
+        v_shape = SdpaShape(batch, num_heads, 2, head_dim_v)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        # test that we do not dispatch to cuDNN for an unsupported case
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous().to(torch.float32),
+                key.contiguous().to(torch.float32),
+                value.contiguous().to(torch.float32),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_fail_d128(self, device):
         # Test that cuDNN attention dispatching correctly bails out on d > 128
         b, h = 1, 2
