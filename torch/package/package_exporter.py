@@ -124,8 +124,6 @@ class EmptyMatchError(Exception):
     ``allow_empty=False``, and is not matched with any module during packaging.
     """
 
-    pass
-
 
 class PackagingError(Exception):
     """This exception is raised when there is an issue with exporting a package.
@@ -429,7 +427,7 @@ class PackageExporter:
     def _import_module(self, module_name: str):
         try:
             return self.importer.import_module(module_name)
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError:
             if not is_mangled(module_name):
                 raise
             msg = (
@@ -664,7 +662,7 @@ class PackageExporter:
             memo: DefaultDict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
-            for opcode, arg, pos in pickletools.genops(data_value):
+            for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"

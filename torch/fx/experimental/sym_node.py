@@ -422,6 +422,47 @@ class SymNode:
     def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace
 
+    # This one is currently done by hand, but if we add other variadic
+    # functions consider factoring it out to be metaprogrammed too.  Note that
+    # some load bearing logic is directly in torch.sym_sum
+
+    def sym_sum(self, args) -> "SymNode":
+        import sympy
+
+        # Inner impl
+        from torch.fx.experimental.proxy_tensor import (
+            get_proxy_mode,
+            handle_sym_dispatch,
+        )
+
+        if get_proxy_mode():
+            return to_node(
+                self,
+                handle_sym_dispatch(
+                    torch.sym_sum,
+                    (tuple(wrap_node(a) for a in args),),
+                    {},
+                ),
+            )
+        exprs = [a.expr for a in args]
+        out = sympy.Add(*exprs)
+
+        size_hints = []
+        out_hint = None
+        for a in args:
+            if a.hint is None:
+                break
+            size_hints.append(a.hint)
+        else:
+            out_hint = sum(size_hints)
+
+        fx_node, _ = self.shape_env._create_fx_call_function(
+            torch.sym_sum, (tuple(a.fx_node for a in args),)
+        )
+
+        # NB: Only for integers!
+        return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
+
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
@@ -436,9 +477,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node, expect_rational=False
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return float(r)
         except Exception:
@@ -803,15 +842,15 @@ def _sympy_ge(a, b):
 
 
 def _sympy_min(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Min
 
-    return sympy.Min(a, b)
+    return Min(a, b)
 
 
 def _sympy_max(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Max
 
-    return sympy.Max(a, b)
+    return Max(a, b)
 
 
 def _sympy_ite(a, t, f):
@@ -943,6 +982,8 @@ def sympy_is_channels_last_contiguous_3d(sizes, strides):
 def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     import sympy
 
+    from torch.utils._sympy.functions import Max
+
     dim = len(sizes)
 
     if dim != len(dim_order):
@@ -973,7 +1014,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
         #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
         #     channels_last
-        m = strides[d] * sympy.Max(sizes[d], 1)
+        m = strides[d] * Max(sizes[d], 1)
 
     return r
 
@@ -1055,7 +1096,6 @@ def _make_node_magic(method, func):
             get_proxy_mode,
             handle_sym_dispatch,
         )
-        from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
 
@@ -1095,7 +1135,6 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
-        out = safe_expand(out)
         sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
@@ -1133,7 +1172,6 @@ def _make_node_magic(method, func):
             get_proxy_mode,
             handle_sym_dispatch,
         )
-        from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
         if get_proxy_mode():
@@ -1152,7 +1190,6 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
-        out = safe_expand(out)
         pytype: Type
         if method in always_int_magic_methods:
             pytype = int
@@ -1175,7 +1212,6 @@ def _make_node_magic(method, func):
                 get_proxy_mode,
                 handle_sym_dispatch,
             )
-            from torch.fx.experimental.symbolic_shapes import safe_expand
 
             out_hint = then_node.hint if pred_node.hint else else_node.hint
             if get_proxy_mode():
@@ -1204,7 +1240,6 @@ def _make_node_magic(method, func):
                 )
                 raise
 
-            out = safe_expand(out)
             fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
@@ -1220,7 +1255,6 @@ def _make_node_magic(method, func):
                 get_proxy_mode,
                 handle_sym_dispatch,
             )
-            from torch.fx.experimental.symbolic_shapes import safe_expand
 
             op = builtins.round
             if get_proxy_mode():
@@ -1234,8 +1268,6 @@ def _make_node_magic(method, func):
             except Exception:
                 log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise
-
-            out = safe_expand(out)
 
             if ndigits is None:
                 pytype = int
