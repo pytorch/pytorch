@@ -777,6 +777,7 @@ CacheNode* _compiled_autograd_impl(
   return cache;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct LockGuardWithErrorLogs {
   LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
     // Note: the standard allows try_lock to fail spuriously during races for

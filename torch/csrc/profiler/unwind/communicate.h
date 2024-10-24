@@ -41,6 +41,10 @@ struct Communicate {
       err_ = std::make_unique<std::ostream>(errbuf_.get());
     }
   }
+  Communicate(const Communicate&) = delete;
+  Communicate(Communicate&&) = delete;
+  Communicate& operator=(const Communicate&) = delete;
+  Communicate& operator=(Communicate&&) = delete;
   ~Communicate() {
     close(inpipe_[1]);
     close(outpipe_[0]);

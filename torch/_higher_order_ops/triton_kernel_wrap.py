@@ -216,7 +216,18 @@ def generate_ttir(
     ordered_tensor_names = [
         name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
     ]
-    specialization = kernel._get_config(*ordered_args.values())
+
+    def _get_specialization(args):  # type: ignore[no-untyped-def]
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            target = triton.runtime.driver.active.get_current_target()
+            backend = triton.compiler.compiler.make_backend(target)
+            return backend.get_attrs_descriptor(args, kernel.params)
+        except ImportError:
+            return kernel._get_config(*args)
+
+    specialization = _get_specialization(ordered_args.values())
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }

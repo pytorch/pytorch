@@ -292,7 +292,7 @@ def split_module(
         # See https://github.com/pytorch/pytorch/issues/130534
         if (
             (val := node.meta.get("example_value")) is not None
-            and isinstance(val, torch.SymInt)
+            and isinstance(val, (torch.SymInt, torch.SymFloat))
             and isinstance(s0 := val.node.expr, sympy.Symbol)
             and s0 not in symbol_to_node
         ):

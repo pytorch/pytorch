@@ -33,7 +33,7 @@ struct TORCH_API ProfilerStubs {
   }
   virtual void onEachDevice(std::function<void(int)> op) const = 0;
   virtual void synchronize() const = 0;
-  virtual ~ProfilerStubs();
+  virtual ~ProfilerStubs() = default;
 };
 
 TORCH_API void registerCUDAMethods(ProfilerStubs* stubs);

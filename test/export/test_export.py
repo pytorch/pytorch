@@ -2637,7 +2637,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def foo_impl(a, b):
                 return a[b.item()]
 
-            @torch.library.register_fake("mylib::foo")
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_fake_impl(a, b):
                 ctx = torch.library.get_ctx()
                 u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10

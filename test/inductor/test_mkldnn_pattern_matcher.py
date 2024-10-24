@@ -940,27 +940,115 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn=matcher_check_fn,
             )
 
+    def _qconv2d_add_cpu_test_helper2(self, use_relu=False, int8_mixed_bf16=False):
+        r"""
+        This testcase will quantize two Conv2d->Add patterns as:
+
+        Conv(X)   extra input
+               \   /
+                Add
+                 |
+           Optional(relu)
+                 |
+                 Y
+
+        , and
+
+        extra input   Conv(X)
+               \   /
+                Add
+                 |
+           Optional(relu)
+                 |
+                 Y
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                use_relu,
+                swap_inputs,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU()
+                self.conv2 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU()
+                self.use_relu = use_relu
+                self.swap_inputs = swap_inputs
+
+            def forward(self, x, x2, x3):
+                x1 = self.conv1(x)
+                if self.swap_inputs:
+                    tmp = self.add_fn(x2, x1)
+                else:
+                    tmp = self.add_fn(x1, x2)
+                if self.use_relu:
+                    tmp = self.relu(tmp)
+                tmp1 = self.conv2(tmp)
+                if self.swap_inputs:
+                    res = self.add_fn2(x3, tmp1)
+                else:
+                    res = self.add_fn2(tmp1, x3)
+                if self.use_relu:
+                    res = self.relu2(res)
+                return res
+
+        for add_fn, swap_inputs in itertools.product(
+            quantization_add_fn_list + quantization_inplace_add_fn_list, [False, True]
+        ):
+            mod = M(add_fn, use_relu, swap_inputs).eval()
+            x = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False)
+            x2 = torch.randn((1, 6, 6, 6), dtype=torch.float32, requires_grad=False)
+            x3 = torch.randn((1, 6, 4, 4), dtype=torch.float32, requires_grad=False)
+
+            def matcher_check_fn():
+                # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                )
+                # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 2
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 2
+                )
+
+            self._test_common(
+                mod,
+                (x, x2, x3),
+                check_quantization=True,
+                check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+                matcher_check_fn=matcher_check_fn,
+            )
+
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     def test_qconv2d_add_cpu(self):
         self._qconv2d_add_cpu_test_helper()
+        self._qconv2d_add_cpu_test_helper2()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     def test_qconv2d_add_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(int8_mixed_bf16=True)
+        self._qconv2d_add_cpu_test_helper2(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     def test_qconv2d_add_relu_cpu(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True)
+        self._qconv2d_add_cpu_test_helper2(use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     def test_qconv2d_add_relu_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
+        self._qconv2d_add_cpu_test_helper2(use_relu=True, int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN

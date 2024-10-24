@@ -67,9 +67,6 @@ void addMetadata(
 // Wraps: libkineto::CpuTraceBuffer
 struct TraceWrapper {
   TraceWrapper(const int64_t start_time, const std::string& name);
-  TraceWrapper(TraceWrapper&&) = default;
-  TraceWrapper(const TraceWrapper&) = delete;
-  ~TraceWrapper();
 
   // The caller is expected to hold a mutex when calling `addCPUActivity`.
   activity_t* addCPUActivity(
@@ -96,8 +93,6 @@ struct TraceWrapper {
 struct ActivityTraceWrapper {
   explicit ActivityTraceWrapper(std::unique_ptr<interface_trace_t>&& trace);
   ActivityTraceWrapper() = default;
-  ActivityTraceWrapper(ActivityTraceWrapper&&) = default;
-  ActivityTraceWrapper(const ActivityTraceWrapper&) = delete;
   explicit operator bool() const;
   void save(const std::string& path);
 

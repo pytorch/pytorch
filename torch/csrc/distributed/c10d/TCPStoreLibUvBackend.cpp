@@ -780,7 +780,7 @@ class UvClient : public UvTcpSocket {
   }
 
   bool parse_ping_command() {
-    uint32_t nonce;
+    uint32_t nonce = 0;
     if (!stream.read_value(nonce)) {
       return false;
     }

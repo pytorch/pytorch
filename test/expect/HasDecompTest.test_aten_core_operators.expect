@@ -391,6 +391,8 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
+aten::permute_copy
+aten::permute_copy.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar
@@ -504,6 +506,8 @@ aten::triu_indices.out
 aten::trunc
 aten::trunc.out
 aten::trunc_
+aten::unbind_copy.int
+aten::unbind_copy.int_out
 aten::unfold
 aten::uniform
 aten::uniform.out

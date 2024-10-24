@@ -695,6 +695,13 @@ class _PipelineStageBase(ABC):
                 self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
+
+        if self.is_last:
+            # stage_output is no longer used in the last stage for backward and only needed
+            # to return to the user in merge_output_chunks, therefore
+            # this should be detached to release autograd graph context and free memory earlier
+            for t in stage_output:
+                t.detach_()
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):

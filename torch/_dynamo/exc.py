@@ -144,6 +144,7 @@ class UserErrorType(Enum):
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
     INVALID_OUTPUT = auto()
+    UNSUPPORTED_ALIASED_MUTATED_DYNAMIC_INPUTS = auto()
 
 
 class UserError(Unsupported):

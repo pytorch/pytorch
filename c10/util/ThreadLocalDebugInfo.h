@@ -74,6 +74,8 @@ class C10_API DebugInfoGuard {
 
   DebugInfoGuard(const DebugInfoGuard&) = delete;
   DebugInfoGuard(DebugInfoGuard&&) = delete;
+  DebugInfoGuard& operator=(const DebugInfoGuard&) = delete;
+  DebugInfoGuard& operator=(DebugInfoGuard&&) = delete;
 
  private:
   bool active_ = false;

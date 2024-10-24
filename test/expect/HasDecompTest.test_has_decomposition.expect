@@ -1010,8 +1010,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1294,8 +1292,6 @@ aten::topk.values
 aten::transpose_
 aten::triangular_solve
 aten::triangular_solve.X
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unique_consecutive
 aten::unique_consecutive.out
 aten::unique_dim

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._dynamo.exc import Unsupported
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -375,9 +376,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
                 )
             ):
                 dynamic_shape_indices.add(j_)
-        assert (
-            len(dynamic_shape_indices) == 0
-        ), f"""\
+        err_message = f"""\
 Encountered a graph where:
 - {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
 - at least one of these aliased inputs was mutated
@@ -397,6 +396,11 @@ torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the para
 If you are running into this issue in a situation where your parameters are static but some other inputs
 are aliased and mutated, and they should be dynamic, please file an issue.
 """
+        if len(dynamic_shape_indices) != 0:
+            raise Unsupported(
+                err_message,
+                case_name="dynamic_shapes_validation",
+            )
     for j in range(num_aliases):
         for i in range(j):
             j_ = aliased_input_indices[j]

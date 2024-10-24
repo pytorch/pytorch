@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._higher_order_ops.auto_functionalize import try_use_slice
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -1062,9 +1063,300 @@ alias_default = alias_default_1 = foo_default = None
                         ignore_empty_lines=True,
                     )
 
+    # Test that slice view is generated instead of as_strided when split is used.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_alias_dynamic(self):
-        self.test_alias(_dynamic=True)
+    def test_split(self, _dynamic=False):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                splits = x.split([4, 6], dim=1)
+                a = splits[0]
+                b = splits[1]
+                torch.ops.mylib.foo(a, b)
+                return (a, b, x)
+
+            orig_args = [torch.randn(10, 10)]
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(
+                f, orig_args, _dynamic
+            )
+            [inductor_args, result2, graph_inductor] = self.run_inductor(
+                f, orig_args, _dynamic
+            )
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    # split forces a specialization on size so we dont see arg0_1 dynamic anymore.
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
+        getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
+        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
+        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
+        return (getitem_4, getitem_7)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
+        getitem_3: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
+        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
+        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
+        return (getitem_4, getitem_7)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+            # 2. Run with inductor backend
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    # split forces a specialization on size so we dont see arg0_1 dynamic anymore.
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        slice_tensor: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
+        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
+        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
+        return (getitem_4, getitem_7)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        slice_tensor: "f32[10, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_tensor_1: "f32[10, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
+        getitem_4: "f32[10, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
+        getitem_7: "f32[10, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
+        return (getitem_4, getitem_7)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+    # Note that split force the input tensor to get specialized. So we do not see SymInts when _dynamic=True.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_split_dynamic(self):
+        self.test_split(_dynamic=True)
+
+    # Test that slice view is generated instead of as_strided when slice is used.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_slice(self, _dynamic=False):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                a = torch.ops.aten.slice.Tensor(x, 0, 0, 2)
+                b = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
+                torch.ops.mylib.foo(a, b)
+                return (a, b, x)
+
+            orig_args = [torch.randn(10, 10)]
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(
+                f, orig_args, _dynamic
+            )
+            [inductor_args, result2, graph_inductor] = self.run_inductor(
+                f, orig_args, _dynamic
+            )
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0, s0][s0, 1]cpu"):
+        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+        add_6: "Sym(2)" = floordiv + 2
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg1_1]);  floordiv = add_6 = None
+        getitem_1: "f32[s0, s0][s0, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[s0, s0][s0, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
+        slice_3: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
+        slice_4: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = 0, _x_slice_end = 2, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg0_1])
+        getitem_1: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
+        slice_3: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
+        slice_4: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+            # 2. Run with inductor backend
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0, s0][s0, 1]cpu"):
+        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+        add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
+        slice_tensor: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
+        slice_tensor_1: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[s0, s0][s0, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
+        slice_3: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
+        slice_4: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        slice_tensor: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_tensor_1: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        slice_3: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_4: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4);  arg0_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+    # Note that split force the input tensor to get specialized. So we do not see SymInts when _dynamic=True.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_slice_dynamic(self):
+        self.test_slice(_dynamic=True)
+
+    def test_try_use_slice(self):
+        def test_round_trip(base, tensor):
+            (dim, start, end) = try_use_slice(base, tensor)
+            sliced = torch.ops.aten.slice.Tensor(base, dim, start, end)
+            self.assertEqual(sliced, tensor)
+
+        t = torch.tensor([[2, 2], [3, 4]])
+        test_round_trip(t, t)
+
+        for dim in range(-1, 1):
+            f = t.split(2, dim)
+            test_round_trip(t, f[0])
+
+        for dim in range(-1, 1):
+            f = t.split(1, dim)
+            test_round_trip(t, f[0])
+            test_round_trip(t, f[1])
+
+        t = torch.randint(1, 10, (3, 3, 3))
+        test_round_trip(t, t)
+
+        for dim in range(-3, 3):
+            f = t.split([1, 2], dim)
+            test_round_trip(t, f[0])
+            test_round_trip(t, f[1])
+
+        for dim in range(-3, 3):
+            f = t.split(1, dim)
+            test_round_trip(t, f[0])
+            test_round_trip(t, f[1])
+            test_round_trip(t, f[2])
+
+        t = torch.rand(10, 10, 10)
+        test_round_trip(t, t)
+        for dim in range(-3, 3):
+            f = t.split([2, 2, 6], dim)
+            test_round_trip(t, f[0])
+            test_round_trip(t, f[1])
+            test_round_trip(t, f[2])
+
+        # example where slice wont work
+
+        # selection
+        t = torch.ones(10)
+        b = t[0]
+        self.assertEqual(try_use_slice(t, b), None)
+
+        t = torch.tensor([[1, 2], [3, 4]])
+        self.assertEqual(try_use_slice(t, t[0]), None)
+        self.assertEqual(try_use_slice(t, t[1]), None)
+
+        t = torch.tensor(
+            [
+                [[1, 2, 3, 4, 5, 6, 7, 8], [10, 11, 12, 13, 14, 15, 16, 17]],
+                [[71, 72, 73, 74, 75, 76, 77, 78], [81, 82, 83, 84, 85, 86, 87, 88]],
+            ]
+        )
+
+        self.assertEqual(try_use_slice(t, t[0:1, 0:1, :7]), None)
+        self.assertEqual(try_use_slice(t, t[0:1, 0:2, :3]), None)
+        self.assertEqual(try_use_slice(t, t[0:2, 1, 0:8]), None)
+
+        # simple slice operations are supported
+        test_round_trip(t, t[0:2])
+        test_round_trip(t, t[3:4])
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
@@ -1229,7 +1521,6 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 v2 = torch.compile(
                     func, backend=counter_v2, fullgraph=True, dynamic=True
                 )
-
                 inputs = [
                     torch.rand(10, 10),
                     torch.rand(100, 100),

@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import functools
 import inspect
@@ -220,9 +221,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None
-                if self.source is None
-                else DefaultsSource(self.source, k, is_kw=True)
+                k: (
+                    None
+                    if self.source is None
+                    else DefaultsSource(self.source, k, is_kw=True)
+                )
                 for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
@@ -1009,6 +1012,38 @@ class PolyfilledFunctionVariable(VariableTracker):
                 )
             )
             return VariableTracker.build(tx, result)
+
+        # Special case for sum on tuple/list of ints
+        if (
+            self.fn is builtins.sum
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
+            and all(
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
+                for x in args[0].items
+            )
+        ):
+            return variables.SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.sym_sum,
+                    (tuple(a.as_proxy() for a in args[0].items),),
+                    {},
+                ),
+                sym_num=torch.sym_sum(
+                    [
+                        (
+                            x.value
+                            if isinstance(x, variables.ConstantVariable)
+                            else x.sym_num
+                        )
+                        for x in args[0].items
+                    ]
+                ),
+            )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)

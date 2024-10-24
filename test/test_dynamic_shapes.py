@@ -451,6 +451,15 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_sym_sum(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        self.assertEqual(
+            (s0 + s1 + s2).node.expr, torch.sym_sum([s0, s1, s2]).node.expr
+        )
+
     def test_prefer_deferred_runtime_assertions_over_guards(self):
         shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
         s0 = create_symint(shape_env, 2)
