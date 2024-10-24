@@ -18,6 +18,8 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from .functions import (
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -101,6 +103,8 @@ def handlers():
         Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         RoundDecimal: "round_decimal",
+        BitwiseFn_bitwise_and: "bitwise_and",
+        BitwiseFn_bitwise_or: "bitwise_or",
     }
     for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
         HANDLERS[getattr(sympy, name)] = name

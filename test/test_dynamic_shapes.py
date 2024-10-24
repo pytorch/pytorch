@@ -371,6 +371,35 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
+    def test_symint_bitwise_and(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_and = a0 & b0
+        self.assertEqual(res_and, 0b1000)
+        self.assertIsInstance(res_and, torch.SymInt, msg=type(res_and))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_and(s0, s1), 8)"""
+        )
+
+        a1 = create_symint(shape_env, 3)
+        b1 = create_symbool(shape_env, True)
+        self.assertEqual(a1 & b1, 1)
+
+        a2 = create_symint(shape_env, 0b1100)
+        self.assertEqual(a2 & 0b1010, 0b1000)
+
+    def test_symint_bitwise_or(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_or = a0 | b0
+        self.assertEqual(res_or, 0b1110)
+        self.assertIsInstance(res_or, torch.SymInt, msg=type(res_or))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s0, s1), 14)"""
+        )
+
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
@@ -1261,6 +1290,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         if second_type == "float" and fn in ["mod"]:
             self.skipTest(f"{fn} only handles int")
+
+        if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
+            self.skipTest(f"{fn} is a bitwise op, only handles int")
 
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type

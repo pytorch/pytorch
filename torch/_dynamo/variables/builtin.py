@@ -2016,6 +2016,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
 
+    call_iand = call_and_
+
     def call_or_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2034,6 +2036,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
+
+    call_ior = call_or_
 
     def call_not_(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):

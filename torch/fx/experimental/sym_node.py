@@ -405,6 +405,13 @@ class SymNode:
     def sym_and(self, other):
         return self.and_(other)
 
+    # Integer bitwise ops
+    def bitwise_and(self, other):
+        return self._bitwise_and(other)  # type: ignore[attr-defined]
+
+    def bitwise_or(self, other):
+        return self._bitwise_or(other)  # type: ignore[attr-defined]
+
     # There is no int_truediv available from C++
     def truediv(self, other):
         return self.float_truediv(other)
@@ -567,6 +574,7 @@ METHOD_TO_OPERATOR = {
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
+    "bitwise_and": operator.and_,
     "ceil": math.ceil,
     "eq": operator.eq,
     "floor": math.floor,
@@ -583,6 +591,7 @@ METHOD_TO_OPERATOR = {
     "ne": operator.ne,
     "neg": operator.neg,
     "or": operator.or_,
+    "bitwise_or": operator.or_,
     "float_pow": operator.pow,
     "pow_by_natural": operator.pow,
     "round": builtins.round,
@@ -660,6 +669,7 @@ only_float_magic_methods = {"is_integer", "round", "sym_int"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
+bitwise_ops = {"bitwise_and", "bitwise_or"}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -750,6 +760,18 @@ def _sympy_rshift(a, b):
     return RShift(a, b)
 
 
+def _bitwise_and(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_and
+
+    return BitwiseFn_bitwise_and(a, b)
+
+
+def _bitwise_or(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_or
+
+    return BitwiseFn_bitwise_or(a, b)
+
+
 reflectable_magic_methods = {
     "add": operator.add,
     "sub": operator.sub,
@@ -758,7 +780,9 @@ reflectable_magic_methods = {
     "pow_by_natural": _sympy_pow_by_natural,
     "float_pow": _sympy_float_pow,
     "and": _sympy_and,
+    "bitwise_and": _bitwise_and,
     "or": _sympy_or,
+    "bitwise_or": _bitwise_or,
     "float_truediv": _sympy_float_truediv,
     "int_truediv": _sympy_int_truediv,
     "int_floordiv": _sympy_floordiv,
@@ -1565,9 +1589,12 @@ def _make_user_magic(method, user_type):
 
         setattr(user_type, f"__{method}__", round_magic_impl)
     else:
-        setattr(user_type, f"__{method}__", binary_magic_impl)
+        method_name = method
+        if method in bitwise_ops:
+            method_name = method[len("bitwise_") :]
+        setattr(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
-            setattr(user_type, f"__r{method}__", rbinary_magic_impl)
+            setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
 for method, func in magic_methods.items():  # type: ignore[assignment]
@@ -1580,7 +1607,8 @@ for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)
     _make_user_magic(method, SymInt)
-    _make_user_magic(method, SymFloat)
+    if method not in bitwise_ops:
+        _make_user_magic(method, SymFloat)
 
 del method
 del func
