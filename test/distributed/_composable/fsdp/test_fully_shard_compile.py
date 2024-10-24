@@ -44,6 +44,23 @@ def _is_fallback_op_in_snodes(snodes, op):
     return any(is_fallback_op(snode.node, op) for snode in snodes)
 
 
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
+
+
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.encoder = torch.nn.Sequential(
+            torch.nn.Linear(28 * 28, 1024, device="cuda"),
+            torch.nn.Linear(1024, 1024, device="cuda"),
+            torch.nn.Linear(1024, 4096, device="cuda"),
+        )
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
 class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -929,6 +946,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     len(triton_codes) > 2,
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
+
+    def test_dynamo_recompiles_on_fsdp_layers(self):
+        m = Mod()
+        for name, child in m.encoder.named_children():
+            if isinstance(child, torch.nn.Linear):
+                new_child = torch.compile(child)
+                setattr(m.encoder, name, new_child)
+        m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
+        inp = torch.randn(32, 784, device="cuda")
+        out = m(inp)
 
 
 if __name__ == "__main__":
