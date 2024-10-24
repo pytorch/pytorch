@@ -19,6 +19,21 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 void dynamic_graph_updater(cudaGraphKernelNodeUpdate* updates, size_t num_updates);
+// Large parameter support:
+// https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
+// Question: Does pytorch still run on Pascal or older?
+
+struct KernelUpdateSOA {
+  static constexpr size_t MAX_NUM_UPDATES =
+      1364; // (32764 - sizeof(size_t)) / (sizeof(void*) + sizeof(size_t) +
+            // sizeof(cudaGraphDeviceNode_t));
+  size_t num_updates;
+  cudaGraphDeviceNode_t device_nodes[MAX_NUM_UPDATES];
+  void* new_pointers[MAX_NUM_UPDATES];
+  size_t param_offsets[MAX_NUM_UPDATES];
+};
+
+void dynamic_graph_updater2(const KernelUpdateSOA& updates);
 
 struct DynamicGraphKernelParamUpdate {
   // in other words:

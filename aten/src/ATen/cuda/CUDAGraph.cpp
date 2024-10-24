@@ -549,11 +549,30 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     }
   }
   AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
-  has_graph_exec_ = true;
-}
 
-void CUDART_CB hostMemoryFreeCallback(void* data) {
-  at::getCPUAllocator()->raw_deallocate(data);
+  // We must call cudaGraphUpload() to allocate memory for the
+  // updatable device nodes. Otherwise, cudaGraphLaunch will
+  // fail.
+
+  // From
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ge546432e411b4495b93bdcbf2fc0b2bd:
+  // "[cudaGraphUpload] Uses memory cached by stream to back the allocations
+  // owned by graphExec."
+
+  // Normally, cudaGraphUpload() must be called on the stream for that
+  // will do cudaGraphLaunch(). However, here we can actually use any
+  // arbitrary stream (thus, the stream we caputred on works) for the
+  // memory backing device nodes. This differs from the usual case for
+  // graphs using memory allocation and free nodes. TODO: Figure out
+  // precisely why.
+
+  // Can this stream ever be deleted while still retain a reference to it?
+  // Yes, if an external stream is used. That is probably very rare.
+  // I suppose we know that torch streams will never be deallocated, so this is
+  // fine...
+  AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, capture_stream_));
+  capture_stream_.synchronize();
+  has_graph_exec_ = true;
 }
 
 void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
@@ -566,7 +585,6 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
 
   // take the allocations that were requested during the capture, and allocate them "for real"
   std::vector<void*> actualDataPtrs;
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
   for (size_t i = 0; i < allocations_.size(); i++) {
     TORCH_INTERNAL_ASSERT(allocations_[i].alloc_idx == i);
     TORCH_CHECK(dynamic_tensors[i].is_contiguous(), "All tensors must be contiguous");
@@ -582,31 +600,17 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
   }
 
-  // practically all of the updates are kernel param updates, which are batched into a single device-side call:
-  size_t totalUpdatesSize = kernel_param_updates_.size() * sizeof(cudaGraphKernelNodeUpdate);
-  cudaGraphKernelNodeUpdate* hostUpdates = (cudaGraphKernelNodeUpdate*) at::getCPUAllocator()->raw_allocate(totalUpdatesSize);
+  KernelUpdateSOA update_soa;
+  update_soa.num_updates = kernel_param_updates_.size();
   for (size_t i = 0; i < kernel_param_updates_.size(); i++) {
     auto update = kernel_param_updates_[i];
-    hostUpdates[i] = cudaGraphKernelNodeUpdate{
-      .node = update.dev_node,
-      .field = cudaGraphKernelNodeFieldParam,
-      .updateData = {
-        .param = {
-          .pValue = (char*)actualDataPtrs[update.alloc_idx] + update.offset, // the kernel will overwrite this to indirect it in GPU memory
-          .offset = update.param_offset,
-          .size = sizeof(void*),
-        },
-      },
-    };
+    update_soa.device_nodes[i] = update.dev_node;
+    update_soa.new_pointers[i] =
+        (char*)actualDataPtrs[update.alloc_idx] + update.offset;
+    update_soa.param_offsets[i] = update.param_offset;
   }
-  cudaGraphKernelNodeUpdate* deviceUpdates = (cudaGraphKernelNodeUpdate*) allocator->raw_alloc_with_stream(totalUpdatesSize, stream);
-  AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, totalUpdatesSize, cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaLaunchHostFunc(stream, hostMemoryFreeCallback, hostUpdates)); // free once the memcpy is done
-  // does this need to be done repeatedly? Or only once?
-  AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, stream));
-  dynamic_graph_updater(deviceUpdates, kernel_param_updates_.size());
+  dynamic_graph_updater2(update_soa);
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
-  allocator->raw_delete(deviceUpdates);
 }
 
 } // namespace at::cuda
