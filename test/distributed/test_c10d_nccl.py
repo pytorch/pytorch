@@ -626,8 +626,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         new_pg1.allreduce(t1).wait()
         new_pg2.allreduce(t2).wait()
         backend = pg._get_backend(torch.device(device))
-        # default PG's backend should have a split count of 2
-        self.assertEqual(backend.comm_split_count(), 2)
+        # default PG's backend should have a split count of 0 because
+        # it's not eager initialized
+        self.assertEqual(backend.comm_split_count(), 0)
         # shutdown all NCCL PGs in one shot
         dist.destroy_process_group()
 
@@ -649,8 +650,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         new_pg2.allreduce(t2).wait()
         backend = pg._get_backend(torch.device(device))
-        # default PG's backend should have a split count of 1
-        self.assertEqual(backend.comm_split_count(), 1)
+        # default PG's backend should have a split count of 0
+        self.assertEqual(backend.comm_split_count(), 0)
         # shutdown all NCCL PGs in one shot
         dist.destroy_process_group()
 
@@ -802,7 +803,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_comm_split_optimization(self):
+    def test_comm_lazy_init_split(self):
         # Test the optimization of new groups that contain all world
         # ranks use the "transparent" `ncclCommSplit` optimization.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -820,9 +821,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             pg.broadcast(tensor, 0)
             self.assertEqual(backend.comm_split_count(), 0)
 
-            # The new group will force a split of the original on first use.
+            # The new group will not force a split because it is a lazy init.
             ng.broadcast(tensor, 0)
-            self.assertEqual(backend.comm_split_count(), 1)
+            self.assertEqual(backend.comm_split_count(), 0)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -913,7 +914,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 0)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
-        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend.comm_split_count(), 0)
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")

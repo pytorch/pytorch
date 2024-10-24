@@ -1776,14 +1776,9 @@ def _new_process_group_helper(
     # communicators based on pre-existing ones, which can save
     # initialization time.  Due to lazy initialization of
     # communicators in some backends, we have to be careful and only
-    # split when we *know* the backends already are connected _on all
-    # ranks_.  We can only know this if the group we are making is the
-    # entire world or if we have bound a device id to the world (which
-    # causes early connection initialization).
-    if is_initialized() and (
-        len(global_ranks_in_group) == _get_default_group().size()
-        or _get_default_group().bound_device_id
-    ):
+    # split when we *know* the default PG has already started communicator initialization.
+    # We know this if we have bound a device id to the default pg (eager initialized).
+    if is_initialized() and _get_default_group().bound_device_id:
         split_from = _get_split_source(_get_default_group())
     else:
         split_from = None
