@@ -1069,11 +1069,16 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
         use_full_backward: bool = True,
     ):
-        if len(stages) <= 1:
-            raise ValueError(
-                f"Multi-stage schedule expects at least two stages but got {len(stages)}"
-            )
+
+        # TODO(whc) can we just delete this assert? It is convenient to do a unit test with a single stage, and
+        # eventually I wonder if we should delete all the PipelineScheduleSingle classes and unify to IR-based schedules
+        # using the 'Runtime' class which happens to derive from Multi.
+        # if len(stages) <= 1:
+        #     raise ValueError(
+        #         f"Multi-stage schedule expects at least two stages but got {len(stages)}"
+        #     )
         # Init parent
+
         super().__init__(
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
