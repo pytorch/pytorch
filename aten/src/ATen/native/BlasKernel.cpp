@@ -90,29 +90,29 @@ void fp16_gemv_notrans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy);
 
 void fp16_gemv_trans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy);
 
 float fp16_dot_with_fp32_arith(
-    const float16_t* vec1,
-    const float16_t* vec2,
+    const Half* vec1,
+    const Half* vec2,
     int64_t len);
 
 void bf16_gemv_trans(
@@ -347,7 +347,7 @@ static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x)
   return vaddvq_f32(t0 + t1);
 }
 
-static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, int len) {
+static float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
   vec::VectorizedN<Half, kF16RegistersPerIteration> sum(0);
 
   const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
@@ -369,7 +369,7 @@ static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, in
 // Rather than unrolling to process multiple rows (transposed columns)
 // of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
 // along an individual dot product.
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
     for (int i = begin; i < end; ++i) {
       y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
@@ -411,8 +411,8 @@ static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x
 }
 
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-  const float16_t* vec1,
-  const float16_t* vec2,
+  const Half* vec1,
+  const Half* vec2,
   vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
   int registerPairIndex) {
   // Load a pair of f32 registers at a time.
@@ -438,12 +438,12 @@ static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t 
 }
 
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const float16_t* vec1,
-    const float16_t* vec2,
+    const Half* vec1,
+    const Half* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vld1_f16(&vec1[idx]);
-  const auto temp_vec2 = vld1_f16(&vec2[idx]);
+  const auto temp_vec1 = vld1_f16(reinterpret_cast<const float16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1_f16(reinterpret_cast<const float16_t*>(&vec2[idx]));
   *tail_sum = f32_fma_f16(*tail_sum, temp_vec1, temp_vec2);
 }
 
@@ -602,6 +602,21 @@ dot_with_fp32_arith_main_loop_no_bfdot(
   return reduce(sum);
 }
 
+template <typename T>
+struct half_to_float16 {
+  using type = T;
+};
+
+#ifdef __aarch64__
+template <>
+struct half_to_float16<Half> {
+  using type = float16_t;
+};
+#endif
+
+template <typename T>
+using half_to_float16_t = typename half_to_float16<T>::type;
+
 // NOTE [GCC code duplication]: The first attempt at landing BFDOT support with
 // TARGET_ARM_BF16_ATTRIBUTE failed because unlike clang, GCC will not
 // allow inlining a non-bf16-specific function into a bf16-specific
@@ -623,7 +638,14 @@ dot_with_fp32_arith_main_loop_no_bfdot(
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
   for (int j = len_aligned_4; j < len; ++j) {                           \
-    reduced_sum += vec1[j] * vec2[j];                                   \
+    /* We use half_to_float16_t here because changing to Half was */    \
+    /* causing arithmetic to at fp16 precision, but the necessary */    \
+    /* necessary behavior to pass python test/test_mps.py -k */         \
+    /* test_output_grad_match_nn_functional_linear_cpu_float16 is */    \
+    /* fp32. (I'm not sure exactly why this fixes it.) */               \
+    half_to_float16_t<std::decay_t<decltype(vec1[j])>> x1 = vec1[j];    \
+    half_to_float16_t<std::decay_t<decltype(vec2[j])>> x2 = vec2[j];    \
+    reduced_sum += x1 * x2;                                             \
   }                                                                     \
   return reduced_sum
 
@@ -644,7 +666,7 @@ dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
 #undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
 } // namespace
 
-float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
+float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) {
   return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
 }
 
@@ -662,7 +684,7 @@ float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec
 // On my Apple M1 Macbook (which is ARM v8.5 and thus has the
 // instructions f32_fma_{low,high}_f16 is targeting), this kernel has
 // equivalent performance to the fp16-native kernel.
-static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, Half* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
     for (int i = begin; i < end; ++i) {
       y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
@@ -682,12 +704,12 @@ void fp16_gemv_trans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
@@ -753,20 +775,20 @@ void fp16_gemv_notrans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
-                                                       : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
-#else
-    return fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+    if (at::globalContext().allowFP16ReductionCPU())  {
+      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+    }
 #endif
+    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
   }
   std::vector<float> sum(m);
   for (const auto j : c10::irange(n)) {
@@ -806,24 +828,24 @@ void gemv_fast_path<at::Half>(
         *m,
         *n,
         fp16_from_bits(alpha->x),
-        reinterpret_cast<const float16_t*>(a),
+        a,
         *lda,
-        reinterpret_cast<const float16_t*>(x),
+        x,
         *incx,
         fp16_from_bits(beta->x),
-        reinterpret_cast<float16_t*>(y),
+        y,
         *incy);
   } else {
     fp16_gemv_notrans(
         *m,
         *n,
         fp16_from_bits(alpha->x),
-        reinterpret_cast<const float16_t*>(a),
+        a,
         *lda,
-        reinterpret_cast<const float16_t*>(x),
+        x,
         *incx,
         fp16_from_bits(beta->x),
-        reinterpret_cast<float16_t*>(y),
+        y,
         *incy);
   }
 }
