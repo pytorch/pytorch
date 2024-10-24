@@ -1597,7 +1597,6 @@ def compile_fx(
 
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
-                    # foobar
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                     model_outputs_node.meta["user_visible_output_idxs"] = [
                         idx
