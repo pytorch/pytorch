@@ -77,6 +77,11 @@ class SymInt(_Union):
     as_expr: SymExpr
     as_int: int
 
+@dataclass(repr=False)
+class SymFloat(_Union):
+    as_expr: SymExpr
+    as_int: float
+
 
 @dataclass(repr=False)
 class SymBool(_Union):
@@ -106,6 +111,16 @@ class SymIntArgument(_Union):
     as_name: str
     as_int: int
 
+# In most cases we will use the "as_name" field to store arguments which are
+# SymFloats.
+# The "as_float" field is used in the case where we have a list containing a mix
+# of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
+# be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
+# to the "as_float" field.
+@dataclass(repr=False)
+class SymFloatArgument(_Union):
+    as_name: str
+    as_float: float
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
@@ -165,6 +180,8 @@ class Argument(_Union):
     as_strings: List[str]
     as_sym_int: SymIntArgument
     as_sym_ints: List[SymIntArgument]
+    as_sym_float: SymFloatArgument
+    as_sym_floats: List[SymFloatArgument]
     as_scalar_type: ScalarType
     as_memory_format: MemoryFormat
     as_layout: Layout
@@ -201,6 +218,7 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorMeta]
     sym_int_values: Dict[str, SymInt]
+    sym_float_values: Dict[str, SymFloat]
     sym_bool_values: Dict[str, SymBool]
     # This is for deserializing the submodule graphs from higher order ops
     # (ex. cond, map) where single tensor returns will just return a single
