@@ -117,7 +117,9 @@ class FrameStateSizeEntry:
 
     # NB: steals the inputs
     @staticmethod
-    def make_tensor(size: Tuple[int], stride: Tuple[int]) -> FrameStateSizeEntry:
+    def make_tensor(
+        size: Tuple[int, ...], stride: Tuple[int, ...]
+    ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(scalar=auto_dynamic, size=size, stride=stride)
 
     @staticmethod
