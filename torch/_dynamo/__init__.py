@@ -104,6 +104,7 @@ def reset() -> None:
 def reset_code_caches() -> None:
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        CODE_STATE.clear()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
         ):
