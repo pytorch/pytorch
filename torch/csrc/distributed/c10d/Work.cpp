@@ -1,4 +1,5 @@
 #include <ATen/ThreadLocalState.h>
+#include <distributed/c10d/ProcessGroup.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
@@ -70,7 +71,10 @@ std::vector<at::Tensor> Work::result() {
   TORCH_CHECK(false, "result() not implemented.");
 }
 
-void Work::synchronize() {}
+void Work::synchronize() {
+  c10d::unregister_work(
+      c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
+}
 
 bool Work::wait(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
