@@ -514,65 +514,6 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
-def _reduce_fake_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
-    """
-    metadata = extract_tensor_metadata_for_cache_key(t)
-    return (_ident, (metadata,))
-
-
-def _reduce_tensor(
-    t: Tensor,
-) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle Tensors.
-    If we see tensors, we know they're constants stored as attributes on
-    the GraphModule. Include the values in the key calculation. Small
-    tensors will be inlined, so we can't serve the same cache entry for
-    different values anyway. Large constants are treated as parameters,
-    so we could conceivably reuse a cache entry. To do that, however,
-    PyCodeCache would need more complexity to create a new module from its
-    cache, but with the right constants attached as attributes.
-    """
-    if t.is_mkldnn:
-        # TODO: These tensors don't currently pickle, so we can't cache a
-        # compiled graph containing them. Just fail now. If mkldnn tensors
-        # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable")
-
-    # Very large tensors could be expensive to copy to cpu and hash. Let's
-    # at least report if we find slowness.
-    start = time()
-    values = t.tolist()
-    elapsed = time() - start
-    if elapsed > 1.0:
-        warnings.warn(
-            f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
-        )
-
-    metadata = extract_tensor_metadata_for_cache_key(t)
-    return (_ident, (TensorMetadataAndValues(metadata, values),))
-
-
-def _reduce_symint(s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle SymInts.
-    """
-    # For hashing purposes, we only care about the name of the symbol and
-    # not the backed value. We evaluate guards stored with a cached graph
-    # to ensure a cached entity with SymInt args is safe to reuse.
-    return (_ident, (str(s),))
-
-
-def _reduce_unsupported(s: Any) -> NoReturn:
-    """
-    See FxGraphCachePickler. Custom reducer to handle any objects that we don't
-    support and therefore raise to bypass caching.
-    """
-    raise BypassFxGraphCache("Reduce unsupported")
-
-
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -588,16 +529,76 @@ class FxGraphCachePickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: _reduce_fake_tensor,
-                torch.Tensor: _reduce_tensor,
-                torch.SymInt: _reduce_symint,
-                torch.fx.experimental._backward_state.BackwardState: _reduce_unsupported,
+                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.SymInt: functools.partial(self._reduce_symint),
+                torch.fx.experimental._backward_state.BackwardState: functools.partial(
+                    self._reduce_unsupported
+                ),
             }
         )
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
+
+    def _reduce_fake_tensor(
+        self, t: Tensor
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+        """
+        Custom reducer to pickle FakeTensors.
+        """
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (metadata,))
+
+    def _reduce_tensor(
+        self,
+        t: Tensor,
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+        """
+        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
+        stored as attributes on the GraphModule. Include the values in the key
+        calculation. Small tensors will be inlined, so we can't serve the same cache
+        entry for different values anyway. Large constants are treated as parameters, so
+        we could conceivably reuse a cache entry. To do that, however, PyCodeCache would
+        need more complexity to create a new module from its cache, but with the right
+        constants attached as attributes.
+        """
+        if t.is_mkldnn:
+            # TODO: These tensors don't currently pickle, so we can't cache a compiled
+            # graph containing them. Just fail now. If mkldnn tensors get pickling
+            # support, we can remove this.
+            raise BypassFxGraphCache("mkldnn tensors unpickleable")
+
+        # Very large tensors could be expensive to copy to cpu and hash. Let's at least
+        # report if we find slowness.
+        start = time()
+        values = t.tolist()
+        elapsed = time() - start
+        if elapsed > 1.0:
+            warnings.warn(
+                f"FX graph cache handling of a large constant took {elapsed:.1}s. "
+                "Please file an issue."
+            )
+
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (TensorMetadataAndValues(metadata, values),))
+
+    def _reduce_symint(self, s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
+        """
+        Custom reducer to pickle SymInts.
+        """
+        # For hashing purposes, we only care about the name of the symbol and not the
+        # backed value. We evaluate guards stored with a cached graph to ensure a cached
+        # entity with SymInt args is safe to reuse.
+        return (_ident, (str(s),))
+
+    def _reduce_unsupported(self, s: Any) -> NoReturn:
+        """
+        Custom reducer to handle any objects that we don't support and therefore
+        raise to bypass caching.
+        """
+        raise BypassFxGraphCache("Reduce unsupported")
 
     def dumps(self, obj: Any) -> bytes:
         """

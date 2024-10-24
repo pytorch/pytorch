@@ -224,43 +224,41 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             raise BypassAOTAutogradCache from e
 
 
-def _reduce_aot_config(aot_config: AOTConfig):
-    """
-    Reduce the config to a stable key for caching.
-    """
-    return (
-        _ident,
-        (
-            aot_config.num_params_buffers,
-            aot_config.keep_inference_input_mutations,
-            aot_config.is_export,
-            aot_config.no_tangents,
-            aot_config.dynamic_shapes,
-            aot_config.aot_autograd_arg_pos_to_source,
-            aot_config.enable_log,
-            aot_config.pre_dispatch,
-        ),
-    )
-
-
-def _reduce_tensor(tensor):
-    """
-    Reduce the tensor to a stable key for caching.
-    """
-    metadata = extract_tensor_metadata_for_cache_key(tensor)
-    return (_ident, (metadata,))
-
-
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self):
         super().__init__()
         self.dispatch_table: Dict
         self.dispatch_table.update(
             {
-                AOTConfig: _reduce_aot_config,
-                torch.Tensor: _reduce_tensor,
+                AOTConfig: functools.partial(self._reduce_aot_config),
+                torch.Tensor: functools.partial(self._reduce_tensor),
             }
         )
+
+    def _reduce_aot_config(self, aot_config: AOTConfig):
+        """
+        Reduce the config to a stable key for caching.
+        """
+        return (
+            _ident,
+            (
+                aot_config.num_params_buffers,
+                aot_config.keep_inference_input_mutations,
+                aot_config.is_export,
+                aot_config.no_tangents,
+                aot_config.dynamic_shapes,
+                aot_config.aot_autograd_arg_pos_to_source,
+                aot_config.enable_log,
+                aot_config.pre_dispatch,
+            ),
+        )
+
+    def _reduce_tensor(self, tensor):
+        """
+        Reduce the tensor to a stable key for caching.
+        """
+        metadata = extract_tensor_metadata_for_cache_key(tensor)
+        return (_ident, (metadata,))
 
 
 def autograd_cache_key(
