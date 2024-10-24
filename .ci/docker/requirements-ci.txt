@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
