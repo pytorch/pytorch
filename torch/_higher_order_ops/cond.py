@@ -444,6 +444,14 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        if true_out is None or false_out is None:
+            if true_out is None and false_out is None:
+                continue
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
+                f"Expected both branches to return None:"
+                f"\n  {true_fn.__name__} returns {true_out}"
+                f"\n  {false_fn.__name__} returns {false_out}"
+            )
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
