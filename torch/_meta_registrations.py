@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
+from functools import wraps
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -519,32 +520,44 @@ def meta__cslt_sparse_mm(
     alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
+    alg_id: int = 0,
+    split_k: int = 1,
+    split_k_one_kernel: bool = False,
 ):
     assert dense_B.dtype in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
-    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
+        torch.float8_e4m3fn,
+    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
     assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
-    is_int8_input_type = compressed_A.dtype == torch.int8
-    compression_factor = 10 if is_int8_input_type else 9
+    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
+    compression_factor = 10 if is_8bit_input_type else 9
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
     if bias is not None:
         assert m == bias.size(0)
 
+    if is_8bit_input_type:
+        assert not dense_B.is_contiguous()
+
     if out_dtype is not None:
-        assert is_int8_input_type and out_dtype in {
-            torch.float16,
-            torch.bfloat16,
-            torch.int32,
-        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
+        assert (
+            is_8bit_input_type
+            and out_dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+                torch.int32,
+                torch.float8_e4m3fn,
+            }
+        ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype)
+    result = torch.empty(output_shape, dtype=out_dtype, device=compressed_A.device)
     return result
 
 
@@ -718,8 +731,18 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
+    if min is None and max is None:
+        torch._check_is_size(size)
+        return
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
+    if type(size) is int:
+        if min is not None:
+            torch._check(size >= min)
+        if max is not None:
+            torch._check(size <= max)
+        return
     _constrain_range_for_size(size, min=min, max=max)
 
 
@@ -3389,10 +3412,6 @@ def meta_embedding_bag(
             lambda: "embedding_bag: per_sample_weights only supported with mode='sum'",
         )
         torch._check(
-            per_sample_weights.dtype == weight.dtype,
-            lambda: f"expected weight ({weight.dtype}) and per_sample_weights ({per_sample_weights.dtype}) to have same dtype",
-        )
-        torch._check(
             per_sample_weights.ndim == 1,
             lambda: f"expected per_sample_weights to be 1D tensor, got {per_sample_weights.ndim}D",
         )
@@ -4787,7 +4806,7 @@ def gather_shape_check(self, dim, index):
             torch._check(
                 ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
                 lambda: f"Size does not match at dimension {i} expected index {index.shape}"
-                + f" to be smaller than self {self.shape} apart from dimension {dim}",
+                + f" to be no larger than self {self.shape} apart from dimension {dim}",
             )
 
 
@@ -4892,13 +4911,13 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         )
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
-            + f" apart from dimension {dim} and to be smaller than src {src_opt.shape}",
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
+            + f" apart from dimension {dim} and to be no larger than src {src_opt.shape}",
         )
     else:
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
             + f" apart from dimension {dim}",
         )
 
@@ -6497,6 +6516,76 @@ _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
 _create_binary_float_meta_func(aten.special_legendre_polynomial_p)
+
+
+def _register_inplace_meta(fn):
+    @wraps(fn)
+    def _fn(self, *args, **kwargs):
+        out = fn(self, *args, **kwargs)
+        check_inplace_broadcast(self.shape, out.shape)
+        return self
+
+    inplace_name = f"{fn.__name__}_"
+    _fn.__name__ = inplace_name
+    _fn = register_meta(getattr(aten, inplace_name))(_fn)  # type: ignore[assignment]
+
+    return _fn
+
+
+@register_meta(aten.lerp)
+@out_wrapper()
+def lerp(start, end, weight):
+    torch._check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end`, but got dtype {end.dtype}",
+    )
+    args = [start, end]
+    if isinstance(weight, TensorLike):
+        torch._check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
+        )
+        args.append(weight)
+    return elementwise_meta(
+        *args, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+@register_meta(aten.addcmul)
+@out_wrapper()
+def addcmul(input, tensor1, tensor2, *, value=1):
+    return elementwise_meta(
+        input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+@register_meta(aten.addcdiv)
+@out_wrapper()
+def addcdiv(input, tensor1, tensor2, *, value=1):
+    torch._check(
+        not (
+            utils.is_integer_dtype(tensor1.dtype)
+            and utils.is_integer_dtype(tensor2.dtype)
+        ),
+        lambda: (
+            "Integer division with addcdiv is no longer supported, and in a future ",
+            "release addcdiv will perform a true division of tensor1 and tensor2. ",
+            "The historic addcdiv behavior can be implemented as ",
+            "(input + value * torch.trunc(tensor1 / tensor2)).to(input.dtype) ",
+            "for integer inputs and as ",
+            "(input + value * tensor1 / tensor2) for float inputs. ",
+            "The future addcdiv behavior is just the latter implementation: ",
+            "(input + value * tensor1 / tensor2), for all dtypes.",
+        ),
+    )
+    return elementwise_meta(
+        input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+lerp_ = _register_inplace_meta(aten.lerp)
+addcmul_ = _register_inplace_meta(aten.addcmul)
+addcdiv_ = _register_inplace_meta(aten.addcdiv)
 
 
 # We must also trigger meta registrations from PrimTorch ref
