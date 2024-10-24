@@ -526,7 +526,7 @@ class GuardBuilder(GuardBuilderBase):
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
-        guard_manager: Optional[GuardManager],
+        guard_manager: GuardManager,
         check_fn_manager: CheckFunctionManager,
     ):
         self.id_ref = id_ref
@@ -2111,7 +2111,6 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
-        self.guard_manager = None
         self.guard_manager = GuardManager()
         self.output_graph = output_graph
         w_builder = None
