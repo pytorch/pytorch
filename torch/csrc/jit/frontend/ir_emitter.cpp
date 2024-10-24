@@ -664,7 +664,7 @@ struct to_ir {
         resolver(std::move(resolver_)),
         typeParser_(resolver),
         environment_stack(nullptr) {
-    AT_ASSERT(resolver);
+    TORCH_INTERNAL_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
@@ -853,7 +853,7 @@ struct to_ir {
     }
 
     if (self) {
-      AT_ASSERT(it != end);
+      TORCH_INTERNAL_ASSERT(it != end);
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
@@ -1093,7 +1093,7 @@ struct to_ir {
       }
       declared_return_type = merged_return_type.value();
     }
-    AT_ASSERT(declared_return_type);
+    TORCH_INTERNAL_ASSERT(declared_return_type);
 
     def_stack_.back().merged_return_type_ = declared_return_type;
 
@@ -4575,7 +4575,7 @@ struct to_ir {
     auto key_trees = dl.key_inputs().tree()->trees();
     auto value_trees = dl.value_inputs().tree()->trees();
 
-    AT_ASSERT(key_trees.size() == value_trees.size());
+    TORCH_INTERNAL_ASSERT(key_trees.size() == value_trees.size());
 
     std::vector<Value*> keys, values;
     TypePtr rhs_value_type;
@@ -4851,11 +4851,12 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      AT_ASSERT(sliceable->type()->isSubtypeOf(*TensorType::get()));
+      TORCH_INTERNAL_ASSERT(sliceable->type()->isSubtypeOf(*TensorType::get()));
 
       args.emplace_back(dim);
     } else {
-      AT_ASSERT(!sliceable->type()->isSubtypeOf(*TensorType::get()));
+      TORCH_INTERNAL_ASSERT(
+          !sliceable->type()->isSubtypeOf(*TensorType::get()));
     }
 
     if (sliceable->type()->cast<TupleType>()) {
@@ -5168,8 +5169,8 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    AT_ASSERT(subscript_exprs.size() == 1);
-    AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
+    TORCH_INTERNAL_ASSERT(subscript_exprs.size() == 1);
+    TORCH_INTERNAL_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
@@ -5334,7 +5335,7 @@ struct to_ir {
             range, sv->asValue(val_range, method), subscript_exprs));
       }
     } else {
-      AT_ASSERT(subscript_exprs.size() == 1);
+      TORCH_INTERNAL_ASSERT(subscript_exprs.size() == 1);
       Value* sliceable = sv->asValue(val_range, method);
 
       // In case of subscript expression being a Python Slice object.

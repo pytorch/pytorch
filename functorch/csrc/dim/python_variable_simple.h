@@ -34,7 +34,7 @@ inline bool THPVariable_Check(PyObject *obj)
       return false;
 
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
-  AT_ASSERT(result != -1);
+  TORCH_INTERNAL_ASSERT(result != -1);
   return result;
 }
 

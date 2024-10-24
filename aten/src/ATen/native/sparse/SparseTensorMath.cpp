@@ -84,7 +84,7 @@ using namespace at::sparse;
 
 // hummu hummu
 SparseTensor& zero_sparse_(SparseTensor& self) {
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
   self.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
   return self._coalesced_(true);
 }
@@ -96,9 +96,9 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
-  AT_ASSERT(value.dim() == 0);
+  TORCH_INTERNAL_ASSERT(r.is_sparse());
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
+  TORCH_INTERNAL_ASSERT(value.dim() == 0);
 
   // Resolve a possibly sparse COO value to a strided tensor.
   Tensor value_;
@@ -113,7 +113,7 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   }
   // With broadcasting in action, value_ may be a 1-D tensor as long
   // as its shape is (1,).
-  AT_ASSERT(value_.numel() == 1);
+  TORCH_INTERNAL_ASSERT(value_.numel() == 1);
 
   if (is_same_tensor(r, t)) {
     r._values().mul_(value_);
@@ -165,8 +165,8 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 // TODO: add in-place variant
 
 SparseTensor& pow_out_sparse_scalar(const SparseTensor& t_, const Scalar& value, SparseTensor& r) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t_.is_sparse());
+  TORCH_INTERNAL_ASSERT(r.is_sparse());
+  TORCH_INTERNAL_ASSERT(t_.is_sparse());
   TORCH_CHECK(value.toDouble() != 0, "pow: cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
 
   // This coalesce is why we can't easily provide an inplace variant
@@ -226,8 +226,8 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got a sparse divisor)");
 
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
+  TORCH_INTERNAL_ASSERT(r.is_sparse());
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
 
   // See note "Sparse Floor Division"
   const bool should_coalesce = rounding_mode.has_value() && !t.is_coalesced();
@@ -295,8 +295,8 @@ SparseTensor& floor_divide_out_sparse_zerodim(const SparseTensor& dividend,
   TORCH_CHECK(!divisor.is_sparse(), "Sparse floor division requires a scalar or ",
     "zero-dim dense tensor divisor (got a sparse divisor)");
 
-  AT_ASSERT(result.is_sparse());
-  AT_ASSERT(dividend.is_sparse());
+  TORCH_INTERNAL_ASSERT(result.is_sparse());
+  TORCH_INTERNAL_ASSERT(dividend.is_sparse());
 
   // Case 1: result and dividend are the same tensor
   // Performs floor division in-place
@@ -348,12 +348,12 @@ Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
 
 // Only supports floating point, FYI
 Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
   return norm_sparse(self, p, IntArrayRef{}, false, std::nullopt);
 }
 
 Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
   if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
@@ -559,7 +559,7 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   }
   // TODO: This test seems a bit goofy
   TORCH_CHECK(src.is_sparse(), "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
-  AT_ASSERT(!t.is_cuda());  // the dispatch argument
+  TORCH_INTERNAL_ASSERT(!t.is_cuda());  // the dispatch argument
   TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
@@ -1047,7 +1047,7 @@ Tensor& _mul_sparse_sparse_out(const Tensor& x, const Tensor& y, Tensor& res) {
 }
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  AT_ASSERT(!t_.is_cuda()); // dispatch argument
+  TORCH_INTERNAL_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
   // case mul(sparse, dense)
@@ -1407,7 +1407,7 @@ SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& de
   // TODO: Make this a real argument
   Scalar alpha = 1;
 
-  AT_ASSERT(!sparse_.is_cuda()); // dispatch argument
+  TORCH_INTERNAL_ASSERT(!sparse_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "hspmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!dense.is_cuda(), "hspmm: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
@@ -1491,7 +1491,7 @@ SparseTensor& _sspaddmm_out_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     SparseTensor& r) {
-  AT_ASSERT(!t.is_cuda()); // dispatch argument
+  TORCH_INTERNAL_ASSERT(!t.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "sspaddmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
@@ -1802,7 +1802,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     if (sum_dense_dim) {
       auto dense_expand_size = std::vector<int64_t>(expand_size);
       dense_expand_size.erase(dense_expand_size.begin());
-      AT_ASSERT(dense_expand_size.size() == static_cast<size_t>(input_values.dim() - 1));
+      TORCH_INTERNAL_ASSERT(dense_expand_size.size() == static_cast<size_t>(input_values.dim() - 1));
       for (auto d : dense_dims_to_sum_v) grad_input_values = grad_input_values.unsqueeze(d - 1);  // -1 since grad has no nnz dim
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }

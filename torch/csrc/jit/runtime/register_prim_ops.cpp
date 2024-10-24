@@ -2694,7 +2694,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           at::Tensor input, shape;
           pop(stack, input, shape);
           shape = shape.contiguous();
-          AT_ASSERT(shape.ndimension() == 1);
+          TORCH_INTERNAL_ASSERT(shape.ndimension() == 1);
           at::IntArrayRef shape_list(
               shape.const_data_ptr<int64_t>(), shape.size(0));
           push(stack, input.reshape(shape_list));

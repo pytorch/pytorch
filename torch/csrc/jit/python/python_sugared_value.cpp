@@ -1345,7 +1345,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
-        AT_ASSERT(
+        TORCH_INTERNAL_ASSERT(
             newClassType,
             "Class '",
             qualifiedName,

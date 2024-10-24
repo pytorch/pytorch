@@ -75,7 +75,8 @@ TEST(LiteTrainerTest, Params) {
       bc_optimizer.step();
     }
   }
-  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
+  TORCH_INTERNAL_ASSERT(
+      parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 
 // TODO Renable these tests after parameters are correctly loaded on mobile
@@ -99,9 +100,9 @@ TEST(MobileTest, NamedParameters) {
 
   auto full_params = m.named_parameters();
   auto mobile_params = bc.named_parameters();
-  AT_ASSERT(full_params.size() == mobile_params.size());
+  TORCH_INTERNAL_ASSERT(full_params.size() == mobile_params.size());
   for (const auto& e : full_params) {
-    AT_ASSERT(e.value.item().toInt() ==
+    TORCH_INTERNAL_ASSERT(e.value.item().toInt() ==
     mobile_params[e.name].item().toInt());
   }
 }
@@ -130,9 +131,10 @@ TEST(MobileTest, SaveLoadParameters) {
 
   // load back the named parameters, compare to full-jit Module's
   auto mobile_params = _load_parameters(ss_data);
-  AT_ASSERT(full_params.size() == mobile_params.size());
+  TORCH_INTERNAL_ASSERT(full_params.size() == mobile_params.size());
   for (const auto& e : full_params) {
-    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
+    TORCH_INTERNAL_ASSERT(e.value.item<int>() ==
+mobile_params[e.name].item<int>());
   }
 }
 */
@@ -157,7 +159,7 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
 
   // load back the named parameters, test is empty
   auto mobile_params = _load_parameters(ss_data);
-  AT_ASSERT(mobile_params.size() == 0);
+  TORCH_INTERNAL_ASSERT(mobile_params.size() == 0);
 }
 
 TEST(MobileTest, SaveParametersDefaultsToZip) {
@@ -306,7 +308,8 @@ TEST(LiteTrainerTest, SGD) {
       bc_optimizer.step();
     }
   }
-  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
+  TORCH_INTERNAL_ASSERT(
+      parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 
 namespace {
@@ -333,7 +336,7 @@ TEST(LiteTrainerTest, SequentialSampler) {
   int i = 1;
   for (const auto& batch : *data_loader) {
     for (const auto& example : batch) {
-      AT_ASSERT(i == example);
+      TORCH_INTERNAL_ASSERT(i == example);
       i++;
     }
   }
@@ -344,48 +347,48 @@ TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
 
   std::vector<size_t> indices = sampler.next(3).value();
   for (auto i : indices) {
-    AT_ASSERT(i < 10);
+    TORCH_INTERNAL_ASSERT(i < 10);
   }
 
   indices = sampler.next(5).value();
   for (auto i : indices) {
-    AT_ASSERT(i < 10);
+    TORCH_INTERNAL_ASSERT(i < 10);
   }
 
   indices = sampler.next(2).value();
   for (auto i : indices) {
-    AT_ASSERT(i < 10);
+    TORCH_INTERNAL_ASSERT(i < 10);
   }
 
-  AT_ASSERT(sampler.next(10).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(10).has_value() == false);
 }
 
 TEST(LiteTrainerTest, RandomSamplerReturnsLessValuesForLastBatch) {
   mobile::RandomSampler sampler(5);
-  AT_ASSERT(sampler.next(3).value().size() == 3);
-  AT_ASSERT(sampler.next(100).value().size() == 2);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(3).value().size() == 3);
+  TORCH_INTERNAL_ASSERT(sampler.next(100).value().size() == 2);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
 }
 
 TEST(LiteTrainerTest, RandomSamplerResetsWell) {
   mobile::RandomSampler sampler(5);
-  AT_ASSERT(sampler.next(5).value().size() == 5);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(5).value().size() == 5);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
   sampler.reset();
-  AT_ASSERT(sampler.next(5).value().size() == 5);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(5).value().size() == 5);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
 }
 
 TEST(LiteTrainerTest, RandomSamplerResetsWithNewSizeWell) {
   mobile::RandomSampler sampler(5);
-  AT_ASSERT(sampler.next(5).value().size() == 5);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(5).value().size() == 5);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
   sampler.reset(7);
-  AT_ASSERT(sampler.next(7).value().size() == 7);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(7).value().size() == 7);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
   sampler.reset(3);
-  AT_ASSERT(sampler.next(3).value().size() == 3);
-  AT_ASSERT(sampler.next(2).has_value() == false);
+  TORCH_INTERNAL_ASSERT(sampler.next(3).value().size() == 3);
+  TORCH_INTERNAL_ASSERT(sampler.next(2).has_value() == false);
 }
 
 } // namespace jit

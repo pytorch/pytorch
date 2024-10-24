@@ -54,7 +54,7 @@ struct FunctionalGraphSlicer {
   }
 
   bool inlineIfTooSmall(Node* n) {
-    AT_ASSERT(n->kind() == prim::FunctionalGraph);
+    TORCH_INTERNAL_ASSERT(n->kind() == prim::FunctionalGraph);
     auto subgraph = SubgraphUtils::getSubgraph(n);
     size_t num_modes = 0;
     nonConstNodes(subgraph->block(), &num_modes);

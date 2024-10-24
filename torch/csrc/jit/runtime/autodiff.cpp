@@ -148,7 +148,7 @@ static std::optional<std::vector<Value*>> build_script_grad(
     new_outputs = insertGraph(*graph, *fw_graph, node->inputs());
     new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
-    AT_ASSERT(new_outputs.size() == outputs.size() + 1);
+    TORCH_INTERNAL_ASSERT(new_outputs.size() == outputs.size() + 1);
     for (const auto i : c10::irange(outputs.size())) {
       new_outputs.at(i)->setType(outputs[i]->type());
       outputs[i]->replaceAllUsesWith(new_outputs.at(i));
@@ -242,7 +242,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      AT_ASSERT(tuple_outputs.size() == size_t(3));
+      TORCH_INTERNAL_ASSERT(tuple_outputs.size() == size_t(3));
       return {
           tuple_outputs[0],
           tuple_outputs[1],
@@ -272,7 +272,7 @@ class GradientHelper {
       Node* tuple_unpack_node =
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
-      AT_ASSERT(tuple_outputs.size() == size_t(3));
+      TORCH_INTERNAL_ASSERT(tuple_outputs.size() == size_t(3));
       return {
           tuple_outputs[0],
           tuple_outputs[1],
@@ -434,7 +434,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
         linearGradientForNode(node, fmap(node->outputs(), get_grad));
     LowerSimpleTuples(reverse_block);
 
-    AT_ASSERT(grad_inputs.size() == node->inputs().size());
+    TORCH_INTERNAL_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad())
         continue;

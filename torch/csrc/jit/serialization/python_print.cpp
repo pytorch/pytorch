@@ -267,7 +267,8 @@ struct PythonPrintImpl {
   // block_point's output.
   Node* scanValue(Node* block_point, Value* v) {
     Node* n = v->node();
-    AT_ASSERT(n->kind() == prim::Constant || output_inline_.count(n) == 0);
+    TORCH_INTERNAL_ASSERT(
+        n->kind() == prim::Constant || output_inline_.count(n) == 0);
 
     if (n == block_point &&
         canInline(v)) { // the node must be at the expected point of the typical
@@ -1256,7 +1257,7 @@ struct PythonPrintImpl {
               }
             } else {
               // vararg functions like format can have extra arguments
-              AT_ASSERT(schema.is_vararg());
+              TORCH_INTERNAL_ASSERT(schema.is_vararg());
             }
             stmt << *v;
           }

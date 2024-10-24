@@ -239,8 +239,8 @@ void SourceRange::print_with_context(
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')
     ++end_line;
-  AT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
-  AT_ASSERT(end_line == str.size() || str[end_line] == '\n');
+  TORCH_INTERNAL_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
+  TORCH_INTERNAL_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
   size_t begin_context = begin_line; // beginning of context, CONTEXT lines
                                      // before the highlight lines
@@ -252,7 +252,7 @@ void SourceRange::print_with_context(
       break;
     }
   }
-  AT_ASSERT(begin_context == 0 || str[begin_context - 1] == '\n');
+  TORCH_INTERNAL_ASSERT(begin_context == 0 || str[begin_context - 1] == '\n');
 
   size_t end_context =
       end_line; // end of context, CONTEXT lines after the highlight lines
@@ -264,7 +264,7 @@ void SourceRange::print_with_context(
       break;
     }
   }
-  AT_ASSERT(end_context == str.size() || str[end_context] == '\n');
+  TORCH_INTERNAL_ASSERT(end_context == str.size() || str[end_context] == '\n');
 
   // print out location information
   if (auto flc = file_line_col()) {
@@ -304,8 +304,10 @@ void SourceRange::print_with_context(
       while (highlight_end < range_end && str[highlight_end] != '\n') {
         ++highlight_end;
       }
-      AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
-      AT_ASSERT(highlight_end == range_end || str[highlight_end] == '\n');
+      TORCH_INTERNAL_ASSERT(
+          hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
+      TORCH_INTERNAL_ASSERT(
+          highlight_end == range_end || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
       for (const auto i : c10::irange(hightlight_begin, highlight_end)) {
         if (str[i] == ' ' || i < start()) {

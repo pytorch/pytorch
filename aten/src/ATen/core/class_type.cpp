@@ -410,9 +410,9 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_, is_module());
-  AT_ASSERT(numAttributes() == refined_slots.size());
+  TORCH_INTERNAL_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(*attributes_[i].getType()));
+    TORCH_INTERNAL_ASSERT(refined_slots[i]->isSubtypeOf(*attributes_[i].getType()));
     ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
@@ -528,7 +528,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 }
 
 void ClassType::addAttribute(ClassAttribute classAttribute) {
-    AT_ASSERT(attributes_.size() == attributeTypes_.size());
+    TORCH_INTERNAL_ASSERT(attributes_.size() == attributeTypes_.size());
     attributeTypes_.emplace_back(classAttribute.getType());
     attributes_.emplace_back(std::move(classAttribute));
 }
@@ -579,13 +579,13 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
   attributes_.erase(attributes_.begin() + static_cast<std::ptrdiff_t>(slot));
   attributeTypes_.erase(attributeTypes_.begin() + static_cast<std::ptrdiff_t>(slot));
-  AT_ASSERT(attributes_.size() == attributeTypes_.size());
+  TORCH_INTERNAL_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 void ClassType::unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty) {
   auto slot = getAttributeSlot(name);
   auto old_attr_info = attributes_[slot];
-  AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
+  TORCH_INTERNAL_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
   attributes_[slot] = ClassAttribute(old_attr_info.getKind(), new_ty, old_attr_info.getName());
   attributeTypes_[slot] = new_ty;
 }

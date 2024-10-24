@@ -92,7 +92,7 @@ class CartPole {
       reward = 0;
     } else {
       if (steps_beyond_done == 0) {
-        AT_ASSERT(false); // Can't do this
+        TORCH_INTERNAL_ASSERT(false); // Can't do this
       }
     }
     step_++;
@@ -131,7 +131,7 @@ bool test_mnist(
       torch::Tensor prediction = forward_op(std::move(data));
       // NOLINTNEXTLINE(performance-move-const-arg)
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
-      AT_ASSERT(!torch::isnan(loss).any().item<int64_t>());
+      TORCH_INTERNAL_ASSERT(!torch::isnan(loss).any().item<int64_t>());
       optimizer.zero_grad();
       loss.backward();
       optimizer.step();

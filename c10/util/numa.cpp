@@ -44,7 +44,7 @@ int GetNUMANode(const void* ptr) {
   if (!IsNUMAEnabled()) {
     return -1;
   }
-  AT_ASSERT(ptr);
+  TORCH_INTERNAL_ASSERT(ptr);
 
   int numa_node = -1;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -75,14 +75,14 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
   if (!IsNUMAEnabled()) {
     return;
   }
-  AT_ASSERT(ptr);
+  TORCH_INTERNAL_ASSERT(ptr);
 
   uintptr_t page_start_ptr =
       ((reinterpret_cast<uintptr_t>(ptr)) & ~(getpagesize() - 1));
   // NOLINTNEXTLINE(*-conversions)
   ptrdiff_t offset = reinterpret_cast<uintptr_t>(ptr) - page_start_ptr;
   // Avoid extra dynamic allocation and NUMA api calls
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       numa_node_id >= 0 &&
       static_cast<unsigned>(numa_node_id) < sizeof(unsigned long) * 8);
   unsigned long mask = 1UL << numa_node_id;

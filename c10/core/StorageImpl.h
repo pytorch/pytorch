@@ -226,7 +226,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   void set_resizable(bool resizable) {
     if (resizable) {
       // We need an allocator to be resizable
-      AT_ASSERT(allocator_);
+      TORCH_INTERNAL_ASSERT(allocator_);
     }
     resizable_ = resizable;
   }

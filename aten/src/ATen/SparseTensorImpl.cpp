@@ -38,10 +38,10 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
     , indices_(std::move(indices))
     , values_(std::move(values)) {
   // we proxy to this constructor so we can initialize the device correctly, but really only indices/values of this shape are allowed.
-  AT_ASSERT(indices_.sizes() == IntArrayRef({1, 0}));
-  AT_ASSERT(values_.sizes() == IntArrayRef({0}));
-  AT_ASSERT(values_.device() == indices_.device());
-  AT_ASSERT(values_.device() == device());
+  TORCH_INTERNAL_ASSERT(indices_.sizes() == IntArrayRef({1, 0}));
+  TORCH_INTERNAL_ASSERT(values_.sizes() == IntArrayRef({0}));
+  TORCH_INTERNAL_ASSERT(values_.device() == indices_.device());
+  TORCH_INTERNAL_ASSERT(values_.device() == device());
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
@@ -105,8 +105,8 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
 
   indices_ = indices;
   values_ = values;
-  AT_ASSERT(device() == values_.device());
-  AT_ASSERT(values_.device() == indices_.device());
+  TORCH_INTERNAL_ASSERT(device() == values_.device());
+  TORCH_INTERNAL_ASSERT(values_.device() == indices_.device());
 
   coalesced_ = TORCH_GUARD_SIZE_OBLIVIOUS(sym_nnz().sym_lt(2));
 }

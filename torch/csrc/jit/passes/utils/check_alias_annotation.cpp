@@ -47,7 +47,7 @@ IValue deepCopy(const IValue& self) {
 
   // If in the future we add more reference types that are used in aten ops,
   // we'll have to add them as cases here.
-  AT_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 Stack deepCopy(const Stack& stack) {
@@ -98,7 +98,7 @@ void checkInputPreconditions(const Stack& inputs) {
       }
       const auto& lhs = inputs.at(i);
       const auto& rhs = inputs.at(j);
-      AT_ASSERT(!lhs.isAliasOf(rhs));
+      TORCH_INTERNAL_ASSERT(!lhs.isAliasOf(rhs));
     }
   }
 }
@@ -113,7 +113,7 @@ void checkAliases(
       if (output.iValue.isAliasOf(input.iValue)) {
         const auto* inputSet = input.aliasInfo;
         const auto* outputSet = output.aliasInfo;
-        AT_ASSERT(inputSet && outputSet);
+        TORCH_INTERNAL_ASSERT(inputSet && outputSet);
         bool found = false;
         for (const auto& set : inputSet->beforeSets()) {
           if (outputSet->beforeSets().count(set)) {
@@ -121,7 +121,7 @@ void checkAliases(
             break;
           }
         }
-        AT_ASSERT(found);
+        TORCH_INTERNAL_ASSERT(found);
       }
     }
   }
@@ -132,12 +132,12 @@ void checkAliases(
 void checkWrites(
     const std::vector<AliasAndIValue>& inputs,
     const std::vector<IValue>& deepCopiedInputs) {
-  AT_ASSERT(inputs.size() == deepCopiedInputs.size());
+  TORCH_INTERNAL_ASSERT(inputs.size() == deepCopiedInputs.size());
   for (const auto i : c10::irange(inputs.size())) {
     const auto& input = inputs[i];
     const auto& deepCopiedInput = deepCopiedInputs[i];
     if (!input.aliasInfo || !input.aliasInfo->isWrite()) {
-      AT_ASSERT(deepEquals(input.iValue, deepCopiedInput));
+      TORCH_INTERNAL_ASSERT(deepEquals(input.iValue, deepCopiedInput));
     }
   }
 }
@@ -180,7 +180,7 @@ const Node* findNodeForOp(
     }
   }
 
-  AT_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 // Handle a few special cases where we need to propagate constants
@@ -265,7 +265,7 @@ void checkAliasAnnotation(
       if (inputValue) {
         push(stack, *inputValue);
       } else {
-        AT_ASSERT(input->type()->kind() == TypeKind::OptionalType);
+        TORCH_INTERNAL_ASSERT(input->type()->kind() == TypeKind::OptionalType);
         push(stack, IValue());
       }
     }

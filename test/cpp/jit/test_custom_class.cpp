@@ -26,13 +26,13 @@ TEST(CustomClassTest, TorchbindIValueAPI) {
   auto test_with_obj = [&m](IValue obj, std::string expected) {
     auto res = m.run_method("forward", obj);
     auto tup = res.toTuple();
-    AT_ASSERT(tup->elements().size() == 2);
+    TORCH_INTERNAL_ASSERT(tup->elements().size() == 2);
     auto str = tup->elements()[0].toStringRef();
     auto other_obj =
         tup->elements()[1].toCustomClass<MyStackClass<std::string>>();
-    AT_ASSERT(str == expected);
+    TORCH_INTERNAL_ASSERT(str == expected);
     auto ref_obj = obj.toCustomClass<MyStackClass<std::string>>();
-    AT_ASSERT(other_obj.get() == ref_obj.get());
+    TORCH_INTERNAL_ASSERT(other_obj.get() == ref_obj.get());
   };
 
   test_with_obj(custom_class_obj, "bar");
@@ -94,11 +94,11 @@ static auto reg =
 TEST(CustomClassTest, TestDocString) {
   auto class_type = getCustomClass(
       "__torch__.torch.classes._TorchBindTest._TorchBindTestClass");
-  AT_ASSERT(class_type);
-  AT_ASSERT(class_type->doc_string() == class_doc_string);
+  TORCH_INTERNAL_ASSERT(class_type);
+  TORCH_INTERNAL_ASSERT(class_type->doc_string() == class_doc_string);
 
-  AT_ASSERT(class_type->getMethod("get").doc_string().empty());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(class_type->getMethod("get").doc_string().empty());
+  TORCH_INTERNAL_ASSERT(
       class_type->getMethod("get_with_docstring").doc_string() ==
       method_doc_string);
 }
@@ -123,9 +123,9 @@ TEST(CustomClassTest, Serialization) {
   auto test_with_obj = [](script::Module& mod) {
     auto res = mod.run_method("forward");
     auto tup = res.toTuple();
-    AT_ASSERT(tup->elements().size() == 2);
+    TORCH_INTERNAL_ASSERT(tup->elements().size() == 2);
     auto i = tup->elements()[1].toInt();
-    AT_ASSERT(i == 123);
+    TORCH_INTERNAL_ASSERT(i == 123);
   };
 
   auto frozen_m = torch::jit::freeze_module(m.clone());

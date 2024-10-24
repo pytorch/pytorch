@@ -218,7 +218,7 @@ IValue Unpickler::parse_ivalue() {
 }
 
 double Unpickler::readFloat() {
-  AT_ASSERT(sizeof(double) == 8);
+  TORCH_INTERNAL_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   double little_endian = 0;
@@ -260,7 +260,7 @@ void Unpickler::run() {
   }
 }
 void Unpickler::setInput(size_t memo_id) {
-  AT_ASSERT(!stack_.empty());
+  TORCH_INTERNAL_ASSERT(!stack_.empty());
   if (memo_id >= memo_table_.size()) {
     memo_table_.insert(
         memo_table_.end(), memo_id - memo_table_.size(), IValue());
@@ -567,7 +567,7 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!stack_.empty(), "Parsing error: stack_ is empty");
       auto tuple = pop(stack_).toTuple();
       const auto& args = tuple->elements();
-      AT_ASSERT(
+      TORCH_INTERNAL_ASSERT(
           args.at(0).toStringRef() == "storage",
           "unknown PERSID key ",
           args.at(0).toStringRef());
@@ -792,7 +792,7 @@ void Unpickler::readGlobal(
     globals_.emplace_back([this] {
       auto tuple = pop(stack_).toTuple();
       const auto& elems = tuple->elements();
-      AT_ASSERT(elems.size() == 2);
+      TORCH_INTERNAL_ASSERT(elems.size() == 2);
       auto complex =
           c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
       stack_.emplace_back(complex);
@@ -1082,7 +1082,7 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
   // First, read any partial from buffer (may be 0).
   // We explicitly assume that sz > buffer_remaining_,
   // and that sz is never bigger than buffer_.size().
-  AT_ASSERT(sz > buffer_remaining_);
+  TORCH_INTERNAL_ASSERT(sz > buffer_remaining_);
   const size_t from_old_buf = buffer_remaining_;
   if (from_old_buf != 0) {
     memcpy(dest, buffer_.data() + buffer_pos_, from_old_buf);
@@ -1090,7 +1090,7 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
   const size_t needed = sz - from_old_buf;
   // Full read into the buffer. The calls here all explicitly
   // assume that one buffer will be enough for any sz.
-  AT_ASSERT(sz <= buffer_.size());
+  TORCH_INTERNAL_ASSERT(sz <= buffer_.size());
   buffer_remaining_ = reader_(buffer_.data(), buffer_.size());
   if (buffer_remaining_ < needed) {
     TORCH_CHECK(false, "Unexpected end of pickler archive.");

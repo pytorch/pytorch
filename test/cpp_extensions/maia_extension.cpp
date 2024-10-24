@@ -65,22 +65,22 @@ struct MAIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::MAIA;
   MAIAGuardImpl() {}
   MAIAGuardImpl(DeviceType t) {
-    AT_ASSERT(t == DeviceType::MAIA);
+    TORCH_INTERNAL_ASSERT(t == DeviceType::MAIA);
   }
   DeviceType type() const override {
     return DeviceType::MAIA;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::MAIA);
-    AT_ASSERT(d.index() == 0);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::MAIA);
+    TORCH_INTERNAL_ASSERT(d.index() == 0);
     return d;
   }
   Device getDevice() const override {
     return Device(DeviceType::MAIA, 0);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::MAIA);
-    AT_ASSERT(d.index() == 0);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::MAIA);
+    TORCH_INTERNAL_ASSERT(d.index() == 0);
   }
   void uncheckedSetDevice(Device d) const noexcept override {
   }

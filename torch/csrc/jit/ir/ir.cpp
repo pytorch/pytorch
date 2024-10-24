@@ -217,7 +217,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       break;
     case AttributeKind::cs:
       // TODO(@anjali411): fix this
-      AT_ASSERT(false);
+      TORCH_INTERNAL_ASSERT(false);
       break;
     case AttributeKind::f:
       printAttribute(out, f(name));
@@ -418,7 +418,7 @@ static void checkSameDevice(const Node* node) {
         has_device = true;
         device = *type->device();
       } else {
-        AT_ASSERT(device == type->device());
+        TORCH_INTERNAL_ASSERT(device == type->device());
       }
     }
   };
@@ -456,10 +456,10 @@ void Node::lint() const {
     for (auto input : inputs_) {
       // WARNING: O(n^2)
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      AT_ASSERT(
+      TORCH_INTERNAL_ASSERT(
           std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) !=
           input->uses_.end());
-      AT_ASSERT(graph_->all_nodes.count(this) == 1);
+      TORCH_INTERNAL_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;
     }
   }
@@ -469,22 +469,22 @@ void Node::lint() const {
       // Use invariants
       // - Use is consistent with inputs
       // - Every user node is live (checked in Graph)
-      AT_ASSERT(use.user->inputs_[use.offset] == o);
+      TORCH_INTERNAL_ASSERT(use.user->inputs_[use.offset] == o);
     }
   }
 
   // Node subclass invariants
   switch (kind()) {
     case prim::Constant:
-      AT_ASSERT(inputs_.empty());
+      TORCH_INTERNAL_ASSERT(inputs_.empty());
       break;
     case prim::Return:
       // Return uses is zero
-      AT_ASSERT(outputs().empty());
+      TORCH_INTERNAL_ASSERT(outputs().empty());
       break;
     case prim::Param:
       // Param inputs is zero
-      AT_ASSERT(inputs_.empty());
+      TORCH_INTERNAL_ASSERT(inputs_.empty());
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
@@ -533,11 +533,11 @@ void Graph::lint() const {
       return nodes.count(n) > 0 || (parent && parent->contains(n));
     }
     void insert(const Value* v) {
-      AT_ASSERT(!contains(v));
+      TORCH_INTERNAL_ASSERT(!contains(v));
       values.insert(v);
     }
     void insert(const Node* n) {
-      AT_ASSERT(!contains(n));
+      TORCH_INTERNAL_ASSERT(!contains(n));
       nodes.insert(n);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -564,12 +564,12 @@ void Graph::lint() const {
     void check_value(const Value* v) {
       scope->insert(v);
       auto b2 = seen_uniques.insert(v->unique());
-      AT_ASSERT(b2.second); // insertion took place
-      AT_ASSERT(v->unique() < g.next_unique_);
+      TORCH_INTERNAL_ASSERT(b2.second); // insertion took place
+      TORCH_INTERNAL_ASSERT(v->unique() < g.next_unique_);
 
       for (auto use : v->uses()) {
-        AT_ASSERT(!scope->contains(use.user));
-        AT_ASSERT(g.all_nodes.count(use.user) == 1);
+        TORCH_INTERNAL_ASSERT(!scope->contains(use.user));
+        TORCH_INTERNAL_ASSERT(g.all_nodes.count(use.user) == 1);
         anticipated_uses[use.user]++; // int default constructs to 0
       }
     }
@@ -579,7 +579,8 @@ void Graph::lint() const {
           TORCH_INTERNAL_ASSERT(0, input->unique(), " not in scope");
         }
       }
-      AT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+      TORCH_INTERNAL_ASSERT(
+          anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
@@ -589,33 +590,33 @@ void Graph::lint() const {
       }
       size_t i = 0;
       for (auto o : n->outputs()) {
-        AT_ASSERT(o->node() == n);
-        AT_ASSERT(i++ == o->offset_);
+        TORCH_INTERNAL_ASSERT(o->node() == n);
+        TORCH_INTERNAL_ASSERT(i++ == o->offset_);
         check_value(o);
       }
       n->lint();
     }
     void check_block(const Block* b) {
       // Check topological ordering
-      AT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
+      TORCH_INTERNAL_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
       auto curNode = *b->nodes().begin();
       while (curNode != b->return_node()) {
-        AT_ASSERT(curNode->isBefore(curNode->next()));
+        TORCH_INTERNAL_ASSERT(curNode->isBefore(curNode->next()));
         curNode = curNode->next();
       }
 
       for (auto input : b->inputs()) {
         check_value(input);
-        AT_ASSERT(input->node()->kind_ == prim::Param);
+        TORCH_INTERNAL_ASSERT(input->node()->kind_ == prim::Param);
       }
 
       for (auto n : b->nodes()) {
-        AT_ASSERT(n->kind_ != prim::Param);
-        AT_ASSERT(n->kind_ != prim::Return);
+        TORCH_INTERNAL_ASSERT(n->kind_ != prim::Param);
+        TORCH_INTERNAL_ASSERT(n->kind_ != prim::Return);
         check_node(n);
       }
 
-      AT_ASSERT(b->output_->kind() == prim::Return);
+      TORCH_INTERNAL_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
 
       // all_nodes
@@ -629,9 +630,12 @@ void Graph::lint() const {
       node_set output_set{b->output_};
       // TODO: Make a more type safe std::includes wrapper which disallows use
       // on non-ordered containers
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
+      TORCH_INTERNAL_ASSERT(
+          std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
+      TORCH_INTERNAL_ASSERT(
+          std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
+      TORCH_INTERNAL_ASSERT(
+          std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
 
       sum_set.insert(ALL_OF(nodes_set));
       sum_set.insert(ALL_OF(inputs_set));
@@ -643,9 +647,10 @@ void Graph::lint() const {
 
       check_block(g.block_);
       for (auto kv : anticipated_uses) {
-        AT_ASSERT(kv.second == -1);
+        TORCH_INTERNAL_ASSERT(kv.second == -1);
       }
-      AT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
+      TORCH_INTERNAL_ASSERT(
+          std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
     }
   };
   LintImpl(*this).check_graph();
@@ -694,7 +699,7 @@ Block::Block(Graph* graph_, Node* node_)
 void Block::reIndexTopology() {
   auto curPos = kLowerBound;
   for (auto node : nodes()) {
-    AT_ASSERT(curPos <= (kUpperBound - kAppendInterval));
+    TORCH_INTERNAL_ASSERT(curPos <= (kUpperBound - kAppendInterval));
     curPos += kAppendInterval;
     node->topo_position_ = curPos;
   }
@@ -912,7 +917,7 @@ Value* Value::copyMetadata(Value* from) {
 }
 
 void Value::replaceFirstUseWith(Value* newValue) {
-  AT_ASSERT(owningGraph() == newValue->owningGraph());
+  TORCH_INTERNAL_ASSERT(owningGraph() == newValue->owningGraph());
   auto u = uses()[0];
   u.user->inputs_[u.offset] = newValue;
   newValue->uses_.push_back(u);
@@ -1276,7 +1281,7 @@ void Node::assignTopoPosition() {
     // insert between two existing nodes
   } else {
     int64_t remaining = nextPos - prevPos;
-    AT_ASSERT(remaining > 0);
+    TORCH_INTERNAL_ASSERT(remaining > 0);
     if (remaining == 1) {
       // There was no room
       owningBlock()->reIndexTopology();
@@ -1288,7 +1293,7 @@ void Node::assignTopoPosition() {
     }
     topo_position_ = prevPos +
         std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
-    AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
+    TORCH_INTERNAL_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }
 
@@ -1303,8 +1308,8 @@ Node::Node(Graph* graph_, NodeKind kind_)
 }
 
 void Node::eraseOutput(size_t i) {
-  AT_ASSERT(i < outputs_.size());
-  AT_ASSERT(outputs_[i]->uses().empty());
+  TORCH_INTERNAL_ASSERT(i < outputs_.size());
+  TORCH_INTERNAL_ASSERT(outputs_[i]->uses().empty());
   op_ = nullptr;
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
@@ -1321,7 +1326,7 @@ Block* Node::addBlock() {
 }
 
 void Node::eraseBlock(size_t i) {
-  AT_ASSERT(i < blocks_.size());
+  TORCH_INTERNAL_ASSERT(i < blocks_.size());
   op_ = nullptr;
   Block* n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
@@ -1352,7 +1357,7 @@ void Node::cloneFrom(Node* s) {
 }
 
 void Node::replaceAllUsesWith(Node* n) {
-  AT_ASSERT(outputs().size() == n->outputs().size());
+  TORCH_INTERNAL_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
   for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
@@ -1393,7 +1398,7 @@ bool Node::isDominatedBy(const Node* dominator) const {
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
-  AT_ASSERT(graph_ == value->owningGraph());
+  TORCH_INTERNAL_ASSERT(graph_ == value->owningGraph());
   op_ = nullptr;
   // First we update the offsets for all existing inputs that will reside
   // after the one we're inserting. Concretely, these are the inputs at
@@ -1412,7 +1417,7 @@ Value* Node::insertInput(size_t i, Value* value) {
 }
 
 Value* Node::addInput(Value* value) {
-  AT_ASSERT(graph_ == value->owningGraph());
+  TORCH_INTERNAL_ASSERT(graph_ == value->owningGraph());
   op_ = nullptr;
   value->uses_.emplace_back(this, inputs_.size());
   inputs_.push_back(value);
@@ -1420,7 +1425,7 @@ Value* Node::addInput(Value* value) {
 }
 
 Value* Node::replaceInput(size_t i, Value* newValue) {
-  AT_ASSERT(newValue->owningGraph() == graph_);
+  TORCH_INTERNAL_ASSERT(newValue->owningGraph() == graph_);
   op_ = nullptr;
   Value* old = dropInput(i);
   inputs_[i] = newValue;
@@ -1429,8 +1434,8 @@ Value* Node::replaceInput(size_t i, Value* newValue) {
 }
 
 void Node::replaceInputWith(Value* from, Value* to) {
-  AT_ASSERT(from->owningGraph() == graph_);
-  AT_ASSERT(to->owningGraph() == graph_);
+  TORCH_INTERNAL_ASSERT(from->owningGraph() == graph_);
+  TORCH_INTERNAL_ASSERT(to->owningGraph() == graph_);
   op_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
@@ -1466,7 +1471,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
       return this->topo_position_ > n->topo_position_;
     }
 
-    AT_ASSERT(this == n);
+    TORCH_INTERNAL_ASSERT(this == n);
     return false;
   }
 
@@ -1474,7 +1479,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
   // until we find the first common block.
   auto lhs = this;
   while (lhs) {
-    AT_ASSERT(lhs->owningBlock());
+    TORCH_INTERNAL_ASSERT(lhs->owningBlock());
 
     auto rhs = n;
     while (rhs) {
@@ -1491,7 +1496,7 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
     lhs = lhs->owningBlock()->owningNode();
   }
   // should never reach here, since both nodes are ultimately in the same graph
-  AT_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 bool Node::isBefore(const Node* n) const {
@@ -1503,14 +1508,14 @@ bool Node::isAfter(const Node* n) const {
 }
 
 Node* Node::insertBefore(Node* n) {
-  AT_ASSERT(n->inBlockList());
+  TORCH_INTERNAL_ASSERT(n->inBlockList());
   insertAfter(n->prev());
   return this;
 }
 
 Node* Node::insertAfter(Node* n) {
-  AT_ASSERT(!inBlockList() && n->inBlockList());
-  AT_ASSERT(n->owningBlock());
+  TORCH_INTERNAL_ASSERT(!inBlockList() && n->inBlockList());
+  TORCH_INTERNAL_ASSERT(n->owningBlock());
   TORCH_INTERNAL_ASSERT(
       n->kind() != prim::Return,
       "Attempting to insert a Node after the Return node or before the Param node. Tried to insert",
@@ -1568,7 +1573,7 @@ void Node::removeAllOutputs() {
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
   op_ = nullptr;
-  AT_ASSERT(new_order.size() == inputs_.size());
+  TORCH_INTERNAL_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
@@ -1584,7 +1589,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
 
 void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   op_ = nullptr;
-  AT_ASSERT(new_order.size() == outputs_.size());
+  TORCH_INTERNAL_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
   for (const auto i : c10::irange(new_order.size())) {
@@ -1602,12 +1607,12 @@ use_list::iterator Node::findUseForInput(size_t i) {
   // O(N) on the use list, but unless we get nodes with +100 uses
   // vector traversal still is probably faster than linked list
   auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
-  AT_ASSERT(use_it != input_uses.end());
+  TORCH_INTERNAL_ASSERT(use_it != input_uses.end());
   return use_it;
 }
 
 Value* Node::dropInput(size_t i) {
-  AT_ASSERT(i < inputs_.size());
+  TORCH_INTERNAL_ASSERT(i < inputs_.size());
   auto input_node = inputs_[i];
   auto use_it = findUseForInput(i);
   input_node->uses_.erase(use_it);
@@ -1616,7 +1621,7 @@ Value* Node::dropInput(size_t i) {
 }
 
 void Node::removeFromList() {
-  AT_ASSERT(inBlockList());
+  TORCH_INTERNAL_ASSERT(inBlockList());
   this->owning_block_ = nullptr;
   Node* next = this->next();
   Node* prev = this->prev();
@@ -1656,8 +1661,8 @@ Block* Node::findCommonAncestorBlockWith(Node* n) {
     n1 = n1->owningBlock()->owningNode();
     n2 = n2->owningBlock()->owningNode();
 
-    AT_ASSERT(n1 != nullptr);
-    AT_ASSERT(n2 != nullptr);
+    TORCH_INTERNAL_ASSERT(n1 != nullptr);
+    TORCH_INTERNAL_ASSERT(n2 != nullptr);
   }
 }
 
@@ -1829,11 +1834,11 @@ Node* Graph::createDict(
     const TypePtr& value_type,
     at::ArrayRef<Value*> keys,
     at::ArrayRef<Value*> values) {
-  AT_ASSERT(keys.size() == values.size());
+  TORCH_INTERNAL_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (const auto i : c10::irange(keys.size())) {
-    AT_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
-    AT_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
+    TORCH_INTERNAL_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
+    TORCH_INTERNAL_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
 
     n->addInput(keys[i]);
     n->addInput(values[i]);
@@ -2010,20 +2015,20 @@ Graph::~Graph() {
 
 void Graph::freeNode(Node* n) {
   auto it = all_nodes.find(n);
-  AT_ASSERT(it != all_nodes.end());
+  TORCH_INTERNAL_ASSERT(it != all_nodes.end());
   delete *it;
   all_nodes.erase(it);
 }
 void Graph::freeValue(Value* v) {
   v->setDebugName("");
   auto it = all_values.find(v);
-  AT_ASSERT(it != all_values.end());
+  TORCH_INTERNAL_ASSERT(it != all_values.end());
   delete *it;
   all_values.erase(it);
 }
 void Graph::freeBlock(Block* b) {
   auto it = all_blocks.find(b);
-  AT_ASSERT(it != all_blocks.end());
+  TORCH_INTERNAL_ASSERT(it != all_blocks.end());
   delete *it;
   all_blocks.erase(it);
 }
@@ -2153,7 +2158,7 @@ std::vector<Value*> inlineCallTo(
   }
   const auto& old_outputs = to_replace->outputs();
 
-  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  TORCH_INTERNAL_ASSERT(new_outputs.size() == old_outputs.size());
   for (const auto i : c10::irange(old_outputs.size())) {
     if (old_outputs[i]->hasDebugName()) {
       new_outputs[i]->setDebugName(old_outputs[i]->debugName());
@@ -2219,7 +2224,7 @@ std::vector<Value*> insertGraph(
     ArrayRef<Value*> inputs,
     std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
-  AT_ASSERT(callee.inputs().size() == inputs.size());
+  TORCH_INTERNAL_ASSERT(callee.inputs().size() == inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
     value_map[callee.inputs()[i]] = inputs[i];
   }

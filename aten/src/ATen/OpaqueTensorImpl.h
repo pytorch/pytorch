@@ -119,7 +119,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
    * `allow_tensor_metadata_change_`, see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    TORCH_INTERNAL_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto opaque_impl =
         static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
     copy_tensor_metadata(

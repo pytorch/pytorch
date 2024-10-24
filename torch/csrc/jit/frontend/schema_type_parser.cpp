@@ -147,7 +147,7 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     } else {
       // We didn't encounter an ->, so assume the "after set" is identical
       // to the "before set"
-      AT_ASSERT(alias_info.afterSets().empty());
+      TORCH_INTERNAL_ASSERT(alias_info.afterSets().empty());
       for (const auto& set : alias_info.beforeSets()) {
         alias_info.addAfterSet(set);
       }
@@ -228,7 +228,7 @@ std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
 
 TypePtr SchemaTypeParser::parseRefinedTensor() {
   auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
-  AT_ASSERT(maybe_dtype);
+  TORCH_INTERNAL_ASSERT(maybe_dtype);
   at::ScalarType dtype = *maybe_dtype;
   TypePtr ptr;
   L.expect('(');

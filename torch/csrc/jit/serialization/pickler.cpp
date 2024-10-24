@@ -664,7 +664,7 @@ size_t Pickler::pushNextBinPut() {
     push<PickleOpCode>(PickleOpCode::LONG_BINPUT);
     push<uint32_t>(memo_id_);
   }
-  AT_ASSERT(memo_id_ <= std::numeric_limits<uint32_t>::max());
+  TORCH_INTERNAL_ASSERT(memo_id_ <= std::numeric_limits<uint32_t>::max());
   ++memo_id_;
   return memo_id_ - 1;
 }

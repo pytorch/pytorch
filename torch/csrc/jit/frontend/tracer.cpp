@@ -364,7 +364,7 @@ static IValue addInput(
     auto tuple = input.toTuple();
     const auto& elems = tuple->elements();
     size_t num_elems = elems.size();
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (const auto i : c10::irange(num_elems)) {
       tuple->unsafeSetElement(
@@ -553,7 +553,7 @@ void setValueTrace(const IValue& v, Value* value) {
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto& var = v.toTensor();
-    AT_ASSERT(var.defined());
+    TORCH_INTERNAL_ASSERT(var.defined());
     env_stack.back()[v] = value;
 
     // If the value comes from a CallFunction or CallMethod, it may not have
@@ -1017,9 +1017,9 @@ void ArgumentStash::stashIntArrayRefElem(
     return;
   IntArrayRefTrace& list_trace =
       stash.intlists.emplace(arg_name, size).first->second;
-  AT_ASSERT(size == list_trace.size());
-  AT_ASSERT(idx < list_trace.size());
-  AT_ASSERT(list_trace[idx] == nullptr);
+  TORCH_INTERNAL_ASSERT(size == list_trace.size());
+  TORCH_INTERNAL_ASSERT(idx < list_trace.size());
+  TORCH_INTERNAL_ASSERT(list_trace[idx] == nullptr);
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();

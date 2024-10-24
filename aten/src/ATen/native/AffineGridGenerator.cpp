@@ -107,7 +107,7 @@ static Tensor affine_grid_generator_4D_backward(
     int64_t W,
     bool align_corners) {
   auto base_grid = make_base_grid_4D(grad_grid, N, C, H, W, align_corners);
-  AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, H, W, 2}));
+  TORCH_INTERNAL_ASSERT(grad_grid.sizes() == IntArrayRef({N, H, W, 2}));
   auto grad_theta = base_grid.view({N, H * W, 3})
                         .transpose(1, 2)
                         .bmm(grad_grid.reshape({N, H * W, 2}));
@@ -123,7 +123,7 @@ static Tensor affine_grid_generator_5D_backward(
     int64_t W,
     bool align_corners) {
   auto base_grid = make_base_grid_5D(grad_grid, N, C, D, H, W, align_corners);
-  AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, D, H, W, 3}));
+  TORCH_INTERNAL_ASSERT(grad_grid.sizes() == IntArrayRef({N, D, H, W, 3}));
   auto grad_theta = base_grid.view({N, D * H * W, 4})
                         .transpose(1, 2)
                         .bmm(grad_grid.reshape({N, D * H * W, 3}));

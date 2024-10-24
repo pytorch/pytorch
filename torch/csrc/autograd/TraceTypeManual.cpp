@@ -190,30 +190,30 @@ static void general_trace_function(
         }
       }
       if (type->isSubtypeOf(*TensorType::get())) {
-        AT_ASSERT(iter->isTensor());
+        TORCH_INTERNAL_ASSERT(iter->isTensor());
         tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
       } else if (type->kind() == TypeKind::FloatType) {
-        AT_ASSERT(iter->isDouble());
+        TORCH_INTERNAL_ASSERT(iter->isDouble());
         tracer::addInputs(node, args[i].name().c_str(), iter->toDouble());
       } else if (type->kind() == TypeKind::IntType) {
-        AT_ASSERT(iter->isInt());
+        TORCH_INTERNAL_ASSERT(iter->isInt());
         tracer::addInputs(node, args[i].name().c_str(), iter->toInt());
       } else if (type->kind() == TypeKind::BoolType) {
-        AT_ASSERT(iter->isBool());
+        TORCH_INTERNAL_ASSERT(iter->isBool());
         tracer::addInputs(node, args[i].name().c_str(), iter->toBool());
       } else if (type->kind() == TypeKind::StringType) {
-        AT_ASSERT(iter->isString());
+        TORCH_INTERNAL_ASSERT(iter->isString());
         tracer::addInputs(node, args[i].name().c_str(), iter->toStringView());
       } else if (type->kind() == TypeKind::NumberType) {
         tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
         if (elem_type->isSubtypeOf(*TensorType::get())) {
-          AT_ASSERT(iter->isTensorList());
+          TORCH_INTERNAL_ASSERT(iter->isTensorList());
           auto list = iter->toTensorVector();
           tracer::addInputs(node, args[i].name().c_str(), list);
         } else if (auto class_type = elem_type->cast<ClassType>()) {
-          AT_ASSERT(iter->isList());
+          TORCH_INTERNAL_ASSERT(iter->isList());
           auto list = iter->toList();
           std::vector<c10::intrusive_ptr<c10::ivalue::Object>> objects;
           for (IValue iv : list) {
@@ -221,7 +221,7 @@ static void general_trace_function(
           }
           tracer::addInputs(node, args[i].name().c_str(), objects, class_type);
         } else if (elem_type->kind() == TypeKind::FloatType) {
-          AT_ASSERT(iter->isDoubleList());
+          TORCH_INTERNAL_ASSERT(iter->isDoubleList());
           // NB: now, tracer doesn't support tracing double list. We add
           // special handling here, since in our case, we assume that all the
           // doubles in the list are constants
@@ -235,13 +235,13 @@ static void general_trace_function(
               graph->insertNode(graph->createList(FloatType::get(), info))
                   ->output());
         } else if (elem_type->kind() == TypeKind::IntType) {
-          AT_ASSERT(iter->isIntList());
+          TORCH_INTERNAL_ASSERT(iter->isIntList());
           tracer::addInputs(
               node,
               args[i].name().c_str(),
               c10::IntArrayRef(iter->toIntVector()));
         } else if (elem_type->kind() == TypeKind::BoolType) {
-          AT_ASSERT(iter->isBoolList());
+          TORCH_INTERNAL_ASSERT(iter->isBoolList());
           tracer::addInputs(
               node, args[i].name().c_str(), iter->toBoolList().vec());
         } else {
@@ -269,19 +269,19 @@ static void general_trace_function(
          ++iter, ++i) {
       const auto& type = op.schema().returns()[i].type();
       if (type->isSubtypeOf(*TensorType::get())) {
-        AT_ASSERT(iter->isTensor());
+        TORCH_INTERNAL_ASSERT(iter->isTensor());
         tracer::addOutput(node, iter->toTensor());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
         if (elem_type->isSubtypeOf(*TensorType::get())) {
-          AT_ASSERT(iter->isTensorList());
+          TORCH_INTERNAL_ASSERT(iter->isTensorList());
           tracer::addOutput(node, iter->toTensorList());
         } else {
           throw std::runtime_error(
               "unsupported ouptut list type: " + elem_type->str());
         }
       } else if (type->kind() == TypeKind::ClassType) {
-        AT_ASSERT(iter->isObject());
+        TORCH_INTERNAL_ASSERT(iter->isObject());
         tracer::addOutput(node, iter->toObject());
       } else {
         throw std::runtime_error(

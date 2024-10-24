@@ -809,7 +809,7 @@ hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
 
 template<>
 Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
-    AT_ASSERT(cx.numel() == 0);
+    TORCH_INTERNAL_ASSERT(cx.numel() == 0);
     return hx;
 }
 

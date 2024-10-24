@@ -63,7 +63,7 @@ std::vector<TensorGroup> take_tensors(
 }
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
-  AT_ASSERT(tensors.size() == order.size());
+  TORCH_INTERNAL_ASSERT(tensors.size() == order.size());
   std::unordered_map<size_t, std::vector<size_t>> type_id_to_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
     type_id_to_indices[type_id(tensors[i])].push_back(i);

@@ -20,7 +20,7 @@ static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArra
     shifts.size() == dims.size(),
     "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
   );
-  AT_ASSERT(dims.size() > 1);
+  TORCH_INTERNAL_ASSERT(dims.size() > 1);
   auto tail_shifts = shifts.slice(1);
   auto tail_dims = dims.slice(1);
   auto first_dim_rolled = roll(self, shifts[0], dims[0]);

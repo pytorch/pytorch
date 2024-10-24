@@ -176,7 +176,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
         << "Broadcastable lists only supported for int or float";
 
   auto elem_ptr = string_to_type_lut().find(value_name);
-  AT_ASSERT(elem_ptr != string_to_type_lut().end());
+  TORCH_INTERNAL_ASSERT(elem_ptr != string_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();

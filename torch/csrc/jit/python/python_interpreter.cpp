@@ -39,7 +39,7 @@ Operation createPythonOperation(const Node* op_) {
       num_inputs++;
   }
 
-  AT_ASSERT(op->outputs().size() == 1);
+  TORCH_INTERNAL_ASSERT(op->outputs().size() == 1);
 
   return [=](Stack& stack) {
     pybind11::gil_scoped_acquire gil;

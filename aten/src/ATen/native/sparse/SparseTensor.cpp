@@ -150,7 +150,7 @@ static SparseTensor new_sparse(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  AT_ASSERT(layout.has_value() && *layout == kSparse);
+  TORCH_INTERNAL_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
   switch (device_or_default(device).type()) {
 #define DO_CASE(device, _) \
@@ -622,9 +622,9 @@ SparseTensor coalesce(const SparseTensor& self) {
 }
 
 SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
-  AT_ASSERT(self.defined());
+  TORCH_INTERNAL_ASSERT(self.defined());
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
   TORCH_INTERNAL_ASSERT(!self.is_coalesced());
 
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,

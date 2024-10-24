@@ -409,7 +409,7 @@ public:
   // Return const reference because CuFFTConfig shouldn't be tampered with once
   // created.
   const CuFFTConfig &lookup(CuFFTParams params) {
-    AT_ASSERT(_max_size > 0);
+    TORCH_INTERNAL_ASSERT(_max_size > 0);
 
     map_kkv_iter_t map_it = _cache_map.find(params);
     // Hit, put to list front

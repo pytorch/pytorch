@@ -316,7 +316,7 @@ struct CodeImpl {
   int allocRegs(at::ArrayRef<Value*> vs) {
     int result = register_size_ + 1;
     for (Value* v : vs) {
-      AT_ASSERT(value_to_reg_.count(v) == 0);
+      TORCH_INTERNAL_ASSERT(value_to_reg_.count(v) == 0);
       value_to_reg_[v] = ++register_size_;
     }
     return result;

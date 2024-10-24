@@ -252,7 +252,7 @@ struct GraphFuser {
   }
 
   Graph& getSubgraph(Node* n) {
-    AT_ASSERT(n->kind() == kind_);
+    TORCH_INTERNAL_ASSERT(n->kind() == kind_);
     return *n->g(attr::Subgraph);
   }
 
@@ -322,14 +322,14 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    AT_ASSERT(n->kind() != kind_);
+    TORCH_INTERNAL_ASSERT(n->kind() != kind_);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
     size_t tensor_insert_idx = 0;
-    AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
+    TORCH_INTERNAL_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
       if (input->type()->isSubtypeOf(*TensorType::get()))
@@ -362,7 +362,7 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
-          AT_ASSERT(input->node()->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
                 throw std::runtime_error("unexpected input");
@@ -448,7 +448,7 @@ struct GraphFuser {
       mergeFusionGroups(group, producer->node());
       return group;
     }
-    AT_ASSERT(producer->node()->outputs().size() == 1);
+    TORCH_INTERNAL_ASSERT(producer->node()->outputs().size() == 1);
     Node* merged = mergeNodeIntoGroup(group, producer->node());
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
@@ -490,7 +490,7 @@ struct GraphFuser {
   }
 
   std::optional<Node*> findFusedChunk(Node* group, Value* input) {
-    AT_ASSERT(group->kind() == prim::FusionGroup);
+    TORCH_INTERNAL_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
       return std::nullopt;
@@ -501,7 +501,7 @@ struct GraphFuser {
     // If subgraph_input is an input to prim::ConstantChunk, it will have 1 use
     auto* node = subgraph_input->uses().at(0).user;
     if (node->kind() == prim::ConstantChunk) {
-      AT_ASSERT(subgraph_input->uses().size() == 1);
+      TORCH_INTERNAL_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
     return std::nullopt;
@@ -539,8 +539,8 @@ struct GraphFuser {
   // input.
   graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
     auto* chunk = producer->node();
-    AT_ASSERT(consumer->kind() == prim::FusionGroup);
-    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    TORCH_INTERNAL_ASSERT(consumer->kind() == prim::FusionGroup);
+    TORCH_INTERNAL_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     // if producer's input is already an input to a prim::ConstantChunk node,
     // we cannot add a new prim::ConstantChunk node because of invariant (2).
@@ -585,7 +585,7 @@ struct GraphFuser {
   }
 
   at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
-    AT_ASSERT(!inputs.empty());
+    TORCH_INTERNAL_ASSERT(!inputs.empty());
     auto* g = inputs[0]->owningGraph();
     auto* input_list =
         g->insertNode(g->createList(TensorType::get(), inputs))->output();
@@ -619,14 +619,14 @@ struct GraphFuser {
     auto new_tensors_it = new_tensors.begin();
     for (size_t i = 0; i < node->inputs().size(); ++i) {
       if (node->inputs()[i]->type()->isSubtypeOf(*TensorType::get())) {
-        AT_ASSERT(new_tensors_it != new_tensors.end());
+        TORCH_INTERNAL_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
     }
   }
 
   Node* promoteChunkToBroadcastingChunk(Node* chunk) {
-    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    TORCH_INTERNAL_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     size_t nchunks = chunk->i(attr::chunks);
     Node* bchunk =
@@ -742,7 +742,7 @@ struct GraphFuser {
     }
     // multiple return operators
     Node* producer_for_chunk_node = producer_for_chunk->node();
-    AT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
+    TORCH_INTERNAL_ASSERT(producer_for_chunk_node->outputs().size() == 1);
 
     // Convert chunk to bchunk, if it isn't one already. The bchunk represents a
     // broadcast and one or more chunk operations.
@@ -814,7 +814,7 @@ struct GraphFuser {
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
         if (original_input->type()->isSubtypeOf(*TensorType::get())) {
-          AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
+          TORCH_INTERNAL_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
               // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
@@ -850,7 +850,7 @@ struct GraphFuser {
         aliasDb_->createValue(output);
         return output;
       });
-      AT_ASSERT(!tensor_sizes.empty());
+      TORCH_INTERNAL_ASSERT(!tensor_sizes.empty());
       Value* output_size = tensor_sizes.size() == 1
           ? tensor_sizes[0]
           : broadcastSizes(tensor_sizes, aliasDb_);
@@ -934,7 +934,7 @@ struct GraphFuser {
 
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
-    AT_ASSERT(inputs.size() == sinputs.size());
+    TORCH_INTERNAL_ASSERT(inputs.size() == sinputs.size());
     for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
@@ -949,7 +949,7 @@ struct GraphFuser {
     // beginning of the kernel.
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
-    AT_ASSERT(outputs.size() == soutputs.size());
+    TORCH_INTERNAL_ASSERT(outputs.size() == soutputs.size());
     for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInSize(outputs[i]))
         continue;
@@ -995,7 +995,7 @@ struct GraphFuser {
       });
       auto shapes =
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
-      AT_ASSERT(!shapes.empty());
+      TORCH_INTERNAL_ASSERT(!shapes.empty());
       shape_of.emplace(
           n->output(),
           shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes, aliasDb_));
@@ -1020,7 +1020,8 @@ struct GraphFuser {
       if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
         auto uses = output->uses();
         for (Use u : uses) {
-          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          TORCH_INTERNAL_ASSERT(
+              u.user->matches("aten::size(Tensor self) -> int[]"));
           u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
           u.user->destroy();
         }
@@ -1059,7 +1060,7 @@ struct GraphFuser {
   }
 
   Node* createFusedConcat(Node* node) {
-    AT_ASSERT(node->kind() == aten::cat);
+    TORCH_INTERNAL_ASSERT(node->kind() == aten::cat);
 
     Graph* graph = node->owningGraph();
     Node* list_construct = node->namedInput(attr::tensors)->node();
@@ -1096,7 +1097,7 @@ struct GraphFuser {
         }
         any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
-        AT_ASSERT(maybe_group && maybe_group == fused_cat);
+        TORCH_INTERNAL_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
         sorted_inputs = sortReverseTopological(fused_cat->inputs());

@@ -19,7 +19,7 @@ void _assert_match(const O& original, const C& compared, const std::string& name
     if (!equal) {
       std::stringstream msg;
       msg << "Tensor " << name << " mismatch!";
-      AT_ASSERT(equal, msg.str());
+      TORCH_INTERNAL_ASSERT(equal, msg.str());
     }
   }
 }
