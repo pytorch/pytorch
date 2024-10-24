@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec/vec.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -292,13 +293,6 @@ bool gemv_use_fast_path<at::BFloat16>(
 }
 
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-static inline float16_t reduce(float16x4_t x) {
-        auto sum = vpadd_f16(x, x);
-        return vget_lane_f16(vpadd_f16(sum, sum), 0);
-}
-static inline float16_t reduce(float16x8_t x) {
-        return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
-}
 
 /*
  * NOTE [ GGML Copyright Notice ]
@@ -341,36 +335,27 @@ static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationS
 static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
 static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
 
-static inline float reduce(float16x8_t x[kF16RegistersPerIteration]) {
+static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
   int offset = kF16RegistersPerIteration;
   c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
     offset /= 2;
     for (int i = 0; i < offset; ++i) {
-      x[i] = vaddq_f16(x[i], x[offset + i]);
+      x[i] = x[i] + x[offset + i];
     }
   });
-  const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
-  const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
-  return vaddvq_f32(vaddq_f32(t0, t1));
-}
-
-static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f16(a, b, c);
-#else
-  return vaddq_f16(a, vmulq_f16(b, c));
-#endif
+  const auto [t0, t1] = vec::convert_half_float(x[0]);
+  return vaddvq_f32(t0 + t1);
 }
 
 static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, int len) {
-  float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
+  vec::VectorizedN<Half, kF16RegistersPerIteration> sum(0);
 
   const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF16ElementsPerIteration) {
     for (int k = 0; k < kF16RegistersPerIteration; ++k) {
-      const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
-      const auto temp_a = vld1q_f16(a + j + k * kF16ElementsPerRegister);
-      sum[k] = f16_fma(sum[k], temp_x, temp_a);
+      const auto temp_x = vec::Vectorized<Half>::loadu(x + j + k * vec::Vectorized<Half>::size());
+      const auto temp_a = vec::Vectorized<Half>::loadu(a + j + k * vec::Vectorized<Half>::size());
+      sum[k] = vec::fmadd(temp_x, temp_a, sum[k]);
     }
   }
   auto reduced_sum = reduce(sum);
@@ -394,44 +379,6 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 
 #endif // __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 
-static inline float reduce(float32x4_t x) {
-        auto sum = vpaddq_f32(x, x);
-        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
-}
-
-static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f32(a, b, c);
-#else
-  return vaddq_f32(a, vmulq_f32(b, c));
-#endif
-}
-
-static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FP16_FML
-  // NOTE: this instruction is an optional instruction in ARM v8.2 and
-  // v8.3, but mandatory in v8.4 per
-  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
-  // I'm not certain that I have the right feature test macro.
-  return vfmlalq_low_f16(a, b, c);
-#else
-  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
-#endif
-}
-
-static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FP16_FML
-  // See above note about this instruction.
-  return vfmlalq_high_f16(a, b, c);
-#else
-  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
-#endif
-}
-
-static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
-  return f32_fma_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
-}
-
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted
 // from llama.cpp's ggml_vec_dot_f32 and surrounding utility
 // functions. See NOTE [ GGML Copyright Notice ] above for the
@@ -452,7 +399,7 @@ static constexpr auto kF32RegistersPerIterationShift = 3;
 static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
 static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
 
-static inline float reduce(float32x4_t x[kF32RegistersPerIteration]) {
+static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   int offset = kF32RegistersPerIteration;
   c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
     offset /= 2;
@@ -466,20 +413,34 @@ static inline float reduce(float32x4_t x[kF32RegistersPerIteration]) {
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const float16_t* vec1,
   const float16_t* vec2,
-  float32x4_t sum[kF32RegistersPerIteration],
+  vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
   int registerPairIndex) {
   // Load a pair of f32 registers at a time.
-  const auto temp_vec1 = vld1q_f16(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]);
-  const auto temp_vec2 = vld1q_f16(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]);
+  const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[registerPairIndex * vec::Vectorized<Half>::size()]);
+  const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[registerPairIndex * vec::Vectorized<Half>::size()]);
 
-  sum[2 * registerPairIndex] = f32_fma_low_f16(sum[2 * registerPairIndex], temp_vec1, temp_vec2);
-  sum[2 * registerPairIndex + 1] = f32_fma_high_f16(sum[2 * registerPairIndex + 1], temp_vec1, temp_vec2);
+  const auto [result_low, result_high] = vec::fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
+  sum[2 * registerPairIndex] = result_low;
+  sum[2 * registerPairIndex + 1] = result_high;
+}
+
+
+static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // NOTE: this instruction is an optional instruction in ARM v8.2 and
+  // v8.3, but mandatory in v8.4 per
+  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
+  // I'm not certain that I have the right feature test macro.
+  return vfmlalq_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
+#else
+  return vec::fmadd(vec::Vectorized<float>(vcvt_f32_f16(b)), vec::Vectorized<float>(vcvt_f32_f16(c)), vec::Vectorized<float>(a));
+#endif
 }
 
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     const float16_t* vec1,
     const float16_t* vec2,
-    float32x4_t* tail_sum,
+    vec::Vectorized<float>* tail_sum,
     int idx) {
   const auto temp_vec1 = vld1_f16(&vec1[idx]);
   const auto temp_vec2 = vld1_f16(&vec2[idx]);
@@ -489,6 +450,14 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_
 static float32x4_t to_bfloat16(uint16x4_t u16) {
   int32x4_t shift = vdupq_n_s32(16);
   return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
+}
+
+static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f32(a, b, c);
+#else
+  return vaddq_f32(a, vmulq_f32(b, c));
+#endif
 }
 
 static float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
@@ -518,12 +487,12 @@ TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE void
 dot_with_fp32_arith_main_inner_loop_bfdot(
     const BFloat16* vec1,
     const BFloat16* vec2,
-    float32x4_t sum[kF32RegistersPerIteration],
+    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
     int registerPairIndex) {
   const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec1[registerPairIndex * 2 * kF32ElementsPerRegister]));
+                                                &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
   const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec2[registerPairIndex * 2 * kF32ElementsPerRegister]));
+                                                &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
   sum[registerPairIndex] =
     f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
 }
@@ -535,7 +504,7 @@ TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
 static void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
-    float32x4_t* tail_sum,
+    vec::Vectorized<float>* tail_sum,
     int idx) {
   const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
@@ -549,12 +518,12 @@ static void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
     const BFloat16* vec1,
     const BFloat16* vec2,
-    float32x4_t sum[kF32RegistersPerIteration],
+    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
     int registerPairIndex) {
   const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec1[registerPairIndex * 2 * kF32ElementsPerRegister]));
+                                             &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
   const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec2[registerPairIndex * 2 * kF32ElementsPerRegister]));
+                                             &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
 
   sum[2 * registerPairIndex] = f32_fma_bf16(
       sum[2 * registerPairIndex],
@@ -569,7 +538,7 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
-    float32x4_t* tail_sum,
+    vec::Vectorized<float>* tail_sum,
     int idx) {
   const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
@@ -600,7 +569,7 @@ dot_with_fp32_arith_main_loop_bfdot(
     const BFloat16* vec1,
     const BFloat16* vec2,
     int64_t len) {
-  float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
     const auto* vec1_ = vec1 + j;
@@ -620,7 +589,8 @@ dot_with_fp32_arith_main_loop_no_bfdot(
     const T* vec1,
     const T* vec2,
     int64_t len) {
-  float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
+
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
     const auto* vec1_ = vec1 + j;
@@ -642,7 +612,7 @@ dot_with_fp32_arith_main_loop_no_bfdot(
   /* First-tier tail fixup: make sure we handle workloads that can */   \
   /* benefit from vectorization, but don't fit into our fully unrolled */ \
   /* loop above. */                                                     \
-  float32x4_t tail_sum = vdupq_n_f32(0);                                \
+  vec::Vectorized<float> tail_sum(0);                                   \
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);       \
   const auto len_aligned_4 = len & ~3;                                  \
   for (int j = len_aligned; j < len_aligned_4; j += 4) {                \
