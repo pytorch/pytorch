@@ -499,13 +499,20 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
     // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
     // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
-    // accepts int. Otherwise, an imlicit conversion may happen at the API call
+    // accepts int. Otherwise, an implicit conversion may happen at the API call
     // and the value may become negative.
     // [Note 2]: this member is pybinded to Python, the value passed from Python
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
+#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+#else
+    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
+    // `split_color` is pybinded to Python, so we need to define it. So we use
+    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
+    int split_color{-2};
+#endif
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };

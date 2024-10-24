@@ -6881,7 +6881,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ",
         reduce,
         ".");
@@ -6976,7 +6977,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ",
         reduce,
         ".");

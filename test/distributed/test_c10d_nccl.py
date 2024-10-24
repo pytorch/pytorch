@@ -450,6 +450,95 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
+    def _helper_test_extra_cuda_context_by_nvml(self):
+        """
+        A helper for `test_extra_cuda_context`, if pynvml is avaiable.
+        pynvml provides python bindings for NVIDIA NVML functionalities.
+        Here we are interested in: nvmlDeviceGetComputeRunningProcesses
+        """
+        import pynvml
+
+        pynvml.nvmlInit()
+
+        device = torch.device("cuda:%d" % self.rank)
+        x = torch.empty((1,), device=device)
+        work = c10d.all_reduce(x, async_op=True)
+
+        # Wait for non-0 ranks to garbage collect Work -- this is the latest
+        # point where extra CUDA context can be created
+        if self.rank == 0:
+            time.sleep(5)
+        del work
+        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        nprocs = len(processes)
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
+        c10d.destroy_process_group()
+        self.assertEqual(
+            nprocs,
+            1,
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+        )
+
+    def _helper_test_extra_cuda_context_by_memory(self):
+        """
+        A helper for `test_extra_cuda_context`, if pynvml is NOT avaiable.
+        If extra context is created, it would manifest into device 0's memory usage.
+        """
+        device = torch.device("cuda:%d" % self.rank)
+        x = torch.empty((1,), device=device)
+        # Rank 0 takes a snapshot before collective -- this snapshot should have
+        # included rank 0's own context.
+        if self.rank == 0:
+            free, total = torch.cuda.mem_get_info(device)
+            used_before = float(total - free)
+
+        work = c10d.all_reduce(x, async_op=True)
+
+        # Wait for non-0 ranks to garbage collect Work -- this is the latest
+        # point where extra CUDA context can be created
+        if self.rank == 0:
+            time.sleep(5)
+            free, total = torch.cuda.mem_get_info(device)
+            used_after = float(total - free)
+        del work
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
+        c10d.destroy_process_group()
+        if self.rank == 0:
+            # If non-0 rank creates a context on device 0, this assert would
+            # fail because one context takes about 1 GB -- much more than the
+            # tensor size created in this test.
+            self.assertTrue(
+                used_after < used_before * 1.5,
+                f"{device} used {used_after} bytes after collective, "
+                f"50% more than the status before ({used_before} bytes). "
+                f"Extra CUDA context may have been created.",
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_extra_cuda_context(self):
+        # Check if non-0 ranks would create extra CUDA context on device 0
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        try:
+            self._helper_test_extra_cuda_context_by_nvml()
+        except ModuleNotFoundError:
+            self._helper_test_extra_cuda_context_by_memory()
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_destruct_before_terminate_pg(self):
@@ -530,15 +619,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         t = torch.rand(10, 10, device=device)
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
-        new_pg1 = c10d.new_group([0, 1], use_split=True)
-        new_pg2 = c10d.new_group([0, 1], use_split=True)
+        new_pg1 = c10d.new_group([0, 1])
+        new_pg2 = c10d.new_group([0, 1])
         t1 = torch.rand(10, 10, device=device)
         t2 = torch.rand(10, 10, device=device)
         new_pg1.allreduce(t1).wait()
         new_pg2.allreduce(t2).wait()
         backend = pg._get_backend(torch.device(device))
-        # default PG's backend should have a split count of 2
-        self.assertEqual(backend.comm_split_count(), 2)
+        # default PG's backend should have a split count of 0 because
+        # it's not eager initialized
+        self.assertEqual(backend.comm_split_count(), 0)
         # shutdown all NCCL PGs in one shot
         dist.destroy_process_group()
 
@@ -554,16 +644,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
         # PG1 is an PG without comms initialized, since we don't call collective on it
-        new_pg1 = c10d.new_group([0, 1], use_split=True)
-        new_pg2 = c10d.new_group([0, 1], use_split=True)
+        new_pg1 = c10d.new_group([0, 1])
+        new_pg2 = c10d.new_group([0, 1])
         t2 = torch.rand(10, 10, device=device)
 
         new_pg2.allreduce(t2).wait()
         backend = pg._get_backend(torch.device(device))
-        # default PG's backend should have a split count of 1
-        self.assertEqual(backend.comm_split_count(), 1)
+        # default PG's backend should have a split count of 0
+        self.assertEqual(backend.comm_split_count(), 0)
         # shutdown all NCCL PGs in one shot
-        torch.cuda.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl()
@@ -714,7 +803,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_comm_split_optimization(self):
+    def test_comm_lazy_init_split(self):
         # Test the optimization of new groups that contain all world
         # ranks use the "transparent" `ncclCommSplit` optimization.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -727,14 +816,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # split doesn't happen unless the original process group has lazily
             # created communicators, so first verify we haven't split even when
             # making the new group and running an operation on the original pg.
-            ng = c10d.new_group(use_split=True)
+            ng = c10d.new_group()
             tensor = torch.tensor([self.rank]).cuda(device)
             pg.broadcast(tensor, 0)
             self.assertEqual(backend.comm_split_count(), 0)
 
-            # The new group will force a split of the original on first use.
+            # The new group will not force a split because it is a lazy init.
             ng.broadcast(tensor, 0)
-            self.assertEqual(backend.comm_split_count(), 1)
+            self.assertEqual(backend.comm_split_count(), 0)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -751,7 +840,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         tensor = torch.full((1,), self.rank).cuda(device)
         original_tensor = tensor.clone()
-        ng = c10d.new_group([0], use_split=True)
+        ng = c10d.new_group([0])
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
@@ -765,7 +854,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_comm_eager_subgroup(self):
+    def test_comm_eager_init_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -776,41 +865,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.is_initialized(), False)
 
         tensor = torch.full((1,), self.rank).cuda(device)
-        new_group = c10d.new_group([0], device_id=device)
+        new_group = c10d.new_group([0, 1], device_id=device)
         self.assertEqual(backend.comm_split_count(), 0)
-        if self.rank == 0:
-            new_backend = new_group._get_backend(torch.device(device))
-            self.assertEqual(new_backend.is_initialized(), True)
-            dist.broadcast(tensor, 0, group=new_group)
-            self.assertEqual(new_backend.comm_split_count(), 0)
 
+        new_backend = new_group._get_backend(torch.device(device))
+        self.assertEqual(new_backend.is_initialized(), True)
+        dist.broadcast(tensor, 0, group=new_group)
+        self.assertEqual(new_backend.comm_split_count(), 0)
         self.assertEqual(backend.is_initialized(), False)
-        dist.destroy_process_group()
-
-    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @skip_but_pass_in_sandcastle_if(
-        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
-    )
-    def test_comm_eager_without_split(self):
-        # Test `ncclCommSplit` for smaller subgroups of the world when
-        # we've passed a specific device_id to init_process_group.
-        store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank}")
-        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
-        backend = pg._get_backend(torch.device(device))
-
-        tensor = torch.full((1,), self.rank).cuda(device)
-        original_tensor = tensor.clone()
-        # if use_split == false, a new group should be created without splitting
-        ng = c10d.new_group([0], use_split=False)
-        self.assertEqual(backend.comm_split_count(), 0)
-        if self.rank == 0:
-            dist.broadcast(tensor, 0, group=ng)
-
-        # no comm split happens after a collective.
-        self.assertEqual(backend.comm_split_count(), 0)
-        self.assertEqual(tensor, original_tensor)
+        torch.cuda.synchronize()
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -875,7 +938,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 0)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
         new_pg.broadcast(broadcast_tensor, 0).wait()
-        self.assertEqual(backend.comm_split_count(), 1)
+        self.assertEqual(backend.comm_split_count(), 0)
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -895,7 +958,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Run an allreduce, comm should have already started initilizaing,
         # but allreduce is issued to CUDA STREAM only after the initialization is a success
         pg.allreduce(reduce_tensor).wait()
-        new_pg = c10d.new_group(use_split=True)
+        new_pg = c10d.new_group()
         # new pg's comm is initialized eagerly
         self.assertEqual(backend.comm_split_count(), 1)
         broadcast_tensor = torch.tensor([self.rank]).cuda(device)
