@@ -1097,6 +1097,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"auto {output_name} = {output};")
                 output_args.append(f"&{output_name}")
+            elif isinstance(output, sympy.Expr):
+                output_name = f"{output_name_base}_{idx}"
+                output_str = str(output).replace("//", "/")
+                self.writeline(f"auto {output_name} = {output_str};")
+                output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
             else:
