@@ -54,7 +54,7 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
   }
-  for(int64_t i = update.view_metas.size()-1; i >= 0; --i) {
+  for(int64_t i = static_cast<int64_t>(update.view_metas.size()) - 1; i >= 0; --i) {
     int64_t out_idx = update.view_metas[i].out_index;
     // Each view inverse is implemented in ViewInverses.cpp.
     t = update.view_metas[i].reverse_fn(tmp_values[i], t, out_idx);

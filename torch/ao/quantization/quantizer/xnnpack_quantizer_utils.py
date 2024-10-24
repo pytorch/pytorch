@@ -501,6 +501,10 @@ def _do_annotate_conv_bn(
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(gm)
+
     matches = []
     if is_conv_transpose:
         combinations = [
@@ -523,7 +527,7 @@ def _do_annotate_conv_bn(
     # Match against all conv dimensions and cuda variants
     for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
         pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda, using_training_ir=using_training_ir)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
@@ -979,13 +983,13 @@ def _annotate_cat(
         inputs = cat_node.args[0]
 
         input_qspec_map = {}
-        input_act0 = inputs[0]
+        input_act0 = inputs[0]  # type: ignore[index]
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
-        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
-        for input_act in inputs[1:]:
-            input_qspec_map[input_act] = shared_with_input0_qspec
+        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
+        for input_act in inputs[1:]:  # type: ignore[index]
+            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 

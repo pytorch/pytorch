@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, overload, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, overload, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -21,6 +21,7 @@ def _is_supported_device(tensor: torch.Tensor) -> bool:
         "xla",
         "cpu",
         "hpu",
+        "mtia",
         torch._C._get_privateuse1_backend_name(),
     )
 
@@ -167,36 +168,6 @@ class ShardedGradScaler(GradScaler):
 
         return apply_scale(outputs)
 
-    def _foreach_non_finite_check_and_unscale_cpu_(
-        self,
-        grads: Sequence[torch.Tensor],
-        found_inf: torch.Tensor,
-        inv_scale: torch.Tensor,
-    ) -> None:
-        if len(grads) == 0:
-            return
-        assert inv_scale.numel() == 1, "inv_scale must be a 1-element tensor."
-        assert found_inf.numel() == 1, "found_inf must be a 1-element tensor."
-
-        for grad in grads:
-            if grad.device.type != "cpu":
-                logger.error(
-                    "tensor device is %s but was expected to be ``cpu``",
-                    grad.device,
-                )
-                raise ValueError(
-                    "Gradients were found on a non-CPU device when"
-                    " expected to be on CPU."
-                )
-            if (
-                torch.isinf(grad).any().item() is True
-                or torch.isnan(grad).any().item() is True
-            ):
-                found_inf.data = torch.tensor([1.0])
-                break
-            else:
-                grad.data *= inv_scale.item()
-
     def _unscale_grads_(
         self,
         optimizer: torch.optim.Optimizer,
@@ -240,18 +211,11 @@ class ShardedGradScaler(GradScaler):
 
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    if grads[0].device.type == "cpu":
-                        self._foreach_non_finite_check_and_unscale_cpu_(
-                            grads,
-                            per_device_found_inf.get(device),
-                            per_device_inv_scale.get(device),
-                        )
-                    else:
-                        torch._amp_foreach_non_finite_check_and_unscale_(
-                            grads,
-                            per_device_found_inf.get(device),
-                            per_device_inv_scale.get(device),
-                        )
+                    torch._amp_foreach_non_finite_check_and_unscale_(
+                        grads,
+                        per_device_found_inf.get(device),
+                        per_device_inv_scale.get(device),
+                    )
         # There exist contexts (e.g. w/ `use_orig_params=True`) wherein some
         # ranks may have no (non-zero sized) parameter shards, necessitating the
         # initialization of `per_device_found_inf._per_device_tensors` here

@@ -3,6 +3,7 @@
 import importlib
 import inspect
 import json
+import logging
 import os
 import pkgutil
 import subprocess
@@ -11,7 +12,7 @@ import unittest
 from typing import Callable
 
 import torch
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -20,6 +21,9 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
@@ -269,7 +273,9 @@ class TestPublicBindings(TestCase):
         failures = []
 
         def onerror(modname):
-            failures.append((modname, ImportError))
+            failures.append(
+                (modname, ImportError("exception occurred importing package"))
+            )
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
@@ -291,6 +297,25 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
+            # TODO(#133647): Remove the onnx._internal entries after
+            # onnx and onnxscript are installed in CI.
+            "torch.onnx._internal.exporter",
+            "torch.onnx._internal.exporter._analysis",
+            "torch.onnx._internal.exporter._building",
+            "torch.onnx._internal.exporter._capture_strategies",
+            "torch.onnx._internal.exporter._compat",
+            "torch.onnx._internal.exporter._core",
+            "torch.onnx._internal.exporter._decomp",
+            "torch.onnx._internal.exporter._dispatching",
+            "torch.onnx._internal.exporter._fx_passes",
+            "torch.onnx._internal.exporter._ir_passes",
+            "torch.onnx._internal.exporter._isolated",
+            "torch.onnx._internal.exporter._onnx_program",
+            "torch.onnx._internal.exporter._registration",
+            "torch.onnx._internal.exporter._reporting",
+            "torch.onnx._internal.exporter._schemas",
+            "torch.onnx._internal.exporter._tensors",
+            "torch.onnx._internal.exporter._verification",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
             "torch.onnx._internal.fx.analysis.unsupported_nodes",
