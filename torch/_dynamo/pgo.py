@@ -5,17 +5,49 @@ import dataclasses
 import enum
 import logging
 import time
-from typing import Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from collections import defaultdict
+from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 from torch._dynamo.utils import get_chromium_event_logger
 
 
 if TYPE_CHECKING:
+    import types
+
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
+
+# How does in memory representation work?  Concretely, this module is
+# responsible for holding GLOBAL state representing the state it holds, no
+# other copies permitted.  So we retire frame_state entirely and store it
+# here.  This should be reset when Dynamo is reset.  We never GC information
+# (similar to how the filesystem doesn't get cleaned up except by tmp
+# cleaner), so the expectation is the information is relatively cheap and we
+# don't mind leaking it.
+
+
+@dataclasses.dataclass(frozen=True)
+class CodeId:
+    filename: str
+    firstlineno: int
+    name: str
+
+    @staticmethod
+    def make(code: types.CodeType) -> CodeId:
+        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+
+
+@dataclasses.dataclass
+class CodeState:
+    automatic_dynamic: DefaultDict[str, FrameStateSizeEntry] = dataclasses.field(
+        default_factory=lambda: defaultdict(FrameStateSizeEntry)
+    )
+
+
+CODE_STATE: DefaultDict[CodeId, CodeState] = defaultdict(CodeState)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,8 +194,10 @@ def update_automatic_dynamic(
     *,
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
-    is_update = name in tx.output.frame_state
-    mut_entry = tx.output.frame_state.setdefault(name, FrameStateSizeEntry())
+    code_id = CodeId.make(tx.f_code)
+    frame_state = CODE_STATE[code_id]
+    is_update = name in frame_state.automatic_dynamic
+    mut_entry = frame_state.automatic_dynamic[name]
     old_entry = copy.copy(mut_entry)
     mut_entry |= entry
 
