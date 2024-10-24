@@ -153,10 +153,11 @@ static bool BlockComparatorSize(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
-  BlockPool(bool small, PrivatePool* private_pool = nullptr)
+  BlockPool(bool small, PrivatePool* private_pool = nullptr, bool comms = false)
       : blocks(BlockComparatorSize),
         unmapped(BlockComparatorAddress),
         is_small(small),
+        is_comms(comms),
         owner_PrivatePool(private_pool) {}
 
   // Do not insert a Block to blocks directly; use insert_into_blocks(),
@@ -165,6 +166,7 @@ struct BlockPool {
   std::set<Block*, Comparison> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
+  const bool is_comms;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
 
@@ -1023,6 +1025,8 @@ class DeviceCachingAllocator {
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
 
+  BlockPool comms_blocks;
+
   // unallocated cached blocks 1 MB or smaller
   BlockPool small_blocks;
 
@@ -1088,7 +1092,7 @@ class DeviceCachingAllocator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
-      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+      : large_blocks(/*small=*/false), comms_blocks(/*small=*/false, nullptr, true), small_blocks(/*small=*/true) {
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -1188,9 +1192,17 @@ class DeviceCachingAllocator {
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
+    auto& comms_pool = comms_blocks;
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    AllocParams default_params(device, size, stream, &pool, alloc_size, stats);
+    AllocParams comms_params(device, size, stream, &comms_pool, alloc_size, stats);
+
+    AllocParams params = default_params;
     params.stat_types = get_stat_types_for_pool(pool);
+    if(CUDAAllocatorConfig::comms() || CUDAAllocatorConfig::comms_alloc()){
+      params = comms_params;
+      params.stat_types = get_stat_types_for_pool(comms_pool);
+    }
 
     // First, try to get a block from the existing pool.
     bool block_found =
@@ -1199,8 +1211,12 @@ class DeviceCachingAllocator {
         // Trigger callbacks and retry search
         || (trigger_free_memory_callbacks(params) && get_free_block(params));
 
+    bool can_alloc = !CUDAAllocatorConfig::comms();
+    if(!can_alloc && !block_found){
+      params.err = cudaErrorMemoryAllocation;
+    }
     // Can't reuse an existing block; try to get a new one.
-    if (!block_found) {
+    if (!block_found && can_alloc) {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
               set_fraction &&
@@ -1212,15 +1228,24 @@ class DeviceCachingAllocator {
       // cudaMalloc. So far this function has not modified allocator state, but
       // keep in mind that any observed allocator state may change across calls
       // to alloc_block since it may release the lock.
-      block_found = alloc_block(params, false, context, lock)
+      block_found = alloc_block(params, false, context, lock);
+      if(!block_found){
+          block_found = get_free_block(comms_params);
+          if(block_found){
+            params = comms_params;
+            params.stat_types = get_stat_types_for_pool(comms_pool);
+          }
+      }
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
-          || (release_available_cached_blocks(params, context) &&
+      if(!block_found){
+          block_found = (release_available_cached_blocks(params, context) &&
               alloc_block(params, false, context, lock))
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway.empty()) &&
-              release_cached_blocks(context) &&
+              release_cached_blocks(context, false) &&
               alloc_block(params, true, context, lock));
+      }
     }
 
     if (!block_found) {
@@ -1574,7 +1599,7 @@ class DeviceCachingAllocator {
   void emptyCache() {
     auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks(context);
+    release_cached_blocks(context, true);
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -2115,6 +2140,8 @@ class DeviceCachingAllocator {
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
         blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(), comms_blocks.blocks.begin(), comms_blocks.blocks.end());
     for (const auto& gp : graph_pools) {
       blocks.insert(
           blocks.end(),
@@ -2475,8 +2502,13 @@ class DeviceCachingAllocator {
   StatTypes get_stat_types_for_pool(const BlockPool& pool) {
     StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(
-        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    if(pool.is_comms){
+       stat_types[static_cast<size_t>(StatType::COMMS_POOL)] = true;
+    }
+    else{
+      stat_types[static_cast<size_t>(
+          pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    }
     return stat_types;
   }
 
@@ -2797,12 +2829,15 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context) {
+  bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context, bool release_comms) {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
     synchronize_and_free_events(context);
 
     // Free all non-split cached blocks to system allocator
+    if(release_comms){
+      release_blocks(comms_blocks, context);
+    }
     release_blocks(large_blocks, context);
     release_blocks(small_blocks, context);
 

@@ -3642,6 +3642,176 @@ class TestCudaMallocAsync(TestCase):
         # force release_cached_blocks to run with some expandable segments in the free list
         alloc(120)
 
+    def test_comms_pool_simple(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms_alloc:True")
+        initial_alloc = alloc(40)
+        del initial_alloc
+        torch.cuda.memory._set_allocator_settings("comms_alloc:False")
+
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        a = alloc(40)
+        a_ptr = a.data_ptr()
+        torch.cuda.memory._set_allocator_settings("comms:False")
+        b = alloc(40)
+        b_ptr = b.data_ptr()
+        del a, b
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        c = alloc(40)
+        torch.cuda.memory._set_allocator_settings("comms:False")
+        d = alloc(40)
+        self.assertEqual(c.data_ptr(), a_ptr) 
+        self.assertEqual(d.data_ptr(), b_ptr) 
+        del c, d
+
+    def test_comms_pool_overflow_to_comms_pool(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms_alloc:True")
+        a = alloc(80)
+        comms_ptr = a.data_ptr() 
+        del a
+        torch.cuda.memory._set_allocator_settings("comms_alloc:False")
+
+        b = alloc(40) 
+        # now out of memory in the default pool, use the comms pool 
+        c = alloc(40) 
+        self.assertEqual(c.data_ptr(), comms_ptr) 
+        d = alloc(40) 
+        del b, c, d
+
+    def test_comms_pool_oom1(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms_alloc:True")
+        a = alloc(80)
+        del a
+        torch.cuda.memory._set_allocator_settings("comms_alloc:False")
+
+        b = alloc(40)
+        c = alloc(40)
+        d = alloc(40)
+        del b, c
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        with self.assertRaises(torch.OutOfMemoryError):
+            e = alloc(80)
+        torch.cuda.memory._set_allocator_settings("comms:False")
+
+    def test_comms_pool_oom2(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms_alloc:True")
+        a = alloc(80)
+        del a
+        torch.cuda.memory._set_allocator_settings("comms_alloc:False")
+        b = alloc(40)
+        print("b", hex(b.data_ptr()))
+        c = alloc(40)
+        print("c", hex(c.data_ptr()))
+        d = alloc(40)
+        print("d", hex(d.data_ptr()))
+        del b, d
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        with self.assertRaises(torch.OutOfMemoryError):
+            e = alloc(80)
+        torch.cuda.memory._set_allocator_settings("comms:False")
+
+    def test_comms_pool_oom3(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms_alloc:True")
+        initial_alloc = alloc(40)
+        del initial_alloc
+        torch.cuda.memory._set_allocator_settings("comms_alloc:False")
+
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        a = alloc(40)
+        with self.assertRaises(torch.OutOfMemoryError):
+            b = alloc(40)
+        torch.cuda.memory._set_allocator_settings("comms:False")
+
+    def test_comms_pool_oom4(self):
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info()
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
+
+        def alloc(n):
+            return torch.ones(n * mb, dtype=torch.int8, device="cuda")
+
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        torch.cuda.memory._set_allocator_settings("comms:True")
+        with self.assertRaises(torch.OutOfMemoryError):
+            a = alloc(40)
+        torch.cuda.memory._set_allocator_settings("comms:False")
+
+
     def test_garbage_collect_expandable(self):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
