@@ -5,9 +5,7 @@ on:
     # - cron: 0 7 * * 1-6
     # - cron: 0 7 * * 0
     # Does not perform max_autotune on CPU, so skip the weekly run setup
-    # Run 6 times everyday to see if perf instablity can be reproduced
-    # Will change this back
-    - cron: 0 */4 * * *
+    - cron: 0 7 * * *
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:
@@ -50,10 +48,21 @@ concurrency:
 permissions: read-all
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   linux-jammy-aarch64-py3_10-inductor-build:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.arm64.m7g.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
       docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
@@ -105,7 +114,7 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-aarch64-py3_10-inductor-build
-    if: github.event.schedule == '0 */4 * * *'
+    if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-aarch64-py3.10
       # Turn off dynamic-shapes and aotinductor tests for now, to have faster iteration for debugging perf instability.

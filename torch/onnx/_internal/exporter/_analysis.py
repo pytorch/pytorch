@@ -10,8 +10,6 @@ import traceback
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-import onnxscript
-
 import torch
 import torch._export.serde.schema
 from torch.export import graph_signature
@@ -203,13 +201,7 @@ def analyze(
     model_info.outputs = outputs
 
     if registry is None:
-        # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
-
-        del ops
-        registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
-        )
+        registry = _registration.ONNXRegistry.from_torchlib()
 
     # Try to find ops for every node in the graph
     for node in exported_program.graph.nodes:

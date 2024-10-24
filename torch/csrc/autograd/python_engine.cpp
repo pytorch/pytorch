@@ -460,7 +460,8 @@ static struct PyMethodDef THPEngine_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEngineType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._EngineBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

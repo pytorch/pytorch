@@ -116,7 +116,7 @@ def get_issue_or_pr_body(number: int) -> str:
     # Despite the 'issues' in the link, this also works for PRs
     url = f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
     with urlopen(Request(url, headers=headers)) as conn:
-        body: str = json.loads(conn.read().decode())["body"]
+        body: str = json.loads(conn.read().decode())["body"] or ""
         return body
 
 

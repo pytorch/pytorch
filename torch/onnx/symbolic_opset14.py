@@ -150,7 +150,6 @@ def scaled_dot_product_attention(
     ), "is_causal and attn_mask cannot be set at the same time"
     assert not enable_gqa, "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
 
-    scale = symbolic_helper._maybe_get_const(scale, "f")
     if symbolic_helper._is_none(scale):
         scale = _attention_scale(g, query)
 
