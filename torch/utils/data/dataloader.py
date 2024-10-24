@@ -521,12 +521,9 @@ class DataLoader(Generic[_T_co]):
             if (
                 self.batch_size is not None
             ):  # IterableDataset doesn't allow custom sampler or batch_sampler
-                from math import ceil
-
-                if self.drop_last:
-                    length = length // self.batch_size
-                else:
-                    length = ceil(length / self.batch_size)
+                length = (
+                    length + self.batch_size - 1 if not self.drop_last else length
+                ) // self.batch_size
             return length
         else:
             return len(self._index_sampler)
