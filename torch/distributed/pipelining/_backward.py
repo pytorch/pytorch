@@ -170,6 +170,7 @@ def stage_backward_input(
         stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
     )
 
+    handles = []
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
 
@@ -185,7 +186,8 @@ def stage_backward_input(
 
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
-            intermediate.register_prehook(get_hook(param_group, i))
+            handle = intermediate.register_prehook(get_hook(param_group, i))
+            handles.append(handle)
 
     # Stage 0 inputs do not require grads? Should we skip in that case?
     if all(tensor.requires_grad for tensor in input_values):
@@ -216,6 +218,10 @@ def stage_backward_input(
 
     else:
         dinputs = None
+
+    # hooks are no longer necessary, clean up for consistency
+    for handle in handles:
+        handle.remove()
 
     return dinputs, param_groups
 
@@ -255,6 +261,9 @@ def stage_backward_weight(
             grad_outputs=sum(param_group["grads"], tuple()),
             retain_graph=retain_graph,
         )
+        # release grad memory early after use
+        del param_group["grads"]
+
         for grad_acc, dw in zip(param_group["params"], dweights):
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:
