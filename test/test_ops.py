@@ -1755,6 +1755,8 @@ class TestCommon(TestCase):
                     op(input_, *args_, **kwargs_, out=out)
                 except Exception as e:
                     return e
+                else:
+                    print(f"[{dev}] {input_=} {args_=} {kwargs_=} {out=}")
 
             # Run the operation with the sample arguments on both CPU and meta devices, capturing
             # the raised error, if any.
