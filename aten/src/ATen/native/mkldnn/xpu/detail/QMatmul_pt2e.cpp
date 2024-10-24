@@ -39,6 +39,7 @@ void quantized_matmul_pt2(
     binary_alpha,
     input_scale,
     input_zero_point,
+    other,
     unary_post_op,
     unary_post_op_args,
     unary_post_op_algorithm,
