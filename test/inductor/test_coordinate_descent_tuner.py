@@ -12,7 +12,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 try:
-    import triton
+    import triton  # @manual
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)

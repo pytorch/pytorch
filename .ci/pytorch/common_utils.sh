@@ -179,7 +179,7 @@ function install_torchvision() {
 }
 
 function install_tlparse() {
-  pip_install --user "tlparse==0.3.7"
+  pip_install --user "tlparse==0.3.25"
   PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
@@ -191,9 +191,22 @@ function install_torchrec_and_fbgemm() {
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
+
+  # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
+  # seems to be an sccache-related issue
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    unset CMAKE_CUDA_COMPILER_LAUNCHER
+    sudo mv /opt/cache/bin /opt/cache/bin-backup
+  fi
+
   # See https://github.com/pytorch/pytorch/issues/106971
   CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
+    sudo mv /opt/cache/bin-backup /opt/cache/bin
+  fi
 }
 
 function clone_pytorch_xla() {

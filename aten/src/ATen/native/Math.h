@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -147,7 +148,7 @@ jiterator_also_stringify_as(jiterator_code(
 #define CENTRAL_RANGE 0.7
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_erfinv(T y) {
 /* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
@@ -1203,22 +1204,30 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
@@ -1230,12 +1239,12 @@ inline T abs_impl(T v) {
 }
 
 template <>
-C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
+[[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
   return v;
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_integral<T>::value, T>::type
+inline typename std::enable_if_t<std::is_integral_v<T>, T>
 calc_gcd(T a, T b) {
   a = abs_impl(a);
   b = abs_impl(b);
@@ -1284,7 +1293,7 @@ C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
  * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 chbevl(const T x, const T array[], size_t len) {
   T b0, b1, b2;
 
@@ -1361,7 +1370,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1388,7 +1397,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1417,7 +1426,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1443,7 +1452,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1463,7 +1472,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_i0(T _x) {
   T x = std::abs(_x);
 
@@ -1480,8 +1489,9 @@ calc_i0(T _x) {
   return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
-// Upcast bfloat16 input to float for numerical accuracy purposes
+// Upcast bfloat16/half input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+inline c10::Half calc_i0(c10::Half a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1493,7 +1503,7 @@ inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_i1(T _x) {
   T x = std::abs(_x);
 
@@ -1512,6 +1522,11 @@ calc_i1(T _x) {
   return (_x < T{0.0}) ? -out : out;
 }
 
+// Upcast bfloat16/half input to float for numerical accuracy purposes
+inline c10::BFloat16 calc_i1(c10::BFloat16 a) { return calc_i1(static_cast<float>(a)); }
+inline c10::Half calc_i1(c10::Half a) { return calc_i1(static_cast<float>(a)); }
+
+
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
@@ -1522,7 +1537,7 @@ calc_i1(T _x) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_i1e(T _x) {
   T x = std::abs(_x);
 
@@ -1540,6 +1555,11 @@ calc_i1e(T _x) {
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
+
+// Upcast bfloat16/half input to float for numerical accuracy purposes
+inline c10::BFloat16 calc_i1e(c10::BFloat16 a) { return calc_i1e(static_cast<float>(a)); }
+inline c10::Half calc_i1e(c10::Half a) { return calc_i1e(static_cast<float>(a)); }
+
 
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
@@ -1737,7 +1757,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
 
 template <typename T>
-C10_HOST_DEVICE  inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE  inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
@@ -2148,7 +2168,7 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
 }
 
 template <typename T>
-C10_HOST_DEVICE inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_erfcx(T x)
 {
   if (at::_isnan(x)) {
@@ -3060,14 +3080,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point<T>::value, int> = 0>
+template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_h_forward(T x, T n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
-    return hermite_polynomial_h_forward(x, ((!std::isinf(n)) && (!std::isnan(n))) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
+template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+__ubsan_ignore_float_cast_overflow__ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+    return hermite_polynomial_h_forward(x, (!std::isinf(n) && !std::isnan(n)) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>

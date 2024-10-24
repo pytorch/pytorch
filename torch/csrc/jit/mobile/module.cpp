@@ -5,14 +5,12 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <exception>
 
 #include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 
@@ -31,7 +29,7 @@ const Function* CompilationUnit::find_function(
 }
 
 Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
-  // NOLINTNEXTLINE
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<Function*>(
       static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
@@ -40,7 +38,7 @@ Method Module::get_method(const std::string& name) const {
   if (auto method = find_method(name)) {
     return *method;
   }
-  AT_ERROR("Method '", name, "' is not defined.");
+  TORCH_CHECK(false, "Method '", name, "' is not defined.");
 }
 
 bool Module::compareMethodSchemas(
@@ -351,5 +349,4 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
