@@ -835,6 +835,22 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(details3),
             )
 
+    def test_stable_strings(self):
+        """
+        Test that objects containing identical strings pickle the same
+        even if they are not the same id.
+        """
+        s1 = "string"
+        s2 = "strin"
+        s2 += "g"
+
+        self.assertNotEqual(id(s1), id(s2))
+
+        self.assertEqual(
+            FxGraphCachePickler.dumps([s1, s1]),
+            FxGraphCachePickler.dumps([s1, s2]),
+        )
+
     def test_get_hash_for_files(self):
         """
         Test the get_hash_for_files helper.
