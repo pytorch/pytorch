@@ -342,19 +342,6 @@ cmake_dependent_option(USE_SYSTEM_UCC "Use system-wide UCC" OFF "USE_UCC" OFF)
 cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
-  USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-  "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-  USE_GLOO_WITH_OPENSSL
-  "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(USE_C10D_GLOO "USE C10D GLOO" ON
-                       "USE_DISTRIBUTED;USE_GLOO" OFF)
-cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
-                       "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
-                       OFF)
-cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
@@ -469,6 +456,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+OPTION(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -487,6 +475,7 @@ if(USE_SYSTEM_LIBS)
   if(USE_NCCL)
     set(USE_SYSTEM_NCCL ON)
   endif()
+  set(USE_SYSTEM_NVTX ON)
 endif()
 
 # /Z7 override option When generating debug symbols, CMake default to use the
@@ -1096,6 +1085,10 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
+  endif()
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
