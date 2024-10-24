@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import os
-from collections import namedtuple
-from typing import Any
+from typing import Any, NamedTuple, Optional
 
 import torch
 
@@ -129,15 +128,21 @@ def make_dual(tensor, tangent, *, level=None):
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
-
-
-class UnpackedDualTensor(_UnpackedDualTensor):
+# NOTE: It is considered a opaque leaf in pytree utilities.
+#       We need to make this a quasi-namedtuple type that is not a pytree node while still keep
+#       Dynamo trace this type as a namedtuple type.
+class UnpackedDualTensor(NamedTuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
 
     See :func:`unpack_dual` for more details.
-
     """
+
+    primal: torch.Tensor
+    tangent: Optional[torch.Tensor]
+
+
+# remove `_asdict` method to make it a opaque leaf (pytree checks `_fields`, `_make`, `_asdict`)
+del UnpackedDualTensor._asdict
 
 
 def unpack_dual(tensor, *, level=None):

@@ -1501,7 +1501,7 @@ class AOTInductorModelCache:
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
-            if pytree._is_namedtuple_instance(example_outputs):
+            if pytree.is_namedtuple_instance(example_outputs):
                 typ = type(example_outputs)
                 pytree._register_namedtuple(
                     typ,
