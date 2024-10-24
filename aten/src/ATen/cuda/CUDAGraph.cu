@@ -9,9 +9,9 @@ namespace at::cuda {
 // average, but dynamic_graph_updater_kernel2 takes about 2.8
 // microseconds on average. There might be other potential speed ups,
 // but this is pretty good.
-template <size_t BLOCK_SIZE>
+template <size_t BLOCK_SIZE, bool VOLTA_OR_LATER>
 __global__ void __launch_bounds__(BLOCK_SIZE) dynamic_graph_updater_kernel(
-    __grid_constant__ const KernelUpdateSOA update_soa) {
+    __grid_constant__ const KernelUpdateSOA<VOLTA_OR_LATER> update_soa) {
   __shared__ const void* pointer_indirection[BLOCK_SIZE];
   __shared__ alignas(cudaGraphKernelNodeUpdate) char
       shared_updates_wrong_type[BLOCK_SIZE * sizeof(cudaGraphKernelNodeUpdate)];
@@ -43,14 +43,18 @@ __global__ void __launch_bounds__(BLOCK_SIZE) dynamic_graph_updater_kernel(
   }
 }
 
-void dynamic_graph_updater(const KernelUpdateSOA& update_soa) {
-  constexpr size_t BLOCK_SIZE = std::min<size_t>(64, KernelUpdateSOA::MAX_NUM_UPDATES);
-  dynamic_graph_updater_kernel<BLOCK_SIZE>
+template<bool VOLTA_OR_LATER>
+void dynamic_graph_updater(const KernelUpdateSOA<VOLTA_OR_LATER>& update_soa) {
+  constexpr size_t BLOCK_SIZE = std::min<size_t>(64, KernelUpdateSOA<VOLTA_OR_LATER>::MAX_NUM_UPDATES);
+  dynamic_graph_updater_kernel<BLOCK_SIZE, VOLTA_OR_LATER>
       <<<(update_soa.num_updates + BLOCK_SIZE - 1) / BLOCK_SIZE,
          BLOCK_SIZE,
          0,
          getCurrentCUDAStream()>>>(update_soa);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
+
+template void dynamic_graph_updater(const KernelUpdateSOA<false>& update_soa);
+template void dynamic_graph_updater(const KernelUpdateSOA<true>& update_soa);
 
 } // namespace at::cuda

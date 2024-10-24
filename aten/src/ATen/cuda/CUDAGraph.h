@@ -19,31 +19,25 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 
+template<bool VOLTA_OR_LATER>
 struct KernelUpdateSOA {
   // Even on Cuda 12.4, Torch supports compute capability down to sm_50
   // However, large parameter support was only added in sm_70
   // https://developer.nvidia.com/blog/cuda-12-1-supports-large-kernel-parameters/
-#if (__CUDA_ARCH__ >= 700)
-  static constexpr size_t KERNEL_PARAM_LIMIT_BYTES = 32764;
-#else
-  static constexpr size_t KERNEL_PARAM_LIMIT_BYTES = 4096;
-#endif
+  static constexpr size_t KERNEL_PARAM_LIMIT_BYTES = VOLTA_OR_LATER ? 32764 : 4096;
   static constexpr size_t PER_UPDATE = sizeof(void*) + sizeof(size_t) + sizeof(cudaGraphDeviceNode_t);
 
   static constexpr size_t MAX_NUM_UPDATES = (KERNEL_PARAM_LIMIT_BYTES - sizeof(size_t)) / PER_UPDATE;
 
   size_t num_updates;
-  // should this a struct? like: KernelUpdate updates[MAX_NUM_UPDATES];
+  // struct-of-arrays pattern for global memory coalescing
   cudaGraphDeviceNode_t device_nodes[MAX_NUM_UPDATES];
   void* new_pointers[MAX_NUM_UPDATES];
   size_t param_offsets[MAX_NUM_UPDATES];
 };
 
-static_assert(KernelUpdateSOA::MAX_NUM_UPDATES > 0);
-static_assert(sizeof(KernelUpdateSOA) <= KernelUpdateSOA::KERNEL_PARAM_LIMIT_BYTES);
-static_assert(sizeof(KernelUpdateSOA) + KernelUpdateSOA::PER_UPDATE > KernelUpdateSOA::KERNEL_PARAM_LIMIT_BYTES);
-
-void dynamic_graph_updater(const KernelUpdateSOA& updates);
+template<bool VOLTA_OR_LATER>
+void dynamic_graph_updater(const KernelUpdateSOA<VOLTA_OR_LATER>& updates);
 
 struct DynamicGraphKernelParamUpdate {
   // in other words:
@@ -91,6 +85,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
 
  protected:
+  template<bool VOLTA_OR_LATER>
+  void launch_dynamic_updaters(const std::vector<void*>& actualDataPtrs);
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
