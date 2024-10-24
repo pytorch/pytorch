@@ -6026,6 +6026,21 @@ class ShapeEnv:
                 maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
+                extra={
+                    "metadata": {
+                        "guard_added": {
+                            "expr": str_g,
+                            "stack": structured.from_traceback(
+                                CapturedTraceback.extract(skip=1).summary()
+                            ),
+                            "symbol_to_sources": {
+                                str(v): k
+                                for k, v in self.source_to_var.items()
+                                if v in g.free_symbols
+                            },
+                        }
+                    }
+                },
             )
 
     @lru_cache(256)
