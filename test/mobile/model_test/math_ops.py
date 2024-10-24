@@ -14,11 +14,11 @@ class PointwiseOpsModule(torch.nn.Module):
         b = torch.randn(4)
         t = torch.tensor([-1, -2, 3], dtype=torch.int8)
         r = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
-        t = torch.tensor([-1, -2, 3], dtype=torch.int8)
         s = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
         f = torch.zeros(3)
         g = torch.tensor([-1, 0, 1])
         w = torch.tensor([0.3810, 1.2774, -0.2972, -0.3719, 0.4637])
+        c = torch.tensor([True, False, True, False])
         return len(
             torch.abs(torch.tensor([-1, -2, 3])),
             torch.absolute(torch.tensor([-1, -2, 3])),
@@ -58,6 +58,9 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.clamp(a, min=-0.5, max=0.5),
             torch.clamp(a, min=0.5),
             torch.clamp(a, max=0.5),
+            torch.clamp(c, min=torch.tensor([False, True, False, True]), max=torch.tensor([False, True, False, True])),
+            torch.clamp(c, min=torch.tensor([False, True, False, True])),
+            torch.clamp(c, max=torch.tensor([False, True, False, True])),
             torch.clip(a, min=-0.5, max=0.5),
             torch.conj(a),
             torch.copysign(a, 1),

@@ -591,28 +591,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       NAME,                                                                   \
       AT_DISPATCH_CASE_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_BOOL_TYPES(...) \
-  AT_DISPATCH_CASE(at::ScalarType::Bool, __VA_ARGS__)
-
-#define AT_DISPATCH_CASE_ALL_TYPES_AND_BOOL(...) \
-  AT_DISPATCH_CASE_BOOL_TYPES(__VA_ARGS__)       \
-  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)   \
-  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)
-
-#define AT_DISPATCH_CASE_ALL_TYPES_AND2_AND_BOOL(  \
-    SCALARTYPE1, SCALARTYPE2, ...)                 \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_BOOL(__VA_ARGS__) \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)       \
-  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
-
-#define AT_DISPATCH_ALL_TYPES_AND2_AND_BOOL(    \
-    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)  \
-  AT_DISPATCH_SWITCH(                           \
-      TYPE,                                     \
-      NAME,                                     \
-      AT_DISPATCH_CASE_ALL_TYPES_AND2_AND_BOOL( \
-          SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
-
 #define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND2(  \
     SCALARTYPE1, SCALARTYPE2, ...)                    \
   AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__) \
