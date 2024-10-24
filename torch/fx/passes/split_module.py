@@ -412,24 +412,13 @@ def split_module(
     # add placeholders to partition inputs
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
-        new_inputs: Dict[str, None] = {}
         for inp in partition.inputs:
-            orig_node = orig_nodes[inp]
-            # We don't pass in get_attr nodes as inputs to the partition, but
-            # instead set them as targets and use getattr within the module
-            if orig_node.op == "get_attr":
-                assert isinstance(orig_node.target, str)
-                placeholder = partition.graph.get_attr(orig_node.target)
-                partition.targets[orig_node.target] = getattr(m, orig_node.target)
-            else:
-                placeholder = partition.graph.placeholder(
-                    inp,
-                    type_expr=orig_nodes[inp].type,
-                )
-                new_inputs[inp] = None
+            placeholder = partition.graph.placeholder(
+                inp,
+                type_expr=orig_nodes[inp].type,
+            )
             placeholder.meta = orig_nodes[inp].meta.copy()
             partition.environment[orig_nodes[inp]] = placeholder
-        partition.inputs = new_inputs
 
     # Transform nodes and collect targets for partition's submodule
     for node in m.graph.nodes:
