@@ -843,6 +843,11 @@ def _compile(
 
         return guarded_code
 
+    chromium_event_log = get_chromium_event_logger()
+
+    chromium_event_log.reset()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ):
@@ -926,8 +931,6 @@ def _compile(
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         convert_frame_intern = structured.intern_string(__file__)
         # Initialize the ChromiumEventLogger on start
-        chromium_event_log = get_chromium_event_logger()
-        chromium_event_log.reset()
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
@@ -1086,7 +1089,7 @@ def _compile(
                     for key, value in d.items()
                 }
 
-            config_dict = handle_sets(config.shallow_copy_dict())
+            config_dict = handle_sets(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1121,9 +1124,13 @@ def _compile(
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
                 json.dumps(config_dict),
+                True,  # is_forward
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time
+            )
 
 
 class ConvertFrame:

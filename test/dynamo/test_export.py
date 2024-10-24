@@ -34,6 +34,11 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
+@torch._dynamo.assume_constant_result
+def dynamo_assume_constant_result_global_function():
+    return "test"
+
+
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
@@ -1271,6 +1276,18 @@ def forward(self, x, y):
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_global_function(self):
+        class MyModule(torch.nn.Module):
+            def forward(self):
+                a = dynamo_assume_constant_result_global_function()
+                b = dynamo_assume_constant_result_global_function()
+                return a + b
+
+        module = MyModule()
+        graph, _ = torch._dynamo.export(module)()
+        result = graph()
+        self.assertEqual(result, "testtest")
 
     def test_export_with_constant_free_function_and_class_method(self):
         @torch._dynamo.assume_constant_result
@@ -4575,6 +4592,18 @@ def forward(self, x, b, y):
         graph, _ = torch._dynamo.export(fn)(*inputs)
         out = graph(*inputs)
         self.assertEqual(out, torch.ones(2, 2) + 1)
+
+    def test_dynamo_enum_in_tuple(self):
+        class IntEnum(int, Enum):
+            X = 0
+
+        def fn(tensor):
+            return tensor[..., IntEnum.X]
+
+        tensor = torch.rand((5, 5))
+        graph, _ = torch._dynamo.export(fn)(tensor)
+        out = graph(tensor)
+        self.assertEqual(out, tensor[:, 0])
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
