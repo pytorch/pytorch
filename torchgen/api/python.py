@@ -1095,9 +1095,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         # does not allow us to override __init__.
         seq_type = f"tuple[{', '.join(python_returns)}]"
         structseq_def_lines = [
-            f"class {structseq_name}(",
-            f"    {seq_type},  # fmt: skip",
-            "):",
+            f"class {structseq_name}({seq_type}):  # fmt: skip",
         ]
         for name, ret_type in zip(field_names, python_returns):
             structseq_def_lines.extend(
@@ -1110,8 +1108,9 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
             [
                 "    def __new__(",
                 "        cls,",
-                f"        sequence: {seq_type},  # fmt: skip",
-                "    ) -> Self: ...",
+                f"        sequence: {seq_type},",
+                "    ) -> Self:  # fmt: skip",
+                "        ...",
                 f"    n_fields: Final[_int] = {len(field_names)}",
                 f"    n_sequeunce_fields: Final[_int] = {len(field_names)}",
                 "    n_unnamed_fields: Final[_int] = 0",
@@ -1122,17 +1121,16 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         structseq_def = "\n".join(structseq_def_lines)
         # Example:
         # structseq_def = (
-        #     "class max(\n"
-        #     "    tuple[Tensor, Tensor],  # fmt: skip\n"
-        #     "):\n"
+        #     "class max(tuple[Tensor, Tensor]):  # fmt: skip\n"
         #     "    @property\n"
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
         #     "    def __new__(\n"
         #     "        cls,\n"
-        #     "        sequence: tuple[Tensor, Tensor],  # fmt: skip\n"
-        #     "    ) -> Self: ...\n"
+        #     "        sequence: tuple[Tensor, Tensor],\n"
+        #     "    ) -> Self:  # fmt: skip\n"
+        #     "        ...\n"
         #     "    n_fields: Final[_int] = 2",
         #     "    n_sequeunce_fields: Final[_int] = 2",
         #     "    n_unnamed_fields: Final[_int] = 0",
