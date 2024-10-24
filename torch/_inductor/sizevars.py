@@ -422,7 +422,6 @@ class SizeVarAllocator:
         static_expr = self.shape_env._maybe_evaluate_static(expr)
 
         if static_expr is not None:
-            # TODO: assert bool(static_expr)
             assert bool(static_expr)
             return left
 
