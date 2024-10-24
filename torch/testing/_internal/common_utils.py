@@ -2515,6 +2515,7 @@ def check_if_enable(test: unittest.TestCase):
                     "xpu": TEST_XPU,
                     "asan": TEST_WITH_ASAN,
                     "dynamo": TEST_WITH_TORCHDYNAMO,
+                    "dynamo_wrapped": TEST_WITH_TORCHDYNAMO,
                     "inductor": TEST_WITH_TORCHINDUCTOR,
                     "slow": TEST_WITH_SLOW,
                 }

@@ -296,7 +296,7 @@ test_python() {
 }
 
 
-test_dynamo_shard() {
+test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -802,7 +802,7 @@ test_without_numpy() {
   # Regression test for https://github.com/pytorch/pytorch/issues/66353
   python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   # Regression test for https://github.com/pytorch/pytorch/issues/109387
-  if [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+  if [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
     python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;torch.compile(lambda x:print(x))('Hello World')"
   fi
   popd
@@ -1475,9 +1475,9 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
       test_inductor_distributed
     fi
   fi
-elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
-  test_dynamo_shard "${SHARD_NUMBER}"
+  test_dynamo_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
