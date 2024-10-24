@@ -7619,6 +7619,64 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureSerDer  # TODO(pianpwk): NoneType has no attribute lower
+    def test_preserve_dynamic_decorators(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        # check that dynamic_shapes don't affect markers on original tensors
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        inputs = (x, y)
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes={
+                "x": (Dim.DYNAMIC, 4),
+                "y": (Dim.AUTO, 4),
+            },
+        )
+        self.assertFalse(hasattr(x, "_dynamo_dynamic_indices"))
+        self.assertFalse(hasattr(y, "_dynamo_weak_dynamic_indices"))
+
+        # check that markers produce dynamic behavior, and stay on tensors
+        torch._dynamo.mark_dynamic(inputs[0], 0)
+        torch._dynamo.mark_dynamic(inputs[1], 0)
+        ep = export(Foo(), inputs)
+        ep.module()(torch.randn(6, 4), torch.randn(6, 4))
+        self.assertTrue(hasattr(x, "_dynamo_dynamic_indices"))
+        self.assertTrue(hasattr(y, "_dynamo_dynamic_indices"))
+        self.assertEqual(list(getattr(x, "_dynamo_dynamic_indices", set())), [0])
+
+        # check that dynamic_shapes spec overrides markers
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Export found Dim.STATIC specified for dynamic_shapes.* at dim 0, "
+            r"but also found dynamic decorators \[_dynamo_dynamic_indices\]."
+        ):
+            export(
+                Foo(),
+                inputs,
+                dynamic_shapes={
+                    "x": (Dim.STATIC, 4),
+                    "y": (Dim.DYNAMIC, 4),
+                },
+            )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Export found Dim\(\"dx\"\) specified for dynamic_shapes.* at dim 0, "
+            r"but also found dynamic decorators \[_dynamo_dynamic_indices\]."
+        ):
+            dx = Dim("dx")
+            export(
+                Foo(),
+                inputs,
+                dynamic_shapes={
+                    "x": (dx, 4),
+                    "y": (dx, 4),
+                },
+            )
+
     @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
