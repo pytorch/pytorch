@@ -561,6 +561,36 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_torch_function_disabled_eager_backend(self):
+        @compile_full_eager
+        def fn(x):
+            return torch.add(x, 1.0)
+
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func == torch.add:
+                    return super().__torch_function__(
+                        lambda x, y: torch.add(x, y) + 2, types, args, kwargs
+                    )
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        x = torch.ones(2, 2)
+        x = x.as_subclass(TestSubclass)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {TestSubclass}):
+            result = fn(x)
+
+        print(result)
+        self.assertEqual(result, torch.ones(2, 2) + 3)
+
+        # create a subclass which rewrites a source op
+        # to the same source op w/ a different operand
+
     def test_return_subclass(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
