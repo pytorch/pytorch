@@ -5173,6 +5173,33 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     return grad_q, grad_k, grad_v
 
 
+@register_meta(
+    [
+        aten._scaled_dot_product_int8,
+    ]
+)
+def meta__scaled_dot_product_int8(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+    q_zp: int = 0,
+    q_scale: float = 0.0,
+    k_zp: int = 0,
+    k_scale: float = 0.0,
+    v_zp: int = 0,
+    v_scale: float = 0.0,
+    a_zp: int = 0,
+    a_scale: float = 0.0,
+    o_zp: int = 0,
+    o_scale: float = 0.0,
+):
+    return torch.empty_like(query)
+
+
 @register_meta([aten._scaled_dot_product_efficient_attention])
 def meta__scaled_dot_product_efficient_attention(
     query: Tensor,

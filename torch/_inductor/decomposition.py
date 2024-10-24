@@ -96,6 +96,7 @@ decomps_to_exclude = [
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
+    aten._scaled_dot_product_int8.default,
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
