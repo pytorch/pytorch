@@ -1,16 +1,15 @@
-#include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/alloc_cpu.h>
 
-#include <torch/csrc/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/Device.h>
 #include <torch/extension.h>
 
-#include <ATen/native/cpu/Loops.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
-#include <ATen/EmptyTensor.h>
-#include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/native/cpu/Loops.h>
 
 static uint64_t op_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -179,25 +178,6 @@ bool custom_op_called() {
   return called;
 }
 
-class PrivateGeneratorImpl : public at::CPUGeneratorImpl {
-public:
-  // Constructors
-  PrivateGeneratorImpl(c10::DeviceIndex device_index) {
-    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
-    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
-  }
-  ~PrivateGeneratorImpl() override = default;
-};
-
-// this is used to register generator
-at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
-  return at::make_generator<PrivateGeneratorImpl>(device_index);
-}
-
-void register_generator() {
-  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
-}
-
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -205,5 +185,4 @@ void register_generator() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_op_called", &custom_op_called, "check if our custom function was called");
-    m.def("register_generator", &register_generator, "register generator for custom device");
 }
