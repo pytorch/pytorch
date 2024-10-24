@@ -140,16 +140,23 @@ def get_param_groups(
 
 
 def stage_backward_input(
-    stage_outputs: List[torch.Tensor],
+    stage_outputs_or_loss: List[torch.Tensor],
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
 ):
     """
-    compute the gradients for only the stage inputs with respect to the stage outputs
+    Compute the gradients for only the stage inputs with
+    respect to the stage outputs (if non-last stage) or loss (if last stage)
+
+    After computing input gradients, we save the intermediate nodes in `param_groups`
+    for later use in stage_backward_weight. We don't need to save any other intermediate nodes
+    that aren't needed for dW because when we do dW calculation, we start from saved intermediates.
+    Detaching the stage_outputs_or_loss at the end of this function is important as
+    it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
     stage_output_grad_fns: List[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
     )
     stage_input_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, input_values))
@@ -185,11 +192,11 @@ def stage_backward_input(
         if output_grads is None:
             # In case this is the loss and there are no output_grads, then we just use 1s
             output_grads = [
-                torch.ones_like(stage_output) for stage_output in stage_outputs
+                torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
             ]
 
         dinputs = torch.autograd.grad(
-            stage_outputs,
+            stage_outputs_or_loss,
             inputs=input_values,
             grad_outputs=output_grads,
             retain_graph=True,
@@ -202,9 +209,9 @@ def stage_backward_input(
             else:
                 inp.grad += dinputs[i]
 
-        # stage_outputs are not used in backwards after this point, so we can safely remove it from the autograd graph
-        # this allows autograd to clear up the graph dedicated for this output and free up significant memory
-        for t in stage_outputs:
+        # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
+        # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
+        for t in stage_outputs_or_loss:
             t.detach_()
 
     else:

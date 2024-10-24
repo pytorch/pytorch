@@ -697,6 +697,8 @@ class _PipelineStageBase(ABC):
                 self.dw_runner[bwd_chunk_id] = lambda: None
 
         if self.is_last:
+            # Autograd dependencies:
+            #    rest_of_autograd_graph -> stage_output -> loss
             # stage_output is no longer used in the last stage for backward and only needed
             # to return to the user in merge_output_chunks, therefore
             # this should be detached to release autograd graph context and free memory earlier
