@@ -3,6 +3,7 @@
 
 import collections.abc
 import contextlib
+import ctypes
 import hashlib
 import io
 import itertools
@@ -676,9 +677,9 @@ class _World:
                     "pg_name": self.pg_names[pg],
                     "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": list(ranks.keys())
-                    if len(ranks) != default_pg_size
-                    else [],  # 'ranks' is an empty list when all ranks are involved in a pg
+                    "ranks": (
+                        list(ranks.keys()) if len(ranks) != default_pg_size else []
+                    ),  # 'ranks' is an empty list when all ranks are involved in a pg
                     "group_size": len(ranks),
                     "group_count": self.group_count,
                 }
@@ -1775,14 +1776,9 @@ def _new_process_group_helper(
     # communicators based on pre-existing ones, which can save
     # initialization time.  Due to lazy initialization of
     # communicators in some backends, we have to be careful and only
-    # split when we *know* the backends already are connected _on all
-    # ranks_.  We can only know this if the group we are making is the
-    # entire world or if we have bound a device id to the world (which
-    # causes early connection initialization).
-    if is_initialized() and (
-        len(global_ranks_in_group) == _get_default_group().size()
-        or _get_default_group().bound_device_id
-    ):
+    # split when we *know* the default PG has already started communicator initialization.
+    # We know this if we have bound a device id to the default pg (eager initialized).
+    if is_initialized() and _get_default_group().bound_device_id:
         split_from = _get_split_source(_get_default_group())
     else:
         split_from = None
@@ -4475,26 +4471,38 @@ def _create_process_group_wrapper(
     return wrapped_pg
 
 
-# helper function for deterministically hashing a list of ranks
-def _hash_ranks(ranks: List[int]):
-    return hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+# helper function for deterministically hashing a list of ranks to a unique
+# string
+def _hash_ranks_to_str(ranks: List[int]) -> str:
+    rank_join: str = "_".join(map(str, ranks))
+    # In case there is already a PG with the same rank composition
+    unique_str = "_".join([rank_join, str(len(_world.pg_names))])
+    return hashlib.sha1(bytes(unique_str, "utf-8")).hexdigest()
 
 
 # Takes a list of ranks and computes an integer color
 def _process_group_color(ranks: List[int]) -> int:
-    # Convert our hash to an int, but avoid negative numbers by shifting a bit.
-    return int(_hash_ranks(ranks), 16) % (sys.maxsize >> 1)
+    # Convert list to tuple to make it hashable
+    ranks = tuple(ranks)
+    hash_value = hash(ranks)
+    # Split color must be:
+    # - a non-negative integer;
+    # - a type compatible with C's int because we are pybinding to the latter.
+    # Thus, we limit the hash value within c_int's max value.
+    max_c_int = 2 ** (ctypes.sizeof(ctypes.c_int) * 8 - 1)
+    color = abs(hash_value) % max_c_int
+    return color
 
 
 def _process_group_name(ranks, use_hashed_name):
+    # Create name for a process group.
     global _world
     if use_hashed_name:
-        pg_name = _hash_ranks(ranks)
-        while pg_name in _world.pg_names.values():
-            pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
+        pg_name = _hash_ranks_to_str(ranks)
     else:
         pg_name = str(_world.group_count)
         _world.group_count += 1
+    # TODO: why is group count incremented only in the else path?
     return pg_name
 
 
@@ -4568,7 +4576,7 @@ def split_group(
         raise RuntimeError(
             "No device associated with the default pg, not safe to split any process groups"
         )
-    default_backend, default_store = _world.pg_map[default_pg]
+    _default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 

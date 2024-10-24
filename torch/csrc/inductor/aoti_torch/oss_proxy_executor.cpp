@@ -21,9 +21,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
   auto& dynamic_args = op_kernel.dynamic_args_;
 
   TORCH_CHECK(serialized_arg.size() == 1);
-  auto serialized_arg_elem = serialized_arg.begin();
-  std::string serialized_arg_type = serialized_arg_elem.key();
-  auto& serialized_arg_val = serialized_arg_elem.value();
+  std::string serialized_arg_type = serialized_arg.begin().key();
+  auto& serialized_arg_val = serialized_arg.begin().value();
 
   switch (schema_arg_type->kind()) {
     case c10::TypeKind::TensorType: {
@@ -193,7 +192,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           schema_arg_type->castRaw<at::OptionalType>()->getElementType();
 
       if (serialized_arg_type == "as_none") {
-        stack.emplace_back(c10::nullopt);
+        stack.emplace_back(std::nullopt);
         if (inner_type->kind() == c10::TypeKind::TensorType) {
           // Tensor is None
           dynamic_args.emplace_back(index, DynamicArgType::TensorType, 0);
@@ -256,9 +255,8 @@ void OSSProxyExecutor::get_output_info_from_serialized(
   size_t output_index = 0;
   for (const auto& serialized_output : serialized_node["outputs"]) {
     TORCH_CHECK(serialized_output.size() == 1);
-    auto serialized_output_elem = serialized_output.begin();
-    std::string serialized_output_type = serialized_output_elem.key();
-    auto& serialized_output_val = serialized_output_elem.value();
+    std::string serialized_output_type = serialized_output.begin().key();
+    auto& serialized_output_val = serialized_output.begin().value();
 
     auto& schema_return = schema_returns[output_index];
     const at::TypePtr& schema_return_type = schema_return.real_type();
@@ -416,7 +414,7 @@ void OSSProxyExecutor::call_function(
                 flatten_tensor_args[tensor_id++]);
             optional_tensor_list.emplace_back(*tensor);
           } else if (item_type == "as_none") {
-            optional_tensor_list.emplace_back(c10::nullopt);
+            optional_tensor_list.emplace_back(std::nullopt);
           }
         }
         stack[arg_index] = optional_tensor_list;
