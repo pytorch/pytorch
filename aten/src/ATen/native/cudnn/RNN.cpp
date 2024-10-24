@@ -2363,8 +2363,7 @@ DropoutState& get_dropout_state(
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0) {
-    const auto& gen =
-        at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
     bool reset_rnn_state = gen_impl->reset_rnn_state();
     if (!state.buffer.defined() || reset_rnn_state) {
