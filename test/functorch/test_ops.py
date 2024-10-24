@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     runOnRocm,
     skipIfRocm,
+    skipIfS390X,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -1041,6 +1042,10 @@ class TestOperators(TestCase):
                 xfail(
                     "unbind_copy"
                 ),  # Batching rule not implemented for aten::unbind_copy.int.
+                decorate("linalg.tensorsolve", decorator=skipIfS390X),
+                decorate("nn.functional.max_pool1d", decorator=skipIfS390X),
+                decorate("nn.functional.max_unpool2d", decorator=skipIfS390X),
+                decorate("nn.functional.multilabel_margin_loss", decorator=skipIfS390X),
             }
         ),
     )
