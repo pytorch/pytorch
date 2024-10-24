@@ -13,6 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
+    BypassFxGraphCache,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -652,113 +653,112 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test the hashing of tensor constants.
         """
-        data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
+        data = FxGraphCachePickler().dumps(torch.tensor(list(range(9))))
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
     def test_hash_fake_tensors(self):
         """
         Test hashing (pickling) FakeTensors with various characteristics.
         """
+        pickler = FxGraphCachePickler()
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
-            data = FxGraphCachePickler.dumps(torch.randn(1))
+            data = pickler.dumps(torch.randn(1))
             self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
             # Different shapes:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(4)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(4)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3)),
+                pickler.dumps(torch.randn(3, 3)),
             )
 
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 4)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 4)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(4, 3)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(4, 3)),
             )
 
             # Different strides:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(
-                    torch.randn(3, 3).transpose(0, 1).transpose(0, 1)
-                ),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3).transpose(0, 1).transpose(0, 1)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, 3)),
-                FxGraphCachePickler.dumps(torch.randn(3, 3).transpose(0, 1)),
+                pickler.dumps(torch.randn(3, 3)),
+                pickler.dumps(torch.randn(3, 3).transpose(0, 1)),
             )
 
             # Different storage offsets:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(3)[1:]),
             )
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3)[1:]),
-                FxGraphCachePickler.dumps(torch.randn(2)),
+                pickler.dumps(torch.randn(3)[1:]),
+                pickler.dumps(torch.randn(2)),
             )
 
             # Different dtypes:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float32)),
-                FxGraphCachePickler.dumps(torch.randn(3, dtype=torch.float64)),
+                pickler.dumps(torch.randn(3, dtype=torch.float32)),
+                pickler.dumps(torch.randn(3, dtype=torch.float64)),
             )
 
             # Different 'requires_grad':
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=True)),
-                FxGraphCachePickler.dumps(torch.randn(3, requires_grad=False)),
+                pickler.dumps(torch.randn(3, requires_grad=True)),
+                pickler.dumps(torch.randn(3, requires_grad=False)),
             )
 
             # Different memory formats:
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(1, 2, 3, 4)),
-                FxGraphCachePickler.dumps(
+                pickler.dumps(torch.randn(1, 2, 3, 4)),
+                pickler.dumps(
                     torch.randn(1, 2, 3, 4).to(memory_format=torch.channels_last)
                 ),
             )
 
             # Different devices:
             self.assertEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="meta")),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(torch.randn(3, device="meta")),
-                FxGraphCachePickler.dumps(torch.randn(3, device="cpu")),
+                pickler.dumps(torch.randn(3, device="meta")),
+                pickler.dumps(torch.randn(3, device="cpu")),
             )
 
             if HAS_MULTIGPU:
                 self.assertEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
                 self.assertNotEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
+                    pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
 
     def test_hash_kwargs(self):
@@ -766,20 +766,22 @@ class TestFxGraphCacheHashing(TestCase):
         Test the special handling of the kwargs when hashing, i.e.,
         ordering of the kwargs dict and any set arguments.
         """
+        pickler = FxGraphCachePickler()
+
         # Dict order of the kwargs should not affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1}, [])
         details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0}, [])
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # Different kwarg values should affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": 0}, [])
         details2 = FxGraphHashDetails(None, [], {"a": 1}, [])
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # Set order should not affect hashes. Sets are unordered, but
@@ -789,16 +791,16 @@ class TestFxGraphCacheHashing(TestCase):
         details1 = FxGraphHashDetails(None, [], {"a": set1}, [])
         details2 = FxGraphHashDetails(None, [], {"a": set2}, [])
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
         # But different set contents should affect hashes.
         details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}}, [])
         details2 = FxGraphHashDetails(None, [], {"a": {1, 2}}, [])
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
 
     def test_hash_config_changes(self):
@@ -812,13 +814,15 @@ class TestFxGraphCacheHashing(TestCase):
         with config.patch({"max_autotune": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
+        pickler = FxGraphCachePickler()
+
         self.assertEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details2),
+            pickler.dumps(details1),
+            pickler.dumps(details2),
         )
         self.assertNotEqual(
-            FxGraphCachePickler.dumps(details1),
-            FxGraphCachePickler.dumps(details3),
+            pickler.dumps(details1),
+            pickler.dumps(details3),
         )
 
     def test_hash_custom_passes(self):
@@ -845,13 +849,24 @@ class TestFxGraphCacheHashing(TestCase):
             custom_pass._uuid = "2"
             details3 = FxGraphHashDetails(None, [], {}, [])
 
+            pickler = FxGraphCachePickler()
+
             self.assertEqual(
-                FxGraphCachePickler.dumps(details1),
-                FxGraphCachePickler.dumps(details2),
+                pickler.dumps(details1),
+                pickler.dumps(details2),
             )
             self.assertNotEqual(
-                FxGraphCachePickler.dumps(details1),
-                FxGraphCachePickler.dumps(details3),
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
+
+    def test_bypass_unsupported(self):
+        """
+        Test _reduce_unsupported
+        """
+        with self.assertRaises(BypassFxGraphCache):
+            FxGraphCachePickler().dumps(
+                torch.fx.experimental._backward_state.BackwardState()
             )
 
     def test_stable_strings(self):
@@ -865,9 +880,10 @@ class TestFxGraphCacheHashing(TestCase):
 
         self.assertNotEqual(id(s1), id(s2))
 
+        pickler = FxGraphCachePickler()
         self.assertEqual(
-            FxGraphCachePickler.dumps([s1, s1]),
-            FxGraphCachePickler.dumps([s1, s2]),
+            pickler.dumps([s1, s1]),
+            pickler.dumps([s1, s2]),
         )
 
     def test_get_hash_for_files(self):
