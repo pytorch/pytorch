@@ -526,6 +526,12 @@ class SymInt:
     def __rsub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __and__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __or__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
         return self.node._graph_repr()
 
@@ -900,6 +906,7 @@ for __name in (
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
+
 
 del __fn, __name, __sym_name, _get_sym_math_fn
 
