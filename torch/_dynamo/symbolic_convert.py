@@ -377,6 +377,23 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
+    user_stack_formatted = "".join(traceback.format_list(user_stack))
+    user_stack_trace = (
+        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"
+        % (
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
+        )
+    )
+    # TODO: add more structure to this in the future
+    torch._logging.trace_structured(
+        "dynamo_graph_break_reason",
+        payload_fn=lambda: "%s\n%s"
+        % (user_stack_trace, traceback.format_exc() if exc_info else ""),
+    )
+
     # torch._dynamo.explain() formats this a little nicer, and presents a slightly
     # more actionable user code pointer
     if (
@@ -384,24 +401,9 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         and not explain
         and graph_break_dup_warning_checker.add(frame_loc)
     ):
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
-        user_stack_trace = (
-            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"
-            % (
-                frame_loc[0],
-                frame_loc[1],
-                reason,
-                user_stack_formatted,
-            )
-        )
-        torch._logging.trace_structured(
-            "dynamo_graph_break_reason",
-            payload_fn=lambda: "%s\n%s"
-            % (user_stack_trace, traceback.format_exc() if exc_info else ""),
-        )
         graph_break_log.debug(
             user_stack_trace,
             exc_info=exc_info,
@@ -410,19 +412,12 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         # This log line MUST not contain the string "Graph break in user code",
         # exercised by
         #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-        user_stack_trace = (
-            "Graph break (details suppressed) in user code at %s:%s\nReason: %s"
-            % (
-                frame_loc[0],
-                frame_loc[1],
-                reason,
-            )
+        graph_break_log.debug(
+            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
         )
-        torch._logging.trace_structured(
-            "dynamo_graph_break_reason",
-            payload_fn=lambda: user_stack_trace,
-        )
-        graph_break_log.debug(user_stack_trace)
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
