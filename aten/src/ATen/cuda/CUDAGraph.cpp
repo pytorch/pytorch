@@ -600,16 +600,21 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
   }
 
-  KernelUpdateSOA update_soa;
-  update_soa.num_updates = kernel_param_updates_.size();
-  for (size_t i = 0; i < kernel_param_updates_.size(); i++) {
-    auto update = kernel_param_updates_[i];
-    update_soa.device_nodes[i] = update.dev_node;
-    update_soa.new_pointers[i] =
-        (char*)actualDataPtrs[update.alloc_idx] + update.offset;
-    update_soa.param_offsets[i] = update.param_offset;
+  for (size_t off = 0; off < kernel_param_updates_.size(); off += KernelUpdateSOA::MAX_NUM_UPDATES) {
+    // (overwhelmingly likely that this loop only runs once)
+    size_t num_updates = std::min(KernelUpdateSOA::MAX_NUM_UPDATES, kernel_param_updates_.size() - off);
+    KernelUpdateSOA update_soa{
+      .num_updates = num_updates,
+    };
+    for (size_t i = 0; i < num_updates; i++) {
+      auto update = kernel_param_updates_[off + i];
+      update_soa.device_nodes[i] = update.dev_node;
+      update_soa.new_pointers[i] =
+          (char*)actualDataPtrs[update.alloc_idx] + update.offset;
+      update_soa.param_offsets[i] = update.param_offset;
+    }
+    dynamic_graph_updater(update_soa);
   }
-  dynamic_graph_updater2(update_soa);
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
 }
 
