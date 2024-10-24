@@ -379,7 +379,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"
+        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"  # noqa: UP031
         % (
             frame_loc[0],
             frame_loc[1],
@@ -393,7 +393,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             "name": "dynamo_graph_break_reason",
             "encoding": "string",
         },
-        payload_fn=lambda: "%s\n%s"
+        payload_fn=lambda: "%s\n%s"  # noqa: UP031
         % (user_stack_trace, traceback.format_exc() if exc_info else ""),
     )
 

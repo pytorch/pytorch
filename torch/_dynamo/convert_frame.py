@@ -1207,7 +1207,7 @@ class ConvertFrame:
                                 "name": "dynamo_graph_break_reason",
                                 "encoding": "string",
                             },
-                            payload_fn=lambda: "%s\n%s"
+                            payload_fn=lambda: "%s\n%s"  # noqa: UP031
                             % (user_stack_trace, traceback.format_exc()),
                         )
                         graph_break_log.debug(
