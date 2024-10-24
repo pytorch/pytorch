@@ -208,7 +208,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
       struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
       char ip[INET_ADDRSTRLEN];
       if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
-          NULL) {
+          nullptr) {
         return fmt::format("{}:{}", ip, psai->sin_port);
       }
     } else if (addr->sa_family == AF_INET6) {
@@ -216,7 +216,7 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
       char ip[INET6_ADDRSTRLEN];
       if (inet_ntop(
               addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
-          NULL) {
+          nullptr) {
         return fmt::format("[{}]:{}", ip, psai->sin6_port);
       }
     }
@@ -587,6 +587,11 @@ bool SocketListenOp::tryListen(int family) {
     }
   }
 
+  recordError(
+      "The server could not be initialized on any address for port={}, family={}",
+      port_,
+      family);
+
   return false;
 }
 
@@ -594,7 +599,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   SocketImpl::Handle hnd =
       ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
   if (hnd == SocketImpl::invalid_socket) {
-    recordError(
+    C10D_DEBUG(
         "The server socket cannot be initialized on {} {}.",
         addr,
         getSocketError());

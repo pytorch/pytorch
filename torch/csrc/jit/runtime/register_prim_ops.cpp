@@ -1041,7 +1041,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor t = pop(stack).toTensor();
           if (t.dim() == 0) {
-            AT_ERROR("len() of a 0-d tensor");
+            TORCH_CHECK(false, "len() of a 0-d tensor");
           }
           push(stack, t.sizes()[0]);
         },
@@ -1488,7 +1488,7 @@ void dictPop(Stack& stack) {
     if (has_default) {
       push(stack, default_value);
     } else {
-      AT_ERROR("KeyError: ", key);
+      TORCH_CHECK(false, "KeyError: ", key);
     }
   } else {
     // note: before erase
@@ -1508,7 +1508,7 @@ void dictDelete(Stack& stack) {
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.empty()) {
-    AT_ERROR("popitem(): dictionary is empty");
+    TORCH_CHECK(false, "popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
 
