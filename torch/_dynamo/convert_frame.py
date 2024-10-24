@@ -1200,10 +1200,7 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
-                        user_stack_trace = (
-                            "Graph break: skip: from user code at:\n%s"
-                            % user_stack_formatted
-                        )
+                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
                         torch._logging.trace_structured(
                             "artifact",
                             metadata_fn=lambda: {
