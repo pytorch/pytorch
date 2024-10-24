@@ -572,6 +572,12 @@ if(USE_ROCM)
   # list(APPEND ATen_HIP_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
 
+# ---[ ARMPL for Arm architecture
+if(ARMPL_FOUND)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ARMPL_LIBRARY})
+  list(APPEND ATen_CPU_INCLUDE ${ARMPL_INCLUDE_DIR})
+endif(ARMPL_FOUND)
+
 set(ATEN_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_INCLUDE_DIR}")
 configure_file(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
