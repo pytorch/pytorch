@@ -67,6 +67,7 @@ SUPPORTED_OPS = {
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor,
+    torch.ops.aten.div.Tensor,
 }
 
 
@@ -106,7 +107,6 @@ def tensorify_python_scalars(
     placeholders = set()
     for node in graph.nodes:
         if node.op != "placeholder":
-            first_none_placeholder = node
             break
         else:
             placeholders.add(node)

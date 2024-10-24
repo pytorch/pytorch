@@ -99,7 +99,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch._inductor import config, test_operators
+from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
@@ -1574,10 +1574,16 @@ class CommonTemplate:
                 pass  # no device asserts in halide
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
-                self.assertTrue((") ? (" in code or "blendv" in code) is has_wrapping)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
-                # Assert that we always vectorize the kernel regardless of wrapping / checks
-                self.assertTrue(("loadu" in code) is vectorize)
+                if (
+                    cpu_vec_isa.valid_vec_isa_list()
+                    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                ):
+                    self.assertTrue(
+                        (") ? (" in code or "blendv" in code) is has_wrapping
+                    )
+                    # Assert that we always vectorize the kernel regardless of wrapping / checks
+                    self.assertTrue(("loadu" in code) is vectorize)
             else:
                 code = run_and_get_triton_code(fn_opt, *inps)
                 self.assertTrue(("tl.where" in code) is has_wrapping)
@@ -1889,8 +1895,20 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
-        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+        atol = None
+        rtol = None
+        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
+            atol = 1e-3
+            rtol = 1e-3
+        self.common(
+            fn,
+            (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
+            atol=atol,
+            rtol=rtol,
+        )
+        self.common(
+            fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
+        )
 
     def test_split_cumsum(self):
         def fn(a):
@@ -3329,6 +3347,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
@@ -3344,6 +3363,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
@@ -3361,6 +3381,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm3(self):
         def fn(a, b):
@@ -9743,7 +9764,6 @@ class CommonTemplate:
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
-    @skipIfRocm
     def test_sdpa(self, use_block_ptr: bool, prefer_nd_tiling: bool):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
@@ -10198,9 +10218,15 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
+            num = (
+                2
+                if cpu_vec_isa.valid_vec_isa_list()
+                and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                else 1
+            )
             FileCheck().check_count(
                 "static_cast<int64_t>(256)",
-                2,
+                num,
                 exactly=True,
             ).run(code)
 
@@ -10397,7 +10423,6 @@ class CommonTemplate:
             rtol=1e-2,  # to pass lowp check on GPU
         )
 
-    @skipIfRocm
     @expectedFailureXPU
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
@@ -10434,7 +10459,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    @xfail_if_triton_cpu
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(
@@ -11104,8 +11128,6 @@ class CommonTemplate:
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    # We only support dtypeview for abi_compatible aoti
-    @torch._inductor.config.patch(abi_compatible=True)
     @parametrize(
         "dtype_x, dtype_y",
         list(itertools.product(test_dtypes, test_dtypes)),
@@ -11140,7 +11162,6 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
-    @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
         @torch.compile
         def fn(x):
