@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    skipIfNoXPU,
     skipIfRocm,
     TEST_MKL,
 )
@@ -695,7 +696,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.conv2(self.conv(x))
 
         mod = M().eval().to(device=device)
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).to(device=device)
+        v = (
+            torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False)
+            .add(1)
+            .to(device=device)
+        )
 
         def matcher_check_fn():
             # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
@@ -730,12 +735,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @skipIfNoXPU
     def test_qconv2d_xpu(self):
         r"""
         This testcase will quantize a single Conv2d module.
         """
         self._qconv2d_cpu_test_helper("xpu")
-
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -771,7 +776,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return self.unary_fn2(self.conv2(tmp))
 
         mod = M().eval().to(device=device)
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1).to(device=device)
+        v = (
+            torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False)
+            .add(1)
+            .to(device=device)
+        )
 
         def matcher_check_fn():
             # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
@@ -804,6 +813,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_relu_xpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
@@ -829,6 +839,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_relu6_xpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
@@ -845,6 +856,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_hardtanh_xpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
@@ -878,6 +890,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_hardswish_xpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
@@ -912,6 +925,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfNoXPU
     def test_qconv2d_silu_xpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -2926,6 +2940,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn=matcher_check_fn,
                 quantizer=quantizer,
             )
+
 
 instantiate_parametrized_tests(TestPatternMatcher)
 
