@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union, Set
+from dataclasses import dataclass
 
-from sympy import Symbol
+from sympy import Symbol, Integer
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -34,6 +35,13 @@ cexpr = CppPrinter().doprint
 def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
+@dataclass(frozen=True)
+class MyKernelArg:
+    node: IRNode
+    symbol: str   
+    size_or_stride: str
+    dim: int
+
 
 class CUDAKernel(Kernel):
     """
@@ -41,6 +49,22 @@ class CUDAKernel(Kernel):
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
+    myargs: Dict[str, MyKernelArg]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.myargs = {}
+
+    def find_symbol(self, node, size_or_stride, dim):
+        def matches(my_kernel_arg):
+            return (
+                my_kernel_arg.node == node
+                and my_kernel_arg.size_or_stride == size_or_stride
+                and my_kernel_arg.dim == dim
+            )
+        matches =  [arg.symbol for arg in self.myargs.values() if matches(arg)]
+        assert len(matches) <= 1, matches
+        return None if len(matches) == 0 else matches[0]
 
 
 class CUDATemplateKernel(CUDAKernel):
@@ -76,6 +100,8 @@ class CUDATemplateKernel(CUDAKernel):
         """
         Generates code to check that a node is not null.
         """
+        # TODO: figure out what to do with dynamic shapes.
+        return ""
         if node is None:
             return ""
 
@@ -148,27 +174,61 @@ class CUDATemplateKernel(CUDAKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        def collect_symbolic_size_and_strides(inp) -> List[str]:
-            if inp is None:
-                return set()
-            sizes = inp.get_size()
-            strides = inp.get_stride()
-            from torch.fx.experimental.symbolic_shapes import free_symbols
-
-            symbols = free_symbols(sizes + strides)
-            return {cexpr(self.rename_indexing(symbol)) for symbol in symbols}
-
-        from functools import reduce
-
-        symbolics = reduce(
-            lambda a, b: a | b,
-            map(lambda b: collect_symbolic_size_and_strides(b), inputs + outputs),
-        )
-        size_args = [f"size_t {s}" for s in sorted(symbolics, key=str)]
+        self.size_args()
+        size_args = [f"const int32_t {s}" for s in ("M", "K", "N", "lda", "ldb", "ldc", "ldd")]
 
         signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
+    
+    def size_args(self):
+        X = self.named_nodes['X']
+        W = self.named_nodes['W']
+        Bias = self.named_nodes.get('Bias', None)
+        Y = self.named_nodes['Y']
+
+        mdim = _normalize_idx(-2, len(X.get_size()))        
+        kdim = _normalize_idx(-1, len(X.get_size()))        
+        ndim = _normalize_idx(-1, len(W.get_size()))        
+
+        M = X.get_size()[mdim]
+        K = X.get_size()[kdim]
+        N = W.get_size()[ndim]
+
+        self.myargs.setdefault('M', MyKernelArg(node=X, symbol='M', size_or_stride='size', dim=mdim))
+        self.myargs.setdefault('K', MyKernelArg(node=W, symbol='K', size_or_stride='size', dim=kdim))
+        self.myargs.setdefault('N', MyKernelArg(node=Y, symbol='N', size_or_stride='size', dim=ndim))
+
+        def find_ld(node):
+            if node is None:
+                return 0
+            dim = find_ld_idx(node)
+            return node.get_stride()[dim]
+
+        def find_ld_idx(node):
+            strides = node.get_stride()   # ignore batch dim if present
+            if V.graph.sizevars.statically_known_equals(strides[-1], 1):
+                return _normalize_idx(-2, len(strides))
+
+            assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+            return _normalize_idx(-1, len(strides))
+        
+        lda_dim = find_ld_idx(X)
+        ldb_dim = find_ld_idx(W)
+        ldc_dim = find_ld_idx(Y)
+        ldd_dim = find_ld_idx(Bias) if Bias else None
+
+        self.myargs.setdefault('lda', MyKernelArg(node=X, symbol='lda', size_or_stride='stride', dim=lda_dim))
+        self.myargs.setdefault('ldb', MyKernelArg(node=W, symbol='ldb', size_or_stride='stride', dim=ldb_dim))
+        self.myargs.setdefault('ldc', MyKernelArg(node=Y, symbol='ldc', size_or_stride='stride', dim=ldc_dim))
+        if Bias:
+            self.myargs.setdefault('ldd', MyKernelArg(node=Bias, symbol='ldd', size_or_stride='stride', dim=ldd_dim))
+
+        LDA = find_ld(X)
+        LDB = find_ld(W)
+        LDC = find_ld(Y)
+        LDD = find_ld(Bias)
+        return M, K, N, LDA, LDB, LDC, LDD
 
     def call_kernel(
         self,
@@ -196,6 +256,9 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
+
+        call_args.extend(self.size_args())
+        arg_types.extend(type(a) for a in self.size_args())
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -310,13 +373,19 @@ class CUDATemplateKernel(CUDAKernel):
         if end_index is None:
             end_index = start_index
         end_index = _normalize_idx(end_index, len(node.get_size()))
-
         sizes = node.get_size()[start_index : end_index + 1]
         if len(sizes) == 0:
             return str(default_value)
 
+        sizes = [
+            self.find_symbol(node, "size", i) or node.get_size()[i]
+            for i in range(start_index, end_index + 1)
+        ]
+
         val = sympy_product(sizes)
-        return cexpr(self.rename_indexing(val))
+
+        return val
+
 
     def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
         """
@@ -335,7 +404,12 @@ class CUDATemplateKernel(CUDAKernel):
             return str(default_value)
 
         stride = node.get_stride()[index]
-        return cexpr(self.rename_indexing(stride))
+
+        if V.graph.sizevars.statically_known_leq(stride, 1):
+            return str(stride)
+        
+        symbol = self.find_symbol(node, "stride", index)
+        return symbol
 
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """

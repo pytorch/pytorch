@@ -18,6 +18,7 @@ from ...ir import (
     ReinterpretView,
 )
 from ...virtualized import V
+from ...utils import is_dynamic
 from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
@@ -37,9 +38,6 @@ extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(X, -1)}};
-  int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -552,7 +550,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(*self.input_nodes, self.output_node):
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
         return res
 
@@ -966,7 +964,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)

@@ -1249,7 +1249,7 @@ class KernelArgs:
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
-
+    
     def __init__(self, sizevars=None):
         self.input_buffers = {}
         self.output_buffers = {}
