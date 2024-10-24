@@ -107,7 +107,14 @@ mm_template = TritonTemplate(
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        input_precision = "tf32" if ALLOW_TF32 else "ieee"
+        if (
+            a.dtype.name == "float32" 
+            and b.dtype.name == "float32"
+            and {torch._inductor.config.triton.use_tf32x3}
+        ):
+            input_precision = "tf32x3"
+        acc += tl.dot(a, b, None, input_precision)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
