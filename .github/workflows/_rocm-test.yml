@@ -64,6 +64,8 @@ jobs:
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        with:
+          test-matrix: ${{ inputs.test-matrix }}
 
       - name: configure aws credentials
         id: aws_creds
