@@ -1479,7 +1479,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
 
 # TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
-@out_wrapper()
+@out_wrapper(exact_dtype=False)
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
