@@ -233,6 +233,16 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
+def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+    return (
+        # Order nested ints by their coefficients.
+        # 1 here to order nested ints after non-nested-ints.
+        (1, tup[0].node.nested_int_coeff(), tup[1])
+        if is_nested_int(tup[0])
+        else (0, *tup)
+    )
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -934,10 +944,10 @@ def compute_unbacked_bindings(
             and rhs in pending
         ):
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[s] = path + (DivideByKey(int(lhs)),)
+            r[rhs] = path + (DivideByKey(int(lhs)),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(s, real // int(lhs))
+                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
             pending.remove(rhs)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
@@ -1014,11 +1024,10 @@ def definitely_true(a: BoolLikeType) -> bool:
     that would cause the expression to return True.
 
     When is it appropriate to use definitely_true?  First, if you can use
-    a higher level combinator like parallel_or/parallel_and, prefer using
-    those instead, they are definitely safe (modulo short-circuiting).
+    a higher level combinator prefer using those instead, they are definitely
+    safe (modulo short-circuiting).
     Second, it can be used if the program would behave equivalently if
-    definitely_true always returned False (parallel_or/parallel_and are
-    examples of this pattern, modulo short-circuiting).  Finally, it even
+    definitely_true always returned False. Finally, it even
     be OK if the program wouldn't behave equivalently, so long as the
     change is semantics preserving.  It can be semantics preserving if
     the program errors in more cases than it did previously (but otherwise
@@ -1072,30 +1081,6 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return False
     assert isinstance(x, bool)
     return x
-
-
-def parallel_or(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical OR of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely True.
-    """
-    if any(statically_known_true(a) for a in args):
-        return True
-    if any(definitely_true(a) for a in args):
-        return True
-    return any(args)
-
-
-def parallel_and(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical FALSE of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely False.
-    """
-    if any(statically_known_true(torch.sym_not(a)) for a in args):
-        return False
-    if any(definitely_false(a) for a in args):
-        return False
-    return all(args)
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -1490,6 +1475,7 @@ class EqualityConstraint(Constraint):
         Tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]
     ]
     phantom_symbols: List[sympy.Symbol]
+    relaxed_sources: Set[Source]
 
     _parents: Dict[Source, Source] = field(init=False)
     _defs: Dict[Source, sympy.Expr] = field(init=False)
@@ -1555,10 +1541,12 @@ class EqualityConstraint(Constraint):
     def is_equal(self, source1: Source, source2: Source) -> bool:
         return (
             # check whether source1 and source2 have the same root
-            self._find(source1) == self._find(source2)
-            or
+            # or are relaxed
+            (src1 := self._find(source1)) in self.relaxed_sources
+            or (src2 := self._find(source2)) in self.relaxed_sources
+            or src1 == src2
             # check whether source1 is derived equal to source2
-            self.is_derived(source1, source2, lambda x: x)
+            or self.is_derived(source1, source2, lambda x: x)
         )
 
     def is_derived(
@@ -2781,7 +2769,10 @@ class DimConstraints:
                 relation_with_digit(right, flip(op), int(left))
             else:
                 assert op == "==", t
-                results[left]["eq"] = sympy.sympify(right)
+                try:
+                    results[left]["eq"] = sympy.sympify(right)
+                except TypeError as e:  # rhs source is not linked to Dim name
+                    pass
 
         # order forced specializations based on name
         forced_specializations = {
@@ -3790,17 +3781,6 @@ class ShapeEnv:
             }
 
             # iterate over unbound strides in sorted order
-            def _nested_int_aware_sort(
-                tup: Tuple[Union[SymInt, int], int]
-            ) -> Tuple[int, int, int]:
-                return (
-                    # Order nested ints by their coefficients.
-                    # 1 here to order nested ints after non-nested-ints.
-                    (1, tup[0].node.nested_int_coeff(), tup[1])
-                    if is_nested_int(tup[0])
-                    else (0, *tup)
-                )
-
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=_nested_int_aware_sort,

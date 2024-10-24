@@ -881,12 +881,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor of floating point or complex values";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   Tensor input = self;
   if (self.dim() == 1) {
@@ -911,24 +911,24 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < n_fft < " << len
              << ", but got n_fft=" << win_length;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (hop_length <= 0) {
     std::ostringstream ss;
     REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (win_length <= 0 || win_length > n_fft) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
              << win_length;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
              << win_length << ", but got window with size " << window.sizes();
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   #undef REPR
   auto window_ = window;
@@ -1063,17 +1063,17 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (input.numel() == 0) {
     std::ostringstream ss;
     REPR(ss) << ": input tensor cannot be empty.";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (input_dim != 3 && input_dim != 4) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor with 3 or 4 dimensions, but got " << input_dim;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (input.size(-1) != 2) {
     std::ostringstream ss;
     REPR(ss) << ": expected the last dimension to be 2 (corresponding to real and imaginary parts), but got " << self.size(-1);
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   const bool onesided = onesidedOpt.value_or(fft_size != n_fft);
@@ -1081,32 +1081,32 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onesided=True, but got " << fft_size;
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   } else {
     if (n_fft != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onesided=False, but got " << fft_size;
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
 
   if (!(0 < hop_length && hop_length <= win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < hop_length <= win_length";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   if (!(0 < win_length && win_length <= n_fft)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   if (window.defined()) {
     if (window.dim() != 1 || window.size(0) != win_length) {
       std::ostringstream ss;
       REPR(ss) << ": Invalid window shape. window has to be 1D and length of `win_length`";
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
 
@@ -1175,7 +1175,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   y = (y / window_envelop);  // size: (channel, expected_output_signal_len)

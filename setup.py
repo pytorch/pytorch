@@ -1159,7 +1159,7 @@ def main():
         )
     install_requires = [
         "filelock",
-        "typing-extensions>=4.10.0",
+        "typing-extensions>=4.8.0",
         'setuptools ; python_version >= "3.12"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
