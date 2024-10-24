@@ -95,9 +95,13 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           TORCH_CUDA_ARCH_LIST: 5.2
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
+          AWS_DEFAULT_REGION: us-east-1
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -e
+          # Fetch aws credential from IMDs
+          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           # Unlike other gradle jobs, it's not worth building libtorch in a separate CI job and share via docker, because:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
@@ -113,6 +117,7 @@ jobs:
           id=$(docker run -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e BUILD_LITE_INTERPRETER \
