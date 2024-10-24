@@ -6,9 +6,11 @@ import io
 import itertools
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -2404,6 +2406,39 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "Cache miss due to new autograd node: torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
+
+    def test_multithreading_tls(self):
+        def train(errors, model, x):
+            try:
+                out = model(x)
+                with compiled_autograd.enable(compiler_fn):
+                    self.assertEqual(compiled_autograd.enabled(), True)
+                    self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
+            except Exception as e:
+                print(f"Found error: {e}")
+                errors.put(1)
+                raise
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+        )
+        x = torch.randn([2, 4])
+
+        threads = []
+        errors = queue.Queue()
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(4):
+                thread = threading.Thread(target=train, args=(errors, model, x))
+                threads.append(thread)
+                thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        assert errors.empty()
 
     def test_verbose_logs_graph(self):
         def fn():
