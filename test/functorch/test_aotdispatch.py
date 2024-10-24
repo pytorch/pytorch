@@ -6186,66 +6186,33 @@ class TestAOTModuleSimplified(AOTTestCase):
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
     def test_unwrap_async_collective_tensor_tangent(self):
-        class WrapSC(torch.Tensor):
-            @staticmethod
-            def __new__(cls, a):
-                kwargs = {}
-                kwargs["strides"] = a.stride()
-                kwargs["storage_offset"] = a.storage_offset()
-                kwargs["device"] = a.device
-                kwargs["layout"] = a.layout
-                kwargs["requires_grad"] = a.requires_grad
-                kwargs["dtype"] = a.dtype
-                out = torch.Tensor._make_wrapper_subclass(cls, a.shape, **kwargs)
-                return out
-
-            def __init__(self, a):
-                self.a = a
-
-            def __repr__(self):
-                a_repr = repr(self.a)
-                return f"WrapSC({a_repr})"
-
-            def __tensor_flatten__(self):
-                return ["a"], None
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
-                a = inner_tensors["a"]
-                return WrapSC(a)
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if kwargs is None:
-                    kwargs = {}
-                args_a = pytree.tree_map_only(WrapSC, lambda x: x.a, args)
-                kwargs_a = pytree.tree_map_only(WrapSC, lambda x: x.a, kwargs)
-                out_a = func(*args_a, **kwargs_a)
-                out_a_flat, spec = pytree.tree_flatten(out_a)
-                out_flat = [
-                    WrapSC(o_a) if isinstance(o_a, torch.Tensor) else o_a
-                    for o_a in out_a_flat
-                ]
-                out = pytree.tree_unflatten(out_flat, spec)
-                return out
-
         def fn(x):
             return x.clone()
 
-        ref_x = WrapSC(torch.randn(2, 3, requires_grad=True))
+        ref_x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
         ref_y = fn(ref_x)
-        ref_y.backward(gradient=WrapSC(torch.randn(2, 3)))
+        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
 
         fn_comp = torch.compile(fn, fullgraph=True)
 
-        x = WrapSC(torch.randn(2, 3, requires_grad=True))
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
         y = fn_comp(x)
-        y.backward(gradient=WrapSC(torch.randn(2, 3)))
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
 
-        x2 = WrapSC(torch.randn(2, 3, requires_grad=True))
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
         y2 = fn_comp(x2)
-        y2.backward(gradient=WrapSC(AsyncCollectiveTensor(torch.randn(2, 3))))
+        y2.backward(
+            gradient=TwoTensor(
+                AsyncCollectiveTensor(torch.randn(2, 3)),
+                AsyncCollectiveTensor(torch.randn(2, 3)),
+            )
+        )
 
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
