@@ -1733,7 +1733,6 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
-    use_split=False,
 ):
     """
     Create a new distributed process group.
@@ -1777,18 +1776,9 @@ def _new_process_group_helper(
     # communicators based on pre-existing ones, which can save
     # initialization time.  Due to lazy initialization of
     # communicators in some backends, we have to be careful and only
-    # split when we *know* the backends already are connected _on all
-    # ranks_.  We can only know this if the group we are making is the
-    # entire world or if we have bound a device id to the world (which
-    # causes early connection initialization).
-    if (
-        use_split
-        and is_initialized()
-        and (
-            len(global_ranks_in_group) == _get_default_group().size()
-            or _get_default_group().bound_device_id
-        )
-    ):
+    # split when we *know* the default PG has already started communicator initialization.
+    # We know this if we have bound a device id to the default pg (eager initialized).
+    if is_initialized() and _get_default_group().bound_device_id:
         split_from = _get_split_source(_get_default_group())
     else:
         split_from = None
@@ -4732,7 +4722,6 @@ def new_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=False,
 ):
     """
     Create a new distributed group.
@@ -4785,11 +4774,7 @@ def new_group(
             in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
-        use_split (bool): for some backends, such as NCCL, split op is supported
-            to create a new process group using the default PG's communicator resourses. This
-            is helpful to speed up the process group creation and save resources. By default,
-            use_split is False. For NCCL backend, if users do want to use the split semantics,
-            It is suggested to use split_group() API instead of this API.
+
     Returns:
         A handle of distributed group that can be given to collective calls or
         GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
@@ -4812,7 +4797,6 @@ def new_group(
         None,
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
-        use_split=use_split,
     )
 
 
@@ -4824,7 +4808,6 @@ def _new_group_with_tag(
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
-    use_split=False,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -4901,7 +4884,6 @@ def _new_group_with_tag(
         pg_tag=pg_tag,
         device_id=device_id,
         group_desc=group_desc,
-        use_split=use_split,
     )
 
     # Create the global rank to group rank mapping
