@@ -413,23 +413,6 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        if has_higher_order_op(gm):
-            # This indicates presence of a higher order op. For now, we
-            # have no way to break the higher order op into two buckets.
-            # Allowing higher order ops in the graph also requires
-            # changes in the split_module, becuase graph splitter
-            # currently assumes that all the args of all ops are
-            # tensors, but in the case of higher order ops, it could be
-            # a graph module. As a workaround, we are shortcircuiting
-            raise NotImplementedError(
-                "DDPOptimizer backend: Found a higher order op in the graph. "
-                "This is not supported. Please turn off DDP optimizer using "
-                "torch._dynamo.config.optimize_ddp=False. Note that this can "
-                "cause performance degradation because there will be one bucket "
-                "for the entire Dynamo graph. Please refer to this issue - "
-                "https://github.com/pytorch/pytorch/issues/104674."
-            )
-
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         processed_modules = set()
