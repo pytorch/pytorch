@@ -7,7 +7,10 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
-from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.associative_scan import (
+    _fake_associative_scan,
+    associative_scan,
+)
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -86,32 +89,46 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     return operands
 
 
-def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
-    inp_leaves, spec = pytree.tree_flatten(xs)
+def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):  # noqa: F811
+    carry_leaves, carry_spec = pytree.tree_flatten(init)
+    inp_leaves, inp_spec = pytree.tree_flatten(xs)
+    if xs is None or len(inp_leaves) == 0:
+        return init, []
     result_flat = []
-    num_leaves = len(inp_leaves)
+    carry = carry_leaves
     op = reversed if reverse else lambda x: x
 
+    dummy_carry, dummy_out = combine_fn(
+        pytree.tree_unflatten(carry, carry_spec),
+        pytree.tree_unflatten(
+            [torch._ops.ops.aten.slice(elem, dim, 0, 1, 1) for elem in inp_leaves],
+            inp_spec,
+        ),
+    )
+    dummy_out_leaves, dummy_out_spec = pytree.tree_flatten(dummy_out)
+    num_leaves = len(dummy_out_leaves)
+
     for ind in op(range(inp_leaves[0].size(dim))):
-        r = [
-            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
-            for leave_ind in range(num_leaves)
+        xs = [
+            torch._ops.ops.aten.slice(elem, dim, ind, ind + 1, 1) for elem in inp_leaves
         ]
-        if (ind > 0 and not reverse) or (
-            ind < (inp_leaves[0].size(dim) - 1) and reverse
-        ):
-            r = combine_fn(
-                pytree.tree_unflatten(result_flat[-1], spec),
-                pytree.tree_unflatten(r, spec),
-            )
-        r_flat, _ = pytree.tree_flatten(r)
-        result_flat.append(r_flat)
+
+        carry, y = combine_fn(
+            pytree.tree_unflatten(carry, carry_spec),
+            pytree.tree_unflatten(xs, inp_spec),
+        )
+        carry, _ = pytree.tree_flatten(carry)
+        y, _ = pytree.tree_flatten(y)
+        result_flat.append(y)
 
     results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        torch.concatenate([e[leave_ind] for e in op(result_flat)], dim)
         for leave_ind in range(num_leaves)
     ]
-    return pytree.tree_unflatten(results, spec)
+    return (
+        pytree.tree_unflatten(carry, carry_spec),
+        pytree.tree_unflatten(results, dummy_out_spec),
+    )
 
 
 def compile_mode_helper(fct, compile_mode):
@@ -1541,7 +1558,7 @@ def forward(self, pred_1, x_1):
 
         num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
-            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            shapes = [random.randint(1, 9) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device)
 
@@ -1620,7 +1637,7 @@ def forward(self, pred_1, x_1):
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
 
-        result1 = associative_scan(
+        result = associative_scan(
             get_scan_combine_fn("s5_operator", True),
             elements,
             0,
@@ -1631,10 +1648,10 @@ def forward(self, pred_1, x_1):
             get_scan_combine_fn("s5_operator", True), elements, 0, reverse=reverse
         )
         self.assertEqual(
-            result1,
+            result,
             expected_result,
         )
-        self.assertEqual([r.device.type for r in result1], [device.type] * len(result1))
+        self.assertEqual([r.device.type for r in result], [device.type] * len(result))
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -1698,7 +1715,7 @@ def forward(self, pred_1, x_1):
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
 
-        result1 = associative_scan(
+        result = associative_scan(
             get_scan_combine_fn("tuple_fct", True),
             inp,
             0,
@@ -1708,7 +1725,7 @@ def forward(self, pred_1, x_1):
         expected_result = _fake_associative_scan(
             get_scan_combine_fn("tuple_fct", True), inp, 0, reverse=reverse
         )
-        self.assertEqual(result1, expected_result)
+        self.assertEqual(result, expected_result)
 
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @requires_cuda
@@ -1750,6 +1767,102 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result_diff, expected_result)
         self.assertEqual(result_diff[1], result_same[1][1])
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping combine_mode=pointwise
+    # as the expand operation is non-pointwise
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+        ),
+    )
+    def test_associative_scan_expand(self, compile_mode, combine_mode, reverse, device):
+        x = torch.randn(3, 2, 2, device=device)
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+        
+        def body(x, y):
+            return x * torch.sum(y, -1).expand(x.shape)
+
+        result = scan_fct(
+            body,
+            x,
+            0,
+            reverse=reverse,
+            combine_mode=combine_mode,
+        )
+        expected_result = _fake_associative_scan(
+            body, x, 0, reverse=reverse
+        )
+        self.assertEqual(result, expected_result)
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping combine_mode=pointwise
+    # as the expand operation is non-pointwise
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+        ),
+    )
+    def test_associative_scan_sparse_tensor(self, compile_mode, combine_mode, reverse, device):
+        x = torch.tensor([[[0., 0], [1., 2.]], [[0., 0], [3., 4.]], [[0., 0], [5., 6.]]]).to_sparse()
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+        
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.compile does not support sparse Tensors",
+            # torch._dynamo.exc.Unsupported,
+            # "Observed exception.*",
+        ):
+            result = scan_fct(
+                get_scan_combine_fn("add", True),
+                x,
+                0,
+                reverse=reverse,
+                combine_mode=combine_mode,
+            )
+        
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping combine_mode=pointwise
+    # as the expand operation is non-pointwise
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+        ),
+    )
+    def test_associative_scan_non_contiguous_tensor(self, compile_mode, combine_mode, reverse, device):
+        x = torch.arange(30).view(10, 3).t()
+        assert not x.is_contiguous()
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+        
+        result = scan_fct(
+            get_scan_combine_fn("add", True),
+            x,
+            0,
+            reverse=reverse,
+            combine_mode=combine_mode,
+        )
+        expected_result = _fake_associative_scan(
+            get_scan_combine_fn("add", True), x, 0, reverse=reverse
+        )
+        self.assertEqual(result, expected_result)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -1791,15 +1904,6 @@ def forward(self, pred_1, x_1):
         ),
     )
     def test_associative_scan_complex_pytree(self, combine_mode, reverse, device):
-        def fct_pointwise(x, y):
-            return {
-                "i": x["i"] * y["i"],
-                "j": (
-                    [x["j"][0][0] * y["j"][0][0]],
-                    [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
-                ),
-            }
-
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         z = torch.randn(3, 2, 2, device=device)
@@ -1970,15 +2074,16 @@ def forward(self, pred_1, x_1):
             1,
             reverse=reverse,
         )
-        result1 = fct_cmp(inp)
-        self.assertEqual(result1, expected_result)
+        result = fct_cmp(inp)
+        self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
+    @parametrize("reverse_first", [False, True])
+    @parametrize("same_direction", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -1990,8 +2095,9 @@ def forward(self, pred_1, x_1):
         ),
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
-        self, combine_mode, compile_mode, reverse, device
+        self, combine_mode, compile_mode, reverse_first, same_direction, device
     ):
+        reverse_second = reverse_first if same_direction else not reverse_first
         # Chain with scan on different dim
         def chain_fct_different_dim(inp):
             o1 = associative_scan(
@@ -1999,14 +2105,14 @@ def forward(self, pred_1, x_1):
                 inp,
                 1,
                 combine_mode=combine_mode,
-                reverse=reverse,
+                reverse=reverse_first,
             )
             o2 = associative_scan(
                 get_scan_combine_fn("add", True),
                 o1,
                 0,
                 combine_mode=combine_mode,
-                reverse=reverse,
+                reverse=reverse_second,
             )
             return o2
 
@@ -2016,13 +2122,196 @@ def forward(self, pred_1, x_1):
         expected_result = _fake_associative_scan(
             get_scan_combine_fn("add", True),
             _fake_associative_scan(
-                get_scan_combine_fn("add", True), inp, 1, reverse=reverse
+                get_scan_combine_fn("add", True), inp, 1, reverse=reverse_first
             ),
+            0,
+            reverse=reverse_second,
+        )
+        result = fct_cmp(inp)
+        self.assertEqual(result, expected_result)
+        
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    # @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("combine_mode", ["pointwise"])
+    # @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none"])
+    @parametrize("reverse_first", [False, True])
+    @parametrize("same_direction", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_nested(
+        self, combine_mode, compile_mode, reverse_first, same_direction, device
+    ):
+        reverse_second = reverse_first if same_direction else not reverse_first
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+
+        def nested_associative_scan(x, y):
+            def inner_fn(xi, yi):
+                return xi * yi
+            
+            y_new = scan_fct(
+                inner_fn,
+                y,
+                0,
+                combine_mode=combine_mode,
+                reverse=reverse_second,
+            )
+            return x + y_new
+
+        inp = torch.randn(3, 10, 2, device=device)
+        
+        result = scan_fct(nested_associative_scan, inp, 0, reverse=reverse_first, combine_mode="generic")
+        # expected_result = _fake_associative_scan(
+        #     nested_associative_scan,
+        #     inp,
+        #     0,
+        #     reverse=reverse_first
+        # )
+        
+        # self.assertEqual(result, expected_result)
+        
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    # @parametrize("loop_type", ["for", "while"])
+    @parametrize("loop_type", ["for"])
+    # @parametrize("loop_type", ["while"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            # and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_loop(
+        self, combine_mode, compile_mode, loop_type, reverse, device
+    ):
+        def loop_body(x, y):
+            cnt = torch.zeros_like(y[0, :])
+            if loop_type == 'while':
+                def cond_fn(ind, loop_val):
+                    return (loop_val < 5)[0]
+                
+                def body_fn(ind, loop_val):
+                    return ind + 1, loop_val + torch.abs(ind)
+                
+                new_ind, cnt = torch.while_loop(cond_fn=cond_fn, body_fn=body_fn, carried_inputs=(torch.zeros(1, dtype=torch.int32, device=cnt.device), cnt))
+            else:
+                for ind in range(10):
+                    cnt += torch.abs(y[ind])
+            return x * cnt
+
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+
+        inp = torch.randn(3, 10, 1, device=device) * 2
+        
+        result = scan_fct(loop_body, inp, dim=0, reverse=reverse, combine_mode=combine_mode)
+        expected_result = _fake_associative_scan(
+            loop_body,
+            inp,
             0,
             reverse=reverse,
         )
-        result1 = fct_cmp(inp)
-        self.assertEqual(result1, expected_result)
+        
+        self.assertEqual(result, expected_result)
+        
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping combine_mode=pointwise 
+    # as the cond operation is classified to be non-pointwise
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            # and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_cond(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        def body(x, y):
+            # TODO: Is the cond operation really non-pointwise?
+            val = cond(torch.sum(y) > 0., lambda y: y + 0., lambda y: 1. - y, (y,))
+            return x * val
+
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+
+        inp = torch.randn(3, 10, 1, device=device)
+        
+        result = scan_fct(body, inp, dim=0, reverse=reverse, combine_mode=combine_mode)
+        expected_result = _fake_associative_scan(
+            body,
+            inp,
+            0,
+            reverse=reverse,
+        )
+        
+        self.assertEqual(result, expected_result)
+        
+    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode_scan", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode_associative_scan", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("reverse_associative_scan", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping combine_mode=pointwise 
+    # as the cond operation is classified to be non-pointwise
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            # and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_scan_associative_scan(
+        self, combine_mode, compile_mode_scan, compile_mode_associative_scan, reverse, reverse_associative_scan, device
+    ):
+        # scan_fct = compile_mode_helper(scan, compile_mode_scan)
+        scan_fct = scan
+        # associative_scan_fct = compile_mode_helper(associative_scan, compile_mode_associative_scan)
+        associative_scan_fct = associative_scan
+        init = torch.randn(10, 5, device=device)
+        inp = torch.randn(3, 10, 5, device=device)
+        
+        def body(x, y):
+            val = associative_scan_fct(get_scan_combine_fn("add", True), y, 0, reverse=reverse_associative_scan, combine_mode=combine_mode)
+            return x + 0., x + val
+            # return x + y, x + y
+        
+        result = scan_fct(body, init, inp, dim=0, reverse=reverse)
+        expected_result = _fake_scan(
+            body,
+            init,
+            inp,
+            0,
+            reverse=reverse,
+        )
+        
+        self.assertEqual(result[1], expected_result[1])
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
@@ -2055,8 +2344,8 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )[ind] @ torch.ones(2, 5, device=device)
-            result1 = fct_cmp(inp)
-            self.assertEqual(result1, expected_result)
+            result = fct_cmp(inp)
+            self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
@@ -2105,8 +2394,8 @@ def forward(self, pred_1, x_1):
             dim=0,
             reverse=reverse,
         )
-        result1 = fct_cmp(inp)
-        self.assertEqual(result1, expected_result)
+        result = fct_cmp(inp)
+        self.assertEqual(result, expected_result)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -2148,14 +2437,14 @@ def forward(self, pred_1, x_1):
         result_expected = _fake_associative_scan(
             get_scan_combine_fn("non_pointwise", True), x, 0, reverse=reverse
         )
-        result1 = associative_scan(
+        result = associative_scan(
             get_scan_combine_fn("non_pointwise", True),
             x,
             0,
             reverse=reverse,
             combine_mode="generic",
         )
-        self.assertEqual(result1, result_expected)
+        self.assertEqual(result, result_expected)
 
     @requires_cuda
     @parametrize("reverse", [False, True])

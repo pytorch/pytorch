@@ -155,6 +155,8 @@ def associative_scan(
         raise RuntimeError("Expected at least 1 xs leaf")
     if any(not isinstance(x, torch.Tensor) for x in leaves):
         raise RuntimeError("xs leaves must be a Tensor")
+    if any(x.is_sparse for x in leaves):
+        raise RuntimeError("xs leaves must dense Tensors, consider using `to_dense()`")
     if any(x.ndim < dim for x in leaves):
         raise RuntimeError(
             "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
@@ -193,25 +195,27 @@ def associative_scan(
             "The pytree of the output of the operator needs to match the xs pytree"
         )
 
-    combine_fn = functools.partial(
-        wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
-    )
-
     if combine_mode == "generic":
+        combine_fn = functools.partial(
+            wrap_combine_fn_flat, combine_fn=torch.vmap(combine_fn, dim, dim), spec=spec, num_leaves=len(leaves)
+        )
         result_flat = generic_associative_scan(combine_fn, leaves, dim)
     else:
+        combine_fn = functools.partial(
+            wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
+        )
         result_flat = associative_scan_op(combine_fn, leaves, dim)
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
-
+        
     return pytree.tree_unflatten(result_flat, spec)
 
 
-def generic_associative_scan(operator, elems_flat, dim=0):
+def generic_associative_scan(operator, leaves, dim=0):
     r"""
     This function performs the associative_scan operation.
-    The algorithm works by recursively collecting neighbours of ``elems_flat`` and subsequently
+    The algorithm works by recursively collecting neighbours of ``leaves`` and subsequently
     applying the ``operator`` on all pairs in parallel along ``dim``.
     The results of the recursive calls are later combined.
 
@@ -219,7 +223,7 @@ def generic_associative_scan(operator, elems_flat, dim=0):
         operator (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, pointwise, and satisfy the associative property.
-        elems_flat (torch.Tensor): A list of torch.Tensors converted from the pytree of
+        leaves (torch.Tensor): A list of torch.Tensors converted from the pytree of
             ``xs`` provided to ``associative_scan``.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
@@ -298,8 +302,8 @@ def generic_associative_scan(operator, elems_flat, dim=0):
         return list(
             safe_map(functools.partial(_interleave, dim=dim), even_elems, odd_elems)
         )
-
-    scans = _scan(elems_flat)
+        
+    scans = _scan(leaves)
 
     return scans
 
