@@ -1190,8 +1190,8 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
       typename U = T,
       std::enable_if_t<std::is_same<U, double>::value, int> = 0>
   Vectorized<T> swapped() const {
-    vtype v0 = vec_permi(_vec0, _vec0, 2);
-    vtype v1 = vec_permi(_vec1, _vec1, 2);
+    vtype v0 = {_vec0[1], _vec0[0]};
+    vtype v1 = {_vec1[1], _vec1[0]};
     return {v0, v1};
   }
 
@@ -1685,6 +1685,7 @@ std::pair<Vectorized<V>, Vectorized<V>> unpack(const Vectorized<T>& x) {
   return {Vectorized<V>{vec0, vec1}, Vectorized<V>{vec2, vec3}};
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 template <>
 std::pair<Vectorized<int16_t>, Vectorized<int16_t>> unpack<uint8_t, int16_t>(
     const Vectorized<uint8_t>& x) {
@@ -1702,6 +1703,7 @@ std::pair<Vectorized<int16_t>, Vectorized<int16_t>> unpack<uint8_t, int16_t>(
       cast_zvector<uint16_t, int16_t>(Vectorized<uint16_t>{vec0, vec1}),
       cast_zvector<uint16_t, int16_t>(Vectorized<uint16_t>{vec2, vec3})};
 }
+C10_DIAGNOSTIC_POP()
 
 template <typename T, typename V = typename pack_type<T>::type>
 Vectorized<V> pack(const Vectorized<T>& first, const Vectorized<T>& second) {
@@ -1710,6 +1712,7 @@ Vectorized<V> pack(const Vectorized<T>& first, const Vectorized<T>& second) {
   return Vectorized<V>{vec0, vec1};
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 template <>
 Vectorized<uint8_t> pack(
     const Vectorized<int16_t>& first,
@@ -1718,6 +1721,7 @@ Vectorized<uint8_t> pack(
   auto vec1 = vec_packsu(second.vec0(), second.vec1());
   return Vectorized<uint8_t>{vec0, vec1};
 }
+C10_DIAGNOSTIC_POP()
 
 } /* unnamed namespace */
 
@@ -1735,7 +1739,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     return VECTOR_WIDTH / sizeof(value_type);
   }
 
-  static constexpr size_t float_num_vecs() {
+  static constexpr int float_num_vecs() {
     return size() / Vectorized<float>::size();
   }
   static constexpr int int_num_vecs() {
@@ -2419,8 +2423,8 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   static typename Vectorized<T>::vinner_type real_neg(const typename Vectorized<T>::vinner_type &a)
   {
     auto a_neg = a.neg();
-    auto v0 = vec_permi(a_neg.vec0(), a.vec0(), 1);
-    auto v1 = vec_permi(a_neg.vec1(), a.vec1(), 1);
+    vtype v0 = {a_neg.vec0()[0], a.vec0()[1]};
+    vtype v1 = {a_neg.vec1()[0], a.vec1()[1]};
     return { v0, v1 };
   }
 
@@ -2732,10 +2736,10 @@ std::pair<Vectorized<T>, Vectorized<T>> inline inner_interleave2(
   //   a      = {a0, a1, a2, a3}
   //   b      = {b0, b1, b2, b3}
   using vtype = typename Vectorized<T>::vtype;
-  vtype ab00 = vec_permi(a.vec0(), b.vec0(), 0);
-  vtype ab11 = vec_permi(a.vec0(), b.vec0(), 3);
-  vtype ab2_00 = vec_permi(a.vec1(), b.vec1(), 0);
-  vtype ab2_11 = vec_permi(a.vec1(), b.vec1(), 3);
+  vtype ab00 = {a.vec0()[0], b.vec0()[0]};
+  vtype ab11 = {a.vec0()[1], b.vec0()[1]};
+  vtype ab2_00 = {a.vec1()[0], b.vec1()[0]};
+  vtype ab2_11 = {a.vec1()[1], b.vec1()[1]};
   //   return {a0, b0, a1, b1}
   //          {a2, b2, a3, b3}
   return std::make_pair(
@@ -2750,11 +2754,11 @@ std::pair<Vectorized<T>, Vectorized<T>> inline inner_deinterleave2(
   //   a = {a0, b0, a1, b1}
   //   b = {a2, b2, a3, b3}
   using vtype = typename Vectorized<T>::vtype;
-  vtype aa01 = vec_permi(a.vec0(), a.vec1(), 0);
-  vtype aa23 = vec_permi(b.vec0(), b.vec1(), 0);
+  vtype aa01 = {a.vec0()[0], a.vec1()[0]};
+  vtype aa23 = {b.vec0()[0], b.vec1()[0]};
 
-  vtype bb_01 = vec_permi(a.vec0(), a.vec1(), 3);
-  vtype bb_23 = vec_permi(b.vec0(), b.vec1(), 3);
+  vtype bb_01 = {a.vec0()[1], a.vec1()[1]};
+  vtype bb_23 = {b.vec0()[1], b.vec1()[1]};
 
   // swap lanes:
   //   return {a0, a1, a2, a3}
@@ -2868,7 +2872,7 @@ std::pair<Vectorized<int64_t>, Vectorized<int64_t>> inline deinterleave2<
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<float>>::type
+std::enable_if_t<std::is_same_v<T, uint8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(const Vectorized<T> &src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
   // Only handle first 64 bits
@@ -2878,7 +2882,7 @@ inline convert_int8_to_float(const Vectorized<T> &src) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<T>>::type
+std::enable_if_t<std::is_same_v<T, uint8_t>, at::vec::Vectorized<T>>
 inline convert_float_to_int8(const Vectorized<float> &src) {
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();

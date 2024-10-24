@@ -14,6 +14,7 @@ import torch._export
 import torch._inductor
 import torch._inductor.config
 import torch.nn as nn
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -108,7 +109,6 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -142,8 +142,8 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -167,7 +167,14 @@ def code_check_count(
     target_str: str,
     target_count: int,
 ):
-    so_path = torch._export.aot_compile(model, example_inputs)
+    with torch.no_grad(), config.patch(
+        {
+            "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        so_path = torch._export.aot_compile(model, example_inputs)
+
     with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
         src_code = cpp.read()
         FileCheck().check_count(
@@ -191,7 +198,12 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        model = Model()
+        self.check_model(model, example_inputs)
+        if self.use_minimal_arrayref_interface:
+            self.code_check_count(
+                model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
+            )
 
     def test_small_constant(self):
         class Model(torch.nn.Module):
@@ -1259,6 +1271,30 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_symint_input(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
+        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        inputs = (input1, input2)
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        self.check_model_with_multiple_inputs(
+            M(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_while_loop_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1553,7 +1589,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
+        with torch.cuda.device(0):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -1644,16 +1680,12 @@ class AOTInductorTestsTemplate:
         inputs = (torch.randn(10, 10), torch.randn(10, 10))
         result_cpu = Model(weight)(*inputs)
 
-        with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), torch.no_grad():
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
-        with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(1), torch.no_grad():
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
@@ -2813,7 +2845,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":
@@ -3001,7 +3032,6 @@ class AOTInductorTestsTemplate:
         inputs = tuple(inputs)
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3071,7 +3101,6 @@ class AOTInductorTestsTemplate:
         }
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3108,7 +3137,6 @@ class AOTInductorTestsTemplate:
         }
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3132,7 +3160,6 @@ class AOTInductorTestsTemplate:
         model = Model()
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3156,11 +3183,7 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "abi_compatible": self.abi_compatible,
-            }
-        ):
+        with torch.no_grad():
             result = AOTIRunnerUtil.run(
                 self.device,
                 model,
@@ -3185,11 +3208,7 @@ class AOTInductorTestsTemplate:
         x = torch.randn(3, 4, dtype=torch.float32, device=self.device)
         model = Model()
 
-        with torch.no_grad(), config.patch(
-            {
-                "abi_compatible": self.abi_compatible,
-            }
-        ):
+        with torch.no_grad():
             result = AOTIRunnerUtil.run(
                 self.device,
                 model,
@@ -3228,7 +3247,6 @@ class AOTInductorTestsTemplate:
         model = Model()
         with torch.no_grad(), config.patch(
             {
-                "abi_compatible": self.abi_compatible,
                 "aot_inductor.debug_compile": True,
             }
         ):
@@ -3628,6 +3646,54 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_sym_i64_input_codegen(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                x_symint = x.item()
+                a = torch.ones(x_symint, device="cuda")
+                b = torch.ones(x_symint, device="cuda")
+                out = torch.zeros_like(a)
+                # unbacked symint in grid
+                add_kernel[(1, 1, x_symint)](a, b, out, x_symint, 32)
+                return out
+
+        example_inputs = (
+            torch.randint(high=1024, size=(1,), device=self.device, dtype=torch.int32),
+        )
+        # This simple unit test case model generates two triton kernels:
+        # 1. triton_poi_fused_ones_1:
+        # triton_meta={'signature': {'out_ptr0': '*fp32', 'xnumel': 'i64'}
+        # 2. add_kernel:
+        # triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr': '*fp32', 'n_elements': 'i64'}
+        # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
+        # it gets explicitly declared using its data types in the cpp wrapper codegen code.
+        expected_scalar_args = [
+            "int64_t var_1 = u0;",
+            "int64_t var_3 = u0;",
+            "int64_t var_5 = u0;",
+            "int64_t var_9 = u0;",
+        ]
+        # check the new behavior of codegen is expected
+        result, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, Model(), example_inputs
+        )
+        for scalar_line in expected_scalar_args:
+            FileCheck().check_count(
+                scalar_line,
+                1,
+            ).run(code)
+
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -3646,9 +3712,36 @@ class AOTITestCase(TestCase):
         super().setUp()
 
 
+def fail_cpu(is_skip=False):
+    return TestFailure(
+        ("cpu",),
+        is_skip=is_skip,
+    )
+
+
+def fail_cuda(is_skip=False):
+    return TestFailure(
+        ("cuda"),
+        is_skip=is_skip,
+    )
+
+
+# test_failures, xfail by default, set is_skip=True to skip
+CPU_TEST_FAILURES = {
+    # TODO: failed internally
+    "test_multiple_output_alias": fail_cpu(is_skip=True),
+}
+
+# test_failures, xfail by default, set is_skip=True to skip
+CUDA_TEST_FAILURES = {
+    # quantized unsupported for GPU
+    "test_quantized_linear": fail_cuda(),
+    "test_quanatized_int8_linear": fail_cuda(),
+}
+
+
 class AOTInductorTestABICompatibleCpu(AOTITestCase):
     device = "cpu"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3656,300 +3749,10 @@ class AOTInductorTestABICompatibleCpu(AOTITestCase):
     use_minimal_arrayref_interface = False
 
 
-def fail_with_and_without_stack_allocation(is_skip=False):
-    return TestFailure(
-        (
-            "abi_compatible_cpu",
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        ),
-        is_skip=is_skip,
-    )
-
-
-def fail_stack_allocation(is_skip=False):
-    return TestFailure(
-        (
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        ),
-        is_skip=is_skip,
-    )
-
-
-def fail_minimal_arrayref_interface(is_skip=False):
-    return TestFailure(
-        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
-        is_skip=is_skip,
-    )
-
-
-def fail_cuda(is_skip=False):
-    return TestFailure(
-        ("abi_compatible_cuda", "non_abi_compatible_cuda"),
-        is_skip=is_skip,
-    )
-
-
-def fail_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("abi_compatible_cuda",),
-        is_skip=is_skip,
-    )
-
-
-def fail_non_abi_compatible_cuda(is_skip=False):
-    return TestFailure(
-        ("non_abi_compatible_cuda",),
-        is_skip=is_skip,
-    )
-
-
-# test_failures, xfail by default, set is_skip=True to skip
-CPU_TEST_FAILURES = {
-    # TODO: error: ‘complex64’ was not declared in this scope
-    "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: use of deleted function RAIIAtenTensorHandle
-    "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: use of deleted function RAIIAtenTensorHandle
-    "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    # TODO:  error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_dynamic_cat": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/129550
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122980
-    "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
-    # minimal arrayref interface only works with CPU; test crashes.
-    # https://github.com/pytorch/pytorch/issues/122983
-    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
-    # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
-    # the test segfaults
-    "test_repeat_output": fail_stack_allocation(is_skip=True),
-    # TODO: failed internally
-    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
-    # segfault
-    "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_bool_input": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_int_list_input": fail_stack_allocation(is_skip=True),
-    # segfault
-    # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
-    "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_scatter_reduce_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_index_put_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122984
-    "test_index_put_with_none_index": fail_minimal_arrayref_interface(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_constant": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
-    "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    # failed on MacOS
-    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    # https://github.com/pytorch/pytorch/issues/122990
-    "test_cond_non_tensor_predicates_dynamic_False": fail_stack_allocation(
-        is_skip=True
-    ),
-    # same issue as https://github.com/pytorch/pytorch/issues/122990
-    "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122991
-    "test_runtime_checks_complex": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_runtime_checks_fp8": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_while_loop_simple": fail_stack_allocation(is_skip=True),
-    "test_while_loop_nested": fail_stack_allocation(is_skip=True),
-    "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
-    # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
-    # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
-    "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_all_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
-    "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
-}
-
-# test_failures, xfail by default, set is_skip=True to skip
-CUDA_TEST_FAILURES = {
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
-    # no runtime checks for non_abi_compatible mode
-    "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
-    # quantized unsupported for GPU
-    "test_quantized_linear": fail_cuda(is_skip=True),
-    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
-    "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
-    # non-abi compatible mode aoti debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-}
-
-
-if not IS_FBCODE:
-    # The following tests look like they pass in both pytest and unittest (xml
-    # and terminal output say pass), but the process will segfault.  This only
-    # happens in OSS CI and is fine internally.
-    CPU_TEST_FAILURES.update(
-        {
-            "test_duplicated_params": fail_stack_allocation(is_skip=True),
-            "test_embedding_bag": fail_stack_allocation(is_skip=True),
-            "test_fqn": fail_stack_allocation(is_skip=True),
-            "test_no_args": fail_stack_allocation(is_skip=True),
-            "test_output_misaligned": fail_stack_allocation(is_skip=True),
-            "test_pytree_inputs": fail_stack_allocation(is_skip=True),
-            "test_seq": fail_stack_allocation(is_skip=True),
-            "test_simple_split": fail_stack_allocation(is_skip=True),
-            "test_addmm": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aliased_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
-            "test_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
-            "test_constant_folding": fail_minimal_arrayref_interface(is_skip=True),
-            "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
-            "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
-            "test_large_weight": fail_minimal_arrayref_interface(is_skip=True),
-            "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
-            "test_normal_functional": fail_minimal_arrayref_interface(is_skip=True),
-            "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
-            "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
-            "test_model_modified_weights": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
-            "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
-            "test_quanatized_int8_linear": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
-            "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
-            "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
-            "test_simple": fail_minimal_arrayref_interface(is_skip=True),
-            "test_small_constant": fail_minimal_arrayref_interface(is_skip=True),
-            "test_with_no_triton_profiler": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_with_offset": fail_minimal_arrayref_interface(is_skip=True),
-            "test_with_profiler": fail_minimal_arrayref_interface(is_skip=True),
-            "test_zero_size_weight": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(
-                is_skip=True
-            ),
-            "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aoti_debug_printer_cpp_kernel": fail_with_and_without_stack_allocation(
-                is_skip=True
-            ),
-        }
-    ),
-    # The following test passes internally but fails in OSS CI. To be investigated.
-    CUDA_TEST_FAILURES.update(
-        {
-            "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
-            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
-                is_skip=True
-            ),
-            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
-        }
-    )
-
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
-    "abi_compatible_cpu",
-    CPU_TEST_FAILURES,
-)
-
-
-class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
-    device = "cpu"
-    abi_compatible = True
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = True
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestABICompatibleCpuWithStackAllocation,
-    "abi_compatible_cpu_with_stack_allocation",
-    CPU_TEST_FAILURES,
-)
-
-
-class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
-    TestCase
-):
-    device = "cpu"
-    abi_compatible = True
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    allow_stack_allocation = True
-    use_minimal_arrayref_interface = True
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
-    "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    "cpu",
     CPU_TEST_FAILURES,
 )
 
@@ -3957,7 +3760,6 @@ copy_tests(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(AOTITestCase):
     device = "cuda"
-    abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3968,89 +3770,9 @@ class AOTInductorTestABICompatibleCuda(AOTITestCase):
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCuda,
-    "abi_compatible_cuda",
+    "cuda",
     CUDA_TEST_FAILURES,
 )
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCpu(AOTITestCase):
-    device = "cpu"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCpu,
-    "non_abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_duplicate_constant_folding": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        # no runtime checks for non_abi_compatible mode
-        "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_runtime_checks_dtype_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_runtime_checks_shape_failed": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_aoti_debug_printer_codegen": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_all_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_missing_arg_with_default_value": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_concat_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_multiple_outputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_reinterpret_view_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_aoti_debug_printer_cpp_kernel": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-    },
-)
-
-
-@unittest.skipIf(
-    IS_FBCODE or sys.platform == "darwin",
-    "NonABI mode should not be used in fbcode nor on MacOS",
-)
-class AOTInductorTestNonABICompatibleCuda(AOTITestCase):
-    device = "cuda"
-    abi_compatible = False
-    check_model = check_model
-    check_model_with_multiple_inputs = check_model_with_multiple_inputs
-    code_check_count = code_check_count
-    allow_stack_allocation = False
-    use_minimal_arrayref_interface = False
-
-
-copy_tests(
-    AOTInductorTestsTemplate,
-    AOTInductorTestNonABICompatibleCuda,
-    "non_abi_compatible_cuda",
-    CUDA_TEST_FAILURES,
-)
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

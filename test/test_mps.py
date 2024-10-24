@@ -350,6 +350,7 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -10999,6 +11000,12 @@ class TestAdvancedIndexing(TestCaseMPS):
         t2 = threading.Thread(target=torch.nonzero, args=(x,))
         t1.start()
         t2.start()
+
+    def test_sliced_view_cast(self):
+        # This used to crash on MacOS Sequoia
+        # See https://github.com/pytorch/pytorch/issues/137800
+        x = torch.rand(16, 16, device='mps', dtype=torch.float16)
+        y = x[:, 0:2].view(torch.float32) + 1
 
     def test_masked_select(self):
         x = torch.randn(3, 4)

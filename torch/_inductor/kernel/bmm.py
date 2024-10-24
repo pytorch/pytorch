@@ -185,7 +185,8 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
 
-@L.register_lowering(aten.baddbmm)
+# Don't register this since it is slower than decomposing it
+# @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
