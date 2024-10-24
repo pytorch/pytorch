@@ -7,9 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace transforms {
+namespace torch::data::transforms {
 
 template <typename T = Example<>>
 struct Stack;
@@ -44,6 +42,4 @@ struct Stack<TensorExample>
     return torch::stack(data);
   }
 };
-} // namespace transforms
-} // namespace data
-} // namespace torch
+} // namespace torch::data::transforms
