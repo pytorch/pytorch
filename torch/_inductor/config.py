@@ -586,6 +586,11 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
+class _collective:
+    auto_select: bool = False
+    one_shot_all_reduce_threshold_bytes: int = 128 * 1024
+
+
 def parallel_compile_enabled_internally() -> bool:
     """
     TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
