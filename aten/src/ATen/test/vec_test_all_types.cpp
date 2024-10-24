@@ -1747,6 +1747,7 @@ namespace {
       } while (0)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
+      TEST_CONVERT_TO(float);
     #undef TEST_CONVERT_TO
     }
 #endif

@@ -12076,6 +12076,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'nn.functional.batch_norm',
+        # NOTE: nn.functional.group_norm is here because 1 ULP difference in the mean
+        # output from the forward pass (tolerable) blew up into 8 ULP difference from
+        # the backward pass, and MPS uses fp16 accumulation anyway.
+        'nn.functional.group_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.cross_entropy',

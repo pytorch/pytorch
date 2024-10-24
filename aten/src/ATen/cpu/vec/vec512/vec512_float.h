@@ -40,6 +40,9 @@ public:
     values = _mm512_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8,
                             val9, val10, val11, val12, val13, val14, val15, val16);
   }
+  Vectorized(const float (&arr)[16])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
+                   arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]) {}
   operator __m512() const {
     return values;
   }
