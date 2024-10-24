@@ -2203,7 +2203,7 @@ class TestSDPACpuOnly(NNTestCase):
                 v_zp=v_zp, v_scale=v_scale,
                 a_zp=a_zp, a_scale=a_scale,
                 o_zp=o_zp, o_scale=o_scale)
-            actual = torch.ops.aten._scaled_dot_product_int8_for_cpu(
+            actual = torch.ops.aten._scaled_dot_product_int8(
                 q, k, v,
                 attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
                 q_zp=q_zp, q_scale=q_scale,

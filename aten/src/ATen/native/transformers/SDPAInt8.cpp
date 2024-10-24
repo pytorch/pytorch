@@ -12,8 +12,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/_scaled_dot_product_int8_for_cpu.h>
-#include <ATen/ops/_scaled_dot_product_int8_for_cpu_native.h>
+#include <ATen/ops/_scaled_dot_product_int8.h>
+#include <ATen/ops/_scaled_dot_product_int8_native.h>
 #include <ATen/ops/clamp_max.h>
 #include <ATen/ops/clamp_min.h>
 #include <ATen/ops/round.h>

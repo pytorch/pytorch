@@ -14778,7 +14778,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_int8_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None, int q_zp=0, float q_scale=1.0, int k_zp=0, float k_scale=1.0, int v_zp=0, float v_scale=1.0, int a_zp=0, float a_scale=1.0, int o_zp=0, float o_scale=1.0) -> Tensor output
+- func: _scaled_dot_product_int8(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None, int q_zp=0, float q_scale=1.0, int k_zp=0, float k_scale=1.0, int v_zp=0, float v_scale=1.0, int a_zp=0, float a_scale=1.0, int o_zp=0, float o_scale=1.0) -> Tensor output
   dispatch:
     CPU: _scaled_dot_product_int8_cpu
   tags: nondeterministic_seeded

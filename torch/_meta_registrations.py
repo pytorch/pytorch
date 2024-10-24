@@ -5175,10 +5175,10 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
 
 @register_meta(
     [
-        aten._scaled_dot_product_int8_for_cpu,
+        aten._scaled_dot_product_int8,
     ]
 )
-def meta__scaled_dot_product_int8_for_cpu(
+def meta__scaled_dot_product_int8(
     query: Tensor,
     key: Tensor,
     value: Tensor,

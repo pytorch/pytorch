@@ -2552,7 +2552,7 @@ make_fallback(
     warn=False,
 )
 make_fallback(
-    aten._scaled_dot_product_int8_for_cpu.default,
+    aten._scaled_dot_product_int8.default,
     sdpa_constraint,
     warn=False,
 )

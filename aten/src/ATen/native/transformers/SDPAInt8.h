@@ -24,6 +24,7 @@ at::Tensor sdpa_int8_math_impl(
     float a_scale,
     int32_t o_zp,
     float o_scale);
+
 using sdpa_int8_fn = void (*)(
     Tensor& output,
     const Tensor& query, const Tensor& key, const Tensor& value,
