@@ -64,13 +64,6 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
-// TODO: remove this change after a safe rollout.
-// Control whether we sleep after an exception is thrown.
-// This change is temporary and is used to safely remove the current sleep that
-// exists after an exception is thrown.
-static std::vector<std::string> TORCH_NCCL_SLEEP_AFTER_EXCEPTION = {
-    "TORCH_NCCL_SLEEP_AFTER_EXCEPTION"};
-
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -1040,6 +1033,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
+
+  // promise to coordinate flight recorder dump.
+  std::promise<void> promiseFlightRecorderDump_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.

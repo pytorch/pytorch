@@ -900,7 +900,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  sleepAfterException_ = getCvarBool(TORCH_NCCL_SLEEP_AFTER_EXCEPTION, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -1592,6 +1591,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         "Flight recorder dump in heartbeatMonitor",
         false,
         true);
+    // Indicate to watchdog thread that we have finished dumping.
+    promiseFlightRecorderDump_.set_value();
   }
 
   // GIL deadlock check.
@@ -1947,12 +1948,18 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
             // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
-            if (sleepAfterException_) {
-              // This sleep is used to give time for dumping before throwing
-              // exception
-              std::this_thread::sleep_for(
-                  std::chrono::seconds(heartbeatTimeoutInSec_));
-              LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+            // Give time for dumping before throwing exception
+            auto start = std::chrono::steady_clock::now();
+            auto status = promiseFlightRecorderDump_.get_future().wait_for(
+                std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+            if (status == std::future_status::timeout) {
+              LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                           << waitTimeoutDumpInMilSec_ << "ms"
+                           << " flight recorder dumps to finish.";
+            } else if (status == std::future_status::ready) {
+              auto end = std::chrono::steady_clock::now();
+              LOG(INFO) << logPrefix() << "slept for "
+                        << computeDeltaMS(start, end) << "ms"
                         << " giving time for flight recorder dumps to finish.";
             }
           } catch (const std::exception& e) {
