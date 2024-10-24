@@ -1428,6 +1428,13 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
+            is_user_visible_output = False
+            if is_output:
+                output_node = n.graph.find_nodes(op="output")[0]
+                output_idx = output_node.args[0].index(n)
+                is_user_visible_output = (
+                    output_idx in output_node.meta["user_visible_output_idxs"]
+                )
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
@@ -1456,16 +1463,14 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                output_node = n.graph.find_nodes(op="output")[0]
-                output_idx = output_node.args[0].index(n)
-                keep_original_strides = (
-                    output_idx in output_node.meta["user_visible_output_idxs"]
-                )
-                strides = output_node.meta["original_output_strides"][output_idx]
+                if is_user_visible_output:
+                    strides = output_node.meta["original_output_strides"][output_idx]
+                else:
+                    strides = strides = n.meta["val"].stride()
 
                 if strides is not None and len(strides) > 0:
                     allow_padding = (
-                        config.pad_outputs or not keep_original_strides
+                        config.pad_outputs or not is_user_visible_output
                     ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
@@ -1478,7 +1483,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and dense
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and not keep_original_strides
+                        and not is_user_visible_output
                         and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
