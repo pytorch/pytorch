@@ -201,5 +201,36 @@ TORCH_API bool has_multicast_support(
   auto allocator = get_allocator(device_type);
   return allocator->has_multicast_support(device_idx);
 }
+
+TORCH_LIBRARY(symm_mem, m) {
+  m.def(
+      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
+      {at::Tag::pt2_compliant_tag});
+}
+
 } // namespace symmetric_memory
 } // namespace c10d
