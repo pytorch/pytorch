@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch.fx
 import torch.utils._pytree as pytree
 
-
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
 
@@ -206,11 +205,39 @@ def aot_compile(
         }
     )
 
-    return compile_fx_aot(
+    return compile_fx_aot_debug_wrapper(
         gm,
         flat_example_inputs,  # type: ignore[arg-type]
-        config_patches=options,
+        options=options,
     )
+
+
+def compile_fx_aot_debug_wrapper(
+    gm: torch.fx.GraphModule,
+    flat_example_inputs: List,
+    options: Optional[Dict[str, str]] = None,
+):
+    from .compile_fx import compile_fx_aot
+
+    if torch._inductor.config.dump_aoti_minifier:
+        try:
+            so_path = compile_fx_aot(gm, flat_example_inputs, config_patches=options)
+            compiled_model = torch._export.aot_load(so_path, device=device)
+            aoti_result = compiled_model(*flat_example_inputs)
+            return so_path
+        except Exception as e:
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            dump_to_minify(gm, flat_example_inputs, "compile_fx_aot", options=options)
+        if torch._inductor.config.aoti_minifier_accuracy_check:
+            # TODO: write minifier for accuracy
+            pass
+            # original_result = gm(*flat_example_inputs)
+            # if aoti_result != original_result:
+            #     pass
+
+    else:
+        return compile_fx_aot(gm, flat_example_inputs, config_patches=options)
 
 
 def list_mode_options(
