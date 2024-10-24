@@ -7,7 +7,7 @@ requires = [
     "ninja",
     "pyyaml",
     "cmake",
-    "typing-extensions>=4.10.0",
+    "typing-extensions",
     "requests",
 ]
 # Use legacy backend to import local packages in setup.py
@@ -150,7 +150,7 @@ select = [
     "RUF026", # default factory kwarg
     "TCH",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
-    "TRY302",
+    "TRY203",
     "TRY401", # verbose-log-message
     "UP",
 ]

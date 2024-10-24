@@ -70,7 +70,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeIs
+from typing_extensions import Self, TypeGuard
 
 import torch
 import torch._guards
@@ -305,10 +305,10 @@ class FailedMatch(RuntimeError):
 MatchResult = Union[Match, FailedMatch]
 
 
-def is_match(m: MatchResult) -> TypeIs[Match]:
+def is_match(m: MatchResult) -> TypeGuard[Match]:
     """
-    TypeIs cannot act on `self`. Thus this function exists to let mypy
-    recognize FailedMatch.__bool__ as a TypeIs.
+    TypeGuards cannot act on `self`. Thus this function exists to let mypy
+    recognize FailedMatch.__bool__ as a TypeGuard.
     """
     return bool(m)
 
