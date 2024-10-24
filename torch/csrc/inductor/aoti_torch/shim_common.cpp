@@ -26,6 +26,7 @@
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
+#include <ATen/ops/_weight_int8pack_mm.h>
 #include <ATen/ops/_wrapped_linear_prepack.h>
 #include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
@@ -876,6 +877,20 @@ AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
         *weight_scale_tensor,
         *weight_zero_point_tensor,
         *bias_tensor));
+  });
+}
+
+AOTITorchError aoti_torch_cpu__weight_int8pack_mm(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle scales,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = at::_weight_int8pack_mm(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(w),
+        *tensor_handle_to_tensor_pointer(scales));
+    *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
 
