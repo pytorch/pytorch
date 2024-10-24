@@ -4,6 +4,7 @@
 #include <torch/library.h>
 
 #include <iostream>
+#include "c10/core/ScalarType.h"
 
 using namespace at::native::onednn;
 namespace at {
@@ -164,11 +165,11 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-    // TODO: handle difference of this dtype with argument dtype
-    // auto dtype =
-    //     (act.scalar_type() == c10::ScalarType::Byte) ? c10::kByte : c10::kChar;
+    bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+    bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+    auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte);
     Tensor output = at::empty(
-        dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
+        dst_tz, device(c10::kXPU).dtype(dst_dtype).memory_format(mfmt));
     
     return quantized_convolution_pt2(
         act,
