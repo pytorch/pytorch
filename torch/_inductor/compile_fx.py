@@ -1262,7 +1262,7 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    model_outputs_node["user_visible_output_idxs"] = [
+    model_outputs_node.meta["user_visible_output_idxs"] = [
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
