@@ -28,3 +28,8 @@ add_library(torch::xpurt INTERFACE IMPORTED)
 set_property(
     TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
     torch::sycl)
+
+# setting xpu arch flags
+torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
+# propagate to torch-xpu-ops
+set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
