@@ -1040,9 +1040,11 @@ class MemPool(_MemPool):
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        ctx = MemPoolContext(self)
-        snapshot = torch.cuda.memory_snapshot()
-        del ctx
+        try:
+            ctx = MemPoolContext(self)
+            snapshot = torch.cuda.memory_snapshot()
+        finally:
+            del ctx
         return snapshot
 
 
