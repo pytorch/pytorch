@@ -7,6 +7,7 @@ import pickle
 import tokenize
 import unittest
 import warnings
+from dataclasses import dataclass
 from types import FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
@@ -43,8 +44,7 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = value
-                default[name] = value
+                config[name] = _ConfigEntry(default=value)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -59,15 +59,12 @@ def install_config_module(module: ModuleType) -> None:
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, Any] = {}
-    default: Dict[str, Any] = {}
+    config: Dict[str, _ConfigEntry] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
-    module._default = default  # type: ignore[attr-defined]
-    module._allowed_keys = set(config.keys())  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -116,17 +113,21 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str
     return assignments
 
 
+@dataclass
+class _ConfigEntry:
+    # The default value specified in the configuration
+    default: Any
+    # The value specified by the user when they overrode the configuration
+    user_override: Any = None
+
+
 class ConfigModule(ModuleType):
     # NOTE: This should be kept in sync with _config_typing.pyi.
 
-    # The default values of the configuration settings.  This can be used to
-    # determine if the config has been changed or not.
-    _default: Dict[str, Any]
     # The actual configuration settings.  E.g., torch._dynamo.config.debug
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
-    # maps as "triton.cudagraphs"
-    _config: Dict[str, Any]
-    _allowed_keys: Set[str]
+    # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
+    _config: Dict[str, _ConfigEntry]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
     _is_dirty: bool
@@ -140,15 +141,18 @@ class ConfigModule(ModuleType):
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
-        elif name not in self._allowed_keys:
+        elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
-            self._config[name] = value
+            self._config[name].user_override = value
             self._is_dirty = True
 
     def __getattr__(self, name: str) -> Any:
         try:
-            return self._config[name]
+            config = self._config[name]
+            if config.user_override is not None:
+                return copy.deepcopy(config.user_override)
+            return copy.deepcopy(config.default)
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -157,7 +161,13 @@ class ConfigModule(ModuleType):
         self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        del self._config[name]
+        self._config[name].user_override = None
+
+    def _is_default(self, name: str) -> bool:
+        return (
+            self._config[name].user_override is None
+            or self._config[name].user_override == self._config[name].default
+        )
 
     def _get_dict(
         self,
@@ -184,7 +194,7 @@ class ConfigModule(ModuleType):
         config: Dict[str, Any] = {}
         for key in self._config:
             if ignored_keys and key in ignored_keys:
-                if skip_default and self._config[key] != self._default[key]:
+                if skip_default and not self._is_default(key):
                     warnings.warn(
                         f"Skipping serialization of {key} value {self._config[key]}"
                     )
@@ -192,22 +202,26 @@ class ConfigModule(ModuleType):
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):
                     continue
-            if skip_default and self._config[key] == self._default[key]:
+            if skip_default and self._is_default(key):
                 continue
-            config[key] = copy.deepcopy(self._config[key])
+            config[key] = copy.deepcopy(self.__getattr__(key))
         return config
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
+        ignored_keys = []
+        if "_save_config_ignore" in self._config:
+            assert isinstance(self._save_config_ignore, list)
+            ignored_keys = self._save_config_ignore
         return pickle.dumps(
-            self._get_dict(ignored_keys=self._config.get("_save_config_ignore", ())),
+            self._get_dict(ignored_keys=ignored_keys),
             protocol=2,
         )
 
     def save_config_portable(self) -> Dict[str, Any]:
         """Convert config to portable format"""
         prefixes = ["_"]
-        prefixes.extend(self._config["_cache_config_ignore_prefix"])
+        prefixes.extend(self._cache_config_ignore_prefix)
         return self._get_dict(ignored_prefixes=prefixes)
 
     def codegen_config(self) -> str:
@@ -217,7 +231,7 @@ class ConfigModule(ModuleType):
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
-            ignored_keys=self._config.get("_save_config_ignore"), skip_default=True
+            ignored_keys=self._save_config_ignore, skip_default=True
         ).items():
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
@@ -255,7 +269,13 @@ class ConfigModule(ModuleType):
             config = pickle.loads(maybe_pickled_config)
         else:
             config = maybe_pickled_config
-        self._config.update(config)
+        for k, v in config.items():
+            if k in self._config:
+                self.__setattr__(k, v)
+            else:
+                warnings.warn(
+                    f"key {k} with value {v} is not understood by this config"
+                )
 
     def get_config_copy(self) -> Dict[str, Any]:
         return self._get_dict()
@@ -338,11 +358,13 @@ class ConfigModule(ModuleType):
         config = self._config
 
         def change() -> Callable[[], None]:
-            prior = {k: config[k] for k in changes}
-            config.update(changes)
+            prior = {k: config[k].user_override for k in changes}
+            for k, v in changes.items():
+                self._config[k].user_override = v
 
             def revert() -> None:
-                config.update(prior)
+                for k, v in prior.items():
+                    self._config[k].user_override = v
 
             return revert
 
