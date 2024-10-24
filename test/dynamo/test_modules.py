@@ -1625,24 +1625,32 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 return self.layer(x)
 
         # This allows us to restart tracing without clearing speculation log
-        def id_and_graph_break(x):
+        def id_and_fail_inlining(x):
             torch._dynamo.graph_break()
             return x
 
-        @torch.compile()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
         def test(mod, x):
             res = mod(x)
             # Speculation log must not diverge in the 2nd round of tracing,
             # after we've initialized the `LazyLinear` into a `Linear` in the
             # 1st round.
-            res2 = id_and_graph_break(res)
+            res2 = id_and_fail_inlining(res)
             return res
 
-        x = torch.ones(10, 3)
         mod = ModWithOneLazyLinear()
+        x = torch.ones(10, 3)
+
+        # Make sure we don't get recompilation across multiple runs
         actual_res = test(mod, x)
         expect_res = mod(x)
         self.assertTrue(torch.allclose(expect_res, actual_res))
+        actual_res = test(mod, x)
+        expect_res = mod(x)
+        self.assertTrue(torch.allclose(expect_res, actual_res))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -3076,6 +3084,31 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
+
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
+    def test_overridden_call(self):
+        class OverRiddenCallModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, x):
+                # Overrides the __call__ method of torch.nn.Module
+                return 5 * self.forward(x)
+
+            def forward(self, x):
+                return x * 3
+
+        m = OverRiddenCallModule()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
