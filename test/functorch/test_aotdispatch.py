@@ -6218,6 +6218,57 @@ class TestAOTModuleSimplified(AOTTestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
+    def test_rrelu_with_noise_mutation(self):
+        def fn_functional(x):
+            noise = torch.ones_like(x)
+            result, noise_out = torch.ops.aten.rrelu_with_noise_functional(
+                x, noise, 0.2, 0.8, True
+            )
+            return result, noise_out
+
+        def fn_mutation(x):
+            noise = torch.ones_like(x)
+            result = torch.ops.aten.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+            return result, noise
+
+        def fn_inplace(x):
+            noise = torch.ones_like(x, requires_grad=False)
+            torch.ops.aten.rrelu_with_noise_(x, noise, 0.2, 0.8, True)
+            return x, noise
+
+        def _test_fn(fn, check_backward=True):
+            x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+
+            ref_y, ref_noise = fn(x)
+            self.assertTrue(torch.all(ref_noise < torch.ones_like(ref_noise)).item())
+
+            comp_y, comp_noise = torch.compile(fn, backend="inductor", fullgraph=True)(
+                x
+            )
+
+            if check_backward:
+                comp_y.sum().backward()
+            self.assertTrue(torch.all(comp_noise < torch.ones_like(comp_noise)).item())
+
+        _test_fn(fn_functional)
+        _test_fn(fn_mutation)
+        _test_fn(fn_inplace, check_backward=False)
+
+
+#    def test_rrelu_with_noise_vmap(self):
+#        def fn(x):
+#            noise = torch.ones_like(x)
+#            result = torch.ops.aten.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+#            return result, noise
+#
+#        x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+#        ref_y, ref_noise = fn(x)
+#
+#        fn = torch.vmap(fn)
+#        vmap_y, vmap_noise = fn(x)
+#        self.assertEqual(ref_y, vmap_y)
+#        self.assertEqual(ref_noise, vmap_noise)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

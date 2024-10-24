@@ -619,50 +619,6 @@ class TestDecomp(TestCase):
         for dim in (-1, 0, 1):
             self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
 
-    def test_rrelu_with_noise(self, device):
-        # rrelu_with_noise behavior depends on a) whether elements in the input
-        # are <= 0, and b) whether we're in training mode. Cover all cases:
-        dtype = torch.float64
-        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
-        lower = 1.0
-        upper = 4.0
-        training = False
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
-        # Now with training=True:
-        training = True
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @tf32_off()

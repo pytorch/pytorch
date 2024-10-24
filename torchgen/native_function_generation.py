@@ -442,10 +442,10 @@ def add_generated_native_functions(
                 continue
 
             base_fn = (
-                d[SchemaKind.inplace]
-                if has_inplace
-                else d[SchemaKind.mutable]
+                d[SchemaKind.mutable]
                 if has_mutable
+                else d[SchemaKind.inplace]
+                if has_inplace
                 else d[SchemaKind.out]
                 if has_out
                 else d[SchemaKind.functional]

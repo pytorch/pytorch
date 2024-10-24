@@ -285,6 +285,44 @@ static void fill__Tensor_batch_rule(
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
+static
+std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
+rrelu_with_noise_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    Tensor& noise,
+    std::optional<int64_t> noise_bdim,
+    const at::Scalar& lower,
+    const at::Scalar& upper,
+    bool training,
+    std::optional<at::Generator> generator) {
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto noise_ = moveBatchDimToFront(self, noise_bdim);
+
+  auto ret = at::rrelu_with_noise(self_, noise_, lower, upper, training, std::move(generator));
+
+  return std::make_tuple(ret, 0, noise_, 0);
+}
+
+static Tensor rrelu_with_noise_batch(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
+  int64_t cur_level = maybe_layer->layerId();
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
+  auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
+  TORCH_CHECK(!noise_bdim.has_value(), "vmap: Attempted to vmap over 'noise' in torch.rrelu_with_noise. This is not supported.");
+  auto res = rrelu_with_noise_batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, std::move(generator));
+  return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+}
+
 static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rule(
   Tensor& grad, std::optional<int64_t> grad_bdim,
   Tensor& self, std::optional<int64_t> self_bdim,
@@ -426,7 +464,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
   BINARY_SCALAR_3(remainder, Tensor, Scalar, Scalar_Tensor);
-  BINARY_POINTWISE(rrelu_with_noise);
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
@@ -512,8 +549,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 #undef LOGICAL_COMPARISON_POINTWISE
   VMAP_SUPPORT(masked_select, masked_select_batch_rule);
   VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule);
-
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
+  m.impl("rrelu_with_noise", rrelu_with_noise_batch);
 }
 
 } // namespace at::functorch

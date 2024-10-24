@@ -1118,6 +1118,10 @@ aten::resize_as_sparse_
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
+aten::rrelu_with_noise
+aten::rrelu_with_noise.out
+aten::rrelu_with_noise_
+aten::rrelu_with_noise_functional
 aten::scalar_tensor
 aten::scalar_tensor.out
 aten::scatter.reduce

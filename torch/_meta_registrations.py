@@ -3666,6 +3666,28 @@ def meta_relu_(self):
     return self
 
 
+@register_meta([aten.rrelu_with_noise])
+@out_wrapper()
+def meta_rrelu_with_noise(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self)
+
+
+@register_meta([aten.rrelu_with_noise_functional])
+def meta_rrelu_with_noise_functional(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self), torch.empty_like(noise)
+
+
+@register_meta([aten.rrelu_with_noise_])
+def meta_rrelu_with_noise_(
+    self, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return self
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
