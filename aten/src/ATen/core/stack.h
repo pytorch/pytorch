@@ -21,7 +21,7 @@ class Operation {
  public:
   template <typename F,
             std::enable_if_t<accepts<F, Stack*>::value, int> = 0>
-  [[deprecated("Please use void(Stack&) to register operator instead.")]]
+  C10_DEPRECATED_MESSAGE("Please use void(Stack&) to register operator instead.")
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
     raw(&stack);
