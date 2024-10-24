@@ -8,7 +8,7 @@ import sympy
 
 import torch
 
-from .. import ir
+from .. import ir, cpp_builder
 from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -519,17 +519,17 @@ class CppMicroGemmAMX(CppMicroGemm):
     const auto num_elements_per_b_tile = 512;
     const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
-#ifndef _MSC_VER
+{%- if cpp_builder.is_msvc_cl() %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
+    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
+{%- else %}
     // It's safe to use a stack-allocated array since the blocking strategy would
     // require us to allocate an array that's smaller than the size of L1D cache,
     // and the default per thread max stack size on Linux is quite higher,
     // so we need not worry about stack overflow.
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
-#else
-    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
-    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
-#endif
+{%- endif %}
 
     // This may not be true for the tail, but wouldn't affect correctness.
     const auto num_b_rows = 16;
