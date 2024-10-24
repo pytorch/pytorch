@@ -132,15 +132,20 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   sum[2 * registerPairIndex + 1] = result_high;
 }
 
-inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
+// Return a + b_low * c_low + b_high * c_high
+inline vec::Vectorized<float> f32_dot_f16(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
 #ifdef __ARM_FEATURE_FP16_FML
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
   // I'm not certain that I have the right feature test macro.
-  return vfmlalq_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
+  vec::Vectorized<float> first = vfmlalq_low_f16(a, b, c);
+  return vfmlalq_high_f16(first, b, c);
 #else
-  return vec::fmadd(vec::Vectorized<float>(vcvt_f32_f16(b)), vec::Vectorized<float>(vcvt_f32_f16(c)), vec::Vectorized<float>(a));
+  const auto [b_float_low, b_float_high] = convert_half_float(b);
+  const auto [c_float_low, c_float_high] = convert_half_float(c);
+  const auto first = vec::fmadd(b_float_low, c_float_low, a);
+  return vec::fmadd(b_float_high, c_float_high, first);
 #endif
 }
 
@@ -149,9 +154,9 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     const Half* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vld1_f16(reinterpret_cast<const float16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_f16(reinterpret_cast<const float16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_f16(*tail_sum, temp_vec1, temp_vec2);
+  const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[idx]);
+  const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[idx]);
+  *tail_sum = f32_dot_f16(*tail_sum, temp_vec1, temp_vec2);
 }
 
 // NOTE: This and some below code is unfortunately duplicated with
@@ -191,6 +196,10 @@ struct half_to_float16<Half> {
 template <typename T>
 using half_to_float16_t = typename half_to_float16<T>::type;
 
+static_assert(
+    (vec::Vectorized<Half>::size() & (vec::Vectorized<Half>::size() - 1)) == 0,
+    "Below code expects power-of-2 vector register size!");
+
 // NOTE [GCC code duplication]: The first attempt at landing BFDOT support with
 // TARGET_ARM_BF16_ATTRIBUTE failed because unlike clang, GCC will not
 // allow inlining a non-bf16-specific function into a bf16-specific
@@ -203,15 +212,15 @@ using half_to_float16_t = typename half_to_float16<T>::type;
   /* loop above. */                                                     \
   vec::Vectorized<float> tail_sum(0);                                   \
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);       \
-  const auto len_aligned_4 = len & ~3;                                  \
-  for (int j = len_aligned; j < len_aligned_4; j += 4) {                \
+  const auto len_aligned_vec = len & ~(vec::Vectorized<Half>::size() - 1); \
+  for (int j = len_aligned; j < len_aligned_vec; j += vec::Vectorized<Half>::size()) { \
     dot_with_fp32_arith_vectorized_tail_inner_loop##bfdot_suffix(vec1, vec2, &tail_sum, j); \
   }                                                                     \
   auto reduced_tail = vpaddq_f32(tail_sum, tail_sum);                   \
   reduced_sum += vgetq_lane_f32(vpaddq_f32(reduced_tail, reduced_tail), 0); \
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
-  for (int j = len_aligned_4; j < len; ++j) {                           \
+  for (int j = len_aligned_vec; j < len; ++j) {                         \
     /* We use half_to_float16_t here because changing to Half was */    \
     /* causing arithmetic to at fp16 precision, but the necessary */    \
     /* necessary behavior to pass python test/test_mps.py -k */         \
