@@ -2043,7 +2043,10 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            # `_cuda_beginAllocateCurrentStreamToPool`` is not thread safe, so we need to lock
+            with graph_capture_lock:
+                out = self.run_eager(new_inputs, function_id)
+            return out
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2108,6 +2111,7 @@ class CUDAGraphTreeManager:
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
+        # now, we are in a recording state !
         with graph_capture_lock:
             out = self.record_function(new_inputs, function_id)
 
