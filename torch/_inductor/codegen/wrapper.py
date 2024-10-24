@@ -1476,7 +1476,7 @@ class PythonWrapperCodegen(CodeGen):
                                 f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
