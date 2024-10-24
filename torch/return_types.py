@@ -13,15 +13,18 @@ return_types = torch._C._return_types  # type: ignore[attr-defined]
 
 
 def pytree_register_structseq(cls):
+    if not torch.utils._pytree.is_structseq_class(cls):
+        raise TypeError(f"Class {cls!r} is not a PyStructSequence class.")
+
     def structseq_flatten(structseq):
-        return list(structseq), None
+        return list(structseq), type(structseq)
 
     def structseq_flatten_with_keys(structseq):
         values, context = structseq_flatten(structseq)
         return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
     def structseq_unflatten(values, context):
-        return cls(values)
+        return context(values)
 
     register_pytree_node(
         cls,
