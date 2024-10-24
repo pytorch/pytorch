@@ -83,6 +83,7 @@ public:
     static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of setValue()");
     iterator_->second = Value(std::forward<Value_>(value));
   }
+  ~DictEntryRef() = default;
 
 private:
   // allow copying and moving, but only our friends (i.e. the Dict class) can do
