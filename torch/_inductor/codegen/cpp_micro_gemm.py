@@ -554,7 +554,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
         const int64_t init_idx =  n * buf_size_per_nr_block;
-        // For simplicitym even if the tail would not be a multiple of block_k,
+        // For simplicity, even if the tail would not be a multiple of block_k,
         // we would incur the cost of reading some data we won't use because
         // each B tile's dequantized data in the buffer would have 16x32 elements.
         const auto last_k_offset = K / {{block_k}} * {{block_k}};
