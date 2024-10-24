@@ -7,6 +7,7 @@ import inspect
 import itertools
 import logging
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
@@ -680,9 +681,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         if type(args[0]) is ConstantVariable:
-            log.warning(
-                "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+            warnings.warn(
+                "Pred is a Python constant. When exporting torch.cond, it exports one of the branches."
+                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool.",
+                UserWarning,
             )
             if args[0].as_python_constant():
                 return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})

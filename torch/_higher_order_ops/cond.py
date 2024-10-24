@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+import warnings
 
 import torch
 import torch._subclasses.functional_tensor
@@ -137,10 +138,12 @@ def cond(pred, true_fn, false_fn, operands):
     )
 
     if isinstance(pred, (bool, int, float)):
-        log.warning(
-            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
-        )
+        if torch.compiler.is_compiling():
+            warnings.warn(
+                "Pred is a Python constant. When exporting torch.cond, it exports one of the branches."
+                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool.",
+                UserWarning,
+            )
         if pred:
             return true_fn(*operands)
         else:
