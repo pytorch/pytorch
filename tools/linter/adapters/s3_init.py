@@ -26,10 +26,7 @@ try:
     PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 except subprocess.CalledProcessError:
     # If git is not installed, compute repo root as 3 folders up from this file
-    path_ = os.path.abspath(__file__)
-    for _ in range(4):
-        path_ = os.path.dirname(path_)
-    PYTORCH_ROOT = path_
+    PYTORCH_ROOT = str(Path(__file__).absolute().parents[3])
 
 DRY_RUN = False
 
