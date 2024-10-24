@@ -1408,6 +1408,24 @@ except RuntimeError as e:
         finally:
             p.terminate()
 
+    def test_inexact_ordering(self):
+        class FastSlowDataset(Dataset):
+            def __init__(self, size):
+                self.size = size
+
+            def __getitem__(self, idx):
+                if idx % 2 == 0:
+                    time.sleep(0.1)
+                return idx % 2 == 0
+
+            def __len__(self):
+                return self.size
+
+        dataset = FastSlowDataset(10)
+        dataloader = self._get_data_loader(dataset, batch_size=1, prefetch_factor=10, num_workers=2)
+        fetched = list(dataloader)
+        self.assertListEqual(fetched, ([False] * 5 + [True] * 5))
+
     # Tests if the child process forked by the DataLoader segfaults due to having more than 3 threads
     # in the parent process after at least one set_num_threads invocation in the parent process.
     # After forking, set_num_threads(1) in the child process entails handling some inherited data-structures
