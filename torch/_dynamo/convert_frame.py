@@ -1200,9 +1200,17 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
+                        user_stack_trace = (
+                            "Graph break: skip: from user code at:\n%s"
+                            % user_stack_formatted
+                        )
+                        torch._logging.trace_structured(
+                            "dynamo_graph_break_reason",
+                            payload_fn=lambda: "%s\n%s"
+                            % (user_stack_trace, traceback.format_exc()),
+                        )
                         graph_break_log.debug(
-                            "Graph break: skip: from user code at:\n%s",
-                            user_stack_formatted,
+                            user_stack_trace,
                             exc_info=True,
                         )
 
