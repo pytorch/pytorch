@@ -4433,13 +4433,7 @@ class CPUReproTests(TestCase):
 
         with torch.cpu.amp.autocast():
             mod = M().to(torch.bfloat16).eval()
-            # compiler_mode = torch.compile(mod)
-            # _ = compiler_mode(*inputs)
-            # output = compiler_mode(*inputs)
             self.common(mod, inputs)
-        # fn = Model()
-        # x = torch.randn(1, 4, 2, 2)
-        # self.common(fn, (x,))
 
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
