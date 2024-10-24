@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-import copy
+import dataclasses
 import functools
 import math
 import sys
@@ -652,7 +652,12 @@ class LocalBufferContext:
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
-            new_loops = copy.copy(loops)
+            new_inner_fn = self.localize_function(
+                loops.inner_fn,
+                rewrite_index,
+            )
+
+            new_loops = dataclasses.replace(loops, inner_fn=new_inner_fn)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
                     name=node.get_name(), layout=node.get_layout(), data=new_loops
@@ -660,10 +665,6 @@ class LocalBufferContext:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_function(
-                new_loops.inner_fn,
-                rewrite_index,
-            )
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]

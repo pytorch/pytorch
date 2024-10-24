@@ -106,7 +106,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       static_cast<MessageType>(tupleElements[0].toInt());
   AutogradMetadata autogradMetadata(
       tupleElements[1].toInt(), tupleElements[2].toInt());
-  worker_id_t workerId = tupleElements[3].toInt();
+  worker_id_t workerId = static_cast<worker_id_t>(tupleElements[3].toInt());
   auto c10DeviceMap =
       tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
