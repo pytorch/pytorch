@@ -408,6 +408,100 @@ def _remap_constants(
                 constants[target] = constant
 
 
+def _produce_aten_artifact(
+    *,
+    gm,
+    mod,
+    constant_attrs,
+    graph_signature,
+    pre_dispatch,
+    fake_args,
+    fake_kwargs,
+    fake_params_buffers,
+) -> ATenExportArtifact:
+    """
+    This is a helper function that is shared between export_to_aten_ir and export_to_aten_ir_make_fx
+    to produce the aten artifact. (export compatible graph module + signature)
+
+    It does:
+    1. Applies runtime assertion pass
+    2. Populate meta val when missing
+    3. Lift constants as placeholders
+    4. Replace raw autograd and autocast ops with HOPs
+    5. Prettify names for placeholders
+    6. Preserve requires_grad value on node meta val
+    """
+    # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
+    # Overwrite output specs afterwards.
+    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
+    gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
+
+    total_non_user_inputs = (
+        len(graph_signature.parameters)
+        + len(graph_signature.buffers)
+        + len(graph_signature.input_tokens)
+    )
+    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
+
+    export_graph_signature = _convert_to_export_graph_signature(
+        graph_signature, gm, _get_non_persistent_buffers(mod)
+    )
+
+    constants = rewrite_script_object_meta(gm)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    if pre_dispatch:
+        from torch._export.passes.replace_autocast_with_hop_pass import (
+            replace_autocast_with_hop_pass,
+        )
+        from torch._export.passes.replace_set_grad_with_hop_pass import (
+            replace_set_grad_with_hop_pass,
+        )
+
+        # Note: replace_set_grad_with_hop_pass need to be after lift_constant_pass because
+        # a getattr of a constant tensor doesn't have meta["val"] until after lift_constant_pass.
+        # If replace_set_grad_with_hop_pass is before lift_constant_pass,
+        # and the constant_tensor is passed as input of the set grad hop, the placeholder's
+        # meta["val"] will be None and fails our verifier for placeholder.
+        gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
+
+        gm, export_graph_signature = replace_autocast_with_hop_pass(
+            gm, export_graph_signature
+        )
+
+    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
+    for _mod in gm.modules():
+        if not isinstance(_mod, torch.fx.GraphModule):
+            continue
+        for node in _mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("stack_trace", None)
+
+    # Prettify names for placeholder nodes.
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
+
+    _preserve_requires_grad_pass(
+        gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
+    )
+
+    return ATenExportArtifact(
+        gm,
+        export_graph_signature,
+        constants,
+    )
+
+
 def _rename_constants_nodes(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
@@ -676,74 +770,15 @@ def _export_to_aten_ir(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
-    # Overwrite output specs afterwards.
-    flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
-
-    total_non_user_inputs = (
-        len(graph_signature.parameters)
-        + len(graph_signature.buffers)
-        + len(graph_signature.input_tokens)
-    )
-    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
-
-    export_graph_signature = _convert_to_export_graph_signature(
-        graph_signature, gm, _get_non_persistent_buffers(mod)
-    )
-
-    constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
-
-    if pre_dispatch:
-        from torch._export.passes.replace_autocast_with_hop_pass import (
-            replace_autocast_with_hop_pass,
-        )
-        from torch._export.passes.replace_set_grad_with_hop_pass import (
-            replace_set_grad_with_hop_pass,
-        )
-
-        # Note: replace_set_grad_with_hop_pass need to be after lift_constant_pass because
-        # a getattr of a constant tensor doesn't have meta["val"] until after lift_constant_pass.
-        # If replace_set_grad_with_hop_pass is before lift_constant_pass,
-        # and the constant_tensor is passed as input of the set grad hop, the placeholder's
-        # meta["val"] will be None and fails our verifier for placeholder.
-        gm, export_graph_signature = replace_set_grad_with_hop_pass(
-            gm, export_graph_signature
-        )
-
-        gm, export_graph_signature = replace_autocast_with_hop_pass(
-            gm, export_graph_signature
-        )
-
-    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
-    for _mod in gm.modules():
-        if not isinstance(_mod, torch.fx.GraphModule):
-            continue
-        for node in _mod.graph.nodes:
-            if node.op in ["placeholder", "output"]:
-                node.meta.pop("nn_module_stack", None)
-                node.meta.pop("stack_trace", None)
-
-    # Prettify names for placeholder nodes.
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
-
-    _preserve_requires_grad_pass(
-        gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
-    )
-
-    return ATenExportArtifact(
-        gm,
-        export_graph_signature,
-        constants,
+    return _produce_aten_artifact(
+        gm=gm,
+        mod=mod,
+        constant_attrs=constant_attrs,
+        graph_signature=graph_signature,
+        pre_dispatch=pre_dispatch,
+        fake_args=fake_args,
+        fake_kwargs=fake_kwargs,
+        fake_params_buffers=fake_params_buffers,
     )
 
 
@@ -1509,8 +1544,6 @@ def _export_to_aten_ir_make_fx(
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
 
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-
     # See comment in _export_to_aten_ir()
     if produce_guards_callback:
         try:
@@ -1518,45 +1551,15 @@ def _export_to_aten_ir_make_fx(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
 
-    gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
-
-    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
-    for _mod in gm.modules():
-        if not isinstance(_mod, torch.fx.GraphModule):
-            continue
-        for node in _mod.graph.nodes:
-            if node.op in ["placeholder", "output"]:
-                node.meta.pop("nn_module_stack", None)
-                node.meta.pop("stack_trace", None)
-
-    set_missing_meta_vals(gm, flat_args, params_len)
-
-    export_graph_signature = _convert_to_export_graph_signature(
-        graph_signature, gm, _get_non_persistent_buffers(mod)
-    )
-
-    constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
-
-    _preserve_requires_grad_pass(
-        gm, export_graph_signature, fake_params_buffers, constants, flat_args
-    )
-
-    # Prettify names for placeholder nodes.
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
-
-    return ATenExportArtifact(
-        gm,
-        export_graph_signature,
-        constants,
+    return _produce_aten_artifact(
+        gm=gm,
+        mod=mod,
+        constant_attrs=constant_attrs,
+        graph_signature=graph_signature,
+        pre_dispatch=True,
+        fake_args=fake_args,
+        fake_kwargs=fake_kwargs,
+        fake_params_buffers=fake_params_buffers,
     )
 
 
