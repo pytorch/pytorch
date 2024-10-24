@@ -154,11 +154,11 @@ isolate_fails_code_str = None
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
 
-    model_str += NNModuleToString.convert(gm)
+    # model_str += NNModuleToString.convert(gm)
 
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+    ep = torch.export.export(gm, tuple(args))
+    ep_path = os.path.join(save_dir, "exported_program.pt2")
+    torch.export.save(ep, ep_path)
 
     writer = InputWriter(save_dir)
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
@@ -174,22 +174,13 @@ isolate_fails_code_str = None
 
     model_str += "\n".join(writer.lines()) + "\n"
 
-    model_str += "mod = Repro()\n"
+    # model_str += "mod = Repro()\n"
+    model_str += f"mod = torch.export.load('{ep_path}').module()\n"
     model_str += f"options={options}\n"
     return model_str
 
 
 def repro_common(options, mod, load_args):
-    # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters())
-    for n, b in mod.named_buffers():
-        if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
-            log.warning(
-                "Constant %s was not serialized, generated random data instead. "
-                "If you think this is affecting you, please comment on "
-                "https://github.com/pytorch/pytorch/issues/100468",
-                n,
-            )
 
     if not hasattr(load_args, "_version"):
         log.warning(

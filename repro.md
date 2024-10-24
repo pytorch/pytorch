@@ -5,19 +5,20 @@ A demo of minifier for AOTI. Code mostly copied from `_dynamo/repro/after_aot.py
 
 Run the code snippet below:
 
+[TODO]: Still need to set up this part of the demo with a better example. Currently I just error on relu.
+
+
 ```python
 class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        # self.fc1 = torch.nn.Linear(10, 16)
+        self.fc1 = torch.nn.Linear(10, 16)
         self.relu = torch.nn.ReLU()
-        # self.fc2 = torch.nn.Linear(16, 1)
         self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, x):
-        # x = self.fc1(x)
+        x = self.fc1(x)
         x = self.relu(x)
-        # x = self.fc2(x)
         x = self.sigmoid(x)
         return x
 
@@ -49,7 +50,7 @@ W1023 17:55:30.015000 1767636 pytorch/torch/_dynamo/debug_utils.py:279] /data/us
 ```
 
 
-The minifier_launcher.py looks like this:
+The minifier_launcher.py looks like this. It's a bit different with the Inductor minifier. Here we dump the module into an ExportedProgram and load it. In Inducotr minifier, it dumps the graph module directly into the minifier_launcher.py file as a string. See the note at the end for why we use ExportedProgram instead.
 
 ```python
 
@@ -90,38 +91,23 @@ isolate_fails_code_str = None
 # GPU Hardware Info:
 # NVIDIA PG509-210 : 8
 
-
-from torch.nn import *
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-
-
-    def forward(self, x):
-        relu = torch.ops.aten.relu.default(x);  x = None
-        sigmoid = torch.ops.aten.sigmoid.default(relu);  relu = None
-        return (sigmoid,)
-
 def load_args(reader):
-    buf0 = reader.storage('db41273a3f311fd0658a07f88e73563410d83758', 320, device=device(type='cuda', index=0))
+    buf0 = reader.storage('a480bc76d85b84685abb6c9741633686b8227ee3', 320, device=device(type='cuda', index=0))
     reader.tensor(buf0, (8, 10), is_leaf=True)  # x
 load_args._version = 0
-mod = Repro()
-options={'aot_inductor.output_path': '/data/users/shangdiy/model.so', 'aot_inductor.serialized_in_spec': '[1, {"type": "builtins.tuple", "context": "null", "children_spec": [{"type": "builtins.tuple", "context": "null", "children_spec": [{"type": null, "context": null, "children_spec": []}]}, {"type": "builtins.dict", "context": "[]", "children_spec": []}]}]', 'aot_inductor.serialized_out_spec': '[1, {"type": null, "context": null, "children_spec": []}]'}
+mod = torch.export.load('/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_04_40_110265-pid_2899125/minifier/checkpoints/exported_program.pt2').module()
+options={'aot_inductor.output_path': '/data/users/shangdiy/torch_compile_debug/model.so', 'aot_inductor.serialized_in_spec': '[1, {"type": "builtins.tuple", "context": "null", "children_spec": [{"type": "builtins.tuple", "context": "null", "children_spec": [{"type": null, "context": null, "children_spec": []}]}, {"type": "builtins.dict", "context": "[]", "children_spec": []}]}]', 'aot_inductor.serialized_out_spec': '[1, {"type": null, "context": null, "children_spec": []}]'}
 if __name__ == '__main__':
     from torch._dynamo.repro.aoti import run_repro
     with torch.no_grad():
-        run_repro(mod, load_args, config_patches=options, accuracy=False, command='minify', save_dir='/data/users/shangdiy/torch_compile_debug/run_2024_10_23_18_07_31_452542-pid_1963264/minifier/checkpoints', check_str=None)
+        run_repro(mod, load_args, config_patches=options, accuracy=False, command='minify', save_dir='/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_04_40_110265-pid_2899125/minifier/checkpoints', check_str=None)
         # To run it separately, do
-        # mod, args = run_repro(mod, load_args, accuracy=False, command='get_args', save_dir='/data/users/shangdiy/torch_compile_debug/run_2024_10_23_18_07_31_452542-pid_1963264/minifier/checkpoints', check_str=None)
+        # mod, args = run_repro(mod, load_args, accuracy=False, command='get_args', save_dir='/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_04_40_110265-pid_2899125/minifier/checkpoints', check_str=None)
         # mod(*args)
 ```
 
 
 Now you can run this minifier_launcher.py file to get the minified result.
-
-[TODO]: Still need to set up this part of the demo with a better example. Currently there's no error in the graph, so it dumps the same graph.
 
 
 The output looks like this:
@@ -134,30 +120,89 @@ W1023 18:01:43.487000 1873218 torch/_dynamo/repro/after_aot.py:342] Copying repr
 Wrote minimal repro out to repro.py
 ```
 
-Here's `repro.py`. You can see that it successfully identified the `relu` node that we purposefully error on.
+Here's `repro.py`. If you print out `mod`, you can see that it successfully identified the `relu` node that we purposefully error on.
 
 ```python
-from torch.nn import *
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
+from math import inf
+
+import torch
+
+import torch._dynamo.config
+import torch._functorch.config
+import torch._inductor.config
+import torch._inductor.inductor_prims
+import torch.fx as fx
+import torch.fx._pytree as fx_pytree
+import torch.fx.experimental._config
+from torch import device, tensor
+from torch._dynamo.testing import rand_strided
+
+torch._inductor.config.dump_aoti_minifier = True
+torch._inductor.config.generate_intermediate_hooks = True
 
 
+isolate_fails_code_str = None
 
-    def forward(self, x):
-        relu = torch.ops.aten.relu.default(x);  x = None
-        return (relu,)
+
+# torch version: 2.6.0a0+gitcd9c6e9
+# torch cuda version: 12.0
+# torch git version: cd9c6e9408dd79175712223895eed36dbdc84f84
+
+
+# CUDA Info:
+# nvcc: NVIDIA (R) Cuda compiler driver
+# Copyright (c) 2005-2023 NVIDIA Corporation
+# Built on Fri_Jan__6_16:45:21_PST_2023
+# Cuda compilation tools, release 12.0, V12.0.140
+# Build cuda_12.0.r12.0/compiler.32267302_0
+
+# GPU Hardware Info:
+# NVIDIA PG509-210 : 8
+
 
 def load_args(reader):
-    buf0 = reader.storage('db41273a3f311fd0658a07f88e73563410d83758', 320, device=device(type='cuda', index=0))
-    reader.tensor(buf0, (8, 10), is_leaf=True)  # x
+    buf0 = reader.storage(
+        "5278226fd34c7b5768476768232f86c125e8d484",
+        512,
+        device=device(type="cuda", index=0),
+    )
+    reader.tensor(buf0, (8, 16), is_leaf=True)  # linear
+
+
 load_args._version = 0
-mod = Repro()
-options=None
-if __name__ == '__main__':
+mod = torch.export.load(
+    "/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_08_39_767620-pid_2957565/minifier/checkpoints/exported_program.pt2"
+).module()
+options = None
+if __name__ == "__main__":
     from torch._dynamo.repro.aoti import run_repro
+
     with torch.no_grad():
-        run_repro(mod, load_args, config_patches=options, accuracy=False, command='run', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_24_10_24_17_588042-pid_2167585/minifier/checkpoints', check_str=None)
+        run_repro(
+            mod,
+            load_args,
+            config_patches=options,
+            accuracy=False,
+            command="run",
+            save_dir="/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_08_39_767620-pid_2957565/minifier/checkpoints",
+            check_str=None,
+        )
+        # To run it separately, do
+        # mod, args = run_repro(mod, load_args, accuracy=False, command='get_args', save_dir='/data/users/shangdiy/torch_compile_debug/run_2024_10_24_11_08_39_767620-pid_2957565/minifier/checkpoints', check_str=None)
+        # mod(*args)
+
+```
+
+Mod:
+```python
+GraphModule()
+
+
+
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)
 ```
 
 
@@ -165,11 +210,11 @@ if __name__ == '__main__':
 
 [TODO]: write some test cases
 
-[TODO]: If we have ` self.fc1 = torch.nn.Linear(10, 16)`, it doesn't work yet. The same error exists for Inductor Minifier. We need to recursively generate all submodules to dump the graph module.
 
-[Question]: Do we have to convert the graph module into string? How about serialize and dump the graph module and just load it later? like exported_program save and load. This is the whole point of export?
+### Note: why we use ExportedProgram to save and load graphs?
+If we have ` self.fc1 = torch.nn.Linear(10, 16)`, it doesn't work in Inductor Minifier. The reason is we need to recursively generate all submodules to dump the graph module.
 
-Sample error msg:
+If we run minifier_launcher.py, we'll see error msg:
 ```bash
   File "/home/shangdiy/.conda/envs/pytorch-3.10/lib/python3.10/inspect.py", line 1769, in getattr_static
     raise AttributeError(attr)
@@ -187,7 +232,7 @@ from torch.nn import *
 class Repro(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.fc1 = Module().cuda()
+        self.fc1 = Module().cuda() ## self.fc1 needs to be converted recursively
 
 
 
