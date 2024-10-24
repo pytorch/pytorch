@@ -150,7 +150,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.wait,
         torch.as_tensor,
         torch.from_numpy,
-        torch.get_device,
         torch.tensor,
         torch.default_generator,
         torch.has_cuda,
@@ -192,7 +191,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
         torch.export.register_dataclass,
@@ -654,6 +652,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
         torch.gcd: lambda input, other, out=None: -1,
         torch.ge: lambda input, other, out=None: -1,
+        torch.get_device: lambda input: -1,
         torch.greater_equal: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
@@ -1140,6 +1139,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sym_min: lambda a, b: -1,
         torch.sym_not: lambda input: -1,
         torch.sym_ite: lambda a, b, c: -1,
+        torch.sym_sum: lambda args: -1,
         torch._sym_sqrt: lambda input: -1,
         torch._sym_cos: lambda input: -1,
         torch._sym_cosh: lambda input: -1,
@@ -1253,6 +1253,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vsplit: lambda input, indices_or_sections: -1,
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
+        torch._wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
+        torch._wrapped_quantized_linear_prepacked: (
+            lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
+        ),
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
         torch._make_dual_copy: lambda primal, tangent, level: -1,
@@ -1341,6 +1345,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
+        Tensor._clear_non_serializable_cached_data: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
@@ -2078,6 +2083,16 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+@contextlib.contextmanager
+def _enable_torch_function():
+    old_state = torch._C._get_torch_function_state()
+    try:
+        torch._C._set_torch_function_state(torch._C._TorchFunctionState.ENABLED)
+        yield
+    finally:
+        torch._C._set_torch_function_state(old_state)
 
 
 @contextlib.contextmanager

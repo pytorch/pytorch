@@ -6,6 +6,8 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
@@ -166,7 +168,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
     ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 
@@ -268,7 +270,7 @@ inline std::vector<c10::SymInt> conv_input_size(
     SymIntArrayRef output_size, SymIntArrayRef weight_size,
     SymIntArrayRef padding, SymIntArrayRef output_padding, SymIntArrayRef stride, SymIntArrayRef dilation, c10::SymInt groups
 ) {
-  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, std::move(groups));
 }
 
 inline std::vector<int64_t> conv_input_size(

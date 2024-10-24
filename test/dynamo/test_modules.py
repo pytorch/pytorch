@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import contextlib
 import copy
 import itertools
 import os
@@ -21,6 +22,7 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -1138,6 +1140,22 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
+@contextlib.contextmanager
+def temporary_tensor_subclass(torch_function=None):
+    class TensorProxy(torch.Tensor):
+        @classmethod
+        def __torch_function__(cls, func, types, args=(), kwargs=None):
+            if torch_function is not None:
+                torch_function()
+            return super().__torch_function__(func, types, args, kwargs)
+
+    torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+    try:
+        yield TensorProxy
+    finally:
+        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+
+
 class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
@@ -1276,14 +1294,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             x = x.sigmoid()
             return x
 
-        class TensorProxy(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                return super().__torch_function__(func, types, args, kwargs)
-
-        torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
-
-        try:
+        with temporary_tensor_subclass() as TensorProxy:
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -1293,13 +1304,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.op_count, 4)
             self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        finally:
-            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
-
     def test_torch_function_with_closure(self):
         def run():
-            counter = 0
-
             def foo(x):
                 # function call, twice to test wrapping
                 x = F.sigmoid(x)
@@ -1309,18 +1315,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 x = x.sigmoid()
                 return x
 
-            class TensorProxy(torch.Tensor):
-                @classmethod
-                def __torch_function__(cls, func, types, args=(), kwargs=None):
-                    nonlocal counter
-                    # for now, only support reads from closure cells
-                    # TODO(future PR): support writes as well
-                    counter + 1
-                    return super().__torch_function__(func, types, args, kwargs)
+            counter = 0
 
-            torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+            def function():
+                nonlocal counter
+                # for now, only support reads from closure cells
+                # TODO(future PR): support writes as well
+                counter + 1
 
-            try:
+            with temporary_tensor_subclass(function) as TensorProxy:
                 x = torch.randn(1).as_subclass(TensorProxy)
                 x = torch.randn(1)
                 cnt = torch._dynamo.testing.CompileCounter()
@@ -1330,10 +1333,60 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
                 self.assertEqual(cnt.op_count, 4)
                 self.assertTrue(torch._dynamo.testing.same(out1, out2))
-            finally:
-                torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
+
+    def test_torch_mangled_class_name(self):
+        original = TensorWithTFOverrideVariable.global_mangled_class_name
+        results = []
+
+        def instrumented(self, tx):
+            result = original(self, tx)
+            results.append(result)
+            return result
+
+        TensorWithTFOverrideVariable.global_mangled_class_name = instrumented
+
+        def one_break(x):
+            x = F.sigmoid(x)
+            print()  # force break
+            x = x.sigmoid()
+            return x
+
+        try:
+            with temporary_tensor_subclass() as TensorProxy:
+                x = torch.randn(1).as_subclass(TensorProxy)
+                x1 = one_break(x)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_one_break = torch._dynamo.optimize(cnt)(one_break)
+                x2 = opt_one_break(x)
+
+                self.assertTrue(torch._dynamo.testing.same(x1, x2))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 2)
+
+                compile_ids = set()
+                for r in results:
+                    # A mangled classname looks like __subclass_TensorProxy_94524181138240_c0
+                    # where the last segment contains the compile_id.
+                    prefix = "__subclass_TensorProxy_"
+                    before, sep, after = r.partition(prefix)
+                    self.assertEqual(before, "")
+                    self.assertEqual(sep, prefix)
+
+                    class_type_id, compile_id = after.split("_")
+                    self.assertTrue(class_type_id.isnumeric())
+                    self.assertTrue(compile_id.startswith("c"))
+
+                    cid = compile_id[1:]
+                    self.assertTrue(cid.isnumeric())
+                    compile_ids.add(cid)
+
+                self.assertEqual(len(compile_ids), 3)
+
+        finally:
+            TensorWithTFOverrideVariable.global_mangled_class_name = original
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
@@ -1941,9 +1994,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
-        # fn compiles twice, and forward twice
-        # (since forward is inlined when fn is compiled)
-        self.assertEqual(cnts.frame_count, 4)
+        # fn compiles twice
+        self.assertEqual(cnts.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
@@ -2719,6 +2771,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(num_compiles, 1)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module_tensor(self):
+        # This test verifies that dynamo will mark
+        # the nn module tensor attributes as static
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "placeholder" and n.name == "l_mod_buf"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buf = torch.ones(2, 2)
+
+            def forward(self, x):
+                return self.buf * x
+
+        mod = TestModule()
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x):
+            return x * mod(x)
+
+        inp = torch.ones(2)
+        fn(inp)
+        self.assertEqual(num_compiles, 1)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @torch._inductor.config.patch("freezing", True)
     @torch.no_grad()
     def test_mark_static_with_freezing(self):
@@ -2916,6 +3011,40 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         helper()
         with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
             helper()
+
+    def test_user_defined_nn_module_dynamic(self):
+        class Conv2d(torch.nn.Conv2d):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, x):
+                x = torch.nn.functional.conv2d(
+                    x,
+                    self.weight,
+                    self.bias,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Conv2d(64, 64, kernel_size=(2, 2), stride=(1, 1))
+        mod2 = Conv2d(64, 64, kernel_size=(2, 2), stride=(2, 2))
+        mod3 = Conv2d(64, 64, kernel_size=(2, 2), stride=(3, 3))
+
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(1, 64, 64, 64)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
 
 
 if __name__ == "__main__":

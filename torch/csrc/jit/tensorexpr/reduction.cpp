@@ -7,29 +7,24 @@
 namespace torch::jit::tensorexpr {
 
 ExprHandle Reducer::operator()(
-    BufHandle result_buf,
+    const BufHandle& result_buf,
     ExprHandle body,
     const std::vector<ExprHandle>& output,
     const std::vector<VarHandle>& inner) const {
   return ReduceOp::make(
-      complete(
-          std::move(result_buf), interaction_, std::move(body), output, inner),
+      complete(result_buf, interaction_, std::move(body), output, inner),
       inner,
       *this);
 }
 
 ReduceOpPtr Reducer::operator()(
-    BufPtr result_buf,
+    const BufPtr& result_buf,
     ExprPtr body,
     const std::vector<ExprPtr>& output,
     const std::vector<VarPtr>& inner) const {
   return alloc<ReduceOp>(
       complete(
-          std::move(result_buf),
-          interaction_,
-          ExprHandle(std::move(body)),
-          output,
-          inner),
+          result_buf, interaction_, ExprHandle(std::move(body)), output, inner),
       inner,
       *this);
 }

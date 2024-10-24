@@ -13,8 +13,7 @@ and have it behave like PyTorch's built-in operators. In order to do so, you mus
 register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
 APIs.
 
-
-Please see :ref:`custom-ops-landing-page` for more details.
+Please see `PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_ for more details.
 
 .. _extending-autograd:
 
@@ -638,10 +637,10 @@ keyword arguments like :func:`torch.add` does::
 
 For speed and flexibility the ``__torch_function__`` dispatch mechanism does not
 check that the signature of an override function matches the signature of the
-function being overrided in the :mod:`torch` API. For some applications ignoring
+function being overridden in the :mod:`torch` API. For some applications ignoring
 optional arguments would be fine but to ensure full compatibility with
 :class:`Tensor`, user implementations of torch API functions should take care to
-exactly emulate the API of the function that is being overrided.
+exactly emulate the API of the function that is being overridden.
 
 Functions in the :mod:`torch` API that do not have explicit overrides will
 return ``NotImplemented`` from ``__torch_function__``. If all operands with
@@ -860,7 +859,7 @@ signature of the original ``PyTorch`` function::
   <Signature (input, other, out=None)>
 
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
-that explicitly cannot be overrided by ``__torch_function__``. This list can be
+that explicitly cannot be overridden by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overridden.
 

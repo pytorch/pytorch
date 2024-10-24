@@ -940,19 +940,19 @@ void initJitScriptBindings(PyObject* module) {
   special_magic_methods.emplace(
       "__str__",
       [](const Object& self,
-         py::args args,
+         const py::args& args,
          const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__str__");
         if (!method) {
           return py::str("ScriptObject <" + self.type()->str() + ">");
         }
-        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
+        return invokeScriptMethodFromPython(*method, args, kwargs);
       });
 
   special_magic_methods.emplace(
       "__repr__",
       [](const Object& self,
-         py::args args,
+         const py::args& args,
          const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__repr__");
         if (!method) {
@@ -960,7 +960,7 @@ void initJitScriptBindings(PyObject* module) {
           ss << std::hex << static_cast<const void*>(&self);
           return py::str("<torch.ScriptObject object at " + ss.str() + ">");
         }
-        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
+        return invokeScriptMethodFromPython(*method, args, kwargs);
       });
 
   for (const char* mm_name : magic_method_names) {
@@ -970,7 +970,9 @@ void initJitScriptBindings(PyObject* module) {
       object_class.def(
           mm_name,
           [mm_name](
-              const Object& self, py::args args, const py::kwargs& kwargs) {
+              const Object& self,
+              const py::args& args,
+              const py::kwargs& kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
               std::string msg = fmt::format(
@@ -979,8 +981,7 @@ void initJitScriptBindings(PyObject* module) {
                   self.type()->str());
               throw c10::NotImplementedError(msg);
             }
-            return invokeScriptMethodFromPython(
-                *method, std::move(args), kwargs);
+            return invokeScriptMethodFromPython(*method, args, kwargs);
           });
     }
   }
@@ -1271,7 +1272,7 @@ void initJitScriptBindings(PyObject* module) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
-            return std::make_tuple(pp.str(), consts);
+            return std::make_tuple(pp.str(), std::move(consts));
           })
       .def("apply", &Module::apply)
       .def("__copy__", &Module::copy)
@@ -1584,7 +1585,7 @@ void initJitScriptBindings(PyObject* module) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
-            return std::make_tuple(pp.str(), consts);
+            return std::make_tuple(pp.str(), std::move(consts));
           })
       .def_property_readonly("owner", &Method::owner)
       .def_property_readonly("raw_owner", [](const Method& self) {
@@ -2440,6 +2441,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_pickle_save", [](const IValue& v) {
     auto bytes = torch::jit::pickle_save(v);
     return py::bytes(bytes.data(), bytes.size());
+  });
+
+  m.def("_pickle_load_obj", [](const py::bytes& bytes) {
+    // https://github.com/pybind/pybind11/issues/2517
+    std::string buffer = bytes;
+    return torch::jit::pickle_load_obj(buffer);
   });
 
   initScriptDictBindings(module);
