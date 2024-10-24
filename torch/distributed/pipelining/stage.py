@@ -474,6 +474,8 @@ class _PipelineStageBase(ABC):
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
         full_backward = bwd_kwargs["full_backward"]
+
+        # TODO(whc) we can not rely on counting chunks anymore since we may have odd numbers due to merged BWs
         if full_backward:
             last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
         else:
@@ -686,6 +688,7 @@ class _PipelineStageBase(ABC):
                 )
 
                 # TODO: we dont need to save this, add to dw_runner?
+                print(f"passing param_groups to dW: {param_groups}")
                 self.backward_state[bwd_chunk_id] = (
                     bwd_kwargs["input_values"],
                     param_groups,
@@ -720,7 +723,8 @@ class _PipelineStageBase(ABC):
                 output_grads,
             ) = self.backward_state.pop(bwd_chunk_id)
 
-            if self.stage_index != 0:
+            # if self.stage_index != 0:
+            if True:
                 bwd_kwargs = {
                     "stage_output": stage_output,
                     "param_groups": param_groups,
