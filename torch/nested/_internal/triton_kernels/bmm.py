@@ -38,25 +38,20 @@ def gen_configs():
                                  [32, 64, 128],
                                  [32, 64, 128],
                                  # [54, 84, 108, 128, 216, 432, 864],
-                                 [1, 2, 4, 8, 16])
+                                 # [1, 2, 4, 8, 16],
+                                 # [1, 2, 4, 8, 16],
+                                 )
     configs=[]
     # for BLOCK_SIZE_K, NUM_SM, num_warps in products:
-    for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, num_warps in products:
+    for BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K in products:
         configs += [
         triton.Config({
-            'BLOCK_SIZE_M': 128,
-            'BLOCK_SIZE_N': 128,
+            'BLOCK_SIZE_M': BLOCK_SIZE_M,
+            'BLOCK_SIZE_N': BLOCK_SIZE_N,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
             # 'NUM_SM': NUM_SM,
-            'num_stages': num_warps,
-            'GROUP_SIZE_M': 8,
-        }),
-        triton.Config({
-            'BLOCK_SIZE_M': 64,
-            'BLOCK_SIZE_N': 64,
-            'BLOCK_SIZE_K': BLOCK_SIZE_K,
-            # 'NUM_SM': NUM_SM,
-            'num_stages': num_warps,
+            # 'num_stages': num_stages,
+            # 'num_warps': num_warps,
             'GROUP_SIZE_M': 8,
         }),
         ]
