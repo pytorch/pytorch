@@ -6238,6 +6238,11 @@ for method, func in magic_methods.items():
     register_lowering(method_to_operator(method))(func)
 
 
+@register_lowering(torch.sym_sum)
+def sym_sum(args):
+    return sympy.Add(*args)
+
+
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
@@ -6470,6 +6475,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
