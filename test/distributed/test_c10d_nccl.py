@@ -862,17 +862,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # default PG comm is not initialized yet
         pg = self._create_process_group_nccl(store, self.opts())
         backend = pg._get_backend(torch.device(device))
-        self.assertEqual(backend.is_initialized(), False)
+        self.assertEqual(backend._is_initialized(), False)
 
         tensor = torch.full((1,), self.rank).cuda(device)
         new_group = c10d.new_group([0, 1], device_id=device)
         self.assertEqual(backend.comm_split_count(), 0)
 
         new_backend = new_group._get_backend(torch.device(device))
-        self.assertEqual(new_backend.is_initialized(), True)
+        self.assertEqual(new_backend._is_initialized(), True)
         dist.broadcast(tensor, 0, group=new_group)
         self.assertEqual(new_backend.comm_split_count(), 0)
-        self.assertEqual(backend.is_initialized(), False)
+        self.assertEqual(backend._is_initialized(), False)
         torch.cuda.synchronize()
         dist.destroy_process_group()
 

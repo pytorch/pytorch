@@ -2567,10 +2567,6 @@ Arguments:
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "is_initialized",
-              &::c10d::Backend::isInitialized,
               py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding
@@ -2780,6 +2776,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "abort",
               &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_is_initialized",
+              &::c10d::ProcessGroupNCCL::isInitialized,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(

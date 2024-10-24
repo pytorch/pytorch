@@ -724,7 +724,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void performNocolorSplit(at::Device device);
 
   // If all comms on this PG are fully initialized, return true.
-  bool isInitialized() override;
+  bool isInitialized();
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and

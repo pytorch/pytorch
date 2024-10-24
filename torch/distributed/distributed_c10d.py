@@ -4776,10 +4776,8 @@ def new_group(
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
-            to "bind" this process to, allowing for backend-specific
-            optimizations.  only under NCCL: the communicator is immediately formed
-            (calling``ncclCommInit*`` immediately rather than the normal lazy
-            call)
+            to "bind" this process to,  The `new_group` call will try to initialize
+            a communication backend immediately for the device if this field is given.
 
     Returns:
         A handle of distributed group that can be given to collective calls or
@@ -4828,6 +4826,10 @@ def _new_group_with_tag(
     default_pg = _get_default_group()
     if device_id is None:
         device_id = default_pg.bound_device_id
+    elif default_pg.bound_device_id is not None:
+        assert (
+            device_id == default_pg.bound_device_id
+        ), "Mismatched bound device between new pg and the default pg."
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
