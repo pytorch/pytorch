@@ -165,7 +165,9 @@ if __name__ == '__main__':
 
 [TODO]: write some test cases
 
-[TODO]: If we have ` self.fc1 = torch.nn.Linear(10, 16)`, it doesn't work yet. The same error exists for Inductor Minifier.
+[TODO]: If we have ` self.fc1 = torch.nn.Linear(10, 16)`, it doesn't work yet. The same error exists for Inductor Minifier. We need to recursively generate all submodules to dump the graph module.
+
+[Question]: Do we have to convert the graph module into string? How about serialize and dump the graph module and just load it later? like exported_program save and load. This is the whole point of export?
 
 Sample error msg:
 ```bash
@@ -176,4 +178,24 @@ torch._dynamo.exc.InternalTorchDynamoError: AttributeError: weight
 from user code:
    File "/data/users/shangdiy/torch_compile_debug/run_2024_10_23_17_20_10_091390-pid_1170971/minifier/minifier_launcher.py", line 47, in forward
     fc1_weight = self.fc1.weight
+```
+
+minifier_launcher:
+```python
+
+from torch.nn import *
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fc1 = Module().cuda()
+
+
+
+    def forward(self, x):
+        fc1_weight = self.fc1.weight
+        fc1_bias = self.fc1.bias
+        linear = torch.ops.aten.linear.default(x, fc1_weight, fc1_bias);  x = fc1_weight = fc1_bias = None
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        sigmoid = torch.ops.aten.sigmoid.default(relu);  relu = None
+        return (sigmoid,)
 ```
