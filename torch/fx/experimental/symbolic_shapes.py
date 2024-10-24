@@ -6290,6 +6290,7 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    @record_shapeenv_event(save_tracked_fakes=True)
     def _defer_runtime_assert_inner(
         self,
         expr: SympyBoolean,
