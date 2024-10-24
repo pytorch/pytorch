@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -171,55 +172,30 @@ def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 
+@dataclass
 class JustKnobsConfig:
-    """Represents a lazily loaded config
+    """Represents a lazily loaded justknob config
 
     This is designed to be used to specify a value in a config.
 
-    i.e. foo.bar = JustknobsConfig(name="//foo:bar", env_name="FORCE_FOO_BAR")
+    i.e.
+    foo = JustknobsConfig(name="//foo:bar")
+    install_config_module(...)
 
-    Call .get() in order to access the value
-    i.e. if foo.bar.get():
+    This configs must be installed with install_config_module to be used
 
-    Note that the value is fetched once, and then not allowed to change. This
-    means less suprises, at the downside that you may have to restart a job
-    to pick up an update.
+    Arguments:
+        name is the name of the feature / JK. In OSS this is unused.
+        defaults is the value to default this knob to in OSS.
 
-    It can also be set explicitly via set - i.e.
-    foo.bar = JustknobsConfig(name="//foo:bar")
-    foo.bar.set(True)
+    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
+    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
+    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
 
-    Note that this does allow for no JK name (so that you can use this to replace old configurations).
     """
 
-    def __init__(
-        self, *, name: Optional[str] = None, env_name=None, default: bool = True
-    ):
-        self.name = name
-        self.env_name = env_name
-        self.default = default
-        self.value: Optional[bool] = None
-        self.executed_value = None
-
-    def set(self, value: bool):
-        self.value = value
-
-    def get(self):
-        if self.executed_value is None:
-            self.executed_value = justknobs_feature(
-                self.name,
-                config_value=self.value,
-                env_name=self.env_name,
-                default=self.default,
-            )
-        return self.executed_value
-
-    def __str__(self):
-        v = bool(self)
-        return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
-
-    def __bool__(self):
-        return self.get()
+    name: Optional[str] = None
+    default: bool = True
 
 
 def justknobs_feature(
@@ -280,7 +256,7 @@ def justknobs_feature(
     return justknobs_check(name)
 
 
-def justknobs_check(name: str) -> bool:
+def justknobs_check(name: str, default=True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
@@ -303,7 +279,7 @@ def justknobs_check(name: str) -> bool:
     fork safe and you will break anyone who forks the process and then
     hits JK again.
     """
-    return True
+    return default
 
 
 def justknobs_getval_int(name: str) -> int:

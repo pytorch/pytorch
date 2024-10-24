@@ -2,7 +2,7 @@
 
 import os
 
-from torch._utils_internal import justknobs_feature, JustKnobsConfig
+from torch._utils_internal import justknobs_feature
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     load_tests,
 )
@@ -16,35 +16,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestJustKnob(TestCase):
-    def test_justknob_config(self):
-        with self.subTest("Returns True"):
-            a = JustKnobsConfig()
-            self.assertTrue(a.get())
-        with self.subTest("Returns False"):
-            a = JustKnobsConfig(name="fake_name", default=False)
-            self.assertFalse(a.get())
-        with self.subTest("Returns True via config"):
-            a = JustKnobsConfig(name="fake_name", default=False)
-            a.set(True)
-            self.assertTrue(a.get())
-        with self.subTest("Returns True via env"):
-            os.environ["FAKE_FEATURE"] = "1"
-            a = JustKnobsConfig(
-                name="fake_name", env_name="FAKE_FEATURE", default=False
-            )
-            self.assertTrue(a.get())
-        with self.subTest("Returns same value consistently"):
-            a = JustKnobsConfig(name="fake_name", default=False)
-            a.set(True)
-            self.assertTrue(a.get())
-            a.set(False)
-            self.assertTrue(a.get())
-        with self.subTest("Checks __bool__"):
-            a = JustKnobsConfig(name="fake_name", default=False)
-            if a:
-                raise RuntimeError("Should not be true")
-            self.assertFalse(a)
-
     def test_justknob_feature(self):
         with self.subTest("OSS is True"):
             self.assertTrue(justknobs_feature("testname"))
