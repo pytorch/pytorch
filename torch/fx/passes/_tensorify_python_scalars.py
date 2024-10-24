@@ -126,6 +126,8 @@ def tensorify_python_scalars(
                 len(node.users) == 0
                 and node.op != "placeholder"
                 and node.op != "output"
+                # This seems a bit fragile. Is there a way to know if an operation is side effectful?
+                and node.name != "copy_"
                 and node not in deleted
             ):
                 graph.erase_node(node)

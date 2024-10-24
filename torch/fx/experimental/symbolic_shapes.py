@@ -443,10 +443,6 @@ def rebind_unbacked(
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
 
-            # We only care about rebinding unbacked things
-            if u1.node.hint is not None:
-                continue
-
             # tensor_version ops get specialized after AOTAutograd, it's OK,
             # we don't actually want to do asserts on them.  This is all a bit
             # questionable though
@@ -458,6 +454,11 @@ def rebind_unbacked(
                     u1,
                 )
                 continue
+
+            # We only care about rebinding unbacked things
+            if u1.node.hint is not None:
+                continue
+
             raw_u1 = u1.node.expr
             # Simplify SymBool binding
             if (
