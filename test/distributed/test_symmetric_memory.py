@@ -776,6 +776,8 @@ class SymmMemUtilTest(TestCase):
         self.assertTrue(t[32:48].eq(1).all())
         self.assertTrue(t[48:].eq(0).all())
 
+        print(torch.ops.symm_mem.memset32_)
+
         with self.assertRaises(RuntimeError):
             _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
 
