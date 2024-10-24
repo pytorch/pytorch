@@ -2,6 +2,7 @@
 
 import itertools
 import random
+from typing import List
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
@@ -188,6 +189,23 @@ class PackedSequenceTest(TestCase):
         padded = rnn_utils.pad_sequence([b, a, c])
         self.assertEqual(padded, expected.transpose(0, 1))
 
+        # padding_side = "left", batch_first=True
+        expected = torch.tensor([[0, 4, 5], [1, 2, 3], [0, 0, 6]])
+        padded = rnn_utils.pad_sequence(
+            [b, a, c],
+            batch_first=True,
+            padding_side="left",
+        )
+        self.assertEqual(padded, expected)
+
+        # padding_side = "left", batch_first=False
+        padded = rnn_utils.pad_sequence(
+            [b, a, c],
+            batch_first=False,
+            padding_side="left",
+        )
+        self.assertEqual(padded, expected.transpose(0, 1))
+
         # pad with non-zero value
         expected = torch.tensor([[4, 5, 1], [1, 2, 3], [6, 1, 1]])
         padded = rnn_utils.pad_sequence([b, a, c], True, 1)
@@ -201,22 +219,38 @@ class PackedSequenceTest(TestCase):
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
-            sequences = []
+            sequences: List[torch.Tensor] = []
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
                 sequences.append(torch.rand(seq_len, 5, *trailing_dims))
             random.shuffle(sequences)
-            expected = []
-            for seq in sequences:
-                expected.append(pad(seq, maxlen * maxlen))
             # batch first = true
-            expected = torch.stack(expected)
+            expected = torch.stack([pad(seq, maxlen * maxlen) for seq in sequences])
             padded = rnn_utils.pad_sequence(sequences, True)
             self.assertEqual(padded, expected)
 
             # batch first = false
             padded = rnn_utils.pad_sequence(sequences)
+            self.assertEqual(padded, expected.transpose(0, 1))
+
+            # padding_side = "left", batch_first=True
+            expected = torch.stack(
+                [pad(seq.flip(0), maxlen * maxlen).flip(0) for seq in sequences]
+            )
+            padded = rnn_utils.pad_sequence(
+                sequences,
+                batch_first=True,
+                padding_side="left",
+            )
+            self.assertEqual(padded, expected)
+
+            # padding_side = "left", batch_first=False
+            padded = rnn_utils.pad_sequence(
+                sequences,
+                batch_first=False,
+                padding_side="left",
+            )
             self.assertEqual(padded, expected.transpose(0, 1))
 
     def test_unpad_sequence(self):

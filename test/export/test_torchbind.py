@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -189,7 +190,7 @@ def forward(self, x, n):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x, n):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -236,7 +237,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj_attr, 'add_tensor', x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -270,7 +271,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = obj_attr = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -304,7 +305,7 @@ def forward(self, x, cc):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, x, cc):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, cc, 'add_tensor', x);  token = cc = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, cc, 'add_tensor', x);  token = cc = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -363,7 +364,7 @@ def forward(self, x, cc):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, x, cc):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, cc, x);  token = cc = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, cc, x);  token = cc = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
@@ -445,10 +446,10 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, getitem_1);  getitem = obj_attr = getitem_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, getitem_1);  getitem = obj_attr = getitem_1 = None
     getitem_2 = with_effects_1[0]
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(x, getitem_3);  x = getitem_3 = None
@@ -492,7 +493,7 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_list_return.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_list_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     getitem_2 = getitem_1[0]
@@ -500,7 +501,7 @@ def forward(self, token, obj_attr, x):
     getitem_4 = getitem_1[2];  getitem_1 = None
     add = torch.ops.aten.add.Tensor(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_4);  add = getitem_4 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add_1);  getitem = obj_attr = add_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add_1);  getitem = obj_attr = add_1 = None
     getitem_5 = with_effects_1[0]
     getitem_6 = with_effects_1[1];  with_effects_1 = None
     add_2 = torch.ops.aten.add.Tensor(x, getitem_6);  x = getitem_6 = None
@@ -542,12 +543,12 @@ def forward(self, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1]
     getitem_2 = with_effects[2];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
     add_1 = torch.ops.aten.add.Tensor(x, getitem_4);  x = getitem_4 = None
@@ -697,20 +698,20 @@ def forward(self, arg0_1, arg1_1):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
     add_1 = torch.ops.aten.add.Tensor(add, linear);  add = linear = None
-    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
     getitem_4 = with_effects_2[0];  with_effects_2 = None
-    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_4 = None
     getitem_6 = with_effects_3[0]
     getitem_7 = with_effects_3[1];  with_effects_3 = None
-    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_6 = None
     getitem_8 = with_effects_4[0];  with_effects_4 = None
     add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
@@ -720,6 +721,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
         safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
@@ -748,7 +750,7 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
                 ep.graph_module.code.strip(),
                 """\
 def forward(self, token, safe_obj):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, safe_obj, 'get');  token = safe_obj = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, safe_obj, 'get');  token = safe_obj = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
@@ -967,21 +969,21 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     cos = torch.ops.aten.cos.default(arg2_1)
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
     getitem = with_effects[0];  with_effects = None
     sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, sin);  getitem = sin = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, sin);  getitem = sin = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
-    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
     getitem_6 = with_effects_3[0];  with_effects_3 = None
     sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
-    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
     getitem_8 = with_effects_4[0]
     getitem_9 = with_effects_4[1];  with_effects_4 = None
-    with_effects_5 = torch._higher_order_ops.effects.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
+    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
     getitem_10 = with_effects_5[0];  with_effects_5 = None
     add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
     return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
@@ -1012,7 +1014,7 @@ def forward(self, tq, x):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, tq, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.queue_push.default, tq, x);  token = x = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.queue_push.default, tq, x);  token = x = None
     getitem = with_effects[0];  with_effects = None
     return (getitem, tq)""",  # noqa: B950
         )
@@ -1281,7 +1283,7 @@ class TestCompileTorchbind(TestCase):
             f(_empty_tensor_queue(), x),
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
-        if not torch.compiler.is_compiling() and backend == "eager":
+        if not torch._dynamo.is_compiling() and backend == "eager":
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
@@ -1317,11 +1319,11 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj, x):
-    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    return (getitem, add)""",  # noqa: B950
+    add_3 = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    return (getitem, add_3)""",  # noqa: B950
         )
 
     @parametrize("backend", ["eager", "aot_eager"])

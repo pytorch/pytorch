@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This pass converts aten ops to a normalized form. It is
 // run immediately after IR generation in both the tracer and compiler,
@@ -14,5 +13,4 @@ TORCH_API void NormalizeOps(const std::shared_ptr<Graph>& graph);
 
 const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap();
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -90,7 +90,8 @@ def freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        params_flat = tracing_context.params_flat
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat = tracing_context.params_flat_unwrap_subclasses
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -147,12 +148,30 @@ class ErasedTensor(torch.Tensor):
         )
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
-        if not isinstance(mod, torch.nn.Module):
-            continue
+    with torch.utils._python_dispatch._disable_current_modes():
+        for (
+            mod
+        ) in torch._guards.TracingContext.get().module_context.nn_modules.values():
+            if not isinstance(mod, torch.nn.Module):
+                continue
 
+            for attr_name, tensor in list(
+                itertools.chain(
+                    mod.named_parameters(recurse=False),
+                    mod.named_buffers(recurse=False),
+                )
+            ):
+                with torch._dispatch.python.no_python_dispatcher():
+                    e_t = ErasedTensor(tensor, attr_name, mod)
+                if isinstance(tensor, torch.nn.Parameter):
+                    e_t.requires_grad_(True)
+                    e_t._is_param = True  # type: ignore[attr-defined]
+                setattr(mod, attr_name, e_t)
+
+
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
+    with torch.utils._python_dispatch._disable_current_modes():
         for attr_name, tensor in list(
             itertools.chain(
                 mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -164,21 +183,6 @@ def invalidate_eager_modules():
                 e_t.requires_grad_(True)
                 e_t._is_param = True  # type: ignore[attr-defined]
             setattr(mod, attr_name, e_t)
-
-
-@torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod: torch.fx.GraphModule):
-    for attr_name, tensor in list(
-        itertools.chain(
-            mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
-        )
-    ):
-        with torch._dispatch.python.no_python_dispatcher():
-            e_t = ErasedTensor(tensor, attr_name, mod)
-        if isinstance(tensor, torch.nn.Parameter):
-            e_t.requires_grad_(True)
-            e_t._is_param = True  # type: ignore[attr-defined]
-        setattr(mod, attr_name, e_t)
 
 
 def enforce_output_layout(gm: torch.fx.GraphModule):

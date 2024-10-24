@@ -33,7 +33,7 @@ TORCH_API Tensor makeBatched(const Tensor& tensor, std::optional<int64_t> bdim, 
 
 // Given a Tensor that may or may not be a BatchedTensor, unwrap it.
 // If `tensor` is not a BatchedTensor, or is a BatchedTensor but the level
-// doesn't match, then this returns (tensor, nullopt).
+// doesn't match, then this returns (tensor, std::nullopt).
 // Otherwise, it returns (unwrap(tensor), bdim).
 TORCH_API std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
 

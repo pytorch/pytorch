@@ -18,7 +18,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
         at::Tensor weight,
         std::optional<at::Tensor> bias) {
   TORCH_CHECK(weight.qscheme() == c10::kPerTensorAffine, "Unsupported qscheme: ", toString(weight.qscheme()));
-  const int output_channels = weight.size(0);
+  const auto output_channels = weight.size(0);
   const auto qtype = weight.qscheme();
   if (bias.has_value()) {
     TORCH_CHECK(bias.value().dim() == 1, "bias should be a vector (1D Tensor)");
@@ -28,14 +28,14 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
   }
 
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightCudnn>(
-          weight,
-          bias,
+          std::move(weight),
+          std::move(bias),
           qtype);
   return ret_ptr;
 }
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 class QLinearPackWeightInt8Cudnn final {
@@ -54,8 +54,8 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

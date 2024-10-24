@@ -24,10 +24,6 @@ class CKTemplate(ROCmTemplate):
         res = super().header()
         res.splice(
             """
-                // HIP headers
-
-                #include <hip/hip_bfloat16.h>
-
                 // CK headers
 
                 #ifdef DEBUG_LOG
@@ -60,7 +56,13 @@ class CKTemplate(ROCmTemplate):
                 template <ck::index_t... Is>
                 using S = ck::Sequence<Is...>;
 
+                template<typename... Ts>
+                using Tuple = ck::Tuple<Ts...>;
+
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
+                using Bilinear = ck::tensor_operation::element_wise::Bilinear;
+                using Scale = ck::tensor_operation::element_wise::Scale;
+                using MultiplyMultiply = ck::tensor_operation::element_wise::MultiplyMultiply;
 
                 // see "composable_kernel/include/ck/utility/data_type.hpp"
                 using F8  = ck::f8_t;
