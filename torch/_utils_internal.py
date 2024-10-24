@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 import tempfile
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -170,90 +169,6 @@ def log_torch_jit_trace_exportability(
 
 def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
-
-
-@dataclass
-class JustKnobsConfig:
-    """Represents a lazily loaded justknob config
-
-    This is designed to be used to specify a value in a config.
-
-    i.e.
-    foo = JustknobsConfig(name="//foo:bar")
-    install_config_module(...)
-
-    This configs must be installed with install_config_module to be used
-
-    Arguments:
-        name is the name of the feature / JK. In OSS this is unused.
-        defaults is the value to default this knob to in OSS.
-
-    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
-    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
-    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
-
-    """
-
-    name: Optional[str] = None
-    default: bool = True
-
-
-def justknobs_feature(
-    name: Optional[str], config_value=None, env_name=None, default: bool = True
-):
-    """Returns whether or not a specific justknob feature is enabled.
-
-    This is a slightly higher level API then justknobs_check, designed to make it "easy" to do the right thing.
-    The primary thing it does, is allow configuration to override JK by default, while retaining some features to force this
-    the other way during sevs.
-
-    The preference order (i.e. who wins first) in OSS (and FB) is
-    - Config if specified
-    - Environment Variable if specified
-    - JK (FB), or default (OSS)
-
-
-    Quickstart
-    Have a config variable
-    Make a JK which is set to your "enabled" value (generally true).
-    Use this feature to check it (if you set the JK to be false, change the default).
-    If you have an env variable, also use the function to check it.
-
-    Arguments:
-        name - This should correspond 1:1 to a JK name internally to FB.
-        env_name - If this is set, we'll try and read the value from environment variables
-        config_value - If this is set to anything other than None, we'll use this value by
-            default. Note that within FB, there is some functionality to force override these
-            configs
-        default - This is the value to return in OSS. This avoids having to write weird double
-            negatives within justknobs and the config code, if you just want to have the
-            killswitch work by having feature return True to turn off features
-
-    Requirements:
-        WARNING - Don't use this at import time - Simply pass in the existing config.
-        If you want to use this at config time, use JustKnobsConfig
-    """
-    if config_value is not None:
-        return config_value
-    if env_name is not None and ((env := os.getenv(env_name)) is not None):
-        env = env.upper()
-        if env in ("1", "TRUE"):
-            return True
-        if env in ("0", "FALSE"):
-            return False
-        log.error(
-            "Difficulty parsing env variable %s=%s for feature %s - Assuming env variable means true and returning True",
-            env_name,
-            env,
-            name,
-        )
-        # We could return default here, but that was confusing to log.
-        return True
-    if name is None:
-        return True
-    if not default:
-        return not justknobs_check(name)
-    return justknobs_check(name)
 
 
 def justknobs_check(name: str, default=True) -> bool:
