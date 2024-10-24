@@ -11,7 +11,7 @@ requests
 # is required until pytorch build not refactored to work for latest setuptools.
 setuptools<=72.1.0
 types-dataclasses
-typing-extensions>=4.10.0
+typing-extensions>=4.8.0
 sympy==1.13.1 ; python_version >= "3.9"
 filelock
 networkx

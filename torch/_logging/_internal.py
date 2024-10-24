@@ -43,6 +43,8 @@ LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 TRACE_ENV_VAR = "TORCH_TRACE"
 
+LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
+
 
 @dataclass
 class LogRegistry:
@@ -972,12 +974,14 @@ def _init_logs(log_file_name=None):
     # initializing it until we actually need to log anything.  This is
     # important because JK initializes a C++ singleton, which will pork our
     # process if we subsequently fork.
-    handler = LazyTraceHandler(trace_dir_name)
+    global LOG_TRACE_HANDLER
+    if LOG_TRACE_HANDLER is None:
+        LOG_TRACE_HANDLER = LazyTraceHandler(trace_dir_name)
     # This log is ALWAYS at debug level.  We will additionally test if there
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
-    trace_log_handler = _track_handler(handler)
+    trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
 
