@@ -96,6 +96,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     return __VA_ARGS__();                                                   \
   }
 
+namespace at {
 namespace detail {
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
@@ -121,6 +122,7 @@ C10_DEPRECATED_MESSAGE(
 inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 } // namespace detail
+} // namespace at
 
 // The AT_DISPATCH_* family of macros provides the ability to
 // conveniently generate specializations of a kernel over all of the
@@ -214,7 +216,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     const auto& the_type = TYPE;                                            \
     constexpr const char* at_dispatch_name = NAME;                          \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
-    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
+    at::ScalarType _st = ::at::detail::scalar_type(the_type);               \
     RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
