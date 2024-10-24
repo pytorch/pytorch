@@ -6,7 +6,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, List, Set, Type, Union
+from typing import Any, Callable, Dict, List, Set, Type, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -14,6 +14,9 @@ from torch import _utils_internal
 from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
 from torch._functorch.pyfunctorch import dispatch_functorch
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 # Query `hasattr` only once.
@@ -99,8 +102,8 @@ class OperatorBase:
                 return True
         return False
 
-    def py_impl(self, k):
-        def inner(fn):
+    def py_impl(self, k: Any) -> Callable[[_F], _F]:
+        def inner(fn: _F) -> _F:
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
@@ -141,7 +144,7 @@ class OperatorBase:
     #       with ctx.redispatch_to_next():
     #           out = ctx.functionalize(inner_f)(*args_unwrapped)
     #           return ctx.wrap_tensors(out)
-    def py_functionalize_impl(self, fn):
+    def py_functionalize_impl(self, fn: _F) -> _F:
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI as _CppFunctionalizeAPI,
             FunctorchFunctionalizeAPI as _FunctorchFunctionalizeAPI,
@@ -245,7 +248,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name):
+    def __init__(self, name, *, cacheable=False):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -258,6 +261,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         _higher_order_ops[name] = self
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
+        self._cacheable = cacheable
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -272,7 +276,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def py_impl(self, k):
+    def py_impl(self, k: Any) -> Callable[[_F], _F]:
         if isinstance(k, DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)
@@ -280,6 +284,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     @property
     def namespace(self):
         return self._ns
+
+    def cacheable(self):
+        return self._cacheable
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)

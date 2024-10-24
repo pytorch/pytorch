@@ -806,7 +806,7 @@ def save(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True)
 
     Saves an object to a disk file.
 
@@ -1005,8 +1005,12 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
     pickle_module.dump(sys_info, f, protocol=pickle_protocol)
-    pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
+
+    class PyTorchLegacyPickler(pickle_module.Pickler):
+        def persistent_id(self, obj):
+            return persistent_id(obj)
+
+    pickler = PyTorchLegacyPickler(f, protocol=pickle_protocol)
     pickler.dump(obj)
 
     serialized_storage_keys = sorted(serialized_storages.keys())
@@ -1083,8 +1087,12 @@ def _save(
 
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
-    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
+
+    class PyTorchPickler(pickle_module.Pickler):  # type: ignore[name-defined]
+        def persistent_id(self, obj):
+            return persistent_id(obj)
+
+    pickler = PyTorchPickler(data_buf, protocol=pickle_protocol)
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
@@ -1269,19 +1277,36 @@ def load(
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
 
+    true_values = ["1", "y", "yes", "true"]
+    # Add ability to force safe only or non-safe weight loads via environment variables
+    force_weights_only_load = (
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+    force_no_weights_only_load = (
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+    )
+
+    if force_weights_only_load and force_no_weights_only_load:
+        raise RuntimeError(
+            "Only one of `TORCH_FORCE_WEIGHTS_ONLY_LOAD` or `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` "
+            "should be set, but both were set."
+        )
+    elif force_weights_only_load:
+        weights_only = True
+    elif force_no_weights_only_load:
+        if weights_only is None:
+            warnings.warn(
+                "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
+                "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
+                UserWarning,
+                stacklevel=2,
+            )
+            weights_only = False
+
     if weights_only is None:
         weights_only, warn_weights_only = False, True
     else:
         warn_weights_only = False
-
-    # Add ability to force safe only weight loads via environment variable
-    if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in [
-        "1",
-        "y",
-        "yes",
-        "true",
-    ]:
-        weights_only = True
 
     if weights_only:
         if pickle_module is not None:
@@ -1485,7 +1510,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             tar.extract("storages", path=tmpdir)
             with open(os.path.join(tmpdir, "storages"), "rb", 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)
-                for i in range(num_storages):
+                for _ in range(num_storages):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
                     dtype = storage_type._dtype
@@ -1519,7 +1544,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 num_tensors = pickle_module.load(f, **pickle_load_args)
                 for _ in range(num_tensors):
                     args = pickle_module.load(f, **pickle_load_args)
-                    key, storage_id, original_tensor_type = args
+                    key, storage_id, _original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     (ndim,) = struct.unpack("<i", f.read(4))
                     # skip next 4 bytes; legacy encoding treated ndim as 8 bytes

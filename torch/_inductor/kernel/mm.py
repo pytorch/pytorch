@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -16,11 +16,11 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 
-from .. import config as inductor_config
+from .. import config as inductor_config, ir
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import WrapperCodeGen
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -32,13 +32,14 @@ from ..select_algorithm import (
 from ..utils import (
     get_gpu_shared_memory,
     use_aten_gemm_kernels,
-    use_ck_template,
+    use_ck_gemm_template,
     use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
 )
 from .mm_common import (
+    _is_static_problem,
     addmm_epilogue,
     extra_mm_configs,
     int8_mm_configs,
@@ -122,6 +123,13 @@ mm_template = TritonTemplate(
 """,
 )
 
+
+# prevent duplication registration of extern functions
+@functools.lru_cache(None)
+def lazy_register_extern_choice(fn):
+    return ExternKernelChoice(fn)
+
+
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(
@@ -136,9 +144,29 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
     has_out_variant=False,
 )
 
+aten__cslt_sparse_mm = ExternKernelChoice(
+    torch._cslt_sparse_mm,
+    "at::_cslt_sparse_mm",
+    has_out_variant=False,
+)
+
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
+
+
+def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
+    return m * n > 2**13
+
+
+def mm_config_kwargs(device):
+    if device == "cpu":
+        return {
+            "scale": 0.5,
+            "exclude": _is_large_block_for_cpu,
+        }
+    return {}
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -170,9 +198,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -182,7 +210,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -203,7 +231,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for config in extra_mm_configs(m, n, k):
+        for config in extra_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -245,6 +275,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
+    for k in inductor_config.external_matmul:
+        choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
+
     try:
         return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
@@ -254,33 +287,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
 
-def _is_static_problem(inputs_tensors, layout):
-    # checks whether all input tensors and the output layout
-    # have a static shape by attempting to convert the dimensions
-    # to int
-    static_shape = True
-    static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
-    if static_size is None:
-        nonzero = True
-        for s in layout.size:
-            sz = WrapperCodeGen.statically_known_int_or_none(s)
-            if sz is not None and sz == 0:
-                nonzero = False
-                break
-        return False, nonzero
-    numel = 1
-    for dim in static_size:
-        numel *= dim
-    nonzero = numel > 0
-    return static_shape, nonzero
-
-
 @register_lowering(aten._int_mm, type_promotion_kind=None)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
     choices = (
@@ -296,7 +308,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for config in int8_mm_configs(m, n, k):
+        for config in int8_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -323,7 +337,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if (not is_nonzero) or (not use_max_autotune()):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
@@ -375,7 +389,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -390,7 +404,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # broadcasting on the last dim of the bias term seems not to be working
         # in the linear GEMM epilogue used by addmm.
         if (
-            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
+            PythonWrapperCodegen.statically_known_int_or_none(
+                inp_expanded.layout.stride[-1]
+            )
             != 0
         ):
             CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -401,7 +417,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
@@ -509,6 +525,124 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
     )
+
+
+@register_lowering(aten._cslt_sparse_mm, type_promotion_kind=None)
+def tuned_cslt_sparse_mm(
+    mat1_compressed,
+    mat2,
+    bias=None,
+    alpha=None,
+    out_dtype=None,
+    transpose_result=False,
+    alg_id=0,
+    split_k=1,
+    split_k_one_kernel=True,
+    layout=None,
+):
+    from torch._inductor.select_algorithm import AlgorithmSelectorCache, realize_inputs
+
+    mat1_compressed, mat2 = realize_inputs(mat1_compressed, mat2)
+    input_nodes: Tuple[Any, ...] = (mat1_compressed, mat2)
+    k, n = mat2.get_size()
+
+    is_8bit_input_type = mat1_compressed.dtype in [torch.int8, torch.float8_e4m3fn]
+    compression_factor = 10 if is_8bit_input_type else 9
+    m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
+
+    from torch._inductor.ir import FixedLayout
+
+    if transpose_result:
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [n, m],
+            [m, 1],
+        )
+    else:
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [m, n],
+            [n, 1],
+        )
+    # workaround for Inductor not supporting optional tensor input arguments
+    if bias is not None:
+        bias = realize_inputs(bias)
+        input_nodes = input_nodes + (bias,)
+
+    if alpha is not None:
+        alpha = realize_inputs(alpha)
+        input_nodes = input_nodes + (alpha,)
+
+    # cuSPARSELt alg_id search, not that we cannot use
+    # AlgorithmSelectorCache.benchmark_example_value() because this will return the base view
+    # and mat2 needs to have transpose properties preserved for cslt mm
+    (
+        searched_alg_id,
+        searched_split_k,
+        searched_split_k_one_kernel,
+        _,
+    ) = torch._C._cusparselt.mm_search(  # type: ignore[attr-defined]
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(mat1_compressed.get_size()),
+            V.graph.sizevars.size_hints(mat1_compressed.get_stride()),
+            mat1_compressed.get_device(),
+            mat1_compressed.dtype,
+            mat1_compressed.layout.offset,
+        ),
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(mat2.get_size()),
+            V.graph.sizevars.size_hints(mat2.get_stride()),
+            mat2.get_device(),
+            mat2.dtype,
+            mat2.layout.offset,
+        ),
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(bias.get_size()),
+            V.graph.sizevars.size_hints(bias.get_stride()),
+            bias.get_device(),
+            bias.dtype,
+            bias.layout.offset,
+        )
+        if bias is not None
+        else None,
+        AlgorithmSelectorCache.generate_example_value(
+            V.graph.sizevars.size_hints(alpha.get_size()),
+            V.graph.sizevars.size_hints(alpha.get_stride()),
+            alpha.get_device(),
+            alpha.dtype,
+            alpha.layout.offset,
+        )
+        if alpha is not None
+        else None,
+        out_dtype,
+        transpose_result,
+    )
+
+    baseline = aten__cslt_sparse_mm.bind(
+        input_nodes,
+        layout,
+        out_dtype=out_dtype,
+        alg_id=0,
+        split_k=1,
+        split_k_one_kernel=True,
+        transpose_result=transpose_result,
+    )
+    baseline.description = f"ALG_ID: 0 SPLIT_K: 1 SPLIT_K_ONE_KERNEL: True TRANSPOSE_RESULT: {transpose_result}"
+    searched = aten__cslt_sparse_mm.bind(
+        input_nodes,
+        layout,
+        out_dtype=out_dtype,
+        alg_id=searched_alg_id,
+        split_k=searched_split_k,
+        split_k_one_kernel=searched_split_k_one_kernel,
+        transpose_result=transpose_result,
+    )
+    searched.description = f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"  # noqa: B950
+    choices = [baseline, searched]
+
+    return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
@@ -668,7 +802,7 @@ def get_size_hints_strides(mat1, mat2):
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
 
     fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
 
@@ -707,7 +841,13 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             choices.append(fallback)
 
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mixed_mm_configs(
+            m,
+            n,
+            k,
+            has_int8_tensor=has_int8_tensor,
+            **mm_config_kwargs(ir.get_device_type(mat1)),
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -764,7 +904,9 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
     choices: List[Dict[Any, Any]] = []
-    for config in int8_mm_configs(m, n, k):
+    for config in int8_mm_configs(
+        m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+    ):
         mm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),

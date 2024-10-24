@@ -82,11 +82,8 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -148,6 +145,14 @@ class ConstantVariable(VariableTracker):
             return variables.BuiltinVariable(str.format).call_function(
                 tx, [self, *args], kwargs
             )
+        elif name == "join" and istype(self.value, str):
+            assert len(args) == 1 and len(kwargs) == 0
+            arg_unpacked = args[0].force_unpack_var_sequence(tx)
+            try:
+                arg_const = [x.as_python_constant() for x in arg_unpacked]
+                return ConstantVariable.create(self.value.join(arg_const))
+            except NotImplementedError:
+                return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
@@ -217,13 +222,12 @@ class EnumVariable(VariableTracker):
         unimplemented("Enum variable is constructed with non constant values")
 
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
