@@ -1291,6 +1291,9 @@ class TestSymNumberMagicMethods(TestCase):
         if second_type == "float" and fn in ["mod"]:
             self.skipTest(f"{fn} only handles int")
 
+        if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
+            self.skipTest(f"{fn} is a bitwise op, only handles int")
+
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":

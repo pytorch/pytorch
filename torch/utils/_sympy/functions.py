@@ -1222,7 +1222,7 @@ OpaqueUnaryFn_log = make_opaque_unary_fn("log")
 OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
 
 
-def make_opaque_bitwise_fn(name):
+def make_opaque_bitwise_fn(name, real_op_name):
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
 
@@ -1231,12 +1231,12 @@ def make_opaque_bitwise_fn(name):
             if isinstance(a, (sympy.Integer, int)) and isinstance(
                 b, (sympy.Integer, int)
             ):
-                return sympy.Integer(getattr(operator, name)(int(a), int(b)))
+                return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
             return None
 
     BitwiseFn.__name__ = "BitwiseFn_" + name
     return BitwiseFn
 
 
-BitwiseFn_bitwise_and = make_opaque_bitwise_fn("bitwise_and")
-BitwiseFn_bitwise_or = make_opaque_bitwise_fn("bitwise_or")
+BitwiseFn_bitwise_and = make_opaque_bitwise_fn("bitwise_and", "and_")
+BitwiseFn_bitwise_or = make_opaque_bitwise_fn("bitwise_or", "or_")
