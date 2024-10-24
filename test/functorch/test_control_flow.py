@@ -5581,6 +5581,7 @@ class TestHopSchema(TestCase):
         )
         self.assertEqual(schema.parse(str(schema)), schema)
 
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_eager_run_with_item(self):
         class M(torch.nn.Module):
@@ -5613,7 +5614,7 @@ def forward(self, a, b1, b2, c):
     cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
     getitem = cond[0];  cond = None
     mul = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
-    return pytree.tree_unflatten((mul,), self._out_spec)""",   # noqa: B950
+    return pytree.tree_unflatten((mul,), self._out_spec)""",  # noqa: B950
         )
         expected_output = model(*args)
         self.assertEqual(expected_output, x * 3 * 2)
