@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
-from typing import Sequence, TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar, Union
 
 from libfb.py.log import set_simple_logging  # type: ignore[import]
 
@@ -11,6 +11,10 @@ from torchgen import gen
 from torchgen.context import native_function_manager
 from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
 from torchgen.static_runtime import config, generator
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
