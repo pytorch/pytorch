@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -22,6 +23,16 @@ constexpr auto kProcessGroupDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
+
+C10_EXPORT void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work);
+
+C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
+
+C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
+
+C10_EXPORT size_t get_work_registry_size();
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -158,13 +169,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.rootTensor,
         opts.asyncOp,
         opts.timeout.count()));
+
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> allreduce(
@@ -181,12 +197,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const std::optional<at::Tensor>& sparse_indices,
                     int64_t)>();
 
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.sparseIndices,
         opts.timeout.count()));
+
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -200,11 +221,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ReduceOp>&,
                              int64_t)>();
 
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.timeout.count());
+
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> reduce(
@@ -219,13 +245,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.rootRank,
         opts.rootTensor,
         opts.timeout.count());
+
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> allgather(
@@ -242,11 +273,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
 
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
+
+    for (const auto& tensor_list : outputTensors) {
+      for (const auto& tensor : tensor_list) {
+        c10d::register_work(tensor, work);
+      }
+    }
+    return work;
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
@@ -267,12 +305,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
         opts.timeout.count()));
+
+    c10d::register_work(outputBuffer, work);
+    return work;
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -291,10 +332,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const at::TensorList&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
-    return op.call(
+    auto work = op.call(
         outputTensorLists,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
+
+    for (const auto& tensor_list : outputTensorLists) {
+      for (const auto& tensor : tensor_list) {
+        c10d::register_work(tensor, work);
+      }
+    }
+    return work;
   }
 
   // This function is a coalesced version of `allgather_into_tensor` (currently
@@ -312,10 +360,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const at::TensorList,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
-    return op.call(
+    auto work = op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
+
+    for (const auto& tensor : outputTensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -330,12 +383,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.timeout.count());
+
+    for (const auto& tensor_list : outputTensors) {
+      for (const auto& tensor : tensor_list) {
+        c10d::register_work(tensor, work);
+      }
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
@@ -353,13 +413,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     int64_t,
                     bool,
                     int64_t)>();
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.asyncOp,
         opts.timeout.count()));
+
+    for (const auto& tensor : outputTensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> reduce_scatter(
@@ -376,12 +441,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     int64_t)>();
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count()));
+
+    for (const auto& tensor : outputTensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
@@ -398,13 +468,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
                 int64_t)>();
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.asyncOp,
         opts.timeout.count()));
+
+    c10d::register_work(outputBuffer, work);
+    return work;
   }
 
   // This function is a coalesced version of `reduce_scatter_tensor` (currently
@@ -424,12 +497,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 int64_t)>();
 
-    return op.call(
+    auto work = op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count());
+
+    for (const auto& tensor : outputTensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(
@@ -447,13 +525,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              std::vector<int64_t>,
                              std::vector<int64_t>,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         outputSplitSizes,
         inputSplitSizes,
         opts.timeout.count());
+
+    c10d::register_work(outputBuffer, work);
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
@@ -469,11 +550,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const at::TensorList&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t)>();
-    return std::get<1>(op.call(
+    auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
+
+    for (const auto& tensor : outputTensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual void monitoredBarrier(
@@ -549,11 +635,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         dstRank,
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> recv(
@@ -567,11 +657,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         srcRank,
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
@@ -583,10 +677,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
-    return op.call(
+    auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         tag);
+    for (const auto& tensor : tensors) {
+      c10d::register_work(tensor, work);
+    }
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> barrier(
@@ -618,11 +716,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const std::vector<int64_t>&,
                              int64_t)>();
 
-    return op.call(
+    auto work = op.call(
         tensor,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.device_ids,
         opts.timeout.count());
+    c10d::register_work(tensor, work);
+    return work;
   }
 
   bool hasBackends() {
