@@ -2153,18 +2153,19 @@ class CommonTemplate:
             )
             return b_int8pack, b_scales
 
-        def fn(a, b_int8pack, b_scales):
-            a = a.to(b.dtype)
+        def fn(a, b_int8pack, b_scales, c):
             res = torch._weight_int8pack_mm(a, b_int8pack, b_scales)
+            res = res + c
             return res
 
         m = 32
         k = 32
         n = 48
-        a = torch.rand((m, k))
+        a = torch.rand((m, k), dtype=torch.bfloat16)
         b = torch.rand((n, k), dtype=torch.bfloat16)
+        c = torch.rand((m, n), dtype=torch.bfloat16)
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
-        self.common(fn, (a, b_int8pack, b_scales))
+        self.common(fn, (a, b_int8pack, b_scales, c))
 
     def test_expanded_reduction(self):
         def fn(x, y):
