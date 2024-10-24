@@ -97,6 +97,7 @@ def generate_inputs(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    nested_tensors: bool = False,
 ):
     q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
     kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
@@ -111,43 +112,50 @@ def generate_inputs(
     make_kv = partial(
         torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )
-    query = (
-        make_q().view(batch_size, q_sequence_length, q_heads, head_dim).transpose(1, 2)
-    )
-    key = (
-        make_kv()
-        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
-        .transpose(1, 2)
-    )
-    value = (
-        make_kv()
-        .view(batch_size, kv_sequence_length, kv_heads, head_dim)
-        .transpose(1, 2)
-    )
+
+    if nested_tensors:
+        query = (
+            make_q()
+            .view(1, q_sequence_length * batch_size, q_heads, head_dim)
+            .transpose(1, 2)
+        )
+        key = (
+            make_kv()
+            .view(1, batch_size * kv_sequence_length, kv_heads, head_dim)
+            .transpose(1, 2)
+        )
+        value = (
+            make_kv()
+            .view(1, batch_size * kv_sequence_length, kv_heads, head_dim)
+            .transpose(1, 2)
+        )
+    else:
+        query = (
+            make_q()
+            .view(batch_size, q_sequence_length, q_heads, head_dim)
+            .transpose(1, 2)
+        )
+        key = (
+            make_kv()
+            .view(batch_size, kv_sequence_length, kv_heads, head_dim)
+            .transpose(1, 2)
+        )
+        value = (
+            make_kv()
+            .view(batch_size, kv_sequence_length, kv_heads, head_dim)
+            .transpose(1, 2)
+        )
     return query, key, value
 
 
-def extend_offsets(offsets, B):
-    batch_lengths = offsets[-1]
-    offsets_ref = offsets[:-1]
-    offsets = [offsets_ref + batch_lengths * i for i in range(B)]
-    offsets.append(
-        torch.tensor(
-            [batch_lengths * B], device=offsets_ref.device, dtype=offsets_ref.dtype
-        )
-    )
-    offsets = torch.cat(offsets, dim=0)
-    return offsets
-
-
 def generate_jagged_inputs(
+    shape: Tuple[int],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     offsets: torch.Tensor,
 ):
-    B, Hq, M, D = query.shape
-    _, Hkv, N, _ = key.shape
+    B, Hq, M, Hkv, N, D = shape
 
     def offsets_to_lengths(
         offsets: torch.Tensor, device: Union[str, torch.device]
@@ -160,8 +168,6 @@ def generate_jagged_inputs(
         """
         lengths = offsets[1:] - offsets[:-1]
         return lengths
-
-    offsets = extend_offsets(offsets, B)
 
     flatten_q = query.transpose(1, 2).flatten(start_dim=0, end_dim=1)
     flatten_k = key.transpose(1, 2).flatten(start_dim=0, end_dim=1)
@@ -232,7 +238,7 @@ def run_single_backend_sdpa(
                 print(f"Backend {backend} not supported for document mask")
             else:  # sdpa
                 q_eager, k_eager, v_eager = generate_jagged_inputs(
-                    query, key, value, **mask_kwargs
+                    config.shape, query, key, value, **mask_kwargs
                 )
                 q_eager = q_eager.transpose(1, 2).requires_grad_(query.requires_grad)
                 k_eager = k_eager.transpose(1, 2).requires_grad_(key.requires_grad)
@@ -320,8 +326,7 @@ def run_single_backend_FA(
     if FA:
         out_FA = FA(q=q_FA, k=k_FA, v=v_FA)
         if config.attn_type in ["document_mask"]:
-            B, Hq, M, Hkv, N, D = config.shape
-            out_FA_updated = out_FA.reshape(B, -1, Hq, D)
+            out_FA_updated = out_FA[None, :, :, :]
         else:
             out_FA_updated = out_FA
         torch.testing.assert_close(
@@ -367,11 +372,13 @@ def run_single_experiment(
         config.dtype,
         device,
         requires_grad=config.calculate_bwd_time,
+        nested_tensors=config.attn_type == "document_mask",
     )
     is_decoding = q_seq_len == 1
 
     score_mod = generate_score_mod(config.attn_type, config.shape)
     block_mask, mask_kwargs = generate_block_mask(config.attn_type, config.shape)
+    kernel_options = get_kernel_options(config.attn_type, config.shape)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -387,6 +394,7 @@ def run_single_experiment(
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=True,
+        kernel_options=kernel_options,
     )
 
     forward_compiled_time = benchmark_torch_function_in_microseconds(
@@ -397,6 +405,7 @@ def run_single_experiment(
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=True,
+        kernel_options=kernel_options,
     )
 
     results = {}
@@ -727,7 +736,7 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
     assert attn_type != "document_mask" or not is_decoding
     if attn_type == "document_mask":
         random.seed(0)
-        lengths = generate_random_lengths(N, 4)
+        lengths = generate_random_lengths(N * B, B)
         mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, "cuda"))
     elif attn_type == "transfusion":
         random.seed(0)
@@ -764,12 +773,39 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
     else:
         new_mask_mod = mask_mod
 
+    mask_shape = (1, 1, M, N) if attn_type != "document_mask" else (1, 1, M * B, N * B)
+
     if new_mask_mod:
-        block_mask = create_block_mask(new_mask_mod, 1, 1, M, N, "cuda")
+        block_mask = create_block_mask(new_mask_mod, *mask_shape, "cuda")
     else:
-        block_mask = create_block_mask(noop_mask, 1, 1, M, N, "cuda")
+        block_mask = create_block_mask(noop_mask, *mask_shape, "cuda")
 
     return block_mask, mask_mod_kwargs
+
+
+def get_kernel_options(attn_type: str, shape: Tuple[int]):
+    B, Hq, M, Hkv, N, D = shape
+    kernel_opt_dict = {
+        "noop": None,
+        "causal": None,
+        "rel": None,
+        "head_bias": None,
+        "alibi": None,
+        "sliding_window": None,
+        "document_mask": {
+            "BLOCK_N": 32,
+            "BLOCK_M": 128,
+            "fwd_num_warps": 8,
+            "fwd_num_stages": 4,
+        }
+        if torch.cuda.get_device_capability() >= (8, 0) and D <= 128
+        else None,
+        "prefix_lm": None,
+        "softcap": None,
+        "transfusion": None,
+    }
+
+    return kernel_opt_dict[attn_type]
 
 
 ###################### Setup Backend ######################
@@ -819,7 +855,10 @@ def generate_FA_callable(
             raise
     elif backend == "fav3":
         try:
-            from flash_attn_interface import flash_attn_func, flash_attn_varlen_func
+            from flash_attn.flash_attn_interface import (
+                flash_attn_func,
+                flash_attn_varlen_func,
+            )
         except ImportError:
             print(
                 "Flash attention 3 is not installed. Please install it to run fav3 backend. "
@@ -837,9 +876,8 @@ def generate_FA_callable(
         alibi_slopes = -torch.exp2(-((h + 1) * 8.0 / Hq))
         FA_kwargs = dict(alibi_slopes=alibi_slopes)
     elif attn_type == "document_mask":
-        extended_offsets = extend_offsets(kwargs["offsets"], B)
-        FA_kwargs["cu_seqlens_q"] = extended_offsets.to(torch.int32)
-        FA_kwargs["cu_seqlens_k"] = extended_offsets.to(torch.int32)
+        FA_kwargs["cu_seqlens_q"] = kwargs["offsets"].to(torch.int32)
+        FA_kwargs["cu_seqlens_k"] = kwargs["offsets"].to(torch.int32)
 
         def offsets_to_lengths(
             offsets: torch.Tensor, device: Union[str, torch.device]

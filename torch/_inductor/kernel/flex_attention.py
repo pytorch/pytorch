@@ -857,16 +857,26 @@ def flex_attention(
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
-        # Work around https://github.com/pytorch/pytorch/issues/129625
-        if num_stages == 2:
-            continue
 
         # Performance tuning
+        # Triton parameters
+        kernel_options.setdefault("fwd_num_stages", num_stages)
+        kernel_options.setdefault("fwd_num_warps", num_warps)
+        # Work around https://github.com/pytorch/pytorch/issues/129625
+        if kernel_options["fwd_num_stages"] == 2:
+            continue
         kernel_options.setdefault("BLOCK_M", BLOCK_M)
         kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
         kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        for k in list(kernel_options.keys()):
+            if k.startswith("fwd_"):
+                v = kernel_options.pop(k)
+                kernel_options[k[4:]] = v
+            if k.startswith("bwd_"):
+                kernel_options.pop(k)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -888,8 +898,6 @@ def flex_attention(
             mutated_inputs=[
                 logsumexp,
             ],
-            num_stages=num_stages,
-            num_warps=num_warps,
             call_sizes=query.get_size(),
             **kernel_options,
         )
@@ -1795,6 +1803,9 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
+        # Triton heuristics
+        kernel_options.setdefault("bwd_num_warps", num_warps)
+        kernel_options.setdefault("bwd_num_stages", num_stages)
         kernel_options.setdefault("BLOCK_M1", BLOCK1)
         kernel_options.setdefault("BLOCK_N1", BLOCK2)
         kernel_options.setdefault("BLOCK_M2", BLOCK2)
@@ -1802,6 +1813,13 @@ def flex_attention_backward(*args, **kwargs):
         # Blocksparse options
         kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        for k in list(kernel_options.keys()):
+            if k.startswith("bwd_"):
+                v = kernel_options.pop(k)
+                kernel_options[k[4:]] = v
+            if k.startswith("fwd_"):
+                kernel_options.pop(k)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1827,8 +1845,6 @@ def flex_attention_backward(*args, **kwargs):
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
             mutated_inputs=[grad_query, broadcasted_grad_value],
             call_sizes=query.get_size() + key.get_size()[1:3],
-            num_stages=num_stages,
-            num_warps=num_warps,
             **kernel_options,
         )
     inputs_for_autotuning = (
