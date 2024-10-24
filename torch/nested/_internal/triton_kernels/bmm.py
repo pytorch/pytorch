@@ -34,23 +34,28 @@ import triton.language as tl
 import itertools
 
 def gen_configs():
-    products = itertools.product([32, 64, 128], [54, 84, 108, 128, 216, 432, 864], [1, 2, 4, 8, 16])
+    products = itertools.product([32, 64, 128],
+                                 # [54, 84, 108, 128, 216, 432, 864],
+                                 [1, 2, 4, 8, 16])
     configs=[]
-    for BLOCK_SIZE_K, NUM_SM, num_warps in products:
+    # for BLOCK_SIZE_K, NUM_SM, num_warps in products:
+    for BLOCK_SIZE_K, num_warps in products:
         configs += [
         triton.Config({
             'BLOCK_SIZE_M': 128,
             'BLOCK_SIZE_N': 128,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
-            'NUM_SM': NUM_SM,
+            # 'NUM_SM': NUM_SM,
             'num_stages': num_warps,
+            'GROUP_SIZE_M': 8,
         }),
         triton.Config({
             'BLOCK_SIZE_M': 64,
             'BLOCK_SIZE_N': 64,
             'BLOCK_SIZE_K': BLOCK_SIZE_K,
-            'NUM_SM': NUM_SM,
+            # 'NUM_SM': NUM_SM,
             'num_stages': num_warps,
+            'GROUP_SIZE_M': 8,
         }),
         ]
     return configs
@@ -71,40 +76,40 @@ def grouped_matmul_kernel(
     lda,
     ldc,
     c_ptr,
-    # number of virtual SM
-    NUM_SM: tl.constexpr,
+    max_M,
+    # # number of virtual SM
+    # NUM_SM: tl.constexpr,
     # tile sizes
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
 ):
-    tile_idx = tl.program_id(0)
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(max_M, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(gn, BLOCK_SIZE_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+    tile_m_idx = pid_m
+    tile_n_idx = pid_n
+
+    # tile_m_idx = tl.program_id(0)
+    # tile_n_idx = tl.program_id(1)
+
     batch_id = tl.program_id(1)
 
     # get the gemm size of the current problem
     a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
     a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
     gm = a_offset_1 - a_offset_0
-
-    num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
     num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
-    num_tiles = num_m_tiles * num_n_tiles
-    last_problem_end = num_tiles
-
-    # iterate through the tiles in the current gemm problem
-    while tile_idx < last_problem_end:
+    if tile_m_idx < num_m_tiles:
         # pick up a tile from the current gemm problem
         # figure out tile coordinates
-
-        # Rematerialize in an effort to save registers
-        a_offset_0 = tl.load(a_offsets_ptr + batch_id, eviction_policy='evict_last')
-        a_offset_1 = tl.load(a_offsets_ptr + batch_id + 1, eviction_policy='evict_last')
-        gm = a_offset_1 - a_offset_0
-        num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
-        num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
-        num_tiles = num_m_tiles * num_n_tiles
-        tile_m_idx = tile_idx // num_n_tiles
-        tile_n_idx = tile_idx % num_n_tiles
 
         offs_am = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         offs_bn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -145,8 +150,8 @@ def grouped_matmul_kernel(
         # assumes full tile for now
         tl.store(c_ptrs, c, mask=c_mask)
 
-        # go to the next tile by advancing NUM_SM
-        tile_idx += NUM_SM
+        # # go to the next tile by advancing NUM_SM
+        # tile_idx += NUM_SM
 
 def group_gemm_fn(tensor_a, tensor_b):
     assert tensor_a.is_nested
@@ -166,12 +171,11 @@ def group_gemm_fn(tensor_a, tensor_b):
     c_values = a_values.new_empty((a_values.size(0), N))
     c_offsets = a_offsets
 
+    max_M = tensor_a._max_seqlen
     # we use a fixed number of CTA, and it's auto-tunable
-    grid = lambda META: (META['NUM_SM'], group_size)
-    # print("a_offsets: ", a_offsets)
-    # grid = (128, group_size)
-    # print("grid: ", grid)
-    # print("tensor_b.size(): ", tensor_b.size())
+    # grid = lambda META: (META['NUM_SM'], group_size)
+    grid = lambda META: (triton.cdiv(max_M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
+                         group_size)
     grouped_matmul_kernel[grid](
         tensor_b,
         group_size,
@@ -183,6 +187,7 @@ def group_gemm_fn(tensor_a, tensor_b):
         a_values.stride(0),
         c_values.stride(0),
         c_values,
+        max_M,
         # BLOCK_SIZE_M=128,
         # BLOCK_SIZE_N=128,
         # BLOCK_SIZE_K=128,
