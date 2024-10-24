@@ -26,14 +26,14 @@ def fresh_name() -> str:
 
 
 class Variable:
-    def __init__(self, value: torch.Tensor, name: str = None):
+    def __init__(self, value: torch.Tensor, name: Optional[str] = None):
         self.value = value
         self.name = name or fresh_name()
 
     # We need to start with some tensors whose values were not computed
     # inside the autograd. This function constructs leaf nodes.
     @staticmethod
-    def constant(value: torch.Tensor, name: str = None):
+    def constant(value: torch.Tensor, name: Optional[str] = None):
         return Variable(value, name)
 
     def __repr__(self):
