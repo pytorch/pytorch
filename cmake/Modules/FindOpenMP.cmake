@@ -290,6 +290,9 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     endif()
 
     if (NOT OpenMP_libomp_LIBRARY)
+      # We prefer gomp over omp if possible, since we've configured MKL DNN
+      # to link in gomp. Linking in multiple OpenMP implementations can cause
+      # performance issues and sporadic runtime failures.
       find_library(OpenMP_libomp_LIBRARY
         NAMES gomp omp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
@@ -411,7 +414,7 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       #
       # Check for separate OpenMP library on AppleClang 7+
       find_library(OpenMP_libomp_LIBRARY
-        NAMES gomp omp iomp5
+        NAMES omp gomp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
         DOC "libomp location for OpenMP"
       )
