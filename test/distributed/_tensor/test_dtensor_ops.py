@@ -14,11 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import (
-    run_tests,
-    suppress_warnings,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, suppress_warnings
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -365,6 +361,7 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
+    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
@@ -449,6 +446,7 @@ dtensor_fails = {
     xfail("trapz"),
     xfail("triangular_solve"),
     xfail("unbind"),
+    xfail("unbind_copy"),
     xfail("unfold"),
     xfail("unfold_copy"),
     xfail("uniform"),
@@ -528,7 +526,6 @@ class TestDTensorOps(DTensorOpTestBase):
 
     # only allow float dytpe for now, we can relax this constraint
     # when feel necessary later (i.e when adding quantization support).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
