@@ -23,6 +23,7 @@ import traceback
 import types
 import warnings
 import weakref
+from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -57,7 +58,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
+from torch.export.dynamic_shapes import (
+    _combine_args,
+    _process_dynamic_shapes,
+    _RelaxedConstraint,
+)
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -112,6 +117,68 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return callback
     else:
         return set_eval_frame(callback)
+
+
+@dataclass
+class DynamoStance:
+    stance: str = "default"
+    backend: Union[str, Callable[..., Any], None] = None
+
+
+_stance = DynamoStance()
+
+
+def _set_stance(stance: DynamoStance) -> DynamoStance:
+    global _stance
+
+    from torch._C._dynamo.eval_frame import get_eval_frame_callback
+
+    callback = get_eval_frame_callback()
+
+    if callback is not False and callback is not None:
+        raise RuntimeError("attempted to set_stance in a torch.compile region")
+
+    prior = _stance
+    _stance = stance
+    return prior
+
+
+_set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+def _callback_from_stance(callback):
+    if _stance.stance == "default":
+        # force_backend
+        if _stance.backend is not None:
+            hooks = Hooks()
+            callback = convert_frame.catch_errors_wrapper(
+                convert_frame.convert_frame(  # type: ignore[arg-type]
+                    get_compiler_fn(_stance.backend),
+                    hooks,
+                ),
+                hooks,
+            )
+
+        return callback
+    elif _stance.stance == "force_eager":
+        # disable
+        return None
+    elif _stance.stance == "eager_on_recompile":
+        # run mode
+        return False
+    elif _stance.stance == "fail_on_recompile":
+
+        def fail_callback(*args, **kwargs):
+            raise RuntimeError(
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+            )
+
+        # to prevent cache miss due to different callback
+        fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+
+        return fail_callback
+    else:
+        raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
 def _reset_guarded_backend_cache():
@@ -376,7 +443,7 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(self.callback)
+        self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
@@ -471,7 +538,7 @@ class _TorchDynamoContext:
                 )
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(callback))
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -645,11 +712,9 @@ class DisableContext(_TorchDynamoContext):
 
         assert callable(fn)
 
-        callback = self.callback
-
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -817,9 +882,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -933,9 +1000,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1597,6 +1666,7 @@ def export(
                     for c in (constraints or ())
                     if (
                         c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
                         and c.constraint_range.vr.lower != c.constraint_range.vr.upper
                     )
                 }
