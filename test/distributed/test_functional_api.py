@@ -444,11 +444,13 @@ class TestMakeFx(MultiThreadedTestCase):
         )
 
 
-BACKEND = (
-    dist.Backend.HCCL
-    if TEST_HPU
-    else (dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO)
-)
+BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+
+# Adding support for HCCL backend
+# To add a different backend, add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
+# And then set the BACKEND variable appropriately.
+if TEST_HPU:
+    BACKEND = dist.Backend.HCCL
 
 
 # allows you to check for multiple accelerator irrespective of device type
