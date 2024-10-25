@@ -286,6 +286,11 @@ The following packages should be installed with either `conda` or `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
+Running
+```
+pip install -r requirements
+```
+will install these dependencies for you.
 
 All PyTorch test suites are located in the `test` folder and start with
 `test_`. Run the entire test
