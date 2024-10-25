@@ -2814,12 +2814,14 @@ def forward(self, fct_1, init_1, xs_1):
     select = torch.ops.aten.select.int(xs_1, 0, 0)
     add = torch.ops.aten.add.Tensor(init_1, select);  add = None
     add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     clone = torch.ops.aten.clone.default(init_1);  clone = None
     select_copy = torch.ops.aten.select_copy.int(xs_1, 0, 0);  select_copy = None
-    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int, sym_size_int_1]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int = sym_size_int_1 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [xs_1], 0, True, [sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4]);  scan_combine_graph_0 = init_1 = xs_1 = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
