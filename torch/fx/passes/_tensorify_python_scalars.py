@@ -249,28 +249,36 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
 
-    # DCE symbols (which are guaranteed to be pure) only
-    graph.eliminate_dead_code()
-
-    # Now do one more pass that specializes all symfloats we didn't manage
-    # to tensorify away.
     nodes = list(graph.nodes)
-    for i, node in enumerate(nodes[:-1]):
+    for i, node in enumerate(nodes[-2::-1]):
         with graph.inserting_before(
-            nodes[i + 1] if node not in placeholders else first_non_placeholder
+            nodes[-(i + 2)] if node not in placeholders else first_non_placeholder
         ):
+            if (
+                len(node.users) == 0
+                and node.op != "placeholder"
+                and node.op != "output"
+                and not node.is_impure()
+            ):
+                graph.erase_node(node)
+                continue
+
             args = []
             kwargs: Dict[str, Any] = {}
             transform = False
             for a in node.args:
-                if a in specialized_float_nodes:
-                    args.append(specialized_float_nodes[a])
-                elif (
+                if (
                     isinstance(a, fx.Node)
                     and "val" in a.meta
                     and isinstance(zf := a.meta["val"], torch.SymFloat)
-                    and isinstance(zf.node.expr, Symbol)
                     and zf.node.hint is not None
+                    and all(
+                        (node := expr_to_sym_proxy.get(s)) is not None
+                        and node.node is not None
+                        and "val" in node.node.meta
+                        and isinstance(node.node.meta["val"], torch.SymFloat)
+                        for s in zf.node.expr.free_symbols
+                    )
                 ):
                     transform = True
                     args.append(float(zf))
@@ -282,26 +290,19 @@ def tensorify_python_scalars(
                     isinstance(v, fx.Node)
                     and "val" in v.meta
                     and isinstance(zf := v.meta["val"], torch.SymFloat)
-                    and isinstance(zf.node.expr, Symbol)
                     and zf.node.hint is not None
+                    and all(
+                        (node := expr_to_sym_proxy.get(s)) is not None
+                        and node.node is not None
+                        and "val" in node.node.meta
+                        and isinstance(node.node.meta["val"], torch.SymFloat)
+                        for s in zf.node.expr.free_symbols
+                    )
                 ):
                     transform = True
                     kwargs[k] = float(zf)
                 else:
                     kwargs[k] = v
-
-            if (
-                callable(node.target)
-                and len(args) > 0
-                and all(isinstance(arg, float) for arg in args)
-                and (type(result := node.target(*args, **kwargs)) == float)
-            ):
-                # If all args are constants and resulting value is a float,
-                # add node to specialized_float_nodes and continue.
-                # In later iterations we'll DCE this node by specializing the float value
-                # into the args of downstream fx nodes.
-                specialized_float_nodes[node] = result
-                continue
 
             if transform:
                 # args may not be metaproxy (eg. float) so can't use metaproxy here
@@ -309,9 +310,6 @@ def tensorify_python_scalars(
                 replacement_node.meta["val"] = node.target(*args, **kwargs)
                 node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
-
-    # DCE one more time to remove specialized item calls
-    graph.eliminate_dead_code()
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
