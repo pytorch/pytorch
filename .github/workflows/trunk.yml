@@ -256,6 +256,7 @@ jobs:
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build:
+    if: false # See https://github.com/pytorch/pytorch/issues/138750
     name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
