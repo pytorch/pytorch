@@ -3,6 +3,7 @@
 import abc
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -31,6 +32,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
+import sympy
 
 import torch
 from torch import SymInt
@@ -106,6 +109,7 @@ from ..utils import (
     istype,
     odict_values,
     proxy_args_kwargs,
+    range_iterator,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -153,6 +157,7 @@ from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -430,8 +435,12 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, var)
 
     @classmethod
-    @functools.lru_cache(None)
     def _type_dispatch(cls):
+        return cls._type_dispatch_impl(config.trace_numpy)
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
@@ -448,6 +457,7 @@ class VariableBuilder:
                 cls.wrap_listlike,
             ),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
@@ -456,7 +466,7 @@ class VariableBuilder:
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
-        if config.trace_numpy and np:
+        if trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
@@ -966,9 +976,11 @@ class VariableBuilder:
             )
             # We bind the new_symint to graph input.
             set_example_value(sym_node_proxy.node, new_symint)
-            self.tx.output.root_tracer.bound_symbols[
-                new_symint.node.expr
-            ] = sym_node_proxy
+            sym_expr = new_symint.node.expr
+            assert isinstance(
+                sym_expr, sympy.Symbol
+            ), f"{sym_expr} is not a basic Symbol."
+            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -1313,6 +1325,12 @@ class VariableBuilder:
         )
 
         return self.set_source_and_track_mutable(value, result)
+
+    def wrap_range_iterator(self, value: range_iterator):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        # Get all the values from the range iterator
+        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        return ListIteratorVariable(items, mutable_local=MutableLocal())
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1861,7 +1879,9 @@ class VariableBuilder:
             source=self.get_source(),
         )
 
-        self.tx.output.root_tracer.bound_symbols[wrapped_value.node.expr] = proxy
+        sym_expr = wrapped_value.node.expr
+        assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
+        self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         set_example_value(proxy.node, wrapped_value)
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
