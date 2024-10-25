@@ -400,7 +400,7 @@ main()
                 self.acc_grad1.register_prehook(acc_grad_node_pre_hook)
 
                 def acc_grad_node_post_hook1(grad_in, grad_out):
-                    self.conv1.weight.grad.mul_(10.0)
+                    self.conv1.weight.grad.mul_(0.5)
 
                 self.acc_grad1.register_hook(acc_grad_node_post_hook1)
 
@@ -412,7 +412,7 @@ main()
                 self.acc_grad2.register_prehook(acc_grad_node_pre_hook)
 
                 def acc_grad_node_post_hook2(grad_in, grad_out):
-                    self.conv2.weight.grad.mul_(10.0)
+                    self.conv2.weight.grad.mul_(0.5)
 
                 self.acc_grad2.register_hook(acc_grad_node_post_hook2)
 
