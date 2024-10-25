@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import logging
+import operator
 import typing
 from collections import Counter
 from typing import Any, Dict, List, Set, Union
@@ -432,12 +433,82 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         remove_redundant_views(gm)
 
 
+def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
+    """
+    To reuse code and simplify tracing, we trace invoke_quant as invoke_subgraph through the
+    joint graph. Then, we map invoke_quant which we traced as invoke_subgraph back to
+    torch.higher_order_ops.invoke_quant. We removed the "identifier" arg, add back the
+    scheme for ease of pattern matching, add the quant options as a meta on the invoke_quant node,
+    and unwrap single element tuples.
+
+    torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
+    ->
+    torch.ops.higher_order.invoke_quant(repeated_subgraph0, arg0_1, arg1_1, scheme = 'nf4');
+    """
+    graph = gm.graph
+    subgraph_invocations = graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    )
+    invoke_subgraph_mapping = torch._guards.TracingContext.get().invoke_subgraph_mapping
+    for invoke_subgraph in subgraph_invocations:
+        if invoke_subgraph.args[1] not in invoke_subgraph_mapping:
+            continue
+
+        scheme, quant_options = invoke_subgraph_mapping[invoke_subgraph.args[1]]
+
+        subgraph, identifier, args = invoke_subgraph.args
+        kwargs = invoke_subgraph.kwargs
+
+        if scheme is not None:
+            kwargs = dict(kwargs)
+            kwargs["scheme"] = scheme
+
+        with gm.graph.inserting_before(invoke_subgraph):
+            invoke_quant_replacement = graph.call_function(
+                torch._higher_order_ops.invoke_quant,
+                tuple([subgraph, *args]),
+                kwargs,
+            )
+            invoke_quant_replacement.meta.update(subgraph.meta)
+            invoke_quant_replacement.meta["quant_options"] = quant_options
+
+            invoke_subgraph.replace_all_uses_with(invoke_quant_replacement)
+            graph.erase_node(invoke_subgraph)
+            first_user = next(iter(invoke_quant_replacement.users))
+
+            if (
+                len(invoke_quant_replacement.users) == 1
+                and len(subgraph.users) == 1
+                and first_user.target == operator.getitem
+                and first_user.args[1] == 0
+            ):
+                subgraph_graph = getattr(gm, subgraph.target)
+                output_node = torch._inductor.utils.output_node(subgraph_graph)
+                assert (
+                    isinstance(output_node.args[0], tuple)
+                    and len(output_node.args[0]) == 1
+                )
+
+                unpacked_output = output_node.args[0][0]
+                output_node.args = (unpacked_output,)
+                if "val" in output_node.meta:
+                    output_node.meta["val"] = output_node.meta["val"][0]
+
+                invoke_quant_replacement.meta.update(first_user.meta)
+                first_user.replace_all_uses_with(invoke_quant_replacement)
+                graph.erase_node(first_user)
+
+
 def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
     lazy_init()
     count = 0
+
+    # must occur before other passes
+    canonicalize_quant_mapping(graph)
+
     if config.joint_custom_pre_pass is not None:
         with GraphTransformObserver(
             graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform

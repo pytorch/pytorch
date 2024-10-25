@@ -2388,12 +2388,16 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": structured.from_traceback(guard.stack.summary())
-                    if guard.stack
-                    else None,
-                    "user_stack": structured.from_traceback(guard.user_stack)
-                    if guard.user_stack
-                    else None,
+                    "stack": (
+                        structured.from_traceback(guard.stack.summary())
+                        if guard.stack
+                        else None
+                    ),
+                    "user_stack": (
+                        structured.from_traceback(guard.user_stack)
+                        if guard.user_stack
+                        else None
+                    ),
                 }
             )
 
