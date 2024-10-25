@@ -114,20 +114,21 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             isolated_workflow=True,
         ),
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            use_split_build=True,
-            arches=["11.8", "12.1", "12.4", "cpu"],
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
-        ),
-        use_split_build=True,
-    ),
+    # See https://github.com/pytorch/pytorch/issues/138750
+    #   BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="manywheel",
+    #     build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+    #         OperatingSystem.LINUX,
+    #         use_split_build=True,
+    #         arches=["11.8", "12.1", "12.4", "cpu"],
+    #     ),
+    #     ciflow_config=CIFlowConfig(
+    #         labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+    #         isolated_workflow=True,
+    #     ),
+    #     use_split_build=True,
+    # ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="conda",
@@ -180,21 +181,22 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         ),
         branches="main",
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["11.8", "12.1", "12.4"],
-            python_versions=["3.9"],
-            use_split_build=True,
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_PERIODIC},
-        ),
-        branches="main",
-        use_split_build=True,
-    ),
+    # See https://github.com/pytorch/pytorch/issues/138750
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="manywheel",
+    #     build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+    #         OperatingSystem.LINUX,
+    #         arches=["11.8", "12.1", "12.4"],
+    #         python_versions=["3.9"],
+    #         use_split_build=True,
+    #     ),
+    #     ciflow_config=CIFlowConfig(
+    #         labels={LABEL_CIFLOW_PERIODIC},
+    #     ),
+    #     branches="main",
+    #     use_split_build=True,
+    # ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="libtorch",

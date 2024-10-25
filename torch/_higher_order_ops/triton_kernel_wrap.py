@@ -217,7 +217,7 @@ def generate_ttir(
         name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
     ]
 
-    def _get_specialization(args):
+    def _get_specialization(args):  # type: ignore[no-untyped-def]
         try:
             from triton.backends.compiler import AttrsDescriptor  # noqa: F401
 
