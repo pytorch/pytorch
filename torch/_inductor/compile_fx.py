@@ -829,6 +829,8 @@ def fx_codegen_and_compile(
         with torch.no_grad():
             fake_mode = fake_tensor_prop(gm, example_inputs)
 
+        record_original_output_strides(gm)
+
         # pattern matcher passes might not preserve striding information
         # on node.meta["val"]. if in the future we rely on these being
         # correct we will need to fix.
@@ -1257,8 +1259,6 @@ def fw_compiler_freezing(
 
     fake_mode = detect_fake_mode(aot_example_inputs)
 
-    record_original_output_strides(opt_model)
-
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
@@ -1495,8 +1495,6 @@ def compile_fx(
                 num_example_inputs, len(example_inputs)
             )
 
-            record_original_output_strides(model)
-
             model_outputs_node = output_node(model)
             if config.keep_output_stride:
                 model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
@@ -1593,8 +1591,6 @@ def compile_fx(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
-                record_original_output_strides(model)
-
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)

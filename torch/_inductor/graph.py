@@ -1467,7 +1467,7 @@ class GraphLowering(torch.fx.Interpreter):
                         else None
                     )
                 else:
-                    strides = strides = n.meta["val"].stride()
+                    strides = n.meta["val"].stride()
 
                 if strides is not None and len(strides) > 0:
                     allow_padding = (
