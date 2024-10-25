@@ -22,7 +22,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 from yaml import load
 
@@ -106,9 +106,11 @@ def check_file(filename: str) -> List[LintMessage]:
             pass
         else:
             if_statement = str(if_statement)
-            valid_checks = [
-                lambda x: "github.repository == 'pytorch/pytorch'" in x and not "github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'" in x,
-                lambda x: "github.repository_owner == 'pytorch'" in x
+            valid_checks: List[Callable[[str], bool]] = [
+                lambda x: "github.repository == 'pytorch/pytorch'" in x
+                and "github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'"
+                not in x,
+                lambda x: "github.repository_owner == 'pytorch'" in x,
             ]
             if not any(f(if_statement) for f in valid_checks):
                 bad_jobs[job] = if_statement
