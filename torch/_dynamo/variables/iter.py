@@ -3,7 +3,7 @@
 import itertools
 import operator
 import sys
-from typing import Dict, List, Optional, TYPE_CHECKING, Union, Iterable
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction

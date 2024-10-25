@@ -2383,9 +2383,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            opt_fn = torch.compile(fullgraph=True)(fn)
-            opt_fn(inputs)
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        self.assertEqual(opt_fn(inputs), fn(inputs))
 
     def test_pow_int(self):
         def fn(a, b):
