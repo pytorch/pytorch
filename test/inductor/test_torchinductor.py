@@ -65,6 +65,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    tf32_on_and_off,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -9537,6 +9538,7 @@ class CommonTemplate:
 
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
+    @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
         mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(GPU_TYPE)
