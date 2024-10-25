@@ -557,6 +557,8 @@ class NCCLComm {
 
  private:
   ncclComm_t ncclComm_{nullptr};
+  // a helper function to wait until the communicator is initialized;
+  void waitUntilInitialized();
 };
 
 // Helper that automatically cleans up premul sums.

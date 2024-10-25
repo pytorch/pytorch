@@ -38,9 +38,11 @@ inline constexpr bool should_include_kernel_dtype(
  * binary.
  */
 #if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
-namespace at::detail {
+namespace at {
+namespace detail {
 TORCH_API void record_kernel_function_dtype(std::string name);
-} // namespace at::detail
+}
+} // namespace at
 
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type) \
   at::detail::record_kernel_function_dtype(           \

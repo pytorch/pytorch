@@ -731,7 +731,6 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
-    sym_sum
 
 Export Path
 -------------

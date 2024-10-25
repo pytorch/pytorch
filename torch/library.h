@@ -206,9 +206,6 @@ class TORCH_API CppFunction final {
 
   ~CppFunction();
 
-  CppFunction(const CppFunction&) = delete;
-  CppFunction& operator=(const CppFunction&) = delete;
-
   CppFunction(CppFunction&&) noexcept = default;
 
   CppFunction& operator=(CppFunction&&) = default;
@@ -566,7 +563,6 @@ class TORCH_API Library final {
   Library& operator=(const Library&) = delete;
   Library(Library&&) = default;
   Library& operator=(Library&&) = default;
-  ~Library() = default;
 
   // Some notes about the API design here.  We had the following constraints:
   //

@@ -2,8 +2,6 @@
 
 #include <string>
 
-#if !defined(FBCODE_CAFFE2) && !defined(C10_NO_DEPRECATED)
-
 namespace c10 {
 
 // NOLINTNEXTLINE(misc-unused-using-decls)
@@ -18,5 +16,3 @@ using std::stoull;
 using std::to_string;
 
 } // namespace c10
-
-#endif
