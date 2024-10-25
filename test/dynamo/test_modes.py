@@ -597,7 +597,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
 
 
 if __name__ == "__main__":

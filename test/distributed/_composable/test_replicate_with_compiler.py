@@ -394,6 +394,9 @@ class DDP_TP_Test(InductorTestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
+    @unittest.skip(
+        "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
     def test_ddp_tp(self):

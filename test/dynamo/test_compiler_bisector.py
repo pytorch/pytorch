@@ -24,7 +24,7 @@ i32 = torch.int32
 @requires_cuda
 class TestCompilerBisector(TestCase):
     def test_bad_decomp(self):
-        mod = import_module("torch._inductor.compile_fx")
+        import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
             assert generator is None
@@ -67,7 +67,7 @@ class TestCompilerBisector(TestCase):
                 vq_compiled = torch.compile(vq)
                 x = torch.randn(4, 400, 256).cuda()
                 with torch._dynamo.utils.preserve_rng_state():
-                    out = vq(x)
+                    vq(x)
                 out_compiled = vq_compiled(x)
 
             return not out_compiled.isnan().any()

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import datetime
 import functools
 import unittest
 from unittest.mock import patch
@@ -14,7 +15,7 @@ from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -156,7 +158,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             for nelem in [1024, 2048, 4096]:
-                x = torch.randn(nelem, device="cuda", dtype=torch.bfloat16)
+                # CI (Tesla T4) does not support bfloat16 compilation natively,
+                # using float
+                x = torch.randn(nelem, device="cuda", dtype=torch.float)
                 golden_out = eager_func(x)
 
                 for _ in range(3):
@@ -242,6 +246,74 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 compiled_inductor_func(*inductor_inputs), *eager_inputs
             )
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_eager_async_allreduce_inductor_wait(self):
+        import torch.distributed as dist
+
+        def all_reduce_non_functional_eager(x):
+            y = x * x
+            work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
+            assert isinstance(work, torch.distributed.Work)
+            return work, y
+
+        def all_reduce_wait(work, y):  # potentially compiled
+            if torch.compiler.is_dynamo_compiling():
+                torch.ops.c10d_functional.wait_tensor(y)
+            else:
+                work.wait(datetime.timedelta(seconds=10))
+            # Under compile, if `wait_tensor(y)` above is correctly executed,
+            # `y`'s data is in its final form and the output of this function will match eager;
+            # otherwise, `y * y` will run in parallel with `all_reduce(y)` and the output of this function
+            # will not match eager.
+            return y * y
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            x = torch.ones(12800, 12800, device="cuda") + self.rank
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
+            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
+            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
+            # thus will produce the wrong result that fails the unit test.
+
+            # Test: pure-eager
+            all_reduce_wait_eager = all_reduce_wait
+            for _ in range(10):
+                work, y = all_reduce_non_functional_eager(x)
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_work_registry_size(), 1
+                )
+                out_ref = all_reduce_wait_eager(work, y)
+                # `work.wait()` will pop the work from the work registry immediately
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_work_registry_size(), 0
+                )
+
+            # Test: issue comm in eager -> wait for comm in compile
+            all_reduce_wait_compiled = torch.compile(
+                all_reduce_wait,
+                backend="inductor",
+                fullgraph=True,
+            )
+            for _ in range(10):
+                work, y = all_reduce_non_functional_eager(x)
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_work_registry_size(), 1
+                )
+                out_compiled, triton_codes = run_and_get_code(
+                    all_reduce_wait_compiled, work, y
+                )
+                # `wait_tensor(y)` will pop the work from the work registry immediately
+                self.assertEqual(
+                    torch._C._distributed_c10d._get_work_registry_size(), 0
+                )
+                FileCheck().check(
+                    "torch.ops._c10d_functional.wait_tensor.default("
+                ).run(triton_codes[0])
+            self.assertEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
