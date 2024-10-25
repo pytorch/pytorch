@@ -3822,7 +3822,9 @@ class ShapeEnv:
         ex_size: Sequence[Union[int, SymInt]],
         ex_stride: Sequence[Union[int, SymInt]],
         dynamic_strides: Sequence[DimDynamic],
-        constraint_strides: Sequence[Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
         are_sizes_static: bool,
         symbolic_context: SymbolicContext,
     ) -> List[Optional[sympy.Expr]]:
