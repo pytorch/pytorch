@@ -27,7 +27,6 @@ from torch._guards import (
 )
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -68,6 +67,14 @@ from .utils import (
 
 
 zip = strict_zip
+
+
+if torch.distributed.is_available():
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+    async_collective_tensor_type = AsyncCollectiveTensor
+else:
+    async_collective_tensor_type = None  # type: ignore[assignment, misc]
 
 
 class CompilerWrapper:
@@ -1447,12 +1454,14 @@ class AOTDispatchAutograd:
         mem_format = memory_format
         if is_subclass:
             memory_format_for_dense_tensor = not isinstance(memory_format, list)
-            if isinstance(x, AsyncCollectiveTensor) and memory_format_for_dense_tensor:
+            if memory_format_for_dense_tensor and isinstance(
+                x, async_collective_tensor_type
+            ):
                 # This is AsyncCollectiveTensor, that we have not seen during tracing time.
                 while True:
                     x = x.trigger_wait()
                     # Checking recursive AsyncCollectiveTensor
-                    if not isinstance(x, AsyncCollectiveTensor):
+                    if not isinstance(x, async_collective_tensor_type):
                         break
                 is_subclass = False
             else:
