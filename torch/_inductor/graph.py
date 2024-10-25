@@ -244,19 +244,6 @@ def get_required_strides(
     if any(user.target in as_strided_ops for user in node.users):
         return val.stride()
 
-    if node.meta.get("inductor_realize_to_strides", False) and isinstance(
-        result, TensorBox
-    ):
-        result.realize()
-        strides = val.stride()
-        sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-        if (
-            not hasattr(result, "get_stride")
-            or result.get_stride() != strides
-            and not sym_strides
-        ):
-            return strides
-
     return None
 
 
@@ -1469,6 +1456,19 @@ class GraphLowering(torch.fx.Interpreter):
                 result = super().run_node(n)
 
             is_output = any(user.op == "output" for user in n.users)
+            if n.meta.get("inductor_realize_to_strides", False) and isinstance(
+                result, TensorBox
+            ):
+                result.realize()
+                strides = n.meta["val"].stride()
+                sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
+                if (
+                    not hasattr(result, "get_stride")
+                    or result.get_stride() != strides
+                    and not sym_strides
+                ):
+                    stride_order = ir.get_stride_order(strides)
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
                 is_output
                 and isinstance(result, TensorBox)
