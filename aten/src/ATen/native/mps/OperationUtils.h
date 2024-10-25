@@ -338,7 +338,7 @@ inline bool is_dense_in_storage(const TensorBase& t) {
 
 class MetalShaderLibrary {
 public:
-  MetalShaderLibrary(const std::string& src): shaderSource(src), nparams(0), compile_options(nullptr) {}
+  MetalShaderLibrary(const std::string& src): shaderSource(src), nparams(0), compile_options(nullptr){}
   MetalShaderLibrary(const std::string& src, unsigned nparams_): shaderSource(src), nparams(nparams_), compile_options(nullptr){}
   MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_): shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
