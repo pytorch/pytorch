@@ -38,7 +38,8 @@ def match_set_tokens(tokens: Sequence[TokenInfo]) -> list[TokenInfo]:
 
 
 def match_braced_sets(tokens: Sequence[TokenInfo]) -> list[Sequence[TokenInfo]]:
-    braces, stack = {}, []
+    braces: dict[int, int] = {}
+    stack: list[int] = []
 
     for i, t in enumerate(tokens):
         if t.type == token.OP:
