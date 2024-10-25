@@ -331,7 +331,7 @@ sympy==1.13.1 ; python_version >= "3.9"
 #Pinned versions:
 #test that import:
 
-onnx==1.16.1
+onnx==1.17.0
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
