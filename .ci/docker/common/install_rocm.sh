@@ -91,7 +91,7 @@ install_centos() {
   echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
   echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
 
-  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}"
+  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}/main"
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
   echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
