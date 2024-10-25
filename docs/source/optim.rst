@@ -40,14 +40,14 @@ as optimization options for this group.
 For example, this is very useful when one wants to specify per-layer learning rates::
 
     optim.SGD([
-                    {'params': model.base.parameters(), 'lr': 1e-2},
-                    {'params': model.classifier.parameters()}
-                ], lr=1e-3, momentum=0.9)
+		    {'params': model.base.parameters(), 'lr': 1e-2},
+		    {'params': model.classifier.parameters()}
+		], lr=1e-3, momentum=0.9)
 
     optim.SGD([
-                    {'params': model.base.named_parameters(), 'lr': 1e-2},
-                    {'params': model.classifier.named_parameters()}
-                ], lr=1e-3, momentum=0.9)
+		    {'params': model.base.named_parameters(), 'lr': 1e-2},
+		    {'params': model.classifier.named_parameters()}
+		], lr=1e-3, momentum=0.9)
 
 This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
 ``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``.
@@ -70,9 +70,9 @@ individual penalization weights for each parameter group::
     others = [p for name, p in self.named_parameters() if 'bias' not in name]
 
     optim.SGD([
-                    {'params': others},
-                    {'params': bias_params, 'weight_decay': 0}
-                ], weight_decay=1e-2, lr=1e-2)
+		    {'params': others},
+		    {'params': bias_params, 'weight_decay': 0}
+		], weight_decay=1e-2, lr=1e-2)
 
 In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
 of ``0`` is set specifically for the bias terms, as to avoid any penalization for
@@ -95,11 +95,11 @@ called once the gradients are computed using e.g.
 Example::
 
     for input, target in dataset:
-        optimizer.zero_grad()
-        output = model(input)
-        loss = loss_fn(output, target)
-        loss.backward()
-        optimizer.step()
+	optimizer.zero_grad()
+	output = model(input)
+	loss = loss_fn(output, target)
+	loss.backward()
+	optimizer.step()
 
 ``optimizer.step(closure)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,13 +112,13 @@ compute the loss, and return it.
 Example::
 
     for input, target in dataset:
-        def closure():
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
-            loss.backward()
-            return loss
-        optimizer.step(closure)
+	def closure():
+	    optimizer.zero_grad()
+	    output = model(input)
+	    loss = loss_fn(output, target)
+	    loss.backward()
+	    return loss
+	optimizer.step(closure)
 
 .. _optimizer-algorithms:
 
@@ -247,13 +247,13 @@ Example::
     scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     for epoch in range(20):
-        for input, target in dataset:
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
-            loss.backward()
-            optimizer.step()
-        scheduler.step()
+	for input, target in dataset:
+	    optimizer.zero_grad()
+	    output = model(input)
+	    loss = loss_fn(output, target)
+	    loss.backward()
+	    optimizer.step()
+	scheduler.step()
 
 Most learning rate schedulers can be called back-to-back (also referred to as
 chaining schedulers). The result is that each scheduler is applied one after the
@@ -266,14 +266,14 @@ Example::
     scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
 
     for epoch in range(20):
-        for input, target in dataset:
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
-            loss.backward()
-            optimizer.step()
-        scheduler1.step()
-        scheduler2.step()
+	for input, target in dataset:
+	    optimizer.zero_grad()
+	    output = model(input)
+	    loss = loss_fn(output, target)
+	    loss.backward()
+	    optimizer.step()
+	scheduler1.step()
+	scheduler2.step()
 
 In many places in the documentation, we will use the following template to refer to schedulers
 algorithms.
@@ -329,12 +329,12 @@ remain unchanged. The following example demonstrates how to implement this custo
 Example::
 
     class OneLayerModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc = nn.Linear(3, 4)
+	def __init__(self):
+	    super().__init__()
+	    self.fc = nn.Linear(3, 4)
 
-        def forward(self, x):
-            return self.fc(x)
+	def forward(self, x):
+	    return self.fc(x)
 
     model = OneLayerModel()
     optimizer = optim.SGD(model.named_parameters(), lr=0.01, momentum=0.9)
@@ -345,13 +345,13 @@ Let's say that ``model`` implements an expert (MoE), and we want to duplicate it
 for two experts, both initialized the same way as the ``fc`` layer. For the following ``model2`` we create two layers identical to ``fc`` and resume training by loading the model weights and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2`` (and adjust them accordingly)::
 
     class TwoLayerModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc1 = nn.Linear(3, 4)
-            self.fc2 = nn.Linear(3, 4)
+	def __init__(self):
+	    super().__init__()
+	    self.fc1 = nn.Linear(3, 4)
+	    self.fc2 = nn.Linear(3, 4)
 
-        def forward(self, x):
-            return (self.fc1(x) + self.fc2(x)) / 2
+	def forward(self, x):
+	    return (self.fc1(x) + self.fc2(x)) / 2
 
     model2 = TwoLayerModel()
     # adapt and load model weights..
@@ -362,30 +362,30 @@ To load the state dict for ``optimizer2`` with the state dict of the previous op
 (to resume training for each layer from ``fc``), we can use the following hook::
 
     def adapt_state_dict_ids(optimizer, state_dict):
-        adapted_state_dict = deepcopy(optimizer.state_dict())
-        # Copy setup parameters (lr, weight_decay, etc.), in case they differ in the loaded state dict.
-        for k, v in state_dict['param_groups'][0].items():
-            if k not in ['params', 'param_names']:
-                adapted_state_dict['param_groups'][0][k] = v
+	adapted_state_dict = deepcopy(optimizer.state_dict())
+	# Copy setup parameters (lr, weight_decay, etc.), in case they differ in the loaded state dict.
+	for k, v in state_dict['param_groups'][0].items():
+	    if k not in ['params', 'param_names']:
+		adapted_state_dict['param_groups'][0][k] = v
 
-        lookup_dict = {
-            'fc1.weight': 'fc.weight',
-            'fc1.bias': 'fc.bias',
-            'fc2.weight': 'fc.weight',
-            'fc2.bias': 'fc.bias'
-        }
-        clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
-        for param_id, param_name in zip(
-                optimizer.state_dict()['param_groups'][0]['params'],
-                optimizer.state_dict()['param_groups'][0]['param_names']):
-            name_in_loaded = lookup_dict[param_name]
-            index_in_loaded_list = state_dict['param_groups'][0]['param_names'].index(name_in_loaded)
-            id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
-            # Copy the state of the corresponding parameter
-            if id_in_loaded in state_dict['state']:
-                adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
+	lookup_dict = {
+	    'fc1.weight': 'fc.weight',
+	    'fc1.bias': 'fc.bias',
+	    'fc2.weight': 'fc.weight',
+	    'fc2.bias': 'fc.bias'
+	}
+	clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
+	for param_id, param_name in zip(
+		optimizer.state_dict()['param_groups'][0]['params'],
+		optimizer.state_dict()['param_groups'][0]['param_names']):
+	    name_in_loaded = lookup_dict[param_name]
+	    index_in_loaded_list = state_dict['param_groups'][0]['param_names'].index(name_in_loaded)
+	    id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
+	    # Copy the state of the corresponding parameter
+	    if id_in_loaded in state_dict['state']:
+		adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
 
-        return adapted_state_dict
+	return adapted_state_dict
 
     optimizer2.register_load_state_dict_pre_hook(adapt_state_dict_ids)
     optimizer2.load_state_dict(torch.load(PATH)) # The previous optimizer saved state_dict
@@ -405,12 +405,12 @@ This approach enables smooth loading and resuming of the optimizer state despite
 The new bypass layer will be trained from scratch::
 
     class Model1(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc = nn.Linear(5, 5)
+	def __init__(self):
+	    super().__init__()
+	    self.fc = nn.Linear(5, 5)
 
-        def forward(self, x):
-            return self.fc(x) + x
+	def forward(self, x):
+	    return self.fc(x) + x
 
 
     model = Model1()
@@ -419,44 +419,44 @@ The new bypass layer will be trained from scratch::
     torch.save(optimizer.state_dict(), PATH)
 
     class Model_bypass(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc = nn.Linear(5, 5)
-            self.bypass = nn.Linear(5, 5, bias=False)
-            torch.nn.init.eye_(self.bypass.weight)
+	def __init__(self):
+	    super().__init__()
+	    self.fc = nn.Linear(5, 5)
+	    self.bypass = nn.Linear(5, 5, bias=False)
+	    torch.nn.init.eye_(self.bypass.weight)
 
-        def forward(self, x):
-            return self.fc(x) + self.bypass(x)
+	def forward(self, x):
+	    return self.fc(x) + self.bypass(x)
 
     model2 = Model_bypass()
     optimizer2 = optim.SGD(model2.named_parameters(), lr=0.01, momentum=0.9)
 
     def adapt_state_dict_missing_param(optimizer, state_dict):
-        adapted_state_dict = deepcopy(optimizer.state_dict())
-        # Copy setup parameters (lr, weight_decay, etc.), in case they differ in the loaded state dict.
-        for k, v in state_dict['param_groups'][0].items():
-            if k not in ['params', 'param_names']:
-                adapted_state_dict['param_groups'][0][k] = v
+	adapted_state_dict = deepcopy(optimizer.state_dict())
+	# Copy setup parameters (lr, weight_decay, etc.), in case they differ in the loaded state dict.
+	for k, v in state_dict['param_groups'][0].items():
+	    if k not in ['params', 'param_names']:
+		adapted_state_dict['param_groups'][0][k] = v
 
-        lookup_dict = {
-            'fc.weight': 'fc.weight',
-            'fc.bias': 'fc.bias',
-            'bypass.weight': None,
-        }
+	lookup_dict = {
+	    'fc.weight': 'fc.weight',
+	    'fc.bias': 'fc.bias',
+	    'bypass.weight': None,
+	}
 
-        clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
-        for param_id, param_name in zip(
-                optimizer.state_dict()['param_groups'][0]['params'],
-                optimizer.state_dict()['param_groups'][0]['param_names']):
-            name_in_loaded = lookup_dict[param_name]
-            if name_in_loaded in state_dict['param_groups'][0]['param_names']:
-                index_in_loaded_list = state_dict['param_groups'][0]['param_names'].index(name_in_loaded)
-                id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
-                # Copy the state of the corresponding parameter
-                if id_in_loaded in state_dict['state']:
-                    adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
+	clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
+	for param_id, param_name in zip(
+		optimizer.state_dict()['param_groups'][0]['params'],
+		optimizer.state_dict()['param_groups'][0]['param_names']):
+	    name_in_loaded = lookup_dict[param_name]
+	    if name_in_loaded in state_dict['param_groups'][0]['param_names']:
+		index_in_loaded_list = state_dict['param_groups'][0]['param_names'].index(name_in_loaded)
+		id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
+		# Copy the state of the corresponding parameter
+		if id_in_loaded in state_dict['state']:
+		    adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
 
-        return adapted_state_dict
+	return adapted_state_dict
 
     optimizer2.register_load_state_dict_pre_hook(adapt_state_dict_ids)
     optimizer2.load_state_dict(torch.load(PATH)) # The previous optimizer saved state_dict
@@ -467,26 +467,26 @@ As a third example, instead of loading a state according to the order of paramet
 this hook can be used to load according to the parameters' names::
 
     def names_matching(optimizer, state_dict):
-        assert len(state_dict['param_groups']) == len(optimizer.state_dict()['param_groups'])
-        adapted_state_dict = deepcopy(optimizer.state_dict())
-        for g_ind in range(len(state_dict['param_groups'])):
-            assert len(state_dict['param_groups'][g_ind]['params']) == len(
-                optimizer.state_dict()['param_groups'][g_ind]['params'])
+	assert len(state_dict['param_groups']) == len(optimizer.state_dict()['param_groups'])
+	adapted_state_dict = deepcopy(optimizer.state_dict())
+	for g_ind in range(len(state_dict['param_groups'])):
+	    assert len(state_dict['param_groups'][g_ind]['params']) == len(
+		optimizer.state_dict()['param_groups'][g_ind]['params'])
 
-            for k, v in state_dict['param_groups'][g_ind].items():
-                if k not in ['params', 'param_names']:
-                    adapted_state_dict['param_groups'][g_ind][k] = v
+	    for k, v in state_dict['param_groups'][g_ind].items():
+		if k not in ['params', 'param_names']:
+		    adapted_state_dict['param_groups'][g_ind][k] = v
 
-            for param_id, param_name in zip(
-                    optimizer.state_dict()['param_groups'][g_ind]['params'],
-                    optimizer.state_dict()['param_groups'][g_ind]['param_names']):
-                index_in_loaded_list = state_dict['param_groups'][g_ind]['param_names'].index(param_name)
-                id_in_loaded = state_dict['param_groups'][g_ind]['params'][index_in_loaded_list]
-                # Copy the state of the corresponding parameter
-                if id_in_loaded in state_dict['state']:
-                    adapted_state_dict['state'][param_id] = deepcopy(state_dict['state'][id_in_loaded])
+	    for param_id, param_name in zip(
+		    optimizer.state_dict()['param_groups'][g_ind]['params'],
+		    optimizer.state_dict()['param_groups'][g_ind]['param_names']):
+		index_in_loaded_list = state_dict['param_groups'][g_ind]['param_names'].index(param_name)
+		id_in_loaded = state_dict['param_groups'][g_ind]['params'][index_in_loaded_list]
+		# Copy the state of the corresponding parameter
+		if id_in_loaded in state_dict['state']:
+		    adapted_state_dict['state'][param_id] = deepcopy(state_dict['state'][id_in_loaded])
 
-        return adapted_state_dict
+	return adapted_state_dict
 
 
 
@@ -520,7 +520,7 @@ EMA models are constructed by specifying the ``multi_avg_fn`` argument as follow
 >>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Suggested values are close to 1.0, as too low decay values can negatively impact model convergence.
 
 :func:`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
