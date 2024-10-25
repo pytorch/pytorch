@@ -579,6 +579,7 @@ jobs:
     secrets: inherit
 
   linux-focal-py3_12-clang10-experimental-split-build:
+    if: false # See https://github.com/pytorch/pytorch/issues/138750
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
