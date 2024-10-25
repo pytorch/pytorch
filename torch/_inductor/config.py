@@ -42,6 +42,10 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# dump an aoti minifier if program errors
+dump_aoti_minifier = False
+aoti_minifier_accuracy_check = False
+
 # use fx aot graph codegen cache
 fx_graph_cache = (
     os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"

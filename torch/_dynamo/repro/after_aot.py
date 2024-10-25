@@ -14,7 +14,6 @@ import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
 from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
-from typing_extensions import Unpack
 
 import torch
 import torch.fx as fx
@@ -43,6 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
+from typing_extensions import Unpack
 
 from .. import config
 
@@ -323,7 +323,9 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
+def dump_compiler_graph_state(
+    gm, args, compiler_name, *, accuracy=None, save_graph_repro_func=save_graph_repro
+):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -332,7 +334,7 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro(
+        save_graph_repro_func(
             fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
         )
     curdir = os.getcwd()
