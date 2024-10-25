@@ -1,5 +1,3 @@
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -113,6 +111,7 @@ void init_elementwise_launch_config(
   }
 }
 
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12010
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -291,6 +290,7 @@ at::Tensor multimem_one_shot_all_reduce(
   auto out = at::empty_like(input);
   return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
 }
+#endif
 
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
@@ -536,10 +536,9 @@ at::Tensor memset32_(
 #endif
   return input;
 }
-#endif
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12010
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
