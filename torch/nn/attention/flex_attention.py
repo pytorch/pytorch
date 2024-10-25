@@ -900,8 +900,9 @@ def _apply_kernel_options(
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
