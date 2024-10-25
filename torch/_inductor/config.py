@@ -271,7 +271,7 @@ reorder_for_compute_comm_overlap_passes = [
 ]
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
+reorder_for_peak_memory = True
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -437,6 +437,17 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 loop_ordering_after_fusion = (
     os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
 )
+
+# If fusing two nodes only save less then score_fusion_memory_threshold memory,
+# we should not bother fusing the nodes.
+#
+# This is especially helpful to resolve https://github.com/pytorch/pytorch/issues/133242
+# Previously we fuse two nodes because of common read of a scalar tensor.
+# If we skip it, the loop ordering after fusion mechanism kicks in and can
+# brings more savings.
+#
+# For the cases loop ordering after fusion does not help, we don't lose much.
+score_fusion_memory_threshold = 10
 
 # For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
 benchmark_epilogue_fusion = (

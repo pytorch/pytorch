@@ -3046,6 +3046,31 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
         self.assertEqual(cnts.frame_count, 3)
 
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
+    def test_overridden_call(self):
+        class OverRiddenCallModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, x):
+                # Overrides the __call__ method of torch.nn.Module
+                return 5 * self.forward(x)
+
+            def forward(self, x):
+                return x * 3
+
+        m = OverRiddenCallModule()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
