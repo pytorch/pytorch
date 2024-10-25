@@ -1844,7 +1844,6 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device: Optional[torch.device] = None
         self.buffer_names_to_free: OrderedSet[str] = OrderedSet()
 
         # fx graph node to the position it appears in the graph
@@ -1859,11 +1858,13 @@ class Scheduler:
             }
         )
 
-    def get_current_device_or_throw(self) -> torch.device:
-        if device := self.current_device:
-            return device
-        else:
-            raise RuntimeError("No current device")
+    @property
+    def current_device(self) -> Optional[torch.device]:
+        return V.graph.current_device
+
+    @current_device.setter
+    def current_device(self, device: Optional[torch.device]) -> None:
+        V.graph.current_device = device
 
     def debug_draw_graph(self) -> None:
         """Generate an image of the graph for debugging"""
@@ -2921,7 +2922,10 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return self.score_fusion_memory(node1, node2) > 0
+        return (
+            self.score_fusion_memory(node1, node2)
+            >= config.score_fusion_memory_threshold
+        )
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -2989,7 +2993,10 @@ class Scheduler:
             return False
         del device2
 
-        no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        no_shared_data = (
+            self.score_fusion_memory(node1, node2)
+            < config.score_fusion_memory_threshold
+        )
         if no_shared_data:
             no_shared_data = not self.has_shared_data_after_reordering_loop(
                 node1, node2
@@ -3469,6 +3476,7 @@ class Scheduler:
                 )
                 seen.add(key)
 
+        self.current_device = None
         for node in self.nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:

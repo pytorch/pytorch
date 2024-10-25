@@ -6238,6 +6238,11 @@ for method, func in magic_methods.items():
     register_lowering(method_to_operator(method))(func)
 
 
+@register_lowering(torch.sym_sum)
+def sym_sum(args):
+    return sympy.Add(*args)
+
+
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
@@ -6392,6 +6397,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
@@ -6470,6 +6481,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )
