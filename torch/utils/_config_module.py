@@ -3,6 +3,7 @@ import copy
 import hashlib
 import inspect
 import io
+import os
 import pickle
 import tokenize
 import unittest
@@ -26,11 +27,28 @@ class Config:
 
     This configs must be installed with install_config_module to be used
 
+    Environment Variables:
+        These are interpreted to be true / false variables.
+
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
+        env_name_force: The environment variable to read that is a FORCE
+            enviornment variable. I.e. it overrides everything
+        env_name_default: The environment variable to read that changes the
+            default behaviour. I.e. user overrides take preference.
 
-    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
+
+    Evaluation Priority (hightest to lowest):
+        env_name_force
+        user_override
+        env_name
+        justknob
+        default
+
+    i.e. if set, env_name_force would override a user override, but a user override will override a JK.
+
+    justknob - The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
     It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
     Similarly, if this is a OSS run, there is no JK, and it'll return the default value
 
@@ -38,10 +56,27 @@ class Config:
 
     default: bool = True
     justknob: Optional[str] = None
+    env_name_literal: bool = False
+    env_name_default: Optional[str] = None
+    env_name_force: Optional[str] = None
 
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+def _read_env_variable(name: str) -> Optional[bool]:
+    if (env := os.getenv(name)) is not None:
+        env = env.upper()
+        if env in ("1", "TRUE"):
+            return True
+        if env in ("0", "FALSE"):
+            return False
+        warnings.warn(
+            f"Difficulty parsing env variable {name}={env} - Assuming env variable means true and returning True",
+        )
+        return True
+    return None
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -79,6 +114,17 @@ def install_config_module(module: ModuleType) -> None:
                 config[name] = _ConfigEntry(
                     default=value.default, justknob=value.justknob
                 )
+
+                if value.env_name_default is not None:
+                    if (
+                        env_value := _read_env_variable(value.env_name_default)
+                    ) is not None:
+                        config[name].env_value_default = env_value
+                if value.env_name_force is not None:
+                    if (
+                        env_value := _read_env_variable(value.env_name_force)
+                    ) is not None:
+                        config[name].env_value_force = env_value
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -161,6 +207,9 @@ class _ConfigEntry:
     justknob: Optional[str] = None
     # The resolved justknob value
     justknob_value: Any = None
+    # environment variables are read at install time
+    env_value_force: Any = _UNSET_SENTINEL
+    env_value_default: Any = _UNSET_SENTINEL
 
 
 class ConfigModule(ModuleType):
@@ -192,8 +241,15 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.env_value_force is not _UNSET_SENTINEL:
+                return config.env_value_force
+
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
+
+            if config.env_value_default is not _UNSET_SENTINEL:
+                return config.env_value_default
 
             if config.justknob_value is not None:
                 # JK only supports bools and ints
