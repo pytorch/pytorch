@@ -26,7 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
-from torch.nn.attention.flex_attention import create_njt_block_mask, flex_attention
+from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -7083,7 +7083,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_njt_block_mask(causal_mask, 1, 1, query, _compile=True)
+        block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
         out_flex = flex_attention(query, key, value, block_mask=block_mask)
         grad_out = torch.randn_like(out_flex)
         grads_flex = torch.autograd.grad(
@@ -7138,7 +7138,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         def my_mask_mod(b, h, q_idx, kv_idx):
             return mask_mod_table[q_idx]
 
-        block_mask = create_njt_block_mask(my_mask_mod, 1, 1, query, _compile=True)
+        block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
         flex_attention(query, key, value, block_mask=block_mask)
 
     @dtypes(torch.float32)
