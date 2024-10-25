@@ -15,7 +15,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.8", "12.1", "12.4", "12.6"]
+CUDA_ARCHES = ["11.8", "12.4", "12.6"]
 
 
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.1", "12.6": "12.6.2"}
