@@ -47,9 +47,8 @@ def current_accelerator() -> torch.device:
         >>>     current_device = torch.accelerator.current_accelerator()
         >>> else:
         >>>     current_device = torch.device("cpu")
-        >>>
         >>> if current_device.type == 'cuda':
-        >>>     is_half_supported = torch.cuda.has_half()
+        >>>     is_half_supported = torch.cuda.has_half
         >>> elif current_device.type == 'xpu':
         >>>     is_half_supported = torch.xpu.get_device_properties().has_fp16
         >>> elif current_device.type == 'cpu':

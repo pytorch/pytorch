@@ -7,14 +7,8 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_accelerator_getAccelerator", []() {
-<<<<<<< HEAD
     // If no accelerator is currently available, raise an exception.
     return c10::Device(at::getAccelerator(true).value());
-=======
-    // If no accelerator is currently available, return CPU.
-    return c10::Device(
-        at::accelerator::getAccelerator(false).value_or(c10::kCPU));
->>>>>>> 0a49eb31653 (Add device-agnostic runtime Device/Stream C++ API)
   });
 
   m.def("_accelerator_deviceCount", []() {
