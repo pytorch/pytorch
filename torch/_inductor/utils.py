@@ -2100,6 +2100,18 @@ def should_use_remote_fx_graph_cache():
     )
 
 
+def should_use_fx_graph_async_compile():
+    if config.fx_graph_async_compile is not None:
+        return config.fx_graph_async_compile
+    if not config.is_fbcode():
+        return False
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    # TODO: JK
+    return False
+
+
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 

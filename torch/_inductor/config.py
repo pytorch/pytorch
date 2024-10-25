@@ -28,6 +28,10 @@ def bundled_autotune_remote_cache_default() -> Optional[bool]:
     return _get_tristate_env("TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE")
 
 
+def fx_graph_async_compile_default() -> Optional[bool]:
+    return _get_tristate_env("TORCHINDUCTOR_FX_GRAPH_ASYNC_COMPILE")
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -52,6 +56,12 @@ fx_graph_cache = (
 # True: Enables the cache
 # None: Not set -- Off for OSS, JustKnobs based for internal
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
+
+# use async compile to compile fx graphs
+# False: Disabled - compile in-process
+# True: Enabled - compile out-of-process
+# None: Not set -- Off for OSS, JustKnobs based for internal
+fx_graph_async_compile: Optional[bool] = fx_graph_async_compile_default()
 
 # Enable autotune local cache.
 #

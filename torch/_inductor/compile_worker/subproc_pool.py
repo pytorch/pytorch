@@ -1,4 +1,6 @@
+import copyreg
 import functools
+import io
 import itertools
 import logging
 import multiprocessing
@@ -12,8 +14,11 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
-from typing_extensions import Never, ParamSpec
+from dataclasses import dataclass
+from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar, Union, TYPE_CHECKING, Type, Optional
+from typing_extensions import Never, ParamSpec, override
+
+import torch
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -21,6 +26,18 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
+    FakeTensor,
+    FakeTensorMode,
+    Tensor,
+    TensorMetadata,
+)
+from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+if TYPE_CHECKING:
+    import sympy
 
 
 log = logging.getLogger(__name__)
@@ -88,6 +105,213 @@ class SubprocException(Exception):
     def __init__(self, details: str) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
+@dataclass
+class _ShapeEnvPickleData:
+    pass
+
+@dataclass
+class _SymNodePickleData:
+    expr: "sympy.Expr"
+    shape_env: ShapeEnv
+    pytype: Type[object]
+    hint: Optional[Union[int, float, bool]]
+
+    def to_sym_node(self) -> SymNode:
+        from torch.fx.experimental.sym_node import SymNode
+        assert self.shape_env is not None
+        return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
+
+    @staticmethod
+    def from_sym_node(node: SymNode) -> "_SymNodePickleData":
+        return _SymNodePickleData(node._expr, node.shape_env, node.pytype, node._hint)
+
+
+_TensorPickleData = TensorMetadata
+
+
+class _SubprocPickler(pickle.Pickler):
+    def __init__(self, file: io.BytesIO) -> None:
+        super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
+
+    @override
+    def reducer_override(self, obj: object) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
+        if isinstance(obj, FakeTensor):
+            return self._pickle_fake_tensor(obj)
+        elif isinstance(obj, torch.SymInt):
+            return self._pickle_sym_int(obj)
+        elif isinstance(obj, ShapeEnv):
+            return self._pickle_shape_env(obj)
+        else:
+            # returning `NotImplemented` causes pickle to revert to the default
+            # behavior for this object.
+            return NotImplemented
+
+    @classmethod
+    def dumps(cls, obj: object) -> bytes:
+        """
+        Pickle an object.
+        """
+        with io.BytesIO() as stream:
+            pickler = cls(stream)
+            pickler.dump(obj)
+            return stream.getvalue()
+
+    def _pickle_fake_tensor(
+        self,
+        t: FakeTensor,
+       ) -> Tuple[Callable[[_TensorPickleData], Tensor], Tuple[_TensorPickleData]]:
+        # THINGS TO WORRY ABOUT:
+        # 1. Need to make sure that two tensors with the same id end up with the
+        #    same id on the other side of the wire.
+        # 2. SymExpr - need to transfer ShapeEnv?
+        data = extract_tensor_metadata(t)
+        _SubprocPickler._TODO_check_tensor_data(data)
+        print(f"{os.getpid()}: ***   pickle data for ({id(t)}):", repr(data), file=sys.stderr)
+        return (_SubprocPickler._unpickle_fake_tensor, (data,))
+
+    @staticmethod
+    def _TODO_check_tensor_data(data: _TensorPickleData) -> None:
+        assert all(isinstance(x, (int, torch.SymInt)) for x in data.shape)
+        assert all(isinstance(x, (int, torch.SymInt)) for x in data.stride)
+        assert isinstance(data.storage_offset, (int, torch.SymInt))
+        assert isinstance(data.storage_bytes, (int, torch.SymInt))
+
+    @staticmethod
+    def _unpickle_fake_tensor(data: _TensorPickleData) -> Tensor:
+        # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
+        _SubprocPickler._TODO_check_tensor_data(data)
+        print(f"{os.getpid()}: *** unpickle data:", repr(data), file=sys.stderr)
+
+        print(f"*** calling torch.empty_strided({data.shape}, {data.stride}, dtype={data.dtype}, layout={data.layout}, device={data.device}, requires_grad={data.requires_grad}", file=sys.stderr)
+        empty = torch.empty_strided(
+            data.shape,  # type: ignore[arg-type]
+            data.stride,  # type: ignore[arg-type]
+            dtype=data.dtype,
+            layout=data.layout,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+        # TODO: Weird storage stuff?
+
+        return empty
+
+    def _pickle_sym_int(self, s: torch.SymInt) -> Tuple[Callable[[_SymNodePickleData], torch.SymInt], Tuple[_SymNodePickleData]]:
+        print(f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr)
+        data = _SymNodePickleData.from_sym_node(s.node)
+        return (_SubprocPickler._unpickle_sym_int, (data,))
+
+    @staticmethod
+    def _unpickle_sym_int(data: _SymNodePickleData) -> torch.SymInt:
+        s = torch.SymInt(data.to_sym_node())
+        print(f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr)
+        return s
+
+    def _pickle_shape_env(self, s: ShapeEnv) -> Tuple[Callable[[_ShapeEnvPickleData], ShapeEnv], Tuple[_ShapeEnvPickleData]]:
+        # In theory pickle should recognize that a given ShapeEnv was already
+        # pickled and reuse the resulting _ShapeEnvPickleData (so two objects
+        # pointing at the same ShapeEnv get the same ShapeEnv out).
+        # TODO: verify this ^^^
+        # TODO: do we care about any of the ShapeEnv vars (specialize_zero_one, etc)?
+        # TODO: pickle the guards?
+        data = _ShapeEnvPickleData()
+        data.settings = s.settings
+        data.settings = s.settings
+        data.guards = s.guards
+        data.var_to_val = s.var_to_val
+        data.unbacked_var_to_val = s.unbacked_var_to_val
+        data.var_to_range = s.var_to_range
+        data.var_to_range_sloc = s.var_to_range_sloc
+        data.source_name_to_debug_name = s.source_name_to_debug_name
+        data.var_to_sources = s.var_to_sources
+        data.var_to_stack = s.var_to_stack
+        data.source_to_var = s.source_to_var
+        data.replacements = s.replacements
+        data.replacements_slocs = s.replacements_slocs
+        data.unbacked_renamings = s.unbacked_renamings
+        data.divisible = s.divisible
+        data.size_like = s.size_like
+        data.val_to_var = s.val_to_var
+        data.unbacked_symfloat_counter = s.unbacked_symfloat_counter
+        data.unbacked_symint_counter = s.unbacked_symint_counter
+        data.deferred_runtime_asserts = s.deferred_runtime_asserts
+        data.num_deferred_runtime_asserts = s.num_deferred_runtime_asserts
+        data.log = s.log
+        data.frozen = s.frozen
+        data.runtime_asserts_frozen = s.runtime_asserts_frozen
+        data.dim_constraints = s.dim_constraints
+        data.counter = s.counter
+        data.symbol_guard_counter = s.symbol_guard_counter
+        data.co_fields = s.co_fields
+        data.pending_fresh_unbacked_symbols = s.pending_fresh_unbacked_symbols
+        data._prev_cache_key = s._prev_cache_key
+        data._version_counter = s._version_counter
+        data.fx_node_cache = s.fx_node_cache
+        data.source_to_symbol = s.source_to_symbol
+        data.unbacked_alloc_order = s.unbacked_alloc_order
+        data._translation_validation_enabled = s._translation_validation_enabled
+        assert not s._translation_validation_enabled
+
+        return (_SubprocPickler._unpickle_shape_env, (data,))
+
+    @staticmethod
+    def _unpickle_shape_env(data: _ShapeEnvPickleData) -> ShapeEnv:
+        from torch._guards import detect_fake_mode
+        mode = detect_fake_mode()
+        assert mode
+        s = mode.shape_env
+
+        # Fill in the ShapeEnv
+        s.settings = data.settings
+        s.guards = data.guards
+        s.var_to_val = data.var_to_val
+        s.unbacked_var_to_val = data.unbacked_var_to_val
+        s.var_to_range = data.var_to_range
+        s.var_to_range_sloc = data.var_to_range_sloc
+        s.source_name_to_debug_name = data.source_name_to_debug_name
+        s.var_to_sources = data.var_to_sources
+        s.var_to_stack = data.var_to_stack
+        s.source_to_var = data.source_to_var
+        s.replacements = data.replacements
+        s.replacements_slocs = data.replacements_slocs
+        s.unbacked_renamings = data.unbacked_renamings
+        s.divisible = data.divisible
+        s.size_like = data.size_like
+        s.val_to_var = data.val_to_var
+        s.unbacked_symfloat_counter = data.unbacked_symfloat_counter
+        s.unbacked_symint_counter = data.unbacked_symint_counter
+        s.deferred_runtime_asserts = data.deferred_runtime_asserts
+        s.num_deferred_runtime_asserts = data.num_deferred_runtime_asserts
+        s.log = data.log
+        s.frozen = data.frozen
+        s.runtime_asserts_frozen = data.runtime_asserts_frozen
+        s.dim_constraints = data.dim_constraints
+        s.counter = data.counter
+        s.symbol_guard_counter = data.symbol_guard_counter
+        s.co_fields = data.co_fields
+        s.pending_fresh_unbacked_symbols = data.pending_fresh_unbacked_symbols
+        s._prev_cache_key = data._prev_cache_key
+        s._version_counter = data._version_counter
+        s.fx_node_cache = data.fx_node_cache
+        s.source_to_symbol = data.source_to_symbol
+        s.unbacked_alloc_order = data.unbacked_alloc_order
+        s._translation_validation_enabled = data._translation_validation_enabled
+        assert not s._translation_validation_enabled
+        #if s._translation_validation_enabled
+        #    s.validator
+        #    s.graph
+        #    s.name_to_node
+
+        return s
+
+
+class _SubprocUnpickler(pickle.Unpickler):
+    @classmethod
+    def loads(cls, data: bytes) -> object:
+        with io.BytesIO(data) as stream:
+            unpickler = cls(stream)
+            return unpickler.load()
+
 
 class SubprocPool:
     """
@@ -144,7 +368,7 @@ class SubprocPool:
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
-        job_data = pickle.dumps(job_fn, pickle.HIGHEST_PROTOCOL)
+        job_data = _SubprocPickler.dumps(job_fn)
         future: Future[_T]
         with self.futures_lock:
             job_id = next(self.job_id_count)
@@ -157,31 +381,35 @@ class SubprocPool:
         return future
 
     def _read_thread(self) -> None:
-        try:
-            while True:
-                job_id, data = _recv_msg(self.read_pipe)
-                if job_id < 0:
-                    if self.running:
-                        log.warning("SubprocPool unclean exit")
-                    self.read_pipe.close()
+        while True:
+            job_id, data = _recv_msg(self.read_pipe)
+            # breakpoint()
+            if job_id < 0:
+                if self.running:
+                    log.warning("SubprocPool unclean exit")
+                self.read_pipe.close()
+                return
+
+            try:
+                result = _SubprocUnpickler.loads(data)
+            except Exception as e:
+                log.exception("failure in SubprocPool._read_thread")
+                result = e
+
+            with self.futures_lock:
+                if not self.running:
                     return
-                result = pickle.loads(data)
-                with self.futures_lock:
-                    if not self.running:
-                        return
-                    if isinstance(result, _SubprocExceptionInfo):
-                        # An exception occurred in the submitted job
-                        self.pending_futures[job_id].set_exception(
-                            SubprocException(result.details)
-                        )
-                    elif isinstance(result, Exception):
-                        # An exception occurred in some of our subprocess machinery.
-                        self.pending_futures[job_id].set_exception(result)
-                    else:
-                        self.pending_futures[job_id].set_result(result)
-                    del self.pending_futures[job_id]
-        except Exception:
-            log.exception("failure in SubprocPool._read_thread")
+                if isinstance(result, _SubprocExceptionInfo):
+                    # An exception occurred in the submitted job
+                    self.pending_futures[job_id].set_exception(
+                        SubprocException(result.details)
+                    )
+                elif isinstance(result, Exception):
+                    # An exception occurred in some of our subprocess machinery.
+                    self.pending_futures[job_id].set_exception(result)
+                else:
+                    self.pending_futures[job_id].set_result(result)
+                del self.pending_futures[job_id]
 
     def shutdown(self) -> None:
         try:
@@ -216,7 +444,8 @@ class SubprocMain:
     def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
         pool = ProcessPoolExecutor(
             nprocs,
-            mp_context=multiprocessing.get_context("fork"),
+            # "fork" causes CUDA problems.
+            mp_context=multiprocessing.get_context("spawn"),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
@@ -263,7 +492,7 @@ class SubprocMain:
                 result = future.result()
             except Exception as e:
                 log.exception("Error in subprocess")
-                result = pickle.dumps(e, pickle.HIGHEST_PROTOCOL)
+                result = _SubprocPickler.dumps(e)
             assert isinstance(result, bytes)
             with self.write_lock:
                 if self.running:
@@ -275,12 +504,12 @@ class SubprocMain:
     @staticmethod
     def do_job(data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        job = pickle.loads(data)
+        job = typing.cast(Callable[[], object], _SubprocUnpickler.loads(data))
         try:
             result = job()
         except Exception as e:
             result = _SubprocExceptionInfo(traceback.format_exc())
-        return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
+        return _SubprocPickler.dumps(result)
 
 
 AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
