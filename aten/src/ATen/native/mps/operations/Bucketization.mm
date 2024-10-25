@@ -20,7 +20,7 @@ namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/BucketizationOps_metallib.h>
+#include <ATen/native/mps/Bucketization_metallib.h>
 #endif
 
 static void searchsorted_mps_contiguous(Tensor& result,

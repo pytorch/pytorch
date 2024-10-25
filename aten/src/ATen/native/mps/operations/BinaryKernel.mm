@@ -27,7 +27,7 @@ namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/BinaryOps_metallib.h>
+#include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
 static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {

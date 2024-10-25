@@ -22,7 +22,7 @@ using namespace mps;
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/QuantizedOps_metallib.h>
+#include <ATen/native/mps/Quantized_metallib.h>
 #endif
 
 Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {

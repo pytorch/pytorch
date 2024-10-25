@@ -221,7 +221,7 @@ static void upsample_out_template(const Tensor& input,
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/UpsampleOps_metallib.h>
+#include <ATen/native/mps/Upsample_metallib.h>
 #endif
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]

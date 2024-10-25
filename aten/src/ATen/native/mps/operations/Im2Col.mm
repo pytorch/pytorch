@@ -16,7 +16,7 @@ using namespace mps;
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/Im2ColOps_metallib.h>
+#include <ATen/native/mps/Im2Col_metallib.h>
 #endif
 
 namespace {
