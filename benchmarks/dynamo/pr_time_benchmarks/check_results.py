@@ -128,8 +128,8 @@ def main():
             )
 
         new_entry = copy.deepcopy(entry)
-
-        new_entry.expected_value = replace_with_zeros (result)
+        # only change if abs(ratio) > entry.noise_margin /4.
+        new_entry.expected_value = replace_with_zeros (result) if abs(ratio) > entry.noise_margin /4  else entry.expected_value
         new_expected[key] = new_entry
 
         if result > high:
