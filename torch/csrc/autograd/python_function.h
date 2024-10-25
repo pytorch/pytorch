@@ -13,7 +13,6 @@
 #include <optional>
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace torch::jit {

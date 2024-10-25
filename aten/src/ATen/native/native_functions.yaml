@@ -8776,12 +8776,14 @@
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
+    MPS: tril_indices_mps
   autogen: tril_indices.out
 
 - func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
+    MPS: triu_indices_mps
   autogen: triu_indices.out
 
 - func: trace(Tensor self) -> Tensor
@@ -9579,7 +9581,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: i0_out
+    CPU, CUDA, MPS: i0_out
   tags: pointwise
 
 - func: sign(Tensor self) -> Tensor

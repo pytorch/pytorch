@@ -1,5 +1,5 @@
 import math
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -66,46 +66,6 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
-
-
-@torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-def zeros_and_scatter(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-
-    for i, idx in enumerate(indices):
-        assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
-        indices[i] = idx.expand(vals.shape)
-
-    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
-
-
-@zeros_and_scatter.register_fake  # type: ignore[misc]
-def _(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    return torch.empty(shape, device=vals.device)
-
-
-@zeros_and_scatter.register_vmap  # type: ignore[misc]
-def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
-    if len(indices) > 1:
-        for i, idx in enumerate(indices):
-            # TODO: Don't use is_batchedtensor API, use in_dims instead.
-            if torch._C._functorch.is_batchedtensor(idx):
-                indices[i] = idx.unsqueeze(-1)
-
-    out = torch.ops.mylib.zeros_and_scatter(
-        shape,
-        indices,
-        val,
-    )
-    return out, None
 
 
 class FlexAttentionHOP(HigherOrderOperator):
@@ -911,7 +871,6 @@ def sdpa_dense_backward(
     actual_grad_query.copy_(grad_query)
     actual_grad_key.copy_(grad_key)
     actual_grad_value.copy_(grad_value)
-
     score_mod_other_buffer_grads = [
         actual_grad.copy_(grad) if actual_grad is not None else actual_grad
         for actual_grad, grad in zip(

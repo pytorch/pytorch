@@ -39,7 +39,8 @@ Example config:
     experiments:
       lf:
         rollout_percent: 25
-
+        all_branches: false
+        default: true
     ---
 
     # Opt-ins:
@@ -57,7 +58,7 @@ import os
 import random
 from argparse import ArgumentParser
 from logging import LogRecord
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Tuple
 
 import yaml
 from github import Auth, Github
@@ -85,6 +86,9 @@ class Experiment(NamedTuple):
     )
     all_branches: bool = (
         False  # If True, the experiment is also enabled on the exception branches
+    )
+    default: bool = (
+        True  # If True, the experiment is enabled by default for all queries
     )
 
     # Add more fields as needed
@@ -140,6 +144,12 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
+def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+    return frozenset(
+        filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
+    )
+
+
 def parse_args() -> Any:
     parser = ArgumentParser("Get dynamic rollout settings")
     parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
@@ -173,6 +183,13 @@ def parse_args() -> Any:
         type=str,
         required=True,
         help="Current GitHub ref type, branch or tag",
+    )
+    parser.add_argument(
+        "--eligible-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
 
     return parser.parse_args()
@@ -348,6 +365,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
+    eligible_experiments: FrozenSet[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -356,11 +374,22 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
-        enabled = False
-
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
                 f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+            )
+            continue
+
+        if eligible_experiments:
+            if experiment_name not in eligible_experiments:
+                exp_list = ", ".join(eligible_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
+                )
+                continue
+        elif not experiment_settings.default:
+            log.info(
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
             )
             continue
 
@@ -371,11 +400,13 @@ def get_runner_prefix(
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
+        enabled = False
         if opted_in_users:
             log.info(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
+
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
             if random.uniform(0, 100) <= experiment_settings.rollout_perc:
@@ -444,6 +475,7 @@ def main() -> None:
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
+            args.eligible_experiments,
             is_canary,
         )
 

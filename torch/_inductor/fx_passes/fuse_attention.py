@@ -42,9 +42,9 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
 def _sfdp_replacement_1(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -64,9 +64,9 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 def _sfdp_replacement_2(query, key, value, scale_factor):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -86,9 +86,9 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
 def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -106,9 +106,9 @@ def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
 def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -127,9 +127,9 @@ def _sfdp_pattern_5(query, key, value, attn_mask):
 def _sfdp_replacement_5(query, key, value, attn_mask):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
@@ -147,9 +147,9 @@ def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
 def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
         is_causal=False,

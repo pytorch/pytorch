@@ -507,7 +507,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2.0)"""
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s0)), 2.0)"""
         )
 
     def test_sym_floor(self):
@@ -541,7 +541,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(s0)), 2)"""
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s0))), 2)"""
         )
 
     def test_sym_ceil(self):
@@ -830,6 +830,15 @@ def forward(self, x_1):
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )
+            )
+        )
+
+    def test_sym_max_multi_max_simplify(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        self.assertTrue(
+            statically_known_true(
+                torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
             )
         )
 

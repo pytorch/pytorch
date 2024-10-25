@@ -7,7 +7,6 @@ import torch
 from torch._prims_common import make_channels_last_strides_for
 from torch.utils._ordered_set import OrderedSet
 
-from . import config
 from .ir import (
     ExternKernelAlloc,
     FixedLayout,
@@ -228,15 +227,12 @@ def _prepare_linear_fusion_create(
 
 
 def _create_output_node(packed):
-    if not config.abi_compatible:
-        return packed
-
     output_ir = MultiOutput(
         packed.get_layout(),
         packed,
         [],
     )
-    packed.layout = MultiOutputLayout(packed.get_device())
+    packed.layout = MultiOutputLayout(device=packed.get_device())
     packed.outputs = [output_ir]
     return output_ir
 
@@ -254,9 +250,7 @@ class ConvolutionUnary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise",
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -272,24 +266,8 @@ class ConvolutionUnary(ExternKernelAlloc):
                 std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                op_overload=self.op_overload,
-                raw_args=[*self.inputs, *self.constant_args],
-            )
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(
@@ -335,9 +313,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary",
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -357,25 +333,8 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                self.cpp_kernel_overload_name,
-                self.op_overload,
-                [*self.inputs, *self.constant_args],
-            )
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(
@@ -435,9 +394,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_",
         )
         # TODO: op.call: input[0] should be at::Tensor&
         self.cpp_op_schema = """
@@ -457,28 +414,13 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 std::optional<c10::string_view> unary_algorithm)"""
 
         self.mutation_outputs = [
-            MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
-            MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
+            MutationOutput(NoneLayout(device=inputs[0].get_device()), inputs[0], self),
+            MutationOutput(NoneLayout(device=inputs[1].get_device()), inputs[1], self),
         ]
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                self.cpp_kernel_overload_name,
-                self.op_overload,
-                [*self.inputs, *self.constant_args],
-            )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -518,7 +460,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         packed = ConvolutionBinaryInplace(
-            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
+            kernel_layout=NoneLayout(device=inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -541,9 +483,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_transpose_pointwise"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_transpose_pointwise",
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -560,20 +500,8 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
                 std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-            )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(
@@ -1135,7 +1063,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
-            layout=NoneLayout(qaccum.get_device()),
+            layout=NoneLayout(device=qaccum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1167,16 +1095,8 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            self.codegen_args(),
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            op_overload=self.op_overload,
-            raw_args=[*self.inputs, *self.constant_args],
-        )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(cls, x, packed_w, orig_w, B, batch_size):
@@ -1215,9 +1135,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise",
         )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
@@ -1230,23 +1148,8 @@ class LinearUnary(ExternKernelAlloc):
                 std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                op_overload=self.op_overload,
-                raw_args=[*self.inputs, *self.constant_args],
-                outputs=self.outputs,
-            )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(cls, x, w, B, attr, scalars, algorithm):
@@ -1266,7 +1169,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         packed = LinearUnary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1295,9 +1198,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary"
-            if config.abi_compatible
-            else None,
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary",
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -1309,24 +1210,8 @@ class LinearBinary(ExternKernelAlloc):
         """
 
     def codegen(self, wrapper):
-        if config.abi_compatible:
-            wrapper.include_extra_header(
-                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-            )
-            super().codegen(wrapper)
-        else:
-            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                self.codegen_args(),
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                self.cpp_kernel_overload_name,
-                op_overload=self.op_overload,
-                raw_args=[*self.inputs, *self.constant_args],
-                outputs=self.outputs,
-            )
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
 
     @classmethod
     def create(cls, x, y, w, B, attr):
@@ -1347,7 +1232,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args.insert(0, B)
 
         packed = LinearBinary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1387,9 +1272,11 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qlinear_pointwise.tensor
-            if x_scale_zp_are_tensors
-            else torch.ops.onednn.qlinear_pointwise.default,
+            op_overload=(
+                torch.ops.onednn.qlinear_pointwise.tensor
+                if x_scale_zp_are_tensors
+                else torch.ops.onednn.qlinear_pointwise.default
+            ),
         )
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
@@ -1600,9 +1487,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qlinear_pointwise.binary_tensor
-            if x_scale_zp_are_tensors
-            else torch.ops.onednn.qlinear_pointwise.binary,
+            op_overload=(
+                torch.ops.onednn.qlinear_pointwise.binary_tensor
+                if x_scale_zp_are_tensors
+                else torch.ops.onednn.qlinear_pointwise.binary
+            ),
         )
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
@@ -1834,7 +1723,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if binary_post_op == "sum":
             V.graph.mark_buffer_mutated(other.get_name())
             packed = QLinearPointwiseBinaryPT2E(
-                layout=NoneLayout(other.get_device()),
+                layout=NoneLayout(device=other.get_device()),
                 inputs=inputs,
                 constant_args=constant_args,
                 has_bias=(bias is not None),
@@ -1932,7 +1821,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         ]
 
         packed = MkldnnRnnLayer(
-            MultiOutputLayout(x.get_device()),
+            MultiOutputLayout(device=x.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )

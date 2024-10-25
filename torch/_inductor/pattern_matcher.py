@@ -139,6 +139,15 @@ class Multiple:
 MULTIPLE = Multiple()
 
 
+def _transfer_meta(new_meta: Dict[str, Any], old_meta: Dict[str, Any]) -> None:
+    # transfer metadata after pattern matching occurs.
+    # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
+    # to remain accurate after pattern matching has occurred.
+    new_meta.update(
+        (k, v) for k, v in old_meta.items() if k in torch.fx.proxy._COPY_META_FIELDS
+    )
+
+
 class Match:
     """
     Represents a successfully matched pattern.
@@ -157,7 +166,7 @@ class Match:
     nodes: List[torch.fx.Node]
     targets: Dict[_TargetExpr, torch.fx.node.Target]
     ctx: MatchContext
-    replacement_graph: Optional[torch.fx.Graph]
+    replacement_graph: Optional[torch.fx.GraphModule]
 
     def __init__(
         self,
@@ -253,6 +262,10 @@ class Match:
             replacement = trace_fn(
                 replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])  # type: ignore[arg-type]
             )
+            if len(self.nodes) == 1:
+                for n in replacement.graph.nodes:
+                    _transfer_meta(new_meta=n.meta, old_meta=self.nodes[0].meta)
+
             ReplacementPatternEntry.replace_with_graph(
                 self,
                 self.ctx.graph,
@@ -1049,6 +1062,7 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
+                    _transfer_meta(new_meta=result.meta, old_meta=node.meta)
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
@@ -1330,7 +1344,13 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(replace_fn, args)  # type: ignore[assignment]
+                match.replacement_graph = trace_fn(replace_fn, args)
+                if len(match.nodes) == 1:
+                    for n in match.replacement_graph.graph.nodes:
+                        _transfer_meta(
+                            new_meta=n.meta,
+                            old_meta=match.nodes[0].meta,
+                        )
                 return True
             return False
 
@@ -1616,7 +1636,27 @@ def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
 _mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
 
 
+def fixme_incorrect_inductor_schema_op(op: torch._ops.OpOverload) -> bool:
+    if op.namespace != "inductor":
+        return False
+
+    # TODO - fix schema
+    # Dont add any more !
+    return op in (
+        torch.ops.inductor.accumulate_grad_.default,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+
+
 def is_mutation_op(node: torch.fx.Node) -> bool:
+    if isinstance(
+        node.target, torch._ops.OpOverload
+    ) and not fixme_incorrect_inductor_schema_op(node.target):
+        return node.target._schema.is_mutable
+    elif isinstance(
+        node.target, torch._higher_order_ops.auto_functionalize.AutoFunctionalized
+    ):
+        return False
     if node.op == "call_function":
         if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True
