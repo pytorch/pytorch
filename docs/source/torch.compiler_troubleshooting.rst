@@ -3,10 +3,8 @@
 torch.compile Troubleshooting
 =================================
 
-So you're trying to slap ``torch.compile`` on your PyTorch model in hopes of getting it to run faster.
-But it's not working as expected - perhaps performance isn't improving, you're experiencing a crash,
-or compilation time is too long. This article details some tips, workarounds, and debugging tools
-that you can use to unblock yourself.
+You're trying to use ``torch.compile`` on your PyTorch model to enhance its performance
+but it's not working as expected. Perhaps performance isn't improving, crashes are happening, or compilation time is too long. This article provides tips, workarounds, and debugging tools to help you overcome these challenges.
 
 **Contents**
 
@@ -16,30 +14,30 @@ that you can use to unblock yourself.
 Setting Expectations
 ~~~~~~~~~~~~~~~~~~~~
 
-``torch.compile`` is intended to be a general-purpose PyTorch compiler.
-Compared to the previous compiler solution (TorchScript), ``torch.compile``
-requires fewer code changes (we generally do not require models to be re-written from the ground up)
-and handles unsupported code better (generally results in a lost optimization opportunity, rather than a crash).
+``torch.compile`` is designed as a general-purpose PyTorch compiler.
+Unlike the previous compiler solution, TorchScript, ``torch.compile``
+requires fewer code changes, meaning models typically don't need to be rewritten from scratch.
+It also manages unsupported code more gracefully - unsupported code results in a lost optimization opportunity rather than a crash.
 
-In the ideal world, one should just be able to slap ``torch.compile`` to any PyTorch model and get free speedups.
-Unfortunately, the real world is full of rogue code, so in practice, we end up in one of 3 situations:
+In the ideal world, one can simply apply ``torch.compile`` to any PyTorch model and enjoy automatic speedups.
+However, in reality, code complexities can lead to one of three scenarios:
 
-1. ``torch.compile`` just works, and you get speedups!
-2. Some modifications to your code are necessary. ``torch.compile`` doesn't crash/take a long time,
+1. ``torch.compile`` works seamlessly, providing speedups.
+2. Some code modifications are necessary. ``torch.compile`` doesn't crash or take too long,
    but you might not be seeing significant performance gains.
-3. A lot of changes are required to your code.
+3. Extensive changes to your code are required.
 
-We expect most code to fall under situations (1) and (2).
-This document provides tips, listed in increasing involvement, for how to deal with code in situation (2).
+We anticipate most code will fall under scenarios (1) and (2).
+This document provides tips, arranged by level of involvement, to help address code issues in scenario (2).
 
 Compile times
 -------------
 
-``torch.compile`` is implemented as a just-in-time compiler, so the first few (1 or 2) runs
-of the compiled function are expected to be significantly slower. Recompilations (details below on when this may happen)
-will also make runs slower. Various ``torch.compile`` components cache results in order to
+``torch.compile`` functions as a just-in-time compiler, so the initial one or two runs
+of the compiled function are expected to be significantly slower. Recompilations, which can occur under certain conditions (detailed below),
+will also make runs slower. Various ``torch.compile`` components cache results to
 reduce compilation time for future invocations, even in different processes.
-Cold-start (uncached) compilation time is expected to be on the order of seconds to minutes for common/benchmarked models.
+Cold-start (uncached) compilation time typically ranges from seconds to minutes for common or benchmarked models.
 Larger models may take upwards of 30 minutes to a few hours.
 
 Terminology
@@ -50,18 +48,18 @@ The following terms are relevant to troubleshooting ``torch.compile`` problems.
 Graph break
 -----------
 
-``torch.compile`` traces through your code and attempts to capture your PyTorch code into a
-single computation graph of PyTorch operators (FX graph). This is not always possible to do -
-when we encounter code that we can't trace through, we perform a "graph break."
-A graph break involves compiling the FX graph we have determined so far, running the unsupported code,
+``torch.compile`` traces your code and attempts to capture your PyTorch code into a
+single computation graph of PyTorch operators (FX graph). However, this is not always possible.
+When encountering code that can't be traced, a "graph break" occurs.
+A graph break involves compiling the FX graph has been determined so far, running the unsupported code,
 then resuming tracing after the unsupported code with a new FX graph.
 Because the computation graph is broken up, we lose optimization opportunities,
 so model code should avoid graph breaks whenever possible.
-We graph break on things like
+Graph breaks occur on things like:
 
-- data-dependent if-statements
-- many Python builtin functions, and
-- C functions.
+- Data-dependent if-statements
+- Many Python built-in functions
+- C functions
 
 Below is an example of a graph break due to the function ``copy.deepcopy`` from a Python builtin library
 (exact output may differ).
@@ -148,10 +146,10 @@ Below is an example of generated guards. The ``TENSOR_MATCH`` guard checks for t
 Recompilation
 -------------
 
-If we fail the guards for every instance of previously compiled code,
-then ``torch.compile`` must "recompile" the function - the original code needs to be traced again.
+If the guards fail for every instance of previously compiled code,
+then ``torch.compile`` must "recompile" the function, requiring the original code to be traced again.
 
-Below, we need to recompile since the guard checking for the tensor argument's shape failed.
+In the example below, recompilation is necessary because the guard checking the tensor argument's shape failed.
 
 .. code-block:: py
 
@@ -172,7 +170,8 @@ Below, we need to recompile since the guard checking for the tensor argument's s
         - 0/0: tensor 'L['x']' size mismatch at index 0. expected 3, actual 4
 
 Dynamic Shapes
-``torch.compile`` by first assumes tensor shapes are static/constant and thus guard on these.
+-------------------------
+``torch.compile`` initially assumes tensor shapes are static/constant and guards based on these assumptions.
 By using "dynamic shapes," we can get ``torch.compile`` to produce compiled code that can accept
 tensor inputs with different shapes - we avoid recompiling every time shapes differ.
 By default, automatic dynamic shapes are enabled ``torch.compile(dynamic=None)`` -
@@ -218,8 +217,8 @@ Traces are very easy to collect. To collect a trace, run your reproduction comma
     pip install tlparse
     tlparse /tmp/tracedir
 
-This will work even if you are running a distributed job (you will get a trace per rank).
-This will open up your browser with HTML like generated above.
+This approach works even if you are running a distributed job, providing a trace for each rank.
+ It will open your browser with HTML similar to what's generated above.
 If you are making a bug report for a complicated problem that you don't have a standalone reproduction for,
 you can still greatly assist PyTorch developers by attaching the trace log generated in ``/tmp/tracedir``.
 
@@ -234,49 +233,51 @@ you can still greatly assist PyTorch developers by attaching the trace log gener
     </style>
 
 .. role:: red
+
 .. role:: green
+
 .. role:: dark-green
 
-The output of ``tlparse`` is mostly oriented at PyTorch developers,
-and the log format is very easy to upload and share on GitHub.
-However, you can still get some useful information from it as a non-PyTorch developer.
-First, we recommend reading the help text that is inline in the report: it helps explain what the report means.
-Here are some things you can get from a ``tlparse``:
+The output of ``tlparse`` is primarily aimed for PyTorch developers,
+and the log format is easy to upload and share on GitHub.
+However,  as a non-PyTorch developer, you can still extract useful information from it.
+We recommend starting with the inline help text in the report, which explains its contents.
+Here are some insights you can gain from a ``tlparse``:
 
-- What model code was compiled, by looking at the stack trie?
-  (This is especially useful if you're not familiar with the codebase being compiled!)
+- What model code was compiled by looking at the stack trie?
+  This is especially useful if you're not familiar with the codebase being compiled!
 - How many graph breaks / distinct compilation regions are there?
   (Each distinct compile is its own color coded block like :dark-green:`[0/0]`).
-  Frames that are potentially graph break'ed are light green :green:`[2/4]`.
+  Frames that are potentially graph-broken are light green :green:`[2/4]`.
   If there are a lot of frames, that is suspicious, and suggests that you had some catastrophic graph breaks,
   or maybe your code isn't a good match for ``torch.compile``.
 - How many times did I recompile a particular frame? Something that recompiled a lot will look like:
   :dark-green:`[10/0]` :dark-green:`[10/1]` :dark-green:`[10/2]`
   - if something is being recompiled a lot, that is very suspicious and worth looking into, even if it isn't the root cause of your problem.
-- Was there a compilation error?  Frames that errored will look like :red:`[0/1]`.
+- Was there a compilation error? Frames that errored will look like :red:`[0/1]`.
 - What intermediate compiler products did I generate for a given frame?
   For example, you can look at the high-level generated FX graph or the generated Triton code.
-- Is there relevant information for a particular frame? You can find these in compilation_metrics.
+- Is there relevant information for a particular frame? You can find these in ``compilation_metrics``.
 
 TORCH_LOGS
 --------------
 
 You can use the ``TORCH_LOGS`` environment variable to selectively enable parts of the ``torch.compile`` stack to log.
-``TORCH_LOGS`` is in fact the source of logs for ``tlparse``. The format of the ``TORCH_LOGS`` envvar is
+``TORCH_LOGS`` is in fact the source of logs for ``tlparse``. The format of the ``TORCH_LOGS`` environment variable looks like this:
 
 ::
 
     TORCH_LOGS="<option1>,<option2>,..." python foo.py
 
 
-Useful high-level options are:
+Useful high-level options include:
 
 - ``graph_breaks``: logs locations of graph breaks in user code and the reason for the graph break
 - ``guards``: logs guards that are generated
 - ``recompiles``: logs which function recompiled and the guards that failed, leading to the recompilation
 - ``dynamic``: logs related to dynamic shapes
 
-You can also programatically set logging options using ``torch._logging.set_logs``:
+Also, you can programmatically set logging options using ``torch._logging.set_logs``:
 
 .. code-block:: py
 
@@ -285,8 +286,8 @@ You can also programatically set logging options using ``torch._logging.set_logs
     ...
 
 More ``TORCH_LOGS`` options are detailed below (TODO link).
-For the full list of options, see https://pytorch.org/docs/stable/logging.html
-and https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs.
+For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
+and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
 
 ``tlparse`` is ideal for debugging large models and gaining a high-level overview of how your model was compiled,
 while ``TORCH_LOGS`` is preferred for small examples and fine-grained debugging detail,
@@ -299,7 +300,7 @@ Where to apply torch.compile?
 ---------------------------------
 
 We recommend applying ``torch.compile`` to the highest-level function that doesn't cause excessive problems.
-Typically, this will be your train/eval step (with the optimizer, but without the loop), your top-level ``nn.Module``,
+Typically, it is your train or eval step with the optimizer but without the loop, your top-level ``nn.Module``,
 or some sub-``nn.Module``s. ``torch.compile`` specifically doesn't handle distributed wrapper modules like
 DDP or FSDP very well, so consider applying ``torch.compile`` to the inner module passed to the wrapper.
 
@@ -342,14 +343,14 @@ DDP or FSDP very well, so consider applying ``torch.compile`` to the inner modul
         inp = ...
         out = model_ddp(inp)
 
-disable / suppress_errors
+Disabling and Suppressing Errors
 ---------------------------------
 
 For some model architectures, there are portions of the model which are particularly difficult to compile
 - either there are many graph breaks, or there are crashes. You may want to explicitly disable these
 portions of the model which are problematic so that you can apply ``torch.compile`` to the parts that work.
-This is done through the ``@torch.compiler.disable`` decorator. When ``torch.compile`` attempts to call a
-disabled function, it will graph break and skip tracing the disabled function, resuming tracing after the call.
+You can do this by using the ``@torch.compiler.disable`` decorator. When ``torch.compile`` attempts to call a
+disabled function, it breaks the graph and skips tracing the disabled function, resuming tracing after the call.
 By default, all recursive calls made from a disabled function are also disabled. Use the ``recursive=False``
 option to allow compilation for recursive calls.
 
@@ -383,24 +384,24 @@ For example, we use ``torch.compiler.disable`` to disable ``torch.compile`` on s
 recommendation models, as the sparse arch is difficult to compile. Preprocessing and logging functions
 are other examples of functions that typically cause a lot of graph breaks and do not get value from being compiled.
 
-If you are experiencing compiler crashes and you want to YOLO keep going, you can set
-``torch._dynamo.config.suppress_errors = True``. Whenever the compiler crashes, we will just skip tracing
+If you are experiencing compiler crashes and you want to continue regardless, you can set
+``torch._dynamo.config.suppress_errors = True``. When the compiler crashes, we will just skip tracing
 the function and try again later. This is not best practice - it is better to eventually manually add
 disable annotations as necessary.
 
 Resolving graph breaks
 ----------------------
 
-Recall that to maximize optimization opportunities, we should reduce the number of graph breaks.
-In general, graph breaks are caused by one of:
+To maximize optimization opportunities,  it's important to reduce the number of graph breaks.
+In general, graph breaks are caused by one of the following:
 
 - You're trying to do something that fundamentally cannot be traced, such as data-dependent control flow.
-- You're trying to do something that we haven't gotten around to supporting yet.
+- You're trying to do something not yet supported. .
   For example, we currently have limited support for tracing code that uses the built-in Python ``inspect`` module.
 - Your code has an error in it. For example, you may have tried calling a function with an incorrect number of arguments.
 
 Unfortunately, many graph breaks are not actionable without a deeper understanding of Dynamo.
-It can even be difficult to determine which of the 3 causes was the true cause of your graph break.
+It can even be challenging to determine which of the three causes was the true cause of your graph break.
 We are working on making graph break messages more actionable.
 
 If the graph break message doesn't suggest any action and you suspect that the cause of your graph break is (2),
@@ -467,7 +468,7 @@ Data-dependent operations
 
 The general workaround for these graph breaks is to avoid doing data-dependent operations. Some specific workarounds are:
 
-- If your control flow doesn't actually depend on data values, you can change your code to do control flow on constants
+- If your control flow doesn't actually depend on data values, consider modifying your code to perform control flow on constants.
 
 .. code-block:: py
 
