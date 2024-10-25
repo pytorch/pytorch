@@ -305,7 +305,7 @@ static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
-void cacheAllocatorRegisterHook(
+static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
@@ -323,7 +323,7 @@ void cacheAllocatorRegisterHook(
   }
 }
 
-void cacheAllocatorDeregisterHook(
+static void cacheAllocatorDeregisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
@@ -341,8 +341,9 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-getNCCLCommDumpMap() {
+static std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>
+    getNCCLCommDumpMap() {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -464,7 +465,7 @@ gil_checker_t& get_gil_checker() {
   return gil_checker;
 }
 
-std::future<bool> launchAsyncGilCheck() {
+static std::future<bool> launchAsyncGilCheck() {
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
@@ -861,12 +862,12 @@ constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
 
 ProcessGroupNCCL::ProcessGroupNCCL(
-    const c10::intrusive_ptr<Store>& store,
+    c10::intrusive_ptr<Store> store,
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
     : Backend(rank, size),
-      store_(store),
+      store_(std::move(store)),
       options_(std::move(options)),
 
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
@@ -1286,7 +1287,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
 // Note: original name of this method is `abort`. It was renamed to
 // `abortComms` to distinguish from the `abort` method below. The `abort`
 // method calls `abortComms` but does more destruction than the latter.
-bool ProcessGroupNCCL::abortComms(std::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abortComms(
+    const std::optional<std::string>& abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1407,7 +1409,7 @@ void ProcessGroupNCCL::terminateProcess(const std::string& errMsg) {
   LOG(FATAL) << logPrefix() << errMsg;
 }
 
-long computeDeltaMS(
+static long computeDeltaMS(
     std::chrono::time_point<std::chrono::steady_clock> start,
     std::chrono::time_point<std::chrono::steady_clock> end) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)

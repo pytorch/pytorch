@@ -3,12 +3,11 @@
 #ifdef USE_C10D_NCCL
 
 #include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 
 #include <memory>
 #include <mutex>
-#include <thread>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -265,7 +264,7 @@ class TORCH_API DebugInfoWriter {
   }
 
  protected:
-  DebugInfoWriter(std::string namePrefix, int rank) {
+  DebugInfoWriter(const std::string& namePrefix, int rank) {
     filename_ = c10::str(namePrefix, rank);
   }
   std::string filename_;
@@ -278,14 +277,9 @@ class TORCH_API DebugInfoWriter {
 // RAII wrapper for NCCL communicator
 class NCCLComm {
  public:
-  explicit NCCLComm(ncclComm_t ncclComm)
-      : aborted_(false),
-        ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(std::nullopt),
-        initialized_(false),
-        ncclComm_(ncclComm) {}
+  explicit NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
 
-  NCCLComm() : NCCLComm(nullptr) {}
+  NCCLComm() = default;
 
   ~NCCLComm() noexcept {
     // Add lock in this destructor, as aborted_ needs to be read after memory
@@ -379,6 +373,7 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
+  // NOLINTNEXTLINE(.*-noexcept-move-.*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
@@ -488,7 +483,7 @@ class NCCLComm {
         " has already been registered on ncclComm_ ",
         ncclComm_);
 
-    void* handle;
+    void* handle = nullptr;
     // Use getNcclComm to make sure comm is ready before calling nccl APIs
     auto comm = getNcclComm();
     C10D_NCCL_CHECK(
@@ -544,16 +539,16 @@ class NCCLComm {
 
  protected:
   // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_;
-  bool aborted_;
+  ncclUniqueId ncclId_{};
+  bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
-  ncclResult_t ncclAsyncErr_;
+  ncclResult_t ncclAsyncErr_{ncclSuccess};
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
-  int rank_;
+  int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_;
+  std::optional<std::string> commFailureReason_{};
   bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
@@ -572,7 +567,7 @@ struct ncclRedOpRAII {
       : op_(op), comm_(comm), premul_sum_(true) {}
   ncclRedOpRAII(const ncclRedOpRAII&) = delete;
   ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
+  ncclRedOpRAII(ncclRedOpRAII&& tmp) noexcept : ncclRedOpRAII() {
     std::swap(tmp.op_, this->op_);
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
@@ -587,8 +582,8 @@ struct ncclRedOpRAII {
   operator ncclRedOp_t() const {
     return op_;
   }
-  ncclRedOp_t op_;
-  ncclComm_t comm_;
+  ncclRedOp_t op_{};
+  ncclComm_t comm_{};
   bool premul_sum_ = false;
 };
 
