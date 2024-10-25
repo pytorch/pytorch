@@ -1211,9 +1211,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if len(node.keypath) == 0:
             self.writeline(f"auto {node.sym} = {node.sym}_raw;")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], ConvertIntKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], DivideByKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
             # TODO: assert divisibility here
             self.writeline(
                 f"int64_t {node.sym} = {node.sym}_raw / {node.keypath[0].divisor};"
@@ -1537,6 +1537,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # before (e.g., in the while_loop codegen)
             self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src}{self.ending}")
+
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        raise NotImplementedError(
+            "codegen invoke_subgraph is not implemented for cpp wrapper"
+        )
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
