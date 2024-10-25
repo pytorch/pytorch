@@ -15,7 +15,7 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char sigmoid_backward_name[] = "sigmoid_backward";
+constexpr char sigmoid_backward_name[] = "sigmoid_backward";
 void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
@@ -86,7 +86,7 @@ void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scal
       });
 }
 
-CONSTEXPR_EXCEPT_WIN_CUDA char tanh_backward_name[] = "tanh_backward";
+constexpr char tanh_backward_name[] = "tanh_backward";
 void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if(isComplexType(dtype)) {
