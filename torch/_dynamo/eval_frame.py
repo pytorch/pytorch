@@ -825,6 +825,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    enter_exit_hooks=[],
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -866,12 +867,6 @@ def _optimize(
         or (not justknobs_check("pytorch/compiler:enable_dynamo"))
     ):
         return _NullDecorator()
-
-    enter_exit_hooks = []
-    if config.specialize_float and backend == "eager":
-        enter_exit_hooks.append(
-            config.config._make_closure_patcher(specialize_float=False)
-        )
 
     backend = get_compiler_fn(backend)
 
