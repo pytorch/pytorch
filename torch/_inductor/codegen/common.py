@@ -1466,7 +1466,7 @@ class KernelArgs:
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
-            dtype=torch.int32,
+            dtype=torch.uint32,
             inner_name="sem_ptr",
             outer_name=f"semaphores_{current_device.type}_{current_device.index}",
             device=current_device,

@@ -11707,30 +11707,34 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return torch.sum(a)
 
             kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
+            expected_divisible = {
+                # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+                # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+                # at slot 3 should be in the divisible by 16 descriptor
+                0: (0, 1, 3),
+                # kernel1 reduces from 8 elements to a single scalar.
+                # Since multi-kernel generate 2 variants for each kernel. The second
+                # persistent-reduction has index 2.
+                1: (0, 1),
+            }
             if config.triton.multi_kernel:
-                self.assertTrue(
-                    len(kernels) == 4,
-                    "SUM should result in four kernels when multi-kernel is enabled",
-                )
+                self.assertEqual(len(kernels), 4)
+                expected_divisible[2] = expected_divisible.pop(1)
+            elif config.triton.cooperative_reductions:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    # one kernel, with extra workspace/semaphore args
+                    0: (0, 1, 2, 3, 5),
+                }
             else:
-                self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+                self.assertEqual(len(kernels), 2)
 
-            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
-            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
-            # at slot 3 should be in the divisible by 16 descriptor
-            arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].triton_meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+            for kernel_id, expected in expected_divisible.items():
+                divisible_by_16 = (
+                    kernels[kernel_id].triton_meta["configs"][0].divisible_by_16
+                )
+                self.assertEqual(divisible_by_16, expected)
 
-            # kernel1 reduces from 8 elements to a single scalar.
-            # Since multi-kernel generate 2 variants for each kernel. The second
-            # persistent-reduction has index 2.
-            kernel1_index = 2 if config.triton.multi_kernel else 1
-            arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[kernel1_index].triton_meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
         @config.patch(assume_aligned_inputs=False)
