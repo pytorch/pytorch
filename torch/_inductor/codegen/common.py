@@ -114,15 +114,11 @@ class WorkspaceArg:
     @staticmethod
     def maximum(a, b):
         assert (
-            a.zero_mode == b.zero_mode
-            and a.dtype == b.dtype
-            and a.device == b.device
-            and a.inner_name == b.inner_name
-            and a.outer_name == b.outer_name
+            a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
         return WorkspaceArg(
             count=sympy.Max(a.count, b.count),
-            zero_mode=a.zero_mode,
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
             inner_name=a.inner_name,
