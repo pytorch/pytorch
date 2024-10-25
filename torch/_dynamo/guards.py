@@ -583,7 +583,7 @@ class GuardBuilder(GuardBuilderBase):
             self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
-        # info is stored alongside optimized_code and check_fn and is used to
+        # info is stored alongside optimized_code and guard_manager and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
@@ -2173,11 +2173,11 @@ class CheckFunctionManager:
         self.compile_check_fn(builder, guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
-        # info is stored alongside optimized_code and check_fn and is used to
+        # info is stored alongside optimized_code and guard_manager and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         # TODO(anijain2305) - Currently this information is stored as an attr on
-        # the check_fn itself to avoid changing CacehEntry datastructure in
-        # eval_frame.c. In future, we should probably replace check_fn with a
+        # the guard_manager itself to avoid changing CacheEntry data structure in
+        # eval_frame.c. In future, we should probably replace guard_manager with a
         # queryable data structure such that this information is already present
         # in some form.
         self.guard_manager.id_matched_objs = builder.id_matched_objs
@@ -2368,10 +2368,10 @@ class CheckFunctionManager:
 
     def invalidate(self):
         # Some tests reveal that CheckFunctionManager has no attribute
-        # check_fn, but this case should not be of any concern.
+        # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
         if (
-            hasattr(self, "check_fn")
+            hasattr(self, "guard_manager")
             and self.guard_manager is not DeletedGuardFn
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
