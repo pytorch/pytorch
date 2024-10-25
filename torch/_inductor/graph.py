@@ -193,6 +193,16 @@ def getattr_recursive(
     return attr_itr
 
 
+def is_user_visible_output(node: torch.fx.Node) -> bool:
+    output_node = node.graph.find_nodes(op="output")[0]
+    return (
+        "user_visible_output_idxs" in output_node.meta
+        and node in output_node.args[0]
+        and output_node.args[0].index(node)
+        in output_node.meta["user_visible_output_idxs"]
+    )
+
+
 def mark_nodes_dislike_padding(g: Graph) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -254,19 +264,7 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-
-        is_user_visible_output_tensor = False
-        if (
-            cur in output_node.args[0]
-            and (val := cur.meta.get("val")) is not None
-            and isinstance(val, torch.Tensor)
-        ):
-            output_idx = output_node.args[0].index(cur)
-            is_user_visible_output_tensor = (
-                output_idx in output_node.meta["user_visible_output_idxs"]
-            )
-
-        if not config.pad_outputs and is_user_visible_output_tensor:
+        if not config.pad_outputs and is_user_visible_output(cur):
             cur.meta["dislike_padding"] = True
 
 
@@ -1428,13 +1426,7 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
-            is_user_visible_output = False
-            if is_output:
-                output_node = n.graph.find_nodes(op="output")[0]
-                output_idx = output_node.args[0].index(n)
-                is_user_visible_output = (
-                    output_idx in output_node.meta["user_visible_output_idxs"]
-                )
+            is_user_visible = is_user_visible_output(n)
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
@@ -1463,14 +1455,23 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                if is_user_visible_output:
-                    strides = output_node.meta["original_output_strides"][output_idx]
+                if is_user_visible:
+                    output_node = n.graph.find_nodes(op="output")[0]
+                    output_idx = output_node.args[0].index(n)
+                    original_output_strides = output_node.meta.get(
+                        "original_output_strides"
+                    )
+                    strides = (
+                        original_output_strides[output_idx]
+                        if original_output_strides is not None
+                        else None
+                    )
                 else:
                     strides = strides = n.meta["val"].stride()
 
                 if strides is not None and len(strides) > 0:
                     allow_padding = (
-                        config.pad_outputs or not is_user_visible_output
+                        config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
@@ -1483,7 +1484,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and dense
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and not is_user_visible_output
+                        and not is_user_visible
                         and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
