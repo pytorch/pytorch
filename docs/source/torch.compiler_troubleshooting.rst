@@ -218,7 +218,7 @@ Traces are very easy to collect. To collect a trace, run your reproduction comma
     tlparse /tmp/tracedir
 
 This approach works even if you are running a distributed job, providing a trace for each rank.
- It will open your browser with HTML similar to what's generated above.
+It will open your browser with HTML similar to what's generated above.
 If you are making a bug report for a complicated problem that you don't have a standalone reproduction for,
 you can still greatly assist PyTorch developers by attaching the trace log generated in ``/tmp/tracedir``.
 
@@ -226,6 +226,7 @@ you can still greatly assist PyTorch developers by attaching the trace log gener
    Do not share the trace log if the model you are working on is sensitive. The trace log does NOT contain weights.
 
 .. raw:: html
+
     <style>
         .red {background-color:#ff0000;}
         .green {background-color:#00ff00;}
