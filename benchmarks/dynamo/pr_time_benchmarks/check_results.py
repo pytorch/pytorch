@@ -39,7 +39,7 @@ def replace_with_zeros(num):
         raise ValueError("Input must be an integer")
 
     # Calculate the number of digits to remove
-    digits_to_remove = len(str(abs(num))) - 3
+    digits_to_remove = len(str(abs(num))) - 4
 
     # Replace digits with zeros
     if digits_to_remove > 0:
