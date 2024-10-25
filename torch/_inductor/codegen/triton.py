@@ -1412,7 +1412,7 @@ class TritonKernel(SIMDKernel):
         return (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
-            and len(self.numels) == 2
+            and len(self.numels) == self.num_reduction_dims + 1
             and V.graph.sizevars.statically_known_geq(self.total_reduction_numel, 256)  # type: ignore[arg-types]
         )
 

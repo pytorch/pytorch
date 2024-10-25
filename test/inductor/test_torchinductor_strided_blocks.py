@@ -537,6 +537,36 @@ class TritonBlockPointerTest(InductorTestCase):
         for block in expected_blocks:
             self.assertIn(block, code)
 
+    def test_2d_reduce_no_x_dim(self):
+        """
+        Tests a 2D reduction without an "x" dimension.
+        """
+        view_size = (2, 346)  # Need to choose a specific size to get no x dim
+        device = torch.device(GPU_TYPE)
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+
+        # Expect 1 block pointer for the input.
+        result, (code,) = self.run_and_compare(
+            torch.prod,
+            view,
+            expected_num_block_pointers=1,
+            expected_num_triton_kernels=1,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check that there's no X dimension in the signature.
+        (signature_line,) = (
+            line for line in code.splitlines() if line.startswith("def triton")
+        )
+        self.assertNotIn("BLOCK", signature_line)
+
+        # Check for 2 reduction dimensions in the body.
+        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for block in expected_blocks:
+            self.assertIn(block, code)
+
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
