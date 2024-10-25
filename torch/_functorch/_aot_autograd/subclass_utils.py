@@ -113,12 +113,9 @@ def create_subclass_meta(
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
 def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
-        xs_inner = []
+        xs_inner: List[Tensor] = []
         for x in xs:
-            if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
-            else:
-                xs_inner.append(x)
+            get_plain_tensors(x, out_append_list=xs_inner)
         return xs_inner
 
     if is_joint_structure:
@@ -134,6 +131,18 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args
+
+
+def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
+    ret_unwrapped = []
+    ret_indices_to_original = []
+    for i, a in enumerate(wrapped_args):
+        a_unwrapped = unwrap_tensor_subclasses([a], is_joint_structure=False)
+        ret_unwrapped.extend(a_unwrapped)
+        n = len(a_unwrapped)
+        ret_indices_to_original.extend([i] * n)
+
+    return ret_unwrapped, ret_indices_to_original
 
 
 def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
@@ -278,6 +287,7 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
     num_intermediate_bases = None
     keep_input_mutations = meta.keep_input_mutations
     traced_tangents = None
+    traced_tangent_memory_formats = None
     subclass_inp_meta = None
     subclass_fw_graph_out_meta = None
     subclass_tangent_meta = None
@@ -288,6 +298,7 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
         num_intermediate_bases=num_intermediate_bases,  # type: ignore[arg-type]
         keep_input_mutations=keep_input_mutations,  # type: ignore[arg-type]
         traced_tangents=traced_tangents,  # type: ignore[arg-type]
+        traced_tangent_memory_formats=traced_tangent_memory_formats,
         subclass_inp_meta=subclass_inp_meta,  # type: ignore[arg-type]
         subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,  # type: ignore[arg-type]
         subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]

@@ -226,7 +226,7 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
         try:
             from . import test_export
         except ImportError:
-            import test_export
+            import test_export  # @manual=fbcode//caffe2/test:test_export-library
 
         with patch(f"{test_export.__name__}.export", mocked_export_fn):
             return fn(*args, **kwargs)
@@ -258,9 +258,21 @@ def expectedFailureRetraceability(fn):
     return fn
 
 
+# Controls tests generated in test/export/test_retraceability.py
+def expectedFailureRetraceabilityNonStrict(fn):
+    fn._expected_failure_retrace_non_strict = True
+    return fn
+
+
 # Controls tests generated in test/export/test_serdes.py
 def expectedFailureSerDer(fn):
     fn._expected_failure_serdes = True
+    return fn
+
+
+# Controls tests generated in test/export/test_serdes.py
+def expectedFailureSerDerNonStrict(fn):
+    fn._expected_failure_serdes_non_strict = True
     return fn
 
 

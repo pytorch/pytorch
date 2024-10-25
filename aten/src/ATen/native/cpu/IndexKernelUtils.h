@@ -2,8 +2,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 static bool is_constant_index(int ntensor, const int64_t* strides) {
@@ -85,4 +84,4 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
   }
 }
 } // at
-} // native
+// native

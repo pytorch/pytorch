@@ -210,7 +210,7 @@ jobs:
 
       - name: Download Build Artifacts
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"

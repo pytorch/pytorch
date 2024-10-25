@@ -3,7 +3,14 @@ from typing import Dict, Tuple
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
-from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
+from . import _version
+from ._traverse import (
+    OBJ_PATH,
+    set_element,
+    STATE_DICT_ITEM,
+    traverse_state_dict,
+    traverse_state_dict_v_2_3,
+)
 
 
 """
@@ -40,7 +47,16 @@ def flatten_state_dict(
         flattened[new_fqn] = value
         mappings[new_fqn] = path
 
-    traverse_state_dict(state_dict, flat_copy)
+    # We started to flatten dictionary since v2.4. But in order to not break
+    # the checkpoints that were saved before v2.4, we need to keep the old
+    # traversal so that we can reconstruct those checkpoints.
+    use_v_2_3 = (
+        _version._derived_version is not None and _version._derived_version == "2_3"
+    )
+    if use_v_2_3:
+        traverse_state_dict_v_2_3(state_dict, flat_copy)
+    else:
+        traverse_state_dict(state_dict, flat_copy)
     return flattened, mappings
 
 

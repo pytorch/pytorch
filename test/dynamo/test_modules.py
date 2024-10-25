@@ -1994,9 +1994,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
-        # fn compiles twice, and forward twice
-        # (since forward is inlined when fn is compiled)
-        self.assertEqual(cnts.frame_count, 4)
+        # fn compiles twice
+        self.assertEqual(cnts.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
@@ -3012,6 +3011,65 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         helper()
         with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
             helper()
+
+    def test_user_defined_nn_module_dynamic(self):
+        class Conv2d(torch.nn.Conv2d):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, x):
+                x = torch.nn.functional.conv2d(
+                    x,
+                    self.weight,
+                    self.bias,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Conv2d(64, 64, kernel_size=(2, 2), stride=(1, 1))
+        mod2 = Conv2d(64, 64, kernel_size=(2, 2), stride=(2, 2))
+        mod3 = Conv2d(64, 64, kernel_size=(2, 2), stride=(3, 3))
+
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(1, 64, 64, 64)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
+
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
+    def test_overridden_call(self):
+        class OverRiddenCallModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, x):
+                # Overrides the __call__ method of torch.nn.Module
+                return 5 * self.forward(x)
+
+            def forward(self, x):
+                return x * 3
+
+        m = OverRiddenCallModule()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

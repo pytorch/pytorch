@@ -66,6 +66,12 @@ def is_sdpa_error(func, idx, e):
         and "Devices" in repr(e)
     ):
         return True
+    if (
+        func is aten._scaled_dot_product_cudnn_attention.default
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
@@ -76,6 +82,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         *,
         check_strides=True,
         check_aliasing=True,
+        only_check_ops_with_meta=True,
     ):
         super().__init__()
         self.ignore_op_fn = (
@@ -83,6 +90,7 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         self.check_strides = check_strides
         self.check_aliasing = check_aliasing
+        self.only_check_ops_with_meta = only_check_ops_with_meta
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -99,6 +107,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
+            and (
+                not self.only_check_ops_with_meta
+                or torch._subclasses.fake_impls.has_meta(func)
+            )
             and torch.Tag.dynamic_output_shape not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags
