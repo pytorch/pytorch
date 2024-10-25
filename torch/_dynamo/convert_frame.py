@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
@@ -690,9 +691,19 @@ def _compile(
         hooks: Hooks,
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
-        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
-            with CompileTimeInstructionCounter.record():
-                return _compile_inner(code, one_graph, hooks, transform)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                dynamo_timed(
+                    "_compile.compile_inner", phase_name="entire_frame_compile"
+                )
+            )
+            stack.enter_context(
+                _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
+            )
+            stack.enter_context(CompileTimeInstructionCounter.record())
+            return _compile_inner(code, one_graph, hooks, transform)
+
+        return None  # dead, but see https://github.com/python/mypy/issues/7577
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
