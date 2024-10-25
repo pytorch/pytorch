@@ -1006,7 +1006,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.compiled_autograd_enabled:
+            if not compiled_autograd.enabled():
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.

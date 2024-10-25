@@ -315,7 +315,7 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Optional[List[torch.Tensor]] = None,
+        example_inputs: Optional[Sequence[object]] = None,
         shape_env: Optional[ShapeEnv] = None,
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
