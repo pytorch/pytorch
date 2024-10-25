@@ -113,7 +113,7 @@ def tensorify_python_scalars(
     placeholders = set()
     for node in graph.nodes:
         if node.op != "placeholder":
-            first_none_placeholder = node
+            first_non_placeholder = node
             break
         else:
             placeholders.add(node)
@@ -307,7 +307,7 @@ def tensorify_python_scalars(
             if (
                 callable(node.target)
                 and len(args) > 0
-                and all(isinstance(arg, (float)) for arg in args)
+                and all(isinstance(arg, float) for arg in args)
                 and (type(result := node.target(*args, **kwargs)) == float)
             ):
                 # If all args are constants and resulting value is a float,
