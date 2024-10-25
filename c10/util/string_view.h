@@ -595,8 +595,12 @@ constexpr inline void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
-using std::string_view;
 using string_view_ext = basic_string_view<char>;
+#ifdef fbcode_caffe2
+using string_view = basic_string_view<char>;
+#else
+using std::string_view;
+#endif
 
 } // namespace c10
 

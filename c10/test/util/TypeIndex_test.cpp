@@ -2,7 +2,6 @@
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
 
-using c10::string_view;
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
 
@@ -50,19 +49,18 @@ struct Functor final {
 };
 static_assert(
     get_type_index<int64_t(uint32_t, Dummy&&, const Dummy&)>() ==
-        get_type_index<
-            c10::guts::infer_function_traits_t<Functor>::func_type>(),
-    "");
+    get_type_index<c10::guts::infer_function_traits_t<Functor>::func_type>());
 
 namespace test_top_level_name {
 
 static_assert(
-    string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<Dummy>().find("Dummy"));
 
 TEST(TypeIndex, TopLevelName) {
   EXPECT_NE(
-      string_view::npos, get_fully_qualified_type_name<Dummy>().find("Dummy"));
+      std::string_view::npos,
+      get_fully_qualified_type_name<Dummy>().find("Dummy"));
 }
 } // namespace test_top_level_name
 
@@ -70,13 +68,12 @@ namespace test_nested_name {
 struct Dummy final {};
 
 static_assert(
-    string_view::npos !=
-        get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"));
 
 TEST(TypeIndex, NestedName) {
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"));
 }
 } // namespace test_nested_name
@@ -87,23 +84,21 @@ struct Outer final {};
 struct Inner final {};
 
 static_assert(
-    string_view::npos !=
-        get_fully_qualified_type_name<Outer<Inner>>().find(
-            "test_type_template_parameter::Outer"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<Outer<Inner>>().find(
+        "test_type_template_parameter::Outer"));
 static_assert(
-    string_view::npos !=
-        get_fully_qualified_type_name<Outer<Inner>>().find(
-            "test_type_template_parameter::Inner"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<Outer<Inner>>().find(
+        "test_type_template_parameter::Inner"));
 
 TEST(TypeIndex, TypeTemplateParameter) {
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<Outer<Inner>>().find(
           "test_type_template_parameter::Outer"));
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<Outer<Inner>>().find(
           "test_type_template_parameter::Inner"));
 }
@@ -114,13 +109,12 @@ template <size_t N>
 struct Class final {};
 
 static_assert(
-    string_view::npos !=
-        get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<Class<38474355>>().find("38474355"));
 
 TEST(TypeIndex, NonTypeTemplateParameter) {
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<Class<38474355>>().find("38474355"));
 }
 } // namespace test_nontype_template_parameter
@@ -132,29 +126,28 @@ struct Type final {
 };
 
 static_assert(
-    string_view::npos !=
-        get_fully_qualified_type_name<typename Type<int>::type>().find("int"),
-    "");
+    std::string_view::npos !=
+    get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
 static_assert(
-    string_view::npos !=
+    std::string_view::npos !=
     get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
 
 // but with remove_pointer applied, there is no '*' in the type name anymore
 static_assert(
-    string_view::npos ==
+    std::string_view::npos ==
     get_fully_qualified_type_name<
         std::remove_pointer_t<typename Type<int>::type>>()
         .find('*'));
 TEST(TypeIndex, TypeComputationsAreResolved) {
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
   // but with remove_pointer applied, there is no '*' in the type name anymore
   EXPECT_EQ(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<
           std::remove_pointer_t<typename Type<int>::type>>()
           .find('*'));
@@ -181,20 +174,20 @@ namespace test_function_arguments_and_returns {
 class Dummy final {};
 
 static_assert(
-    string_view::npos !=
+    std::string_view::npos !=
     get_fully_qualified_type_name<Dummy(int)>().find(
         "test_function_arguments_and_returns::Dummy"));
 static_assert(
-    string_view::npos !=
+    std::string_view::npos !=
     get_fully_qualified_type_name<void(Dummy)>().find(
         "test_function_arguments_and_returns::Dummy"));
 TEST(TypeIndex, FunctionArgumentsAndReturns) {
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<Dummy(int)>().find(
           "test_function_arguments_and_returns::Dummy"));
   EXPECT_NE(
-      string_view::npos,
+      std::string_view::npos,
       get_fully_qualified_type_name<void(Dummy)>().find(
           "test_function_arguments_and_returns::Dummy"));
 }
