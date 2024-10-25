@@ -3046,6 +3046,8 @@ class TestCase(expecttest.TestCase):
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
 
+        torch.compiler.set_stance("default")
+
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
         # When strict mode is False, suppress_errors is True
@@ -5389,9 +5391,14 @@ def remove_cpp_extensions_build_root():
 
 # Decorator to provide a helper to load inline extensions to a temp directory
 def scoped_load_inline(func):
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         def load_inline(*args, **kwargs):
+            if IS_WINDOWS:
+                # TODO(xmfan): even using TemporaryDirectoryName will result in permission error
+                return cpp_extension.load_inline(*args, **kwargs)
+
             assert "build_directory" not in kwargs
             with TemporaryDirectoryName() as temp_dir_name:
                 if kwargs.get("verbose", False):
