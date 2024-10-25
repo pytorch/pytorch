@@ -3888,6 +3888,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    def test_binary_pointwise_with_nested_int_second_arg(self, device):
+        # See https://github.com/pytorch/pytorch/issues/138496
+        nt = random_nt_from_dims(
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt * nt.size(1)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt + nt.size(1)
+
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
