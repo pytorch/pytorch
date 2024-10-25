@@ -104,6 +104,7 @@ class TORCH_API TensorBase {
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
+  ~TensorBase() = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
