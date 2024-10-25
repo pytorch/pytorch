@@ -305,7 +305,7 @@ static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
-void cacheAllocatorRegisterHook(
+static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
@@ -323,7 +323,7 @@ void cacheAllocatorRegisterHook(
   }
 }
 
-void cacheAllocatorDeregisterHook(
+static void cacheAllocatorDeregisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
@@ -341,8 +341,9 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-getNCCLCommDumpMap() {
+static std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>
+    getNCCLCommDumpMap() {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -464,7 +465,7 @@ gil_checker_t& get_gil_checker() {
   return gil_checker;
 }
 
-std::future<bool> launchAsyncGilCheck() {
+static std::future<bool> launchAsyncGilCheck() {
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
@@ -861,12 +862,12 @@ constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
 
 ProcessGroupNCCL::ProcessGroupNCCL(
-    const c10::intrusive_ptr<Store>& store,
+    c10::intrusive_ptr<Store> store,
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
     : Backend(rank, size),
-      store_(store),
+      store_(std::move(store)),
       options_(std::move(options)),
 
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
@@ -900,7 +901,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  sleepAfterException_ = getCvarBool(TORCH_NCCL_SLEEP_AFTER_EXCEPTION, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -1075,6 +1075,21 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       options_->config,
       options_->global_ranks_in_group);
 #endif
+}
+
+bool ProcessGroupNCCL::isInitialized() {
+  if (devNCCLCommMap_.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  bool initialized = true;
+  for (const auto& [_, comm] : devNCCLCommMap_) {
+    if (!comm->isInitialized()) {
+      initialized = false;
+      break;
+    }
+  }
+  return initialized;
 }
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
@@ -1272,7 +1287,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
 // Note: original name of this method is `abort`. It was renamed to
 // `abortComms` to distinguish from the `abort` method below. The `abort`
 // method calls `abortComms` but does more destruction than the latter.
-bool ProcessGroupNCCL::abortComms(std::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abortComms(
+    const std::optional<std::string>& abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1393,7 +1409,7 @@ void ProcessGroupNCCL::terminateProcess(const std::string& errMsg) {
   LOG(FATAL) << logPrefix() << errMsg;
 }
 
-long computeDeltaMS(
+static long computeDeltaMS(
     std::chrono::time_point<std::chrono::steady_clock> start,
     std::chrono::time_point<std::chrono::steady_clock> end) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
@@ -1592,6 +1608,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         "Flight recorder dump in heartbeatMonitor",
         false,
         true);
+    // Indicate to watchdog thread that we have finished dumping.
+    promiseFlightRecorderDump_.set_value();
   }
 
   // GIL deadlock check.
@@ -1947,12 +1965,18 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
             // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
-            if (sleepAfterException_) {
-              // This sleep is used to give time for dumping before throwing
-              // exception
-              std::this_thread::sleep_for(
-                  std::chrono::seconds(heartbeatTimeoutInSec_));
-              LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+            // Give time for dumping before throwing exception
+            auto start = std::chrono::steady_clock::now();
+            auto status = promiseFlightRecorderDump_.get_future().wait_for(
+                std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+            if (status == std::future_status::timeout) {
+              LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                           << waitTimeoutDumpInMilSec_ << "ms"
+                           << " flight recorder dumps to finish.";
+            } else if (status == std::future_status::ready) {
+              auto end = std::chrono::steady_clock::now();
+              LOG(INFO) << logPrefix() << "slept for "
+                        << computeDeltaMS(start, end) << "ms"
                         << " giving time for flight recorder dumps to finish.";
             }
           } catch (const std::exception& e) {

@@ -468,14 +468,17 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input! "
+                    "Consider cloning the input before modifying it. "
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input! "
+                    "If you are returning a view of the input, please make sure "
+                    "to clone it. "
                 )
 
         cond_return = cond_op(
