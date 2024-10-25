@@ -2386,6 +2386,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fullgraph=True)(fn)
         self.assertEqual(opt_fn(inputs), fn(inputs))
 
+    def test_filter_infinite_iterator(self):
+        def fn(x):
+            x = x + 1
+            return zip(range(3), filter(lambda x: x < 10, itertools.count()))
+
+        inputs = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn(inputs)), list(fn(inputs)))
+
+    def test_filter_return_type(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            x = x + 1
+            return filter(lambda x: x < 10, [1, 2, 3])
+
+        inputs = torch.ones(1)
+        res = fn(inputs)
+        self.assertEqual(type(res), filter)
+        self.assertTrue(isinstance(res, filter))
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)

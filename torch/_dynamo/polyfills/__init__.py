@@ -187,4 +187,5 @@ def addcmul_inplace(self, tensor1, tensor2, value):
 
 
 def filter_is_true(res):
+    # Checks if the Python constant represented by the VariableTracker object is true
     return res.is_python_constant() and res.as_python_constant()
