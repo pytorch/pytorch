@@ -8,17 +8,6 @@
 
 namespace c10 {
 
-namespace detail {
-template <typename Base, typename Child, typename... Args>
-std::enable_if_t<
-    !std::is_array_v<Base> && !std::is_array_v<Child> &&
-        std::is_base_of_v<Base, Child>,
-    std::unique_ptr<Base>>
-make_unique_base(Args&&... args) {
-  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
-}
-}
-
 inline KernelFunction::KernelFunction()
     : boxed_kernel_func_()
     , unboxed_kernel_func_(nullptr)
@@ -194,7 +183,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
 #if !defined(C10_MOBILE)
     (void)func_ptr; // Suppress unused variable warning
     return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
-        detail::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
+        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
 #else
     // On mobile, we rather want to optimize for binary size than for performance,
@@ -211,7 +200,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedRuntimeFunction(FuncType* f
     TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(
-        detail::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(func)
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(func)
     );
 }
 
@@ -221,7 +210,7 @@ inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, 
 
 #if !defined(C10_MOBILE)
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
-        detail::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
 #else
     // On mobile, we rather want to optimize for binary size than for performance,
@@ -237,7 +226,7 @@ inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
-        detail::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
 }
 

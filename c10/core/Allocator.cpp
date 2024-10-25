@@ -87,6 +87,8 @@ void reportOutOfMemoryToProfiler(
   }
 }
 
+MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
+
 void MemoryReportingInfoBase::reportOutOfMemory(
     int64_t /*alloc_size*/,
     size_t /*total_allocated*/,

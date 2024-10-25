@@ -36,7 +36,6 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
-#include <tuple>
 #include <utility>
 
 namespace at::native { inline namespace CPU_CAPABILITY {

@@ -133,7 +133,6 @@ struct C10_API PlacementDeleteContext {
   DataPtr data_ptr_;
   PlacementDtor placement_dtor_;
   size_t size_;
-
   PlacementDeleteContext(
       DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
@@ -141,11 +140,6 @@ struct C10_API PlacementDeleteContext {
       : data_ptr_(std::move(data_ptr)),
         placement_dtor_(placement_dtor),
         size_(size) {}
-
-  PlacementDeleteContext(PlacementDeleteContext&&) noexcept = delete;
-  PlacementDeleteContext(const PlacementDeleteContext&) = delete;
-  PlacementDeleteContext& operator=(const PlacementDeleteContext&) = delete;
-  PlacementDeleteContext& operator=(PlacementDeleteContext&&) = delete;
   static DataPtr makeDataPtr(
       DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
@@ -243,7 +237,6 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
 
   ExtraMeta() = default;
-  ~ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
