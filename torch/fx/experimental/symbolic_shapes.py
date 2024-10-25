@@ -3822,22 +3822,178 @@ class ShapeEnv:
         ex_size: Sequence[Union[int, SymInt]],
         ex_stride: Sequence[Union[int, SymInt]],
         dynamic_strides: Sequence[DimDynamic],
-        constraint_strides: Sequence[Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[Optional[sympy.Expr]]:
+        if False:
+            import time
+
+            start_old = time.time()
+            for x in range(100000):
+                old = self._compute_symbolic_stride_old(
+                    source,
+                    size,
+                    ex_size,
+                    ex_stride,
+                    dynamic_strides,
+                    constraint_strides,
+                    are_sizes_static,
+                    symbolic_context,
+                )
+            start_new = end_old = time.time()
+            for x in range(100000):
+                new = self._compute_symbolic_stride_new(
+                    source,
+                    size,
+                    ex_size,
+                    ex_stride,
+                    dynamic_strides,
+                    constraint_strides,
+                    are_sizes_static,
+                    symbolic_context,
+                )
+            end_new = time.time()
+            old_t = end_old - start_old
+            new_t = end_new - start_new
+            print(f"*** timing: old: {old_t}, new: {new_t}, multiple: {old_t / new_t}")
+        else:
+            new = self._compute_symbolic_stride_new(
+                source,
+                size,
+                ex_size,
+                ex_stride,
+                dynamic_strides,
+                constraint_strides,
+                are_sizes_static,
+                symbolic_context,
+            )
+            old = self._compute_symbolic_stride_old(
+                source,
+                size,
+                ex_size,
+                ex_stride,
+                dynamic_strides,
+                constraint_strides,
+                are_sizes_static,
+                symbolic_context,
+            )
+
+        def recursive_eq(shape_env, a, b, state):
+            if a == b:
+                return True
+            if isinstance(a, (int, sympy.Integer)):
+                return a == b
+            elif isinstance(a, sympy.Symbol):
+                if not isinstance(b, sympy.Symbol):
+                    return False
+                if a in state:
+                    return state[a] == b
+                elif b in state:
+                    return state[b] == a
+                else:
+                    if shape_env.size_hint(a) != shape_env.size_hint(b):
+                        return False
+                    if shape_env.var_to_range[a] != shape_env.var_to_range[b]:
+                        return False
+                    state[a] = b
+                    state[b] = a
+                    return True
+            elif isinstance(a, (list, tuple)):
+                if not isinstance(b, (list, tuple)):
+                    return False
+                if len(a) != len(b):
+                    return False
+                return all(recursive_eq(shape_env, a1, b1, state) for a1, b1 in zip(a, b))
+            else:
+                breakpoint()
+
+        state = {}
+        assert recursive_eq(self, old, new, state), f"Mismatch:\n  old: {old!r}\n  new: {new!r}"
+        return old
+
+    def _compute_symbolic_stride_new(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
+
+        # iterate over unbound strides in sorted order
+        val_list = [(val, i) for i, val in enumerate(ex_stride)]
+        val_list.sort(key=_nested_int_aware_sort)
+
+        for val, i in val_list:
+            if val in (0, 1):
+                out_stride = sympy.Integer(val)
+            else:
+                dynamic_stride = dynamic_strides[i]
+                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                    # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                    out_stride = candidates[val]
+                else:
+                    # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                    dyn_stride = dynamic_stride
+                    if dynamic_stride == DimDynamic.INFER_STRIDE:
+                        dyn_stride = (
+                            DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+                        )
+                    out_stride = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
+                    )
+            stride[i] = out_stride
+            candidates[ex_size[i] * val] = size[i] * out_stride
+
+        assert all(x is not None for x in stride)
+        return stride
+
+    def _compute_symbolic_stride_old(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
         are_sizes_static: bool,
         symbolic_context: SymbolicContext,
     ) -> List[Optional[sympy.Expr]]:
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 
+        # print("*** _compute_symbolic_stride_old", file=sys.stderr)
+
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex_stride):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
+                # print(f"***     (1) set stride[{i}] = Integer({val})", file=sys.stderr)
         while any(x is None for x in stride):
+            # print(f"***   start loop")
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
                 if stride[i] is not None and ex_stride[i] >= 0
             }
+            # print(f"***     candidates = {candidates!r}")
 
             # iterate over unbound strides in sorted order
             val_list = sorted(
@@ -3852,6 +4008,7 @@ class ShapeEnv:
                     and ex_stride[i] in candidates
                 ):
                     stride[i] = candidates[ex_stride[i]]
+                    # print(f"***     (2) set stride[{i}] = candidates[{ex_stride[i]}]", file=sys.stderr)
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
 
             if any(x is None for x in stride):
@@ -3877,6 +4034,7 @@ class ShapeEnv:
                     constraint_dim=constraint_strides[i],
                     symbolic_context=symbolic_context,
                 )
+                # print(f"***     (3) set stride[{i}] = create_symbol", file=sys.stderr)
         assert all(x is not None for x in stride)
         return stride
 
