@@ -24,7 +24,7 @@ enum BIN_SELECTION_ALGORITHM {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/HistogramOps_metallib.h>
+#include <ATen/native/mps/HistogramKernel_metallib.h>
 #endif
 
 template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
