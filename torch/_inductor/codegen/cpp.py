@@ -3965,10 +3965,29 @@ class CppScheduling(BaseScheduling):
 
                 ref_node = node2 if len(vars1) < len(vars2) else node1
 
-                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+                ref_indexing_constraints = get_indexing_ranges_exprs(ref_node)
 
                 node_to_recomp.recompute_size_and_body(
-                    extra_indexing_constraints=extra_indexing_constraints
+                    extra_indexing_constraints=ref_indexing_constraints
+                )
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+
+                if vars1 == vars2:
+                    return FusedSchedulerNode.fuse(node1, node2)
+
+                # We can not recompute sizes and body for nodes other than SchedulerNode
+                # TODO: we can extend the support for FusedSchedulerNode
+                assert isinstance(ref_node, SchedulerNode)
+
+                node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
+                    node_to_recomp
+                )
+
+                # recompute ref_node if its ranges are also changed
+                ref_node.recompute_size_and_body(
+                    extra_indexing_constraints=node_to_recomp_indexing_constraints
                 )
 
                 _, (vars1, _) = node1.group
