@@ -2619,7 +2619,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
-    def test_hints_wrapper_haha(self):
+    def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y
             x = torch.relu(x)

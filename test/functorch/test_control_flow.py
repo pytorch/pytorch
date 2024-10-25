@@ -1299,7 +1299,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(true_outs, fake_outs)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
-    # TODO: when combind_mode is "compile_dynamic_shape", there will be lifted
+    # TODO: when compile_mode is "compile_dynamic_shape", there will be lifted
     # symint inputs. associative_scan doesn't handle closures yet.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -1907,7 +1907,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
-    # TODO: when combind_mode is "compile_dynamic_shape", there will be lifted
+    # TODO: when compile_mode is "compile_dynamic_shape", there will be lifted
     # symint inputs. associative_scan doesn't handle closures yet.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -1949,7 +1949,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result1, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
-    # TODO: when combind_mode is "compile_dynamic_shape", there will be lifted
+    # TODO: when compile_mode is "compile_dynamic_shape", there will be lifted
     # symint inputs. associative_scan doesn't handle closures yet.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -2003,7 +2003,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result1, expected_result)
 
     # TODO: provide an implementation for all compile modes and re-enable all test
-    # TODO: when combind_mode is "compile_dynamic_shape", there will be lifted
+    # TODO: when compile_mode is "compile_dynamic_shape", there will be lifted
     # symint inputs. associative_scan doesn't handle closures yet.
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
