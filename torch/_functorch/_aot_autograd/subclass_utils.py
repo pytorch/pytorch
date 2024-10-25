@@ -182,7 +182,7 @@ def runtime_unwrap_tensor_subclasses(
     def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
-            return
+            return out
 
         assert isinstance(x, Tensor)
 
@@ -210,6 +210,7 @@ def runtime_unwrap_tensor_subclasses(
             out.extend(
                 [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
             )
+        return out
 
     xs_inner: List[Union[int, Tensor, SymInt]] = []
 
@@ -222,7 +223,7 @@ def runtime_unwrap_tensor_subclasses(
             continue
 
         if subclass_metas is None:
-            get_plain_tensors(typing.cast(Tensor, x), out_append_list=xs_inner)
+            get_plain_tensors(typing.cast(Tensor, x), out=xs_inner)
         else:
             meta = subclass_metas[idx]
             assert isinstance(meta, SubclassCreationMeta)
@@ -251,7 +252,7 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
         num_indices = 1
         if is_traceable_wrapper_subclass(arg):
             num_indices = (
-                len(get_plain_tensors(typing.cast(Tensor, arg)))
+                len(get_plain_tensors(typing.cast(Tensor, arg), out=[]))
                 + len(filter_symints(arg.size()))
                 + len(filter_symints(arg.stride()))
             )

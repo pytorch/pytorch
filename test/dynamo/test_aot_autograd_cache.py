@@ -88,7 +88,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @unittest.expectedFailure
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_aot_runtime_trace_joint(self):
         @torch.compile(backend="inductor")
