@@ -1391,6 +1391,7 @@ def compile_fx(
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_: Sequence[InputType] = example_inputs_
+
                 if isinstance(model_, GraphModule):
                     fake_inputs = [
                         node.meta.get("val")
@@ -1404,7 +1405,7 @@ def compile_fx(
                         for inp in fake_inputs
                     ]
 
-                    if all(v is not None for v in fake_inputs):
+                    if any(v is not None for v in fake_inputs):
                         # Validate devices before switching to fake tensors.
                         for idx, fi, i in zip(count(), fake_inputs, inputs_):
                             if fi is not None:
@@ -1415,7 +1416,7 @@ def compile_fx(
                                         f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
                                         "make sure torch.export() and torch.aot_compile() run on the same device."
                                     )
-                        inputs_ = fake_inputs
+                        inputs_ = fake_inputs  # type: ignore[assignment]
                 return compile_fx(
                     model_,
                     inputs_,
