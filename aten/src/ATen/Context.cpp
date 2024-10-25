@@ -179,11 +179,8 @@ bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
   if (hasCUDART() && (versionCUDART() >= 10020)) {
-    char* workspace_config = std::getenv(cublas_config_var_name);
-    cublas_config_deterministic = (workspace_config != nullptr) && (
-      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
-      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
-    );
+    auto workspace_config = c10::utils::get_env(cublas_config_var_name);
+    cublas_config_deterministic = (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
   }
   return cublas_config_deterministic;
 }
