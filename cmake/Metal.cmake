@@ -2,6 +2,31 @@ if(NOT APPLE)
     return()
 endif()
 
+function(metal_to_air SRC TARGET FLAGS)
+    add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} -Wall -Wextra -fno-fast-math
+                       DEPENDS ${SRC}
+                       OUTPUT ${TARGET}
+                       COMMENT "Compiling ${SRC} to ${TARGET}"
+                       VERBATIM)
+endfunction()
+
+function(air_to_metallib TARGET OBJECTS)
+    set(_OBJECTS ${OBJECTS} ${ARGN})
+    add_custom_command(COMMAND xcrun metallib -o ${TARGET} ${_OBJECTS}
+                       DEPENDS ${_OBJECTS}
+                       OUTPUT ${TARGET}
+                       COMMENT "Linking ${TARGET}"
+                       VERBATIM)
+endfunction()
+
+function(metal_to_metallib_h SRC TGT)
+    file(READ ${SRC} SHADER_CONTENT)
+    file(WRITE ${TGT} "#include <ATen/native/mps/OperationUtils.h>\n")
+    file(APPEND ${TGT} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
+    file(APPEND ${TGT} "${SHADER_CONTENT}")
+    file(APPEND ${TGT} ")SHDR\");\n")
+endfunction()
+
 set(BFLOAT_METAL_CODE "
   kernel void inc(device bfloat* ptr,
                    uint idx [[thread_position_in_grid]]) {

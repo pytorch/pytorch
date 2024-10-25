@@ -561,24 +561,10 @@ if(USE_CUDA)
 endif()
 
 if(USE_MPS)
-    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
-    function(metal_to_air SRC TARGET FLAGS)
-        add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} -Wall -Wextra -fno-fast-math
-                           DEPENDS ${SRC}
-                           OUTPUT ${TARGET}
-                           COMMENT "Compiling ${SRC} to ${TARGET}"
-                           VERBATIM)
-    endfunction()
-    function(air_to_metallib TARGET OBJECTS)
-        set(_OBJECTS ${OBJECTS} ${ARGN})
-        add_custom_command(COMMAND xcrun metallib -o ${TARGET} ${_OBJECTS}
-                           DEPENDS ${_OBJECTS}
-                           OUTPUT ${TARGET}
-                           COMMENT "Linking ${TARGET}"
-                           VERBATIM)
-    endfunction()
-
     include(../../../cmake/Metal.cmake)
+
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
@@ -597,11 +583,7 @@ if(USE_MPS)
         foreach(SHADER ${native_mps_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
             string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
-            file(READ ${SHADER} SHADER_CONTENT)
-            file(WRITE ${SHADER_HDR_NAME} "#include <ATen/native/mps/OperationUtils.h>\n")
-            file(APPEND ${SHADER_HDR_NAME} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
-            file(APPEND ${SHADER_HDR_NAME} "${SHADER_CONTENT}")
-            file(APPEND ${SHADER_HDR_NAME} ")SHDR\");\n")
+            metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
         endforeach()
     endif()
 endif()
