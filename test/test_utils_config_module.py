@@ -61,6 +61,22 @@ class TestConfigModule(TestCase):
         del config.e_dict
         del config.e_none
 
+    def test_none_override_semantics(self):
+        config.e_bool = None
+        self.assertIsNone(config.e_bool)
+        del config.e_bool
+
+    def test_reference_semantics(self):
+        config.e_list.append(2)
+        self.assertEqual(config.e_list, [1, 2])
+        config.e_set.add(2)
+        self.assertEqual(config.e_set, {1, 2})
+        config.e_dict[2] = 3
+        self.assertEqual(config.e_dict, {1: 2, 2: 3})
+        del config.e_list
+        del config.e_set
+        del config.e_dict
+
     def test_delete(self):
         self.assertTrue(config.e_bool)
         del config.e_bool
@@ -130,7 +146,12 @@ class TestConfigModule(TestCase):
         config.e_ignored = False
         code = config.codegen_config()
         self.assertEqual(
-            code, "torch.testing._internal.fake_config_module.e_bool = False"
+            code,
+            """torch.testing._internal.fake_config_module.e_bool = False
+torch.testing._internal.fake_config_module.e_list = [1]
+torch.testing._internal.fake_config_module.e_set = {1}
+torch.testing._internal.fake_config_module.e_dict = {1: 2}
+torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
         )
         # Config changes get persisted between test cases
         del config.e_bool

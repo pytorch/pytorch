@@ -113,12 +113,16 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str
     return assignments
 
 
+_UNSET_SENTINEL = object()
+
+
 @dataclass
 class _ConfigEntry:
     # The default value specified in the configuration
     default: Any
     # The value specified by the user when they overrode the configuration
-    user_override: Any = None
+    # _UNSET_SENTINEL indicates the value is not set.
+    user_override: Any = _UNSET_SENTINEL
 
 
 class ConfigModule(ModuleType):
@@ -150,9 +154,16 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
-            if config.user_override is not None:
-                return copy.deepcopy(config.user_override)
-            return copy.deepcopy(config.default)
+            if config.user_override is not _UNSET_SENTINEL:
+                return config.user_override
+
+            # Note that reference types can still me modified, so we
+            # copy them to user_overrides in case the user overrides
+            # them
+            if isinstance(config.default, (list, set, dict)):
+                config.user_override = copy.deepcopy(config.default)
+                return config.user_override
+            return config.default
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -161,13 +172,10 @@ class ConfigModule(ModuleType):
         self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override = None
+        self._config[name].user_override = _UNSET_SENTINEL
 
     def _is_default(self, name: str) -> bool:
-        return (
-            self._config[name].user_override is None
-            or self._config[name].user_override == self._config[name].default
-        )
+        return self._config[name].user_override is _UNSET_SENTINEL
 
     def _get_dict(
         self,
@@ -209,10 +217,7 @@ class ConfigModule(ModuleType):
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
-        ignored_keys = []
-        if "_save_config_ignore" in self._config:
-            assert isinstance(self._save_config_ignore, list)
-            ignored_keys = self._save_config_ignore
+        ignored_keys = getattr(self, "_save_config_ignore", [])
         return pickle.dumps(
             self._get_dict(ignored_keys=ignored_keys),
             protocol=2,
@@ -221,7 +226,7 @@ class ConfigModule(ModuleType):
     def save_config_portable(self) -> Dict[str, Any]:
         """Convert config to portable format"""
         prefixes = ["_"]
-        prefixes.extend(self._cache_config_ignore_prefix)
+        prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
     def codegen_config(self) -> str:
@@ -231,7 +236,7 @@ class ConfigModule(ModuleType):
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
-            ignored_keys=self._save_config_ignore, skip_default=True
+            ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
         ).items():
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
