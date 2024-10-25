@@ -91,15 +91,30 @@ else:
             # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
             # to slice out mesh["dp_cp"], then submesh_dims = [(0, 1), (2,)] and submesh_dim_size = [2 * 2, 2] = [4, 2].
             # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
+            def f(x, y):
+                print(device_mesh.mesh.size(x))
+                return device_mesh.mesh.size(x) * device_mesh.mesh.size(y)
             slice_dim_size = [
                 reduce(
-                    lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
+                    f,
                     mesh_dim,
                 )
                 if len(mesh_dim) > 1
                 else device_mesh.mesh.size(mesh_dim[0])
                 for mesh_dim in submesh_dims
             ]
+            """
+            slice_dim_size = [
+                reduce(
+                    lambda x, y: x * device_mesh.mesh.size(y),
+                    mesh_dim,
+                    1,
+                )
+                if len(mesh_dim) > 1
+                else device_mesh.mesh.size(mesh_dim[0])
+                for mesh_dim in submesh_dims
+            ]
+            """
 
             mesh_tensor = device_mesh.mesh
             # slice_dim_idx could be differnt from submesh_dims, as we may need to flatten out some dims.
@@ -713,6 +728,7 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
+                print(f"mesh_dim_names={mesh_dim_names}, slice_mesh_dims={slice_mesh_dims}")
                 submesh = _mesh_resources.create_sub_mesh(
                     self, mesh_dim_names, slice_mesh_dims
                 )
