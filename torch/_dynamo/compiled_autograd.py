@@ -513,10 +513,23 @@ class AutogradCompilerInstance:
             # pre_hook handle a tuple of grad tensors
             input_nodes = self.get_all_nodes(node.args[1])
 
+            to_remove = []
+            to_append = []
+            hook_block = [node]  # contain the hook and hook args getitem
+            for n in input_nodes:
+                if n.op == "call_function" and n.target == operator.getitem:
+                    to_append.append(n.args[0])
+                    to_remove.append(n)
+                    hook_block.append(n)
+            for a, b in zip(to_remove, to_append):
+                input_nodes.remove(a)
+                input_nodes.append(b)
+
             arg = max(input_nodes)  # last input
             if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(getitem_node)
-                getitem_node.append(node)
+                for n in hook_block:
+                    getitem_node.append(n)
 
     def reorder_post_acc_grad_hook_nodes(self):
         """
@@ -531,7 +544,6 @@ class AutogradCompilerInstance:
         ):
             if node.kwargs.get("hook_type", None) != "post_acc_grad_hook":
                 continue
-
             post_acc_grad_hooks.append(node)
 
         # nodes in post_acc_grad_hooks are in topo order. For hooks registered
@@ -540,6 +552,7 @@ class AutogradCompilerInstance:
             getitem_node = node.args[0]
             param_node = node.args[1]  # post_acc_grad_hook handle one param
 
+            # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
                 if (
@@ -547,10 +560,13 @@ class AutogradCompilerInstance:
                     and n.target == torch.ops.inductor.accumulate_grad_.default
                 ):
                     acc_grad_node = n
+                    break
+
             assert (
                 acc_grad_node is not None
             ), "post_acc_grad_hook must have corresponding acc grad node"
 
+            # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
             getitem_node.append(node)
 
@@ -561,12 +577,15 @@ class AutogradCompilerInstance:
         soon as possible. This pass attempts to reorder the graph to mimic eager
         behavior.
         """
+        post_hooks = []
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_hook
         ):
             if node.kwargs.get("hook_type", None) != "post_hook":
                 continue
+            post_hooks.append(node)
 
+        for node in reversed(post_hooks):
             getitem_node = node.args[0]
             output_nodes = node.args[1]
             input_nodes = node.args[2]
@@ -578,7 +597,11 @@ class AutogradCompilerInstance:
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
                 for user in list(input_node.users.keys()):
-                    if user != node:
+                    if not (
+                        user.op == "call_function"
+                        and user.target == call_hook
+                        and node.kwargs.get("hook_type", None) == "post_hook"
+                    ):
                         input_nodes_and_users.append(user)
 
             arg = max(input_nodes_and_users)  # last input users
