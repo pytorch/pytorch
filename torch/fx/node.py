@@ -78,6 +78,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
+    _ops.aten.copy_.default,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.sym_constrain_range.default,
