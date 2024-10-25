@@ -162,7 +162,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
   // This assertion is costly for build time so it's debug-gated.
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
 #endif
-    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
+    static_assert(std::is_base_of_v<OperatorKernel, KernelFunctor>, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     auto* unboxed_fn = &impl::wrap_kernel_functor_unboxed<KernelFunctor>::call;
     void* void_unboxed_fn = reinterpret_cast<void*>(unboxed_fn);
@@ -184,7 +184,7 @@ inline KernelFunction KernelFunction::makeFromBoxedFunctor(std::unique_ptr<Kerne
 template<class FuncPtr, bool AllowLegacyTypes>
 inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) {
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
-    static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    static_assert(!std::is_same_v<typename FuncPtr::FuncType, BoxedKernelFunction>, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
 #if defined(__GNUC__) && defined(__SANITIZE_ADDRESS__) && !defined(__CUDACC__)
     TORCH_INTERNAL_ASSERT(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 #else
@@ -207,7 +207,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
 template<bool AllowLegacyTypes, class FuncType>
 inline KernelFunction KernelFunction::makeFromUnboxedRuntimeFunction(FuncType* func) {
     static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    static_assert(!std::is_same_v<FuncType, BoxedKernelFunction>, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(

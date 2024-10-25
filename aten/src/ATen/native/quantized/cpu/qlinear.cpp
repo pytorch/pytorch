@@ -490,7 +490,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
     // prepare weights
     underlying_t w_zp = static_cast<underlying_t>(
         orig_weight.q_zero_point() +
-        (std::is_same<underlying_t, uint8_t>::value ? 128 : 0));
+        (std::is_same_v<underlying_t, uint8_t> ? 128 : 0));
 
    at::Tensor xnnp_weight = at::_empty_affine_quantized(
         orig_weight.sizes(),

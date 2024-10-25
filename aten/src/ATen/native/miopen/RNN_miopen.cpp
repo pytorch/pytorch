@@ -803,7 +803,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-    static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
+    static_assert(std::is_same_v<hidden_type, void>, "pack_hidden not implemented for this type");
     TORCH_CHECK(false, "NOT IMPLEMENTED");
 }
 
