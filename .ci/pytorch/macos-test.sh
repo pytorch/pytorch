@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
@@ -148,21 +149,127 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+torchbench_setup_macos() {
+  git clone --recursive https://github.com/pytorch/vision torchvision
+  git clone --recursive https://github.com/pytorch/audio torchaudio
+
+  pushd torchvision
+  git fetch
+  git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
+  git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
+  popd
+
+  pushd torchaudio
+  git fetch
+  git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
+  git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
+  popd
+
+  checkout_install_torchbench
+}
+
+conda_benchmark_deps() {
+  conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
+  conda install -y -c conda-forge librosa
+}
+
+
+test_torchbench_perf() {
+  print_cmake_info
+
+  echo "Launching torchbench setup"
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+
+  echo "Setup complete, launching torchbench training performance run"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+
+  echo "Launching torchbench inference performance run"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+
+  echo "Pytorch benchmark on mps device completed"
+  # TEMP_DEBUG
+  cat ${TEST_REPORTS_DIR}/torchbench_training.csv
+  cat ${TEST_REPORTS_DIR}/torchbench_inference.csv
+  cd pytorch
+}
+
+test_hf_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  echo "Launching HuggingFace training perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_training.csv
+
+  echo "Launching HuggingFace inference perf run"
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_inference.csv
+
+  echo "HuggingFace benchmark on mps device completed"
+
+  # TEMP_DEBUG
+  cat ${TEST_REPORTS_DIR}/hf_training.csv
+  cat ${TEST_REPORTS_DIR}/hf_inference.csv
+}
+
+test_timm_perf() {
+  print_cmake_info
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  echo "Launching timm training perf run"
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_training.csv
+
+  echo "Launching timm inference perf run"
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_inference.csv
+
+  echo "timm benchmark on mps device completed"
+
+  # TEMP_DEBUG
+  cat ${TEST_REPORTS_DIR}/timm_inference.csv
+  cat ${TEST_REPORTS_DIR}/timm_training.csv
+}
+
 install_tlparse
 
-if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_python_shard "${SHARD_NUMBER}"
-  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+if [[ $TEST_CONFIG == *"test_mps"* ]]; then
+  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_python_shard "${SHARD_NUMBER}"
+    if [[ "${SHARD_NUMBER}" == 1 ]]; then
+      test_libtorch
+      test_custom_script_ops
+    elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+      test_jit_hooks
+      test_custom_backend
+    fi
+  else
+    test_python_all
     test_libtorch
     test_custom_script_ops
-  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
     test_jit_hooks
     test_custom_backend
   fi
-else
-  test_python_all
-  test_libtorch
-  test_custom_script_ops
-  test_jit_hooks
-  test_custom_backend
+fi
+
+if [[ $TEST_CONFIG == *"perf_all"* ]]; then
+  test_torchbench_perf
+  test_hf_perf
+  test_timm_perf
+elif [[ $TEST_CONFIG == *"perf_torchbench"* ]]; then
+  test_torchbench_perf
+elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
+  test_hf_perf
+elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
+  test_timm_perf
 fi
