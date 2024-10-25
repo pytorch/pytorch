@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import os
-from itertools import chain, count
+from itertools import chain, count, zip_longest
 from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
@@ -97,13 +97,7 @@ class DeferredGpuDefaultGrid:
         assert (
             params is not None
         ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        block_cfg = {
-            "XBLOCK": params["x_block"],
-            "YBLOCK": params["y_block"],
-            "ZBLOCK": params["z_block"],
-            "RBLOCK": params["r_block"],
-        }
-        return grid_fn(block_cfg)
+        return grid_fn(params["meta"])
 
 
 class DeferredGpuGridLine(DeferredLineBase):
@@ -256,6 +250,9 @@ class CppWrapperGpu(CppWrapperCpu):
             autotune_configs=configs,
         )
 
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError("Host-side TMA descriptors NYI in C++ wrapper.")
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
@@ -283,9 +280,17 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline("}")
         return kernel_var_name
 
-    def generate_args_decl(self, call_args, arg_types):
+    def generate_args_decl(self, call_args, arg_types, arg_signatures):
         new_args = []
-        for arg, arg_type in zip(call_args, arg_types):
+
+        # Add more cases for other types as needed
+        signature2dtype = {
+            "i32": "int32_t",
+            "i64": "int64_t",
+            "fp32": "float",
+        }
+
+        def process_args(arg, arg_type, arg_signature=None):
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(arg_type, torch_dtype):
                 if arg.endswith(".item()"):
@@ -309,9 +314,25 @@ class CppWrapperGpu(CppWrapperCpu):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
             elif arg_type in (sympy.Float, float):
                 self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
+            # For symbolic call arguments, examine the arg signatures from triton meta
+            # to explicitly cast to the right type
+            # Reason: `auto` can infer unexpected type against kernel input signature.
+            elif (
+                isinstance(arg_type, type(SymbolicCallArg))
+                and arg_signature is not None
+                and arg_signature in signature2dtype.keys()
+            ):
+                self.writeline(
+                    f"{signature2dtype[arg_signature]} {var_name} = {self.expr_printer(arg)};"
+                )
             else:
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             new_args.append(f"&{var_name}")
+
+        for arg, arg_type, arg_signature in zip_longest(
+            call_args, arg_types, arg_signatures
+        ):
+            process_args(arg, arg_type, arg_signature)
 
         return ", ".join(new_args)
 
@@ -372,7 +393,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
         stream = (
             "stream"
@@ -389,18 +410,26 @@ class CppWrapperGpu(CppWrapperCpu):
             # args with value 1 are added into equal_to_1 and constants
             # in triton_meta (in the Python codegen) which makes them
             # inlined in the PTX and compiled CUBIN
+            arg_signatures = []
             if (
                 triton_meta is not None
-                and "configs" in triton_meta
-                and triton_meta["configs"]
+                and triton_meta.get("configs")
+                and triton_meta.get("signature")
             ):
                 equal_to_1 = triton_meta["configs"][0].equal_to_1
                 call_args = [
                     arg for i, arg in enumerate(call_args) if i not in equal_to_1
                 ]
                 arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+                # extract the arg signatures from triton_meta
+                arg_signatures = triton_meta["signature"].values()
+                arg_signatures = [
+                    v for i, v in enumerate(arg_signatures) if i not in equal_to_1
+                ]
 
-            call_args_str = self.generate_args_decl(call_args, arg_types)
+            call_args_str = self.generate_args_decl(
+                call_args, arg_types, arg_signatures
+            )
             kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
             self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
 
