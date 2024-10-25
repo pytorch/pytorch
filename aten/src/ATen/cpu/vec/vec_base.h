@@ -295,6 +295,19 @@ public:
     }
     return false;
   }
+// TODO: Remove this once the issue with MSVC is fixed
+//       See https://developercommunity.visualstudio.com/t/MSVC-loop-unrolling-problem-194033813-/10720692
+#if defined(_WIN32) && defined(__aarch64__)
+  Vectorized<T> map(T (*const f)(T)) const {
+    Vectorized<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = f(values[i]);
+      if (++i < size())
+        ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+#else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -302,6 +315,7 @@ public:
     }
     return ret;
   }
+#endif
   Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -1121,7 +1135,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
