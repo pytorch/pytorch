@@ -1228,6 +1228,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
 
