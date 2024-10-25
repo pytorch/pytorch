@@ -6244,7 +6244,7 @@ def dot(self, other):
             return torch.vdot(other.conj(), self)
 
     _dot_check(self, other)
-    return (self * other).sum()
+    return torch.sum(self * other, dtype=self.dtype)
 
 
 @register_decomposition(aten.vdot)
@@ -6263,7 +6263,7 @@ def vdot(self, other):
 
     _dot_check(self, other)
     # The decomposition fails if you do self.conj()... not sure why
-    return (self.conj_physical() * other).sum()
+    return torch.sum(self.conj_physical() * other, dtype=self.dtype)
 
 
 @register_decomposition(aten.select_scatter)
