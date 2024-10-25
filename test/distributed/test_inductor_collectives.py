@@ -298,7 +298,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 backend="inductor",
                 fullgraph=True,
             )
-            with allow_inflight_collective_as_graph_input():
+            with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
                 for _ in range(10):
                     work, y = all_reduce_non_functional_eager(x)
                     self.assertEqual(

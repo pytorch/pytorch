@@ -34,6 +34,10 @@ C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
 
 C10_EXPORT size_t get_work_registry_size();
 
+C10_EXPORT void set_allow_inflight_collective_as_graph_input(bool value);
+
+C10_EXPORT bool allow_inflight_collective_as_graph_input();
+
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
 //
@@ -177,7 +181,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.asyncOp,
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -206,7 +210,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.sparseIndices,
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -231,7 +235,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.timeout.count());
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -259,7 +263,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootTensor,
         opts.timeout.count());
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -287,7 +291,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensors) {
         for (const auto& tensor : tensor_list) {
           c10d::register_work(tensor, work);
@@ -322,7 +326,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.asyncOp,
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
     return work;
@@ -349,7 +353,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensorLists) {
         for (const auto& tensor : tensor_list) {
           c10d::register_work(tensor, work);
@@ -379,7 +383,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
         c10d::register_work(tensor, work);
       }
@@ -406,7 +410,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootRank,
         opts.timeout.count());
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensors) {
         for (const auto& tensor : tensor_list) {
           c10d::register_work(tensor, work);
@@ -439,7 +443,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.asyncOp,
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
         c10d::register_work(tensor, work);
       }
@@ -468,7 +472,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
         c10d::register_work(tensor, work);
       }
@@ -498,7 +502,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.asyncOp,
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
     return work;
@@ -528,7 +532,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.timeout.count());
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
         c10d::register_work(tensor, work);
       }
@@ -559,7 +563,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         inputSplitSizes,
         opts.timeout.count());
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
     return work;
@@ -584,7 +588,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.timeout.count()));
 
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
         c10d::register_work(tensor, work);
       }
@@ -670,7 +674,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         dstRank,
         tag);
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -694,7 +698,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         srcRank,
         tag);
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -715,7 +719,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         tag);
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
         c10d::register_work(tensor, work);
       }
@@ -757,7 +761,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.device_ids,
         opts.timeout.count());
-    if (allow_inflight_collective_as_graph_input()) {
+    if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(tensor, work);
     }
     return work;

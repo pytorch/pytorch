@@ -245,6 +245,16 @@ class WorkRegistry {
     return total_size;
   }
 
+  void set_allow_inflight_collective_as_graph_input(bool value) {
+    std::unique_lock lock(lock_);
+    allow_inflight_collective_as_graph_input_ = value;
+  }
+
+  bool allow_inflight_collective_as_graph_input() {
+    std::unique_lock lock(lock_);
+    return allow_inflight_collective_as_graph_input_;
+  }
+
   ~WorkRegistry() {
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
@@ -274,6 +284,7 @@ class WorkRegistry {
       c10::weak_intrusive_ptr<c10::StorageImpl>,
       std::vector<c10::intrusive_ptr<c10d::Work>>>
       registry_;
+  bool allow_inflight_collective_as_graph_input_ = false;
   std::mutex lock_;
 };
 
@@ -303,6 +314,16 @@ void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
 
 size_t get_work_registry_size() {
   return RankLocal<WorkRegistry>::get().get_work_registry_size();
+}
+
+void set_allow_inflight_collective_as_graph_input(bool value) {
+  return RankLocal<WorkRegistry>::get()
+      .set_allow_inflight_collective_as_graph_input(value);
+}
+
+bool allow_inflight_collective_as_graph_input() {
+  return RankLocal<WorkRegistry>::get()
+      .allow_inflight_collective_as_graph_input();
 }
 
 } // namespace c10d

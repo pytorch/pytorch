@@ -20,6 +20,7 @@ from unittest import mock, SkipTest
 
 import torch
 import torch.distributed as c10d
+import torch.distributed._functional_collectives as _functional_collectives
 
 
 if not c10d.is_available() or not c10d.is_nccl_available():
@@ -3188,8 +3189,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
-        with allow_inflight_collective_as_graph_input():
-            input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
+        with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+            input = torch.full(
+                (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
+            )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
             # Running another collective on the same tensor should still work
@@ -3216,7 +3219,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
 
         # Case 1: under context manager (i.e. work is registered in registry)
-        with allow_inflight_collective_as_graph_input():
+        with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
