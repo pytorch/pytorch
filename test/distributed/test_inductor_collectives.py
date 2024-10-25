@@ -298,21 +298,22 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 backend="inductor",
                 fullgraph=True,
             )
-            for _ in range(10):
-                work, y = all_reduce_non_functional_eager(x)
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 1
-                )
-                out_compiled, triton_codes = run_and_get_code(
-                    all_reduce_wait_compiled, work, y
-                )
-                # `wait_tensor(y)` will pop the work from the work registry immediately
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
-                FileCheck().check(
-                    "torch.ops._c10d_functional.wait_tensor.default("
-                ).run(triton_codes[0])
+            with allow_inflight_collective_as_graph_input():
+                for _ in range(10):
+                    work, y = all_reduce_non_functional_eager(x)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 1
+                    )
+                    out_compiled, triton_codes = run_and_get_code(
+                        all_reduce_wait_compiled, work, y
+                    )
+                    # `wait_tensor(y)` will pop the work from the work registry immediately
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                    FileCheck().check(
+                        "torch.ops._c10d_functional.wait_tensor.default("
+                    ).run(triton_codes[0])
             self.assertEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

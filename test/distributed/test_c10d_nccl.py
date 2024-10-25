@@ -3188,12 +3188,22 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
-        input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
-        dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
-        # Running another collective on the same tensor should still work
-        dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
+        with allow_inflight_collective_as_graph_input():
+            input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
+            dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+            # Running another collective on the same tensor should still work
+            dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
+
+        # Intentionally test memory-stressed case, not under context manager
+        # (hence not registered in work registry)
+        for _ in range(50000):
+            input = torch.full(
+                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
+            )
+            dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3205,17 +3215,37 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
+        # Case 1: under context manager (i.e. work is registered in registry)
+        with allow_inflight_collective_as_graph_input():
+            input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+            torch.ops.c10d_functional.wait_tensor(input1)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+            input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+            work.wait()
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            self.assertEqual(input1, input2)
+
+        # Case 2: not under context manager (i.e. work is not registered in registry)
         input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        # this does not take effect, since the underlying wait_tensor() logic would not
+        # be able to find the corresponding work object (because it's not registered in registry)
         torch.ops.c10d_functional.wait_tensor(input1)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
         input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         work.wait()
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         self.assertEqual(input1, input2)
