@@ -912,9 +912,11 @@ def compute_unbacked_bindings(
                 free_unbacked_symbols_with_path(
                     a.storage_offset(),
                     path + (CallMethodKey("storage_offset"),),
-                    real=a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None,
+                    real=(
+                        a.real_tensor.storage_offset()
+                        if a.real_tensor is not None
+                        else None
+                    ),
                 )
             )
 
@@ -2142,9 +2144,9 @@ class DimConstraints:
         source_name_to_debug_name: Mapping[str, str],
     ) -> None:
         # We try to solve systems of inequalities with 1 free variable.
-        self._univariate_inequalities: Dict[
-            sympy.Symbol, Set[SympyBoolean]
-        ] = defaultdict(set)
+        self._univariate_inequalities: Dict[sympy.Symbol, Set[SympyBoolean]] = (
+            defaultdict(set)
+        )
         # Among them, we prioritize solving for a free variable that has equalities.
         # NOTE: _symbols_with_equalities is always a subset of _univariate_inequalities.keys()
         # and removing a symbol from the former => removing it from the latter.
@@ -3769,6 +3771,63 @@ class ShapeEnv:
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context
         )
+        stride = self._compute_symbolic_stride(
+            source,
+            size,
+            ex_size,
+            ex_stride,
+            dynamic_strides,
+            constraint_strides,
+            are_sizes_static,
+            symbolic_context,
+        )
+
+        sym_sizes = [
+            self.create_symintnode(
+                sym,
+                hint=hint,
+                source=TensorPropertySource(source, TensorProperty.SIZE, i),
+            )
+            for i, (sym, hint) in enumerate(zip(size, ex_size))
+        ]
+        sym_stride = []
+        for i, stride_expr in enumerate(stride):
+            # NB: Don't duck size the stride; instead use the expression
+            # we computed
+            assert stride_expr is not None
+            sym_stride.append(
+                self.create_symintnode(
+                    stride_expr,
+                    hint=ex_stride[i],
+                    source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                )
+            )
+        sym_storage_offset = self.create_symintnode(
+            self.create_symbol(
+                ex_storage_offset,
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+                dynamic_dim=dynamic_offset,
+                constraint_dim=None,
+                symbolic_context=symbolic_context,
+            ),
+            hint=ex_storage_offset,
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+        )
+        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
+
+    def _compute_symbolic_stride(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[Optional[sympy.Expr]]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex_stride):
             if val in (0, 1):
@@ -3819,39 +3878,7 @@ class ShapeEnv:
                     symbolic_context=symbolic_context,
                 )
         assert all(x is not None for x in stride)
-
-        sym_sizes = [
-            self.create_symintnode(
-                sym,
-                hint=hint,
-                source=TensorPropertySource(source, TensorProperty.SIZE, i),
-            )
-            for i, (sym, hint) in enumerate(zip(size, ex_size))
-        ]
-        sym_stride = []
-        for i, stride_expr in enumerate(stride):
-            # NB: Don't duck size the stride; instead use the expression
-            # we computed
-            assert stride_expr is not None
-            sym_stride.append(
-                self.create_symintnode(
-                    stride_expr,
-                    hint=ex_stride[i],
-                    source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-                )
-            )
-        sym_storage_offset = self.create_symintnode(
-            self.create_symbol(
-                ex_storage_offset,
-                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-                dynamic_dim=dynamic_offset,
-                constraint_dim=None,
-                symbolic_context=symbolic_context,
-            ),
-            hint=ex_storage_offset,
-            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-        )
-        return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
+        return stride
 
     @record_shapeenv_event()
     def create_symintnode(
@@ -4219,9 +4246,9 @@ class ShapeEnv:
                         sloc,
                     )
                 else:
-                    self.var_to_range[
-                        sympy_expr
-                    ] = self._default_unspecified_value_range()
+                    self.var_to_range[sympy_expr] = (
+                        self._default_unspecified_value_range()
+                    )
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
 
                 # Small performance optimization: if we have a min-max constraint,
@@ -4484,9 +4511,9 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
-        symbol_to_constraints: DefaultDict[
-            sympy.Symbol, Set[Constraint]
-        ] = collections.defaultdict(set)
+        symbol_to_constraints: DefaultDict[sympy.Symbol, Set[Constraint]] = (
+            collections.defaultdict(set)
+        )
         constraint_violations: List[Tuple[bool, str, Callable[[], str]]] = []
 
         def record_constraint_violation(
@@ -5719,9 +5746,9 @@ class ShapeEnv:
                     "stack": structured.from_traceback(
                         CapturedTraceback.extract(skip=1).summary()
                     ),
-                    "user_stack": structured.from_traceback(user_tb)
-                    if user_tb
-                    else None,
+                    "user_stack": (
+                        structured.from_traceback(user_tb) if user_tb else None
+                    ),
                 },
             )
 
