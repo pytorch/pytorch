@@ -1015,6 +1015,9 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
+            if config._collective.auto_select and config._collective.plan_comm_buffers:
+                self.plan_comm_buffers()
+
             if config.triton.store_cubin:
                 self.generate_reset_kernel_saved_flags()
 
@@ -1122,6 +1125,22 @@ class PythonWrapperCodegen(CodeGen):
         total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
+
+    def plan_comm_buffers(self):
+        from .comm_buffer_planning import CommBufferPlanner
+
+        comm_buffer_pools: Set[Tuple[ir.CommBufferType, str]] = set()
+        for buffer in V.graph.buffers:
+            layout = buffer.get_layout()
+            if isinstance(layout, ir.CommBufferLayout):
+                comm_buffer_pools.add((layout.comm_buffer_type, layout.group_name))
+
+        for comm_buffer_type, group_name in comm_buffer_pools:
+            self.lines = CommBufferPlanner(
+                self,
+                comm_buffer_type,
+                group_name,
+            ).plan(self.lines)
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
