@@ -643,6 +643,30 @@ def _common_getitem_elimination_pass(
                     node_id[node] = node.name
 
 
+def _get_updated_module_call_graph(
+    gm: torch.fx.GraphModule,
+    old_module_call_graph: List[ModuleCallEntry],
+):
+    new_module_call_graph = copy.deepcopy(old_module_call_graph)
+
+    # use node-level provenance metadata to create a map
+    # from old node names to new node names
+    provenance: Dict[str, str] = {}
+    for node in gm.graph.nodes:
+        if history := node.meta.get("from_node", []):
+            provenance[history[-1][0]] = node.name
+
+    # map old names to new names in module call signatures
+    for entry in new_module_call_graph:
+        signature = entry.signature
+        if signature is None:
+            continue
+        for x in [*signature.inputs, *signature.outputs]:
+            x.name = provenance.get(x.name, x.name)
+
+    return new_module_call_graph
+
+
 def _decompose_exported_program(
     ep,
     *,
@@ -655,6 +679,15 @@ def _decompose_exported_program(
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
+    )
+
+    # The signatures of ep.module_call_graph refer to input / output nodes of
+    # the original graph module. However, the new graph module may have
+    # new nodes due to decompositions. So we need to update these signatures
+    # in the decomposed exported program's module_call_graph.
+    new_module_call_graph = _get_updated_module_call_graph(
+        gm,
+        ep.module_call_graph,
     )
 
     # TODO unfortunately preserving graph-level metadata is not
@@ -673,7 +706,7 @@ def _decompose_exported_program(
         graph_signature=new_graph_signature,
         state_dict=ep.state_dict,
         range_constraints=new_range_constraints,
-        module_call_graph=copy.deepcopy(ep.module_call_graph),
+        module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
         constants=ep.constants,
     )
