@@ -284,7 +284,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             for _ in range(10):
                 work, y = all_reduce_non_functional_eager(x)
                 self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 1
+                    torch._C._distributed_c10d._get_work_registry_size(), 0
                 )
                 out_ref = all_reduce_wait_eager(work, y)
                 # `work.wait()` will pop the work from the work registry immediately

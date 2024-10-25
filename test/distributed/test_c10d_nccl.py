@@ -3189,24 +3189,30 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
+        # Case 1: Run collectives under context manager, and don't call wait on them.
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             input = torch.full(
                 (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
+            # Non-functional collectives run under the context manager is registered in the work registry.
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
             # Running another collective on the same tensor should still work
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
 
-        # Intentionally test memory-stressed case, not under context manager
-        # (hence not registered in work registry)
+        # Case 2: Run collectives not under context manager, and don't call wait on them.
+        # NOTE: Here we intentionally test memory-stressed case.
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
         for _ in range(50000):
             input = torch.full(
                 (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        # Work registry size is unchanged, since non-functional collectives not run under
+        # the context manager is not registered in the work registry.
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
