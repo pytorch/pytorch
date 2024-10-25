@@ -138,7 +138,7 @@ case "$ID" in
   ubuntu)
     install_ubuntu
     ;;
-  centos)
+  centos | almalinux)
     install_centos
     ;;
   *)
