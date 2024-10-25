@@ -129,7 +129,7 @@ def main():
 
         new_entry = copy.deepcopy(entry)
         # only change if abs(ratio) > entry.noise_margin /4.
-        new_entry.expected_value = replace_with_zeros (result) if abs(ratio) > entry.noise_margin /4  else entry.expected_value
+        new_entry.expected_value = replace_with_zeros(result) if abs(ratio) > entry.noise_margin / 4 else entry.expected_value
         new_expected[key] = new_entry
 
         if result > high:
@@ -183,32 +183,32 @@ def main():
                     }
                 ),
             )
-
-    if fail:
-        print(
-            f"There was some failures you can use the new reference expected result stored at path:"
-            f"{reference_expected_results_path}.\n"
-        )
-
-        sys.exit(1)
-    else:
-        print("All benchmarks passed")
+    print("new expected results file content if needed:")
+    with open(reference_expected_results_path) as f:
+        print(f.read())
 
     with open(reference_expected_results_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         for entry in new_expected.values():
             # Write the data to the CSV file
+            # print(f"{entry.benchmark_name},{entry.metric_name,},{round(entry.expected_value)},{entry.noise_margin}")
             writer.writerow(
                 [
                     entry.benchmark_name,
                     entry.metric_name,
-                    round(entry.expected_value),
+                    entry.expected_value,
                     entry.noise_margin,
                 ]
             )
+    if fail:
+        print(
+            f"There was some failures you can use the new reference expected result stored at path:"
+            f"{reference_expected_results_path} and printed above\n"
+        )
+        sys.exit(1)
+    else:
+        print("All benchmarks passed")
 
-    with open(reference_expected_results_path) as f:
-        print(f.read())
 
 
 if __name__ == "__main__":
