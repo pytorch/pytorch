@@ -107,7 +107,6 @@ def tensorify_python_scalars(
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
     specialized_float_nodes: dict[fx.Node, float] = {}
-    deleted: set[fx.Node] = set()
 
     first_non_placeholder = None
     placeholders = set()
@@ -119,18 +118,6 @@ def tensorify_python_scalars(
             placeholders.add(node)
 
     Analysis = TensorReferenceAnalysis
-
-    def dce(graph: fx.Graph, deleted: set[fx.Node]) -> None:
-        for node in graph.nodes:
-            if (
-                len(node.users) == 0
-                and node.op != "placeholder"
-                and node.op != "output"
-                and node not in deleted
-                and not node.is_impure()
-            ):
-                graph.erase_node(node)
-                deleted.add(node)
 
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
@@ -261,10 +248,9 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
-                    deleted.add(node)
 
     # DCE symbols (which are guaranteed to be pure) only
-    dce(graph, deleted)
+    graph.eliminate_dead_code()
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -325,7 +311,7 @@ def tensorify_python_scalars(
                 graph.erase_node(node)
 
     # DCE one more time to remove specialized item calls
-    dce(graph, deleted)
+    graph.eliminate_dead_code()
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
