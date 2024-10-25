@@ -373,7 +373,7 @@ class Fuzzer:
         """
         import numpy as np
         if seed is None:
-            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
+            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)  # type: ignore[assignment]
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
