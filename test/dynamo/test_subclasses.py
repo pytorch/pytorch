@@ -1821,7 +1821,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_with_subclass_desugaring(self):
-        from typing import Any, Callable, Dict, List, Optional
+        from typing import Any, Callable, List, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -1843,7 +1843,6 @@ class GraphModule(torch.nn.Module):
             aot_mode: bool = False,
             is_inference: bool = False,
             boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            user_visible_outputs: Optional[Dict[str, None]] = None,
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
