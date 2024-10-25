@@ -218,7 +218,6 @@ static void upsample_out_template(const Tensor& input,
   }
 }
 
-
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else

@@ -687,4 +687,3 @@ INSTANTIATE_MV(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_MV(bfloat);
 #endif
-
