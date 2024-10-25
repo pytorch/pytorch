@@ -3647,8 +3647,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-
-     def test_tile_positional_embedding(self):
+    def test_tile_positional_embedding(self):
         class TilePositionalEmbedding(nn.Module):
             """
             Positional embedding for tiles, different for every tile, same for every token within a tile.
