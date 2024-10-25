@@ -3961,7 +3961,7 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs if x)
         return deps
 
     def get_reduction_size(self):
@@ -4193,6 +4193,8 @@ class InputsKernel(OperationBuffer):
             elif isinstance(input, ShapeAsConstantBuffer):
                 # Skip creating dependncy for symbolics as they're visible globally
                 continue
+            elif input is None:
+                continue
             else:
                 reads.add(StarDep(input.get_name()))
 
@@ -4222,6 +4224,8 @@ class InputsKernel(OperationBuffer):
             return cls.unwrap_storage_for_input(x)
         if isinstance(x, TorchBindObject):
             return x
+        if isinstance(x, NoneAsConstantBuffer):
+            return None
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 

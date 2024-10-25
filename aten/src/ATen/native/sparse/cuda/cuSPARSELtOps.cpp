@@ -347,6 +347,8 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
   if (alpha_opt.has_value()) {
     if (alpha_tensor.numel() == 1) {
         alpha = alpha_tensor.item<float>();
+        // * static_cast<float*>(alpha_tensor.data_ptr());
+        // std::cout<<alpha<<std::endl;
     }
     else {
         tensor_alpha_mode = 1;

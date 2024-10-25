@@ -557,7 +557,7 @@ def meta__cslt_sparse_mm(
             }
         ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = torch.empty(output_shape, dtype=out_dtype, device=compressed_A.device)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
 
 
