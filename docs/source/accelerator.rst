@@ -7,11 +7,11 @@ torch.accelerator
     :toctree: generated
     :nosignatures:
 
-    current_accelerator
-    current_device_idx
-    current_stream
     device_count
     is_available
+    current_accelerator
     set_device_idx
+    current_device_idx
     set_stream
+    current_stream
     synchronize
