@@ -60,13 +60,18 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     NO_DEFAULT_PATH
   )
 endif()
+# Windows now supports sycl.lib without a version suffix. However, we still include hardcoded
+# versions (8, 7, 6) to ensure backward compatibility with older compiler versions.
+# TODO: Remove hardcoded versions when compatibility with older SYCL runtime versions is no longer required.
 if(WIN32)
-  find_library(
-    SYCL_LIBRARY
-    NAMES sycl
-    HINTS ${SYCL_LIBRARY_DIR}
-    NO_DEFAULT_PATH
-  )
+  foreach(sycl_runtime_version "" 8 7 6)
+    find_library(
+      SYCL_LIBRARY
+      NAMES "sycl${sycl_runtime_version}"
+      HINTS ${SYCL_LIBRARY_DIR}
+      NO_DEFAULT_PATH
+    )
+  endforeach()
   if(SYCL_LIBRARY STREQUAL "SYCL_LIBRARY-NOTFOUND")
     message(FATAL_ERROR "Cannot find a SYCL library on Windows")
   endif()
