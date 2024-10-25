@@ -74,6 +74,7 @@ class Times:
 class ExperimentResults:
     fwd_time: float
     bwd_time: Optional[float]
+    sparsity: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,10 @@ def run_single_backend_sdpa(
                 print(
                     f"Backend: {backend} failed on shape {config.shape} with error: {e} "
                 )
-                return ExperimentResults(fwd_time=float("nan"), bwd_time=float("nan"))
+                return ExperimentResults(
+                    fwd_time=float("nan"),
+                    bwd_time=float("nan") if config.calculate_bwd_time else None,
+                )
             if config.attn_type in ["document_mask"]:
                 flatten_o_eager = torch.cat(torch.unbind(out_eager.transpose(1, 2)))
                 flatten_o_compile = out_compile.transpose(1, 2).flatten(
@@ -330,7 +334,7 @@ def run_single_backend_FA(
         else:
             out_FA_updated = out_FA
         torch.testing.assert_close(
-            out_FA_updated, out_compile.transpose(1, 2), atol=1e-1, rtol=1e-1
+            out_FA_updated, out_compile.transpose(1, 2), atol=1e-2, rtol=1e-2
         )
 
     if FA:
@@ -440,10 +444,13 @@ def run_single_experiment(
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
         )
+    sparsity = block_mask.sparsity() / 100.0 if block_mask is not None else 0.0
+    sparsity = sparsity if config.attn_type != "document_mask" else 0.5
 
     results["compiled"] = ExperimentResults(
         fwd_time=forward_compiled_time,
         bwd_time=backward_compile_time if config.calculate_bwd_time else None,
+        sparsity=sparsity,
     )
 
     return results
@@ -464,6 +471,8 @@ def calculate_speedup(
 def calculate_bandwidth(
     config: ExperimentConfig, results: ExperimentResults, type: str
 ) -> float:
+    B, Hq, M, Hkv, N, D = config.shape
+    sparsity = results.sparsity if M == 1 else 0.0
     if type == "fwd":
         batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
         query_size = (
@@ -484,7 +493,9 @@ def calculate_bandwidth(
             * 2
         )
         output_size = query_size
-        total_size = (query_size + kv_size + output_size) / 1e9  # In GB
+        total_size = (
+            query_size + kv_size * (1 - sparsity) + output_size
+        ) / 1e9  # In GB
         time_in_seconds = results.fwd_time / 1e6
         return total_size / time_in_seconds / 1e3
     else:
@@ -497,7 +508,7 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     softmax_flops = M * N * 2  # Not counting online softmax overhead
     o_flops = M * D * N * 2
     # Not counting split k overhead
-    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops)
+    total_flops = B * Hq * (qk_flops + softmax_flops + o_flops) * (1 - results.sparsity)
     return total_flops / results.fwd_time / 1e6  # in TFLOPs/
 
 
@@ -785,7 +796,8 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
 
 def get_kernel_options(attn_type: str, shape: Tuple[int]):
     B, Hq, M, Hkv, N, D = shape
-    kernel_opt_dict = {
+    is_decoding = M == 1
+    kernel_opt_training_dict = {
         "noop": None,
         "causal": None,
         "rel": None,
@@ -805,7 +817,33 @@ def get_kernel_options(attn_type: str, shape: Tuple[int]):
         "transfusion": None,
     }
 
-    return kernel_opt_dict[attn_type]
+    def get_default_split_k(B: int, H: int, Mk: int) -> int:
+        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+        """Heuristic for the number of splits from xformer"""
+        bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
+        split_k = num_SM // bh * 2  # Each SM should at least get one block.
+        split_k = max(split_k, 1)
+
+        return split_k
+
+    kernel_opt_decoding_dict = {
+        "noop": None,
+        "causal": {"SPLIT_KV": get_default_split_k(B, Hkv, N) * 2},
+        "rel": None,
+        "head_bias": None,
+        "alibi": {"SPLIT_KV": get_default_split_k(B, Hkv, N) * 2},
+        "sliding_window": None,
+        "document_mask": None,
+        "prefix_lm": None,
+        "softcap": {"SPLIT_KV": get_default_split_k(B, Hkv, N) * 2},
+        "transfusion": None,
+    }
+
+    return (
+        kernel_opt_decoding_dict[attn_type]
+        if is_decoding
+        else kernel_opt_training_dict[attn_type]
+    )
 
 
 ###################### Setup Backend ######################
