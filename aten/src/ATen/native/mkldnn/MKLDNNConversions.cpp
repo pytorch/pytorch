@@ -280,6 +280,39 @@ static Tensor mkldnn_reorder_linear_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
+Tensor pack_linear(const Tensor& weight) {
+#if !defined(__aarch64__) || !AT_MKLDNN_ACL_ENABLED()
+  return weight
+#endif
+  const auto weight_dim = weight.dim();
+  TORCH_CHECK(
+      weight_dim != 0,
+      "weights need to be at least 1D, but they are ",
+      weight_dim,
+      "D");
+  ideep::matmul_forward_params params;
+  ideep::tensor input = itensor_view_from_dense(
+      at::zeros({weight.size(-1), weight.size(-1)}, weight.options()));
+  ideep::tensor weight_ = itensor_view_from_dense(weight.t());
+  ideep::tensor result = itensor_view_from_dense(
+      at::zeros({weight.size(-1), weight.size(-2)}, weight.options()));
+  ideep::matmul_forward::prepare(
+      params,
+      input,
+      weight_,
+      result,
+      1.0f,
+      1.0f,
+      ideep::attr_t(),
+      ideep::data_type::undef);
+
+  auto new_weights = weight_.reorder_if_differ_in(params.pd.weights_desc());
+  return new_with_itensor_mkldnn(
+      std::move(new_weights),
+      optTypeMetaToScalarType(weight.options().dtype_opt()),
+      weight.options().device_opt());
+}
+
 static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
     ideep::tensor::data_type w_dtype,
