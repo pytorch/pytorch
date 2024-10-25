@@ -45,7 +45,6 @@ from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_mo
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.utils.rnn import PackedSequence
@@ -6185,7 +6184,12 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "test requires torch distributed"
+    )
     def test_unwrap_async_collective_tensor_tangent(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
         def fn(x):
             return x.clone()
 
