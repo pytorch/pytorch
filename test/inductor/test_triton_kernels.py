@@ -54,6 +54,14 @@ if HAS_GPU:
                 fast_dividef as my_fast_dividef,
             )
 
+    def _triton_get_ast_equal_to_str(params):
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            return f"'tt.equal_to': {params}"
+        except ImportError:
+            return f"equal_to_1={params}"
+
     # Define shared triton constants here.
     CONSTANT_C: tl.constexpr = 4
     STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
@@ -1259,9 +1267,9 @@ def forward(self, x_1, output_1):
         if dynamic:
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
-            self.assertTrue("equal_to_1=()" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         else:
-            self.assertTrue("equal_to_1=(3,)" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1290,7 +1298,7 @@ def forward(self, x_1, output_1):
 
         # float 1.0 (both literal or symbolic)
         # should not be added to equal_to_1
-        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1667,7 +1675,7 @@ def forward(self, x_1, output_1):
         a = torch.randn(301, device=GPU_TYPE)
         b = torch.randn(301, device=GPU_TYPE)
 
-        backend = torch._dynamo.testing.AOTEagerAndRecordGraphs()
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
         torch.compile(
             f,
             fullgraph=True,
@@ -2117,6 +2125,51 @@ def forward(self, arg0_1, arg1_1):
         x2 = torch.randn(1024 + 5, device=GPU_TYPE)
         res2 = fn_c(x2)
         self.assertEqual(x2 * x2, res2)
+
+    @requires_gpu
+    def test_triton_kernel_none_args(self):
+        # https://github.com/pytorch/pytorch/issues/115344
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=5, num_warps=2),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def sin_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            if in_ptr0 is not None:
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+            else:
+                x = 0.0
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def sin_triton(x, out):
+            n_elements = out.numel()
+            sin_kernel[(n_elements,)](x, out, n_elements)
+
+        x = torch.randn(65, device="cuda")
+        out = torch.empty_like(x)
+        out_compiled = torch.empty_like(x)
+        sin_triton_compiled = torch.compile(fullgraph=True)(sin_triton)
+
+        sin_triton(x, out)
+        sin_triton_compiled(x, out_compiled)
+        self.assertEqual(out, out_compiled)
+
+        sin_triton(None, out)
+        sin_triton_compiled(None, out_compiled)
+        self.assertEqual(out, out_compiled)
 
 
 def make_mutation_test(fn):

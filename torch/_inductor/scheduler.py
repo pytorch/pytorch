@@ -2824,7 +2824,7 @@ class Scheduler:
         bw_saving = self.score_fusion_memory(node1, node2)
 
         # The factor 32 here is quite arbitrary.
-        if V.graph.sizevars.statically_known_geq(memory_overhead, 32 * bw_saving):
+        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
             return True
         return False
 
