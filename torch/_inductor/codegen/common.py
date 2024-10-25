@@ -327,8 +327,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
             if cpp_wrapper
             else wrapper_codegen_obj.wrapper_codegen
         )
-    else:
-        return None
+    return None
 
 
 @functools.lru_cache(None)
@@ -678,8 +677,7 @@ class ExprPrinter(Printer):
         assert exp >= 0
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
-        else:  # exp == 0
-            return "1"
+        return "1"
 
     # Explicit NotImplemented functions are to prevent default sympy printing
     # behavior, which will just barf out ToFloat(...) to your IR.  The error
@@ -2039,8 +2037,7 @@ class Kernel(CodeGen):
 
                     arg_bounds = list(map(arg_to_bound, args))
                     return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                else:
-                    return ValueRanges.unknown()
+                return ValueRanges.unknown()
 
             @staticmethod
             def indirect_indexing(
@@ -2134,8 +2131,7 @@ class Kernel(CodeGen):
                     CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
-                else:
-                    return None  # type: ignore[return-value]
+                return None  # type: ignore[return-value]
 
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
@@ -2339,47 +2335,46 @@ class KernelTemplate:
     @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
-        if env is not None:
-            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            from jinja2 import TemplateSyntaxError
+        if env is None:
+            return None
+        env.filters["indent_except_first"] = KernelTemplate.indent_except_first
+        from jinja2 import TemplateSyntaxError
 
-            class DetailedTemplateSyntaxError(TemplateSyntaxError):
-                def __init__(self, original_error):
-                    super().__init__(
-                        original_error.message,
-                        original_error.lineno,
-                        original_error.name,
-                        original_error.filename,
-                    )
-                    self.original_error = original_error
+        class DetailedTemplateSyntaxError(TemplateSyntaxError):
+            def __init__(self, original_error):
+                super().__init__(
+                    original_error.message,
+                    original_error.lineno,
+                    original_error.name,
+                    original_error.filename,
+                )
+                self.original_error = original_error
 
-                def __str__(self):
-                    error_info = f"Error in template at line {self.lineno}\n"
-                    error_info += f"Error message: {self.message}\n"
-                    if hasattr(self.original_error, "source"):
-                        lines = self.original_error.source.split("\n")
-                        error_info += "Context:\n"
-                        start = max(0, self.lineno - 2)
-                        end = min(len(lines), self.lineno + 2)
-                        for i in range(start, end):
-                            if i == self.lineno - 1:
-                                error_info += f"{i + 1}: --> {lines[i]}\n"
-                                if hasattr(self.original_error, "column"):
-                                    error_info += (
-                                        "     "
-                                        + " " * (self.original_error.column - 1)
-                                        + "^\n"
-                                    )
-                            else:
-                                error_info += f"{i + 1}:     {lines[i]}\n"
-                    return error_info
+            def __str__(self):
+                error_info = f"Error in template at line {self.lineno}\n"
+                error_info += f"Error message: {self.message}\n"
+                if hasattr(self.original_error, "source"):
+                    lines = self.original_error.source.split("\n")
+                    error_info += "Context:\n"
+                    start = max(0, self.lineno - 2)
+                    end = min(len(lines), self.lineno + 2)
+                    for i in range(start, end):
+                        if i == self.lineno - 1:
+                            error_info += f"{i + 1}: --> {lines[i]}\n"
+                            if hasattr(self.original_error, "column"):
+                                error_info += (
+                                    "     "
+                                    + " " * (self.original_error.column - 1)
+                                    + "^\n"
+                                )
+                        else:
+                            error_info += f"{i + 1}:     {lines[i]}\n"
+                return error_info
 
-            try:
-                return env.from_string(source)
-            except TemplateSyntaxError as e:
-                raise DetailedTemplateSyntaxError(e) from e
-
-        return None
+        try:
+            return env.from_string(source)
+        except TemplateSyntaxError as e:
+            raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
     def _fake_get_dtype(fake_out):
