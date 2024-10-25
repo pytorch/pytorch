@@ -2427,7 +2427,7 @@ def tensor_always_has_static_shape(
 def lazy_format_graph_tabular(fn_name, gm):
     def inner():
         try:
-            from tabulate import tabulate  # TODO: Check that this is installed
+            from tabulate import tabulate
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"

@@ -3086,7 +3086,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Dynamic control flow is not supported at the moment",
         ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
+            torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
 
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
