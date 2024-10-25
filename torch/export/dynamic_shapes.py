@@ -900,17 +900,43 @@ def _process_dynamic_shapes(
 
         # clean out decorators from user side, or previous export call
         # we also delete these attributes in non_strict_utils.py/make_constraints()
-        tensor._dynamo_weak_dynamic_indices = set()
-        tensor._dynamo_dynamic_indices = set()
-        tensor._dynamo_dynamic_range = set()
-        tensor._dynamo_static_indices = set()
-        tensor._dynamo_unbacked_indices = set()
+        dim2decorator = defaultdict(set)
+        for attr in [
+            "_dynamo_weak_dynamic_indices",
+            "_dynamo_dynamic_indices",
+            "_dynamo_dynamic_range",
+            "_dynamo_static_indices",
+            "_dynamo_unbacked_indices",
+        ]:
+            if not (indices := getattr(tensor, attr, None)):
+                setattr(tensor, attr, set())
+            elif attr != "_dynamo_dynamic_range":
+                for i in indices:
+                    dim2decorator[i].add(attr)
+
+        def _check_decorator_conflict(i, dim):
+            if (decs := dim2decorator[i]):
+                dec_str = ",".join(decs)
+                if isinstance(dim, _DimHint):
+                    name = f"Dim.{dim.name}"
+                elif isinstance(dim, _Dim):
+                    name = f"Dim(\"{dim.__name__}\")"
+                else:
+                    name = str(dim)
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Export found {name} specified for dynamic_shapes{keystr(path)} "
+                    f"at dim {i}, but also found dynamic decorators [{dec_str}]. Behavior is undefined "
+                    f"when multiple decorators are provided, did you unintentionally call mark_dynamic(), "
+                    f"maybe_mark_dynamic(), mark_static(), mark_unbacked(), on the sample inputs to export()?"
+                )
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, (int, _Dim)):
                     if isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
+                    _check_decorator_conflict(i, dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
@@ -920,6 +946,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    _check_decorator_conflict(i, dim)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
@@ -928,6 +955,7 @@ def _process_dynamic_shapes(
                 if isinstance(dim, (int, _Dim)):
                     if isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
+                    _check_decorator_conflict(i, dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
@@ -937,6 +965,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    _check_decorator_conflict(i, dim)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
