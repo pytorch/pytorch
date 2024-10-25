@@ -25,14 +25,18 @@ from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
+    any_common_cpu_device_one,
     deviceCountAtLeast,
+    has_gpu_device,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    onlyCUDAAndXPU,
     onlyNativeDeviceTypesAnd,
     OpDTypes,
     ops,
     skipMeta,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -40,6 +44,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
+    apply_op_db_for,
     BinaryUfuncInfo,
     op_db,
     ops_and_refs,
@@ -72,6 +77,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
+    TEST_XPU,
     TestCase,
     unMarkDynamoStrictTest,
 )
@@ -80,6 +86,10 @@ from torch.utils._pytree import tree_map
 
 
 assert torch.get_default_dtype() == torch.float32
+
+if TEST_XPU:
+    apply_op_db_for(op_db, device="xpu")
+    apply_op_db_for(python_ref_db, device="xpu")
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -146,7 +156,7 @@ class TestCommon(TestCase):
             assert len(filtered_ops) == 0, err_msg
 
     # Validates that each OpInfo works correctly on different CUDA devices
-    @onlyCUDA
+    @onlyCUDAAndXPU
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
@@ -265,7 +275,7 @@ class TestCommon(TestCase):
             and op.formatted_name
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
-            and "cuda" in device
+            and has_gpu_device(device)
             or "cpu" in device
         ):  # noqa: E121
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
@@ -278,10 +288,10 @@ class TestCommon(TestCase):
                 )
 
     # Tests that the cpu and gpu results are consistent
-    @onlyCUDA
+    @onlyCUDAAndXPU
     @suppress_warnings
     @slowTest
-    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=any_common_cpu_device_one())
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
@@ -535,7 +545,7 @@ class TestCommon(TestCase):
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
+    @onlyCUDAAndXPU
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -575,6 +585,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
+    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -783,7 +794,11 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if (
+                    self.device_type != "cpu"
+                    and self.device_type != "cuda"
+                    and self.device_type != "xpu"
+                ):
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -911,7 +926,11 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda":
+                if (
+                    self.device_type != "cpu"
+                    and self.device_type != "cuda"
+                    and self.device_type != "xpu"
+                ):
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -1645,6 +1664,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
+    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2655,12 +2675,12 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals())
-instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals())
-instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestTags, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
