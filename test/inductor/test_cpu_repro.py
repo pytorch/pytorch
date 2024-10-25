@@ -4410,17 +4410,17 @@ class CPUReproTests(TestCase):
                 view_284 = None
                 return view_283, view_285
 
-        clone_50 = torch.randn((28, 12, 512, 64), dtype=torch.bfloat16)
+        clone_50 = torch.randn((28, 12, 512, 64), dtype=torch.bfloat16) / 10
         gt_scalar = torch.randint(0, 2, (28, 12, 512, 512), dtype=torch.bool)
-        div_tensor = torch.randn((28, 12, 512, 512), dtype=torch.float)
-        convert_element_type_default_7 = torch.randn(
-            (336, 64, 512), dtype=torch.bfloat16
+        div_tensor = torch.randn((28, 12, 512, 512), dtype=torch.float) / 10
+        convert_element_type_default_7 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
         )
-        convert_element_type_default_13 = torch.randn(
-            (336, 64, 512), dtype=torch.bfloat16
+        convert_element_type_default_13 = (
+            torch.randn((336, 64, 512), dtype=torch.bfloat16) / 10
         )
-        convert_element_type_default_14 = torch.randn(
-            (336, 512, 64), dtype=torch.bfloat16
+        convert_element_type_default_14 = (
+            torch.randn((336, 512, 64), dtype=torch.bfloat16) / 10
         )
         inputs = (
             clone_50,
@@ -4433,7 +4433,7 @@ class CPUReproTests(TestCase):
 
         with torch.cpu.amp.autocast():
             mod = M().to(torch.bfloat16).eval()
-            self.common(mod, inputs)
+            self.common(mod, inputs, atol=1e-3, rtol=1e-3)
 
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
