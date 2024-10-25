@@ -3380,10 +3380,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       fn(tensor, comm_, ncclStream, p2pTargetRank),
       ncclComm->getNcclCommFailureReason());
 #else
-  C10D_NCCL_CHECK_TIMEOUT(
-      fn(tensor, comm_, ncclStream, p2pTargetRank),
-      ncclComm->getNcclComm(),
-      ncclComm->getNcclCommFailureReason());
+  // In non-blocking mode, we need to use ncclGroup semantics to ensure that the
+  // kernel is enqueued for single-P2P ops.  Otherwise, the event record below
+  // may not capture the kernel, leading to data corruption.
+  ncclGroupStart();
+  C10D_NCCL_CHECK_NONBLOCKING(
+      fn(tensor, comm_, ncclStream, p2pTargetRank), std::nullopt);
+  C10D_NCCL_CHECK_TIMEOUT_GROUPEND(
+      ncclGroupEnd(), ncclComm, ncclComm->getNcclCommFailureReason());
 #endif
 
   if (!coalescing_state_) {
