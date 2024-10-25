@@ -213,8 +213,7 @@ class CapabilityBasedPartitioner:
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
-            for partition_id in partitions_by_id:
-                merge_candidates[partition_id] = None
+            merge_candidates.update(dict.fromkeys(partitions_by_id))
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
