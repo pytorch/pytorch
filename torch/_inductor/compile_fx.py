@@ -432,6 +432,9 @@ def maybe_disable_comprehensive_padding(
     if config.disable_padding_cpu and config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
         return config.patch(comprehensive_padding=False)
+    elif config.aot_inductor.use_runtime_constant_folding:
+        perf_hint_log.info("Skip comprehensive padding for use_runtime_constant_folding")
+        return config.patch(comprehensive_padding=False)
     else:
         return contextlib.nullcontext()
 
