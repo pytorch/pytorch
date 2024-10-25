@@ -2143,10 +2143,8 @@ class CommonTemplate:
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
 
+    @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
     def test_int8_weight_only_quant(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("No _weight_int8pack_mm implementation on CUDA")
-
         def convert_weight_to_int8pack(b):
             b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
                 b, -128, 127, torch.int8
