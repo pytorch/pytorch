@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Optional, Tuple
+from typing import cast, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -169,19 +169,18 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 
 def register_comm_lowerings():
-    c10d: Optional[torch._ops._OpNamespace] = None  # type: ignore[assignment]
     try:
-        c10d = torch.ops._c10d_functional
-    except (ImportError, AttributeError):
+        torch.ops._c10d_functional.all_reduce
+    except AttributeError:
         log.info(
             "Inductor support for distributed collectives depends on building "
             "torch.distributed"
         )
         return
 
-    assert c10d is not None
-
     from .lowering import clone, copy_, register_lowering
+
+    c10d = torch.ops._c10d_functional
 
     @register_lowering(c10d.all_reduce)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
