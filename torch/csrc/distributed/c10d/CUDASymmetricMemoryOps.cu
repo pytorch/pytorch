@@ -111,7 +111,7 @@ void init_elementwise_launch_config(
   }
 }
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -538,7 +538,7 @@ at::Tensor memset32_(
 }
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12010
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
