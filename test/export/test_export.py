@@ -6586,25 +6586,34 @@ graph():
         m = M()
         eager_result = m(*inp)
 
+        def test(ep):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            with self.assertRaisesRegex(
-                ValueError,
-                r"Found multiple calls of module n that mutate buffer n.buf",
-            ):
-                # Unflattening while preserving signatures is NYI for this case.
-                torch.export.unflatten(
-                    export(M(), inp, preserve_module_call_signature=("n",))
+            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            # running decompositions again should work for all IRs
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            test(ep.run_decompositions({}))
+            if is_training_ir_test(self._testMethodName):
+                # since we run decompositions by default when testing training IR,
+                # also test training IR without running decompositions
+                strict = not is_non_strict_test(self._testMethodName)
+                ept = torch.export.export_for_training(
+                    M(),
+                    inp,
+                    strict=strict,
+                    preserve_module_call_signature=("n",),
                 )
+                test(ept)
 
-        ep = export(M(), inp)
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-
-        exported_result = epm(*inp)
-        self.assertTrue(torch.allclose(exported_result, eager_result))
-
-        unflattened_result = ufm(*inp)
-        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+        test(export(M(), inp))
 
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
