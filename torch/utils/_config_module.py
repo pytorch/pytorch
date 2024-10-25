@@ -7,10 +7,37 @@ import pickle
 import tokenize
 import unittest
 import warnings
+from dataclasses import dataclass
 from types import FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
+
+from torch._utils_internal import justknobs_check
+
+
+@dataclass
+class Config:
+    """Represents a config with richer behaviour than just a default value.
+
+    i.e.
+    foo = Config(justknob="//foo:bar", default=False)
+    install_config_module(...)
+
+    This configs must be installed with install_config_module to be used
+
+    Arguments:
+        justknob: the name of the feature / JK. In OSS this is unused.
+        default: is the value to default this knob to in OSS.
+
+    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
+    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
+    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
+
+    """
+
+    default: bool = True
+    justknob: Optional[str] = None
 
 
 # Types saved/loaded in configs
@@ -38,13 +65,20 @@ def install_config_module(module: ModuleType) -> None:
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
+                # Handle from torch.utils._config_module import Config
+                or (isinstance(value, type) and issubclass(value, Config))
             ):
                 continue
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = value
-                default[name] = value
+                config[name] = _ConfigEntry(default=value)
+                if dest is module:
+                    delattr(module, key)
+            elif isinstance(value, Config):
+                config[name] = _ConfigEntry(
+                    default=value.default, justknob=value.justknob
+                )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -59,15 +93,12 @@ def install_config_module(module: ModuleType) -> None:
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, Any] = {}
-    default: Dict[str, Any] = {}
+    config: Dict[str, _ConfigEntry] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
-    module._default = default  # type: ignore[attr-defined]
-    module._allowed_keys = set(config.keys())  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -116,17 +147,29 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str
     return assignments
 
 
+_UNSET_SENTINEL = object()
+
+
+@dataclass
+class _ConfigEntry:
+    # The default value specified in the configuration
+    default: Any
+    # The value specified by the user when they overrode the configuration
+    # _UNSET_SENTINEL indicates the value is not set.
+    user_override: Any = _UNSET_SENTINEL
+    # The justknob to check for this config
+    justknob: Optional[str] = None
+    # The resolved justknob value
+    justknob_value: Any = None
+
+
 class ConfigModule(ModuleType):
     # NOTE: This should be kept in sync with _config_typing.pyi.
 
-    # The default values of the configuration settings.  This can be used to
-    # determine if the config has been changed or not.
-    _default: Dict[str, Any]
     # The actual configuration settings.  E.g., torch._dynamo.config.debug
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
-    # maps as "triton.cudagraphs"
-    _config: Dict[str, Any]
-    _allowed_keys: Set[str]
+    # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
+    _config: Dict[str, _ConfigEntry]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
     _is_dirty: bool
@@ -140,15 +183,36 @@ class ConfigModule(ModuleType):
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
-        elif name not in self._allowed_keys:
+        elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
-            self._config[name] = value
+            self._config[name].user_override = value
             self._is_dirty = True
 
     def __getattr__(self, name: str) -> Any:
         try:
-            return self._config[name]
+            config = self._config[name]
+            if config.user_override is not _UNSET_SENTINEL:
+                return config.user_override
+
+            if config.justknob_value is not None:
+                # JK only supports bools and ints
+                return config.justknob_value
+            if config.justknob is not None:
+                config.justknob_value = justknobs_check(
+                    name=config.justknob, default=config.default
+                )
+                # JK only supports bools and ints
+                return config.justknob_value
+
+            # Note that reference types can still me modified, so we
+            # copy them to user_overrides in case the user overrides
+            # them
+            if isinstance(config.default, (list, set, dict)):
+                config.user_override = copy.deepcopy(config.default)
+                return config.user_override
+            return config.default
+
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -157,7 +221,10 @@ class ConfigModule(ModuleType):
         self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        del self._config[name]
+        self._config[name].user_override = _UNSET_SENTINEL
+
+    def _is_default(self, name: str) -> bool:
+        return self._config[name].user_override is _UNSET_SENTINEL
 
     def _get_dict(
         self,
@@ -184,30 +251,31 @@ class ConfigModule(ModuleType):
         config: Dict[str, Any] = {}
         for key in self._config:
             if ignored_keys and key in ignored_keys:
-                if skip_default and self._config[key] != self._default[key]:
+                if skip_default and not self._is_default(key):
                     warnings.warn(
-                        f"Skipping serialization of {key} value {self._config[key]}"
+                        f"Skipping serialization of {key} value {self.__getattr__(key)}"
                     )
                 continue
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):
                     continue
-            if skip_default and self._config[key] == self._default[key]:
+            if skip_default and self._is_default(key):
                 continue
-            config[key] = copy.deepcopy(self._config[key])
+            config[key] = copy.deepcopy(getattr(self, key))
         return config
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
+        ignored_keys = getattr(self, "_save_config_ignore", [])
         return pickle.dumps(
-            self._get_dict(ignored_keys=self._config.get("_save_config_ignore", ())),
+            self._get_dict(ignored_keys=ignored_keys),
             protocol=2,
         )
 
     def save_config_portable(self) -> Dict[str, Any]:
         """Convert config to portable format"""
         prefixes = ["_"]
-        prefixes.extend(self._config["_cache_config_ignore_prefix"])
+        prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
     def codegen_config(self) -> str:
@@ -217,7 +285,7 @@ class ConfigModule(ModuleType):
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
-            ignored_keys=self._config.get("_save_config_ignore"), skip_default=True
+            ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
         ).items():
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
@@ -255,7 +323,13 @@ class ConfigModule(ModuleType):
             config = pickle.loads(maybe_pickled_config)
         else:
             config = maybe_pickled_config
-        self._config.update(config)
+        for k, v in config.items():
+            if k in self._config:
+                self.__setattr__(k, v)
+            else:
+                warnings.warn(
+                    f"key {k} with value {v} is not understood by this config"
+                )
 
     def get_config_copy(self) -> Dict[str, Any]:
         return self._get_dict()
@@ -338,11 +412,13 @@ class ConfigModule(ModuleType):
         config = self._config
 
         def change() -> Callable[[], None]:
-            prior = {k: config[k] for k in changes}
-            config.update(changes)
+            prior = {k: config[k].user_override for k in changes}
+            for k, v in changes.items():
+                self._config[k].user_override = v
 
             def revert() -> None:
-                config.update(prior)
+                for k, v in prior.items():
+                    self._config[k].user_override = v
 
             return revert
 
