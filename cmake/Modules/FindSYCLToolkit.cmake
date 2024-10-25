@@ -64,6 +64,7 @@ endif()
 # versions (8, 7, 6) to ensure backward compatibility with older compiler versions.
 # TODO: Remove hardcoded versions when compatibility with older SYCL runtime versions is no longer required.
 if(WIN32)
+  set(SYCL_LIBRARY_FOUND FALSE)
   foreach(sycl_runtime_version "" 8 7 6)
     find_library(
       SYCL_LIBRARY
@@ -71,8 +72,12 @@ if(WIN32)
       HINTS ${SYCL_LIBRARY_DIR}
       NO_DEFAULT_PATH
     )
+    if(EXISTS "${SYCL_LIBRARY}")
+      set(SYCL_LIBRARY_FOUND TRUE)
+      break()
+    endif()
   endforeach()
-  if(SYCL_LIBRARY STREQUAL "SYCL_LIBRARY-NOTFOUND")
+  if(NOT SYCL_LIBRARY_FOUND)
     message(FATAL_ERROR "Cannot find a SYCL library on Windows")
   endif()
 endif()
