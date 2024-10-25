@@ -128,9 +128,9 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=device_props.warp_size
-                        if device_props.warp_size
-                        else 32,
+                        num_elements_per_warp=(
+                            device_props.warp_size if device_props.warp_size else 32
+                        ),
                     )
                 )
 
@@ -246,6 +246,10 @@ class CachingAutotuner(KernelInterface):
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
+        # Dumps the launch configs after autotuning.
+        self.dump_launch_params = (
+            os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
+        )
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
@@ -381,6 +385,9 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
+                if k == "kpack":
+                    compile_meta["kpack"] = v
+                    continue
             compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -478,13 +485,38 @@ class CachingAutotuner(KernelInterface):
                 raise
             binary._init_handles()
 
+        """
+        https://github.com/pytorch/pytorch/issues/115344
+
+        self.fn.constexprs doesn't properly deal with None args, so when we filter out
+        an arg in UserDefinedTritonKernel.codegen, we need to filter it here as well.
+        We also don't want to modify self.fn.
+
+        We know that we removed something from the signature if:
+            1. It's in compile_meta["constants"]
+            2. It isn't a constant we already know about
+                Note: The value of interest has already been added to compile_meta['constants'],
+                    so we use self.fn.constexprs instead.
+            3. It isn't in the compile_meta signature
+        """
+        none_args = set(compile_meta["constants"].keys())
+        known_constants = {
+            arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
+        }
+        none_args = none_args.difference(known_constants)
+        none_args = none_args.difference(set(compile_meta["signature"].keys()))
+
         call_args = [
             arg
             for i, arg in enumerate(self.fn.arg_names)
-            if i not in self.fn.constexprs
+            if i not in self.fn.constexprs and arg not in none_args
         ]
-        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
+        def_args = [
+            name
+            for name in self.fn.arg_names
+            if name not in cfg.kwargs and name not in none_args
+        ]
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
@@ -494,9 +526,11 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": CompiledKernel.launch_enter_hook,
             "launch_exit_hook": CompiledKernel.launch_exit_hook,
-            "metadata": binary.packed_metadata
-            if hasattr(binary, "packed_metadata")
-            else binary.metadata,
+            "metadata": (
+                binary.packed_metadata
+                if hasattr(binary, "packed_metadata")
+                else binary.metadata
+            ),
             "shared": binary_shared,
         }
 
@@ -724,10 +758,9 @@ class CachingAutotuner(KernelInterface):
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names:
+            if name in self.mutated_arg_names and arg.is_cuda:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
-                assert not arg.is_cpu
                 size = arg.numel() * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(
@@ -828,9 +861,11 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata.name
-            if hasattr(launcher.bin.metadata, "name")
-            else launcher.bin.metadata["name"],
+            "mangled_name": (
+                launcher.bin.metadata.name
+                if hasattr(launcher.bin.metadata, "name")
+                else launcher.bin.metadata["name"]
+            ),
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
@@ -838,12 +873,16 @@ class CachingAutotuner(KernelInterface):
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
             "r_block": launcher.config.kwargs.get("RBLOCK", None),
-            "num_warps": launcher.bin.num_warps
-            if hasattr(launcher.bin, "num_warps")
-            else launcher.bin.metadata.num_warps,
-            "shared_mem": launcher.bin.shared
-            if hasattr(launcher.bin, "shared")
-            else launcher.bin.metadata.shared,
+            "num_warps": (
+                launcher.bin.num_warps
+                if hasattr(launcher.bin, "num_warps")
+                else launcher.bin.metadata.num_warps
+            ),
+            "shared_mem": (
+                launcher.bin.shared
+                if hasattr(launcher.bin, "shared")
+                else launcher.bin.metadata.shared
+            ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
@@ -935,7 +974,7 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
-        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+        if self.dump_launch_params:
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
         # it is faster than entering and exiting a context manager, even if the context
@@ -1003,7 +1042,7 @@ def end_graph(output_file):
     cur_file = inspect.stack()[1].filename
     summary_str = (
         f"SUMMARY ({cur_file})\n"
-        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb / (overall_time / 1e3):.2f}GB/s"
     )
     print(summary_str)
     print()
@@ -1018,7 +1057,7 @@ def end_graph(output_file):
                 file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
                 for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
                     # also display the runtime percentage for each kernel
-                    percentage = f"{ms/overall_time*100:.2f}%"
+                    percentage = f"{ms / overall_time * 100:.2f}%"
                     suffix = f" \t {percentage} \t {kernel_name}"
                     bw_info_str = create_bandwidth_info_str(
                         ms,
@@ -1325,6 +1364,7 @@ def triton_config(
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x = min(x, size_hints[0])
 
     cfg = {"XBLOCK": x}
     if y:
@@ -1579,7 +1619,6 @@ def reduction(
         size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
-    rnumel = size_hints[-1]
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -1716,7 +1755,6 @@ def user_autotune(
             )
             for c in configs
         ]
-
     return cached_autotune(
         None,
         configs,

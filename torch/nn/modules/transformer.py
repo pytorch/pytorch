@@ -34,10 +34,6 @@ def _generate_square_subsequent_mask(
 
     The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
-    if device is None:
-        device = torch.device("cpu")
-    if dtype is None:
-        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float("-inf"), dtype=dtype, device=device),
         diagonal=1,

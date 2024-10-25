@@ -224,10 +224,29 @@ struct LiftedIValueArgs {
   const std::optional<size_t>& active_node_call_idx;
 };
 
+// Hold GIL while using
+struct PyTLSWrapper {
+  PyTLSWrapper(PyObject* state) : state(state) {}
+  PyTLSWrapper(const PyTLSWrapper&) = delete;
+  PyTLSWrapper& operator=(const PyTLSWrapper&) = delete;
+  PyTLSWrapper(PyTLSWrapper&&) = default;
+  PyTLSWrapper& operator=(PyTLSWrapper&&) = default;
+
+  static PyTLSWrapper create();
+
+  PyObject* get(std::string_view key) const;
+
+ private:
+  PyObject* state;
+};
+
 struct AutogradCompilerCall {
-  AutogradCompilerCall()
-      : tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx) {}
+  AutogradCompilerCall() = delete;
+  AutogradCompilerCall(PyTLSWrapper&& state)
+      : active_node_call_idx(std::nullopt),
+        tensor_args(active_node_call_idx),
+        lifted_ivalue_args(active_node_call_idx),
+        state(std::move(state)) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -245,6 +264,7 @@ struct AutogradCompilerCall {
     active_node_call_idx = node_call_idx;
   }
 
+  std::optional<size_t> active_node_call_idx;
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   LiftedIValueArgs lifted_ivalue_args;
@@ -252,9 +272,11 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
-  std::optional<size_t> active_node_call_idx;
+
+  const PyTLSWrapper state;
 };
 
 class CompiledNodeArgs {

@@ -47,6 +47,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 
 if TYPE_CHECKING:
+    from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -175,7 +176,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -205,7 +206,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         gm: torch.fx.GraphModule,
         example_inputs,
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -269,7 +270,7 @@ def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs,
     config: AOTConfig,
-    fx_config: Dict[str, BoxedBool],
+    fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
 ) -> Tuple[str, List[str]]:
     """
@@ -295,7 +296,7 @@ class FXGraphCacheLoadable:
     def is_backward(self):
         return False
 
-    def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
+    def load(self, example_inputs, fx_config: _CompileFxKwargs) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -332,7 +333,7 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
+        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
         result._boxed_call = True
         return result
 
@@ -369,6 +370,12 @@ class AOTAutogradCacheEntry:
     compiled_fw: CompiledForward
     compiled_bw: Optional[CompiledBackward]
 
+    # Code of the joint graph using print_readable()
+    # Used for logging purposes
+    aot_joint_graph_str: Optional[str]
+    aot_forward_graph_str: Optional[str]
+    aot_backward_graph_str: Optional[str]
+
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
 
@@ -393,7 +400,7 @@ class AOTAutogradCacheEntry:
         self,
         args: List[torch.Tensor],
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ) -> Callable:
         """
         This function takes a cache entry and carefully reconstructs the original callable
@@ -411,6 +418,25 @@ class AOTAutogradCacheEntry:
 
         Which we'll handle separately later on, if necessary.
         """
+
+        # Log the output of AOTAutogradCache
+        if aot_config.enable_log:
+            # TODO: maybe also log to aot_graphs_log
+            # Unfortunately aot_graphs_log uses
+            # slightly different formatting though
+            if self.aot_joint_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+            if self.aot_forward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_forward_graph", payload_fn=lambda: self.aot_forward_graph_str
+                )
+            if self.aot_backward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
         if self.compiled_bw is not None:
@@ -541,7 +567,7 @@ class AOTAutogradCache:
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
-        fx_config = {"cudagraphs": cudagraphs}
+        fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
         try:
             cache_key, debug_lines = autograd_cache_key(gm, args, aot_config, fx_config)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(
