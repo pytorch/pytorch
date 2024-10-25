@@ -53,14 +53,12 @@ void _dim_apply(
           return;
         }
 
-        for (C10_UNUSED const auto i : c10::irange(n)) {
-          f(
-            reinterpret_cast<scalar_t*>(values_data_bytes),
+        for ([[maybe_unused]] const auto i : c10::irange(n)) {
+          f(reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
             reinterpret_cast<int64_t*>(indices_data_bytes),
             indices_dim_stride,
-            dim_size
-          );
+            dim_size);
 
           values_data_bytes += strides[0];
           indices_data_bytes += strides[1];

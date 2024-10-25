@@ -404,7 +404,7 @@ class SACEstimator(TorchDispatchMode):
             # 6. Find the first occurence of a tensor corresponding to each module that
             # shares the same storage as the current tensor
             past_output_ids = d.output_ids
-            if output_ids in past_output_ids:
+            if set(output_ids).issubset(set(past_output_ids)):
                 for mod_fqn, op_parent_idx in mod_op_parent_idxs.items():
                     if op_parent_idx == -1:
                         if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
@@ -509,8 +509,10 @@ class SACEstimator(TorchDispatchMode):
         # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
         random_ops_group: Dict[int, Set[int]] = {}
-        random_group_head_idx = min(sac_stats.rand_ops)
-        random_ops_group[random_group_head_idx] = set(sac_stats.rand_ops)
+        random_group_head_idx = min(sac_stats.rand_ops, default=-1)
+        has_rand_ops = bool(sac_stats.rand_ops)
+        if has_rand_ops:
+            random_ops_group[random_group_head_idx] = set(sac_stats.rand_ops)
 
         # 1. Random ops are stored if force_store_random is set
         # 2. View-like ops are recomputed by default
@@ -522,7 +524,7 @@ class SACEstimator(TorchDispatchMode):
         stored_ops: Set[int] = set()
         recomputed_ops: Set[int] = set()
         # Case 1:
-        if sac_stats.force_store_random:
+        if has_rand_ops and sac_stats.force_store_random:
             stored_ops.add(random_group_head_idx)
         # Case 2:
         recomputed_ops.update(set(sac_stats.view_like_ops))
@@ -541,7 +543,7 @@ class SACEstimator(TorchDispatchMode):
         # The potential recompute candidates are populated as:
         recompute_candidates: Set[int] = set()
         # 1) The random group head if it is not stored
-        if random_group_head_idx not in stored_ops:
+        if has_rand_ops and random_group_head_idx not in stored_ops:
             recompute_candidates.add(random_group_head_idx)
         # 2) The in-place op group heads that are not stored
         recompute_candidates.update(set(inplace_op_groups.keys()) - stored_ops)
@@ -560,7 +562,7 @@ class SACEstimator(TorchDispatchMode):
             op_indices = {cand_idx}
             if cand_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[cand_idx])
-            if cand_idx == random_group_head_idx:
+            if has_rand_ops and cand_idx == random_group_head_idx:
                 op_indices.update(sac_stats.rand_ops)
 
             mem = sum(sac_stats.memory[op_idx] for op_idx in op_indices)
