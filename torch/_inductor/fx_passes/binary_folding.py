@@ -236,8 +236,8 @@ def binary_folding_init():
                 torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
                 != weight_meta_value.dtype
             ):
-                # if not linear_node.meta.get("_allow_mixed_dtype_folding", False):
-                #     return False
+                if not linear_node.meta.get("_allow_mixed_dtype_folding", False):
+                    return False
 
                 if (
                     other_meta_value.dtype != torch.float  # type: ignore[union-attr]
