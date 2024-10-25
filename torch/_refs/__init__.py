@@ -6231,8 +6231,22 @@ def _dot_check(self, other):
     torch._check(self.numel() == other.numel(), numel_error)
 
 
+def _dot_check_wrapper(fn):
+    @wraps(fn)
+    def wrapper(self, other):
+        _dot_check(self, other)
+        return fn(self, other)
+
+    return wrapper
+
+
 @register_decomposition(aten.dot)
 @out_wrapper()
+@_dot_check_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def dot(self, other):
     if self.is_complex():
         if self.is_conj():
@@ -6243,16 +6257,16 @@ def dot(self, other):
         elif other.is_conj():
             return torch.vdot(other.conj(), self)
 
-    _dot_check(self, other)
-
-    return elementwise_type_promotion_wrapper(
-        type_promoting_args=("self", "other"),
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )(lambda self, other: (self * other).sum())(self, other)
+    return (self * other).sum()
 
 
 @register_decomposition(aten.vdot)
 @out_wrapper()
+@_dot_check_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def vdot(self, other):
     if not self.is_complex():
         return torch.dot(self, other)
@@ -6265,13 +6279,8 @@ def vdot(self, other):
     elif other.is_conj():
         return torch.dot(self, other.conj()).conj()
 
-    _dot_check(self, other)
-
     # The decomposition fails if you do self.conj()... not sure why
-    return elementwise_type_promotion_wrapper(
-        type_promoting_args=("self", "other"),
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )(lambda self, other: (self.conj_physical() * other).sum())(self, other)
+    return (self.conj_physical() * other).sum()
 
 
 @register_decomposition(aten.select_scatter)
