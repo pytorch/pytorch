@@ -445,6 +445,15 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
+    def test_enable_py_dispatcher(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        with torch._subclasses.FakeTensorMode(shape_env=shape_env):
+            r = torch.empty(a0, device="cpu")
+
+            # doesnt fail - somehow doesnt fail on master either ??
+            r.expand([r.numel() + 2, r.numel() + 2])
+
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
