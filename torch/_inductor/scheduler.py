@@ -408,6 +408,12 @@ class BaseSchedulerNode:
         }
 
         ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+        # NOTE remove V.graph.removed_operations once deps issue is fixed
+        inconsequential_nodes = (
+            (self.ancestors - {self.get_name()})
+            | V.graph.removed_operations
+            | self.scheduler.completed_operations
+        )
 
         for buf in self.get_outputs():
             buf_node = buf.node
@@ -429,16 +435,11 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
-                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
-                    # no need to inplace.
-                    if input_buf.defining_op.get_name() in fused_nodes:
-                        continue
-
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in inconsequential_nodes
                     ]
                     if (
                         len(remaining_uses) == 1

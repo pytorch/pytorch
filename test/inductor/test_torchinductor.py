@@ -12530,18 +12530,39 @@ if HAS_GPU and not TEST_WITH_ASAN:
             _, (code,) = run_and_get_code(torch.compile(fn), inp)
             FileCheck().check("copy_").check_same("True").run(code)
 
-        @config.patch(inplace_buffers=True)
-        def test_layer_norm_should_not_inplace(self):
+        def test_layer_norm_alone_should_not_inplace(self):
             # https://github.com/pytorch/pytorch/issues/120217
             D = 16
 
             def fn(x):
                 return nn.LayerNorm([D], dtype=torch.float16)(x)
 
-            inps = [torch.rand(D, dtype=torch.float16)]
+            inps = [torch.rand(D, dtype=torch.float16, device=GPU_TYPE)]
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("in_out_ptr" not in code)
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_layer_norm_inplaces_after_matmul(self):
+            # https://github.com/pytorch/pytorch/issues/132826
+            batch_size = 32
+            seq_length = 50
+            hidden_size = 768
+
+            layer_norm = torch.nn.LayerNorm(hidden_size)
+
+            def fn(inp, weight):
+                matmul_output = inp @ weight
+                final_output = layer_norm(matmul_output)
+                return final_output
+
+            inps = [
+                torch.randn(batch_size, seq_length, hidden_size, device=GPU_TYPE),
+                torch.randn(hidden_size, hidden_size, device=GPU_TYPE),
+            ]
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("in_out_ptr" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
     class RNNTest(TestCase):
