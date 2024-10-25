@@ -769,8 +769,14 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
 class SymmMemUtilTest(TestCase):
     @requires_cuda
     def test_memset32(self):
-        torch.cuda.set_device("cuda:0")
-        t = torch.zeros(64, dtype=torch.uint32, device="cuda")
+        t = _SymmetricMemory.empty_strided_p2p(
+            (64,),
+            (1,),
+            dtype=torch.uint32,
+            device=torch.device("cuda:0"),
+            group_name="0",
+        ).fill_(0)
+
         _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
         self.assertTrue(t[:32].eq(0).all())
         self.assertTrue(t[32:48].eq(1).all())

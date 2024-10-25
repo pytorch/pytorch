@@ -521,32 +521,25 @@ at::Tensor memset32_(
       input.numel(),
       ")");
 
-  auto driver_api = c10::cuda::DriverAPI::get();
-  CUcontext pctx, prev;
+  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
 
   c10::cuda::CUDAGuard guard(input.device());
-  C10_CUDA_DRIVER_CHECK(driver_api->cuDevicePrimaryCtxRetain_(
-      &pctx, (CUdevice)input.device().index()));
-
-  C10_CUDA_DRIVER_CHECK(driver_api->cuCtxGetCurrent_(&prev));
-  C10_CUDA_DRIVER_CHECK(driver_api->cuCtxSetCurrent_(pctx));
-
-  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemsetD32Async_(
       reinterpret_cast<CUdeviceptr>(addr),
       val,
       count,
       at::cuda::getCurrentCUDAStream()));
-
-  C10_CUDA_DRIVER_CHECK(driver_api->cuCtxSetCurrent_(prev));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
   return input;
 }
+#endif
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
@@ -584,7 +577,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
-
+#endif
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::memset32_),
@@ -592,5 +585,3 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 }
 
 } // namespace
-
-#endif
