@@ -21,7 +21,7 @@
 namespace at::native {
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/TriangularOps_metallib.h>
 #endif
