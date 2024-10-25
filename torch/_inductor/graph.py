@@ -203,6 +203,63 @@ def is_user_visible_output(node: torch.fx.Node) -> bool:
     )
 
 
+def get_required_strides(
+    node: torch.fx.Node, result: Optional[Any] = None
+) -> Optional[Tuple[Union[int, torch.SymInt], ...]]:
+    """
+    Obtain the stride requirement for `node` from various sources.
+    """
+    output_node = node.graph.find_nodes(op="output")[0]
+    val = node.meta.get("val")
+    if not isinstance(val, torch.Tensor):
+        return None
+
+    if (
+        # Note that config.pad_outputs can only exempt a node's stride
+        # requirement if the requirement arises solely from the node being a
+        # user-visible output.
+        not config.pad_outputs
+        and "original_output_strides" in output_node.meta
+        and "user_visible_output_idxs" in output_node.meta
+        and node in output_node.args[0]
+        and (idx := output_node.args[0].index(node))
+        in output_node.meta["user_visible_output_idxs"]
+    ):
+        return output_node.meta["original_output_strides"][idx]
+
+    # require the same stride order for dense outputs,
+    # 1. user-land view() will not throw because inductor
+    # output different strides than eager
+    # long term the solution is to make view() always succeed
+    # with infallible strides.
+    # 2: as_strided ops, we need make sure its input has same size/stride with
+    # eager model to align with eager behavior.
+    as_strided_ops = [
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_.default,
+        torch.ops.aten.as_strided_scatter.default,
+        torch.ops.aten.resize.default,
+        torch.ops.aten.resize_as.default,
+    ]
+    if any(user.target in as_strided_ops for user in node.users):
+        return val.stride()
+
+    if node.meta.get("inductor_realize_to_strides", False) and isinstance(
+        result, TensorBox
+    ):
+        result.realize()
+        strides = val.stride()
+        sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
+        if (
+            not hasattr(result, "get_stride")
+            or result.get_stride() != strides
+            and not sym_strides
+        ):
+            return strides
+
+    return None
+
+
 def mark_nodes_dislike_padding(g: Graph) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -1411,39 +1468,7 @@ class GraphLowering(torch.fx.Interpreter):
                 debug("")
                 result = super().run_node(n)
 
-            # require the same stride order for dense outputs,
-            # 1. user-land view() will not throw because inductor
-            # output different strides than eager
-            # long term the solution is to make view() always succeed
-            # with infallible strides.
-            # 2: as_strided ops, we need make sure its input has same size/stride with
-            # eager model to align with eager behavior.
-            as_strided_ops = [
-                torch.ops.aten.as_strided.default,
-                torch.ops.aten.as_strided_.default,
-                torch.ops.aten.as_strided_scatter.default,
-                torch.ops.aten.resize.default,
-                torch.ops.aten.resize_as.default,
-            ]
             is_output = any(user.op == "output" for user in n.users)
-            is_user_visible = is_user_visible_output(n)
-            is_input_for_as_strided = any(
-                user.target in as_strided_ops for user in n.users
-            )
-
-            if n.meta.get("inductor_realize_to_strides", False) and isinstance(
-                result, TensorBox
-            ):
-                result.realize()
-                strides = n.meta["val"].stride()
-                sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
-                    stride_order = ir.get_stride_order(strides)
-                    result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
                 is_output
                 and isinstance(result, TensorBox)
@@ -1452,64 +1477,48 @@ class GraphLowering(torch.fx.Interpreter):
                 # Realize so that outputs are correctly aliased
                 result.realize()
 
-            if (is_output or is_input_for_as_strided) and isinstance(
-                n.meta["val"], torch.Tensor
-            ):
-                if is_user_visible:
-                    output_node = n.graph.find_nodes(op="output")[0]
-                    output_idx = output_node.args[0].index(n)
-                    original_output_strides = output_node.meta.get(
-                        "original_output_strides"
-                    )
-                    strides = (
-                        original_output_strides[output_idx]
-                        if original_output_strides is not None
-                        else None
-                    )
-                else:
-                    strides = n.meta["val"].stride()
+            val = n.meta.get("val")
+            required_strides = get_required_strides(n, result)
 
-                if strides is not None and len(strides) > 0:
-                    allow_padding = (
-                        config.pad_outputs or not is_user_visible
-                    ) and not is_input_for_as_strided
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
-                        n.meta["val"]
-                    )
-                    unbacked_symbols_in_strides = (
-                        len(free_unbacked_symbols(strides)) > 0
-                    )
+            if isinstance(val, torch.Tensor):
+                strides = required_strides or val.stride()
+
+                # Only try to honor the channel-last preference if the node
+                # doesn't have other stride requirements.
+                if required_strides is None:
                     if (
-                        not unbacked_symbols_in_strides
-                        and dense
+                        len(strides) > 0
+                        and len(free_unbacked_symbols(strides)) == 0
+                        and torch._prims_common.is_non_overlapping_and_dense(val)
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and not is_user_visible
-                        and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
                             result.get_size(), torch.channels_last
                         )
-                    if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
-                            result.data, ir.BaseView
-                        ):
-                            result = ir.ExternKernel.require_stride_order(
-                                result,
-                                ir.get_stride_order(strides),
-                                allow_padding=allow_padding,
-                            )
-                        else:
-                            strides = [
-                                s.node.expr if isinstance(s, torch.SymInt) else s
-                                for s in strides
-                            ]
-                            result = ir.ExternKernel.require_exact_strides(
-                                result, strides, allow_padding=allow_padding
-                            )
+
+                if len(strides) > 0 and len(free_unbacked_symbols(strides)) == 0:
+                    # To avoid converting possible view ops to a copy kernel, we use the previous
+                    # require_exact_strides to handle views. But ultimately it's better to require
+                    # the right strides at the tensor definition.
+                    if val._is_view() or isinstance(result.data, ir.BaseView):
+                        result = ir.ExternKernel.require_stride_order(
+                            result,
+                            ir.get_stride_order(strides),
+                            # Note that when config.pad_outputs=True,
+                            # get_required_strides() will return None if the
+                            # node's stride requirement arises solely from the
+                            # node being a user-visible output.
+                            allow_padding=required_strides is None,
+                        )
+                    else:
+                        strides = [
+                            s.node.expr if isinstance(s, torch.SymInt) else s
+                            for s in strides
+                        ]  # type: ignore[assignment]
+                        result = ir.ExternKernel.require_exact_strides(
+                            result, strides, allow_padding=required_strides is None
+                        )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
