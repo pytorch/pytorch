@@ -46,11 +46,13 @@ class _DimHint(Enum):
     - AUTO means automatic inference of shape (static or dynamic).
     - STATIC means static shape (always specialized).
     - DYNAMIC means dynamic, will error out if specialized.
+    - UNBACKED means allocating an unbacked symbol for the shape.
     """
 
     AUTO = auto()
     STATIC = auto()
     DYNAMIC = auto()
+    UNBACKED = auto()
 
 
 class _Dim(type):
@@ -238,6 +240,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
 Dim.AUTO = _DimHint.AUTO  # type: ignore[attr-defined]
 Dim.STATIC = _DimHint.STATIC  # type: ignore[attr-defined]
 Dim.DYNAMIC = _DimHint.DYNAMIC  # type: ignore[attr-defined]
+Dim.UNBACKED = _DimHint.UNBACKED  # type: ignore[attr-defined]
 
 
 def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
@@ -920,6 +923,8 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    elif dim == _DimHint.UNBACKED:
+                        torch._dynamo.decorators.mark_unbacked(tensor, i)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
@@ -937,6 +942,8 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    elif dim == _DimHint.UNBACKED:
+                        torch._dynamo.decorators.mark_unbacked(tensor, i)
                     constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)

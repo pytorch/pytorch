@@ -2279,6 +2279,16 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # two fake modes there...
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+        if isinstance(out_proxy, list):
+            assert (
+                all(isinstance(x, Proxy) for x in out_proxy)
+                and isinstance(out, list)
+                and len(out) == len(out_proxy)
+            ), out_proxy
+            for _out, _out_proxy in zip(out, out_proxy):
+                if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, _out):
+                    _out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
+        else:
             assert isinstance(out_proxy, Proxy), out_proxy
-            out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
+            if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+                out_proxy.node.meta["unbacked_bindings"] = symbol_to_path

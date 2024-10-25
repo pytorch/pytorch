@@ -4127,6 +4127,7 @@ class ShapeEnv:
         if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
             out = self.create_unbacked_symint().node.expr
             self._constrain_range_for_size(out)
+            self.set_unbacked_var_to_val(out, val)
             # TODO: maybe put the hint somewhere
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
