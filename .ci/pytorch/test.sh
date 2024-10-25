@@ -284,7 +284,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
@@ -310,7 +310,8 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1354,7 +1355,7 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
-  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+  source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
 
