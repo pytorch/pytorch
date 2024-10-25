@@ -58,6 +58,10 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual Device getDeviceFromPtr(void* data) const {
     TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
   }
+
+  virtual Allocator* getDeviceAllocator() const {
+    TORCH_CHECK(false, "Backend doesn`t support getDeviceAllocator()");
+  }
 };
 
 } // namespace at
