@@ -115,19 +115,6 @@ def create_subclass_meta(
     return infos
 
 
-# Output structure:
-# - List[Tensor] if tracing an inference graph
-# - Tuple[List[Tensor], List[Tensor]] if tracing a joint graph.
-# This function effectively concats each inner list of subclass tensors
-# into a (potentially longer) list of inner tensors.
-#
-# This function takes in a pytree of arguments and unwraps any tensor subclasses.
-# Annoyingly, we can't use pytrees to perform the unwrapping, because unwrapping returns
-# a list of tensors that we would then need to concat together.
-# Instead, we specialize the logic for the inference vs. joint graph case.
-# NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
-
-
 def filter_symints(lst: Iterable[Union[int, SymInt]]):
     # Capture all SymInts from the iterable.
     def symint_check(s: Union[int, SymInt]) -> bool:
@@ -141,7 +128,10 @@ def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List
     return [s is None for s in lst]
 
 
-# The reason for "append_symints"
+# This function takes in a pytree of arguments and unwraps any tensor
+# subclasses.
+#
+# NOTE: The reason for "append_symints":
 #
 # * At compile time: we append extra symint args when unwrapping primals
 # (but not tangents, because they should always share symints with primals).
@@ -149,10 +139,8 @@ def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> List
 # traced function, so we can return them as extra outputs
 #
 # * At runtime: we similarly append subclass sizes when we unwrap subclass
-# primals (but not tangents) on entry to the forward.
-#
-# subclass_metas is needed at runtime to compute which indices are symints in
-# the outer_size/outer_stride
+# primals (but not tangents) on entry to the forward. See the runtime version of
+# this function below.
 def unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,
@@ -185,6 +173,8 @@ def unwrap_tensor_subclasses(
     return xs_inner
 
 
+# subclass_metas is needed at runtime to compute which indices are symints in
+# the outer_size/outer_stride
 def runtime_unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,
@@ -235,7 +225,7 @@ def runtime_unwrap_tensor_subclasses(
             continue
 
         if subclass_metas is None:
-            xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
+            get_plain_tensors(typing.cast(Tensor, x), out_append_list=xs_inner)
         else:
             meta = subclass_metas[idx]
             assert isinstance(meta, SubclassCreationMeta)
