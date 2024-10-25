@@ -397,7 +397,7 @@ class GaussianNLLLoss(_Loss):
           but with one dimension equal to 1 (to allow for broadcasting)
         - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
-          dimension (to allow for broadcasting)
+          dimension (to allow for broadcasting), or a scalar value
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
           shape as the input
@@ -438,7 +438,7 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+    def forward(self, input: Tensor, target: Tensor, var: Tensor | float) -> Tensor:
         return F.gaussian_nll_loss(
             input, target, var, full=self.full, eps=self.eps, reduction=self.reduction
         )
