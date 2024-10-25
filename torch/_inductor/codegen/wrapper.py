@@ -1476,7 +1476,7 @@ class PythonWrapperCodegen(CodeGen):
                                 f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
@@ -2124,6 +2124,14 @@ class PythonWrapperCodegen(CodeGen):
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
 
         self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        name = invoke_subgraph.get_name()
+
+        self.writeline(f"{name} = [None] * {len(invoke_subgraph.outputs)}")
+        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+        outer_outputs = [f"{name}[{i}]" for i in range(len(invoke_subgraph.outputs))]
+        self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
