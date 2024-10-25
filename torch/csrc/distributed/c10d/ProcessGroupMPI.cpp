@@ -7,7 +7,6 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -199,9 +198,6 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
     populateException();
     std::rethrow_exception(exception_);
   }
-  c10d::unregister_work(
-      c10::intrusive_ptr<
-          ProcessGroupMPI::AsyncWork>::unsafe_reclaim_from_nonowning(this));
   // Always return true, because abort API is not implemented.
   return true;
 }
