@@ -994,7 +994,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             except AttributeError:
                 method = None
 
-            if self.is_supported_nn_module_method(method):
+            params_dict = self.var_getattr(tx, "_parameters").realize()
+            if isinstance(
+                params_dict, variables.ConstDictVariable
+            ) and self.is_supported_nn_module_method(method):
                 return self.trace_supported_methods(tx, method, name, args, kwargs)
 
             if isinstance(method, staticmethod):
