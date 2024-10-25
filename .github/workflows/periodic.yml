@@ -333,6 +333,7 @@ jobs:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       use_split_build: true
@@ -363,6 +364,7 @@ jobs:
     name: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       use_split_build: true
@@ -390,6 +392,7 @@ jobs:
     name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       use_split_build: true

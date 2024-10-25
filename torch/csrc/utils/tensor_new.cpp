@@ -853,6 +853,14 @@ class CheckSparseTensorInvariantsContext {
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
+  CheckSparseTensorInvariantsContext(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext(CheckSparseTensorInvariantsContext&&) =
+      delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
   bool state;
