@@ -324,6 +324,12 @@ skip_fsdp_hooks = True
 # dynamo will not notice and will execute whichever version you first compiled.
 skip_nnmodule_hook_guards = True
 
+# Make dynamo skip no tensor aliasing guard on parameters
+# Note: unsafe: if you compile a function with different parameters as inputs,
+# and then later pass on the same parameter as two inputs, dynamo will not
+# notice and lead to incorrect result.
+skip_no_tensor_aliasing_guards_on_parameters = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
