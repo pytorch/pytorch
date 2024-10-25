@@ -1151,6 +1151,10 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
+            elif isinstance(r.get_layout(), ir.CommBufferLayout):
+                # Active references to persistent comm buffers are not allowed
+                # outside of graphs
+                result_correct_strides.append(ir.ExternKernel.copy_input(r))
             else:
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
