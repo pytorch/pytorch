@@ -263,7 +263,12 @@ main()
         x = torch.randn([1, 4, 32, 32])
 
         model(x).sum().backward()
-        ref_res = [model[0].weight.grad, model[0].bias.grad, model[1].weight.grad, model[1].bias.grad]
+        ref_res = [
+            model[0].weight.grad,
+            model[0].bias.grad,
+            model[1].weight.grad,
+            model[1].bias.grad,
+        ]
 
         model[0].weight.grad = None
         model[0].bias.grad = None
@@ -271,7 +276,12 @@ main()
         model[1].bias.grad = None
         with compiled_autograd.enable(compiler_fn):
             compiled_model(x).sum().backward(retain_graph=True)
-        res = [model[0].weight.grad, model[0].bias.grad, model[1].weight.grad, model[1].bias.grad]
+        res = [
+            model[0].weight.grad,
+            model[0].bias.grad,
+            model[1].weight.grad,
+            model[1].bias.grad,
+        ]
 
         self.assertEqual(res[0], ref_res[0])
         self.assertEqual(res[1], ref_res[1])
@@ -302,7 +312,8 @@ main()
 
                         self.grad_acc.append(grad_acc)
                         self.grad_acc_hooks.append(
-                            grad_acc.register_hook(grad_acc_hook))
+                            grad_acc.register_hook(grad_acc_hook)
+                        )
 
                     wrapper(param)
 
@@ -379,10 +390,10 @@ main()
             return torch.compile(gm, fullgraph=True, backend="inductor")
 
         def tensor_hook(grad):
-            return grad.sub(2.)
+            return grad.sub(2.0)
 
         def acc_grad_node_pre_hook(grad_out):
-            return (grad_out[0].div(5.),)
+            return (grad_out[0].div(5.0),)
 
         def post_acc_grad_hook(tensor):
             tensor.grad.add_(3.0)
@@ -394,25 +405,27 @@ main()
                 self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
 
                 self.acc_grad1 = self.conv1.weight.view_as(
-                    self.conv1.weight).grad_fn.next_functions[0][0]
+                    self.conv1.weight
+                ).grad_fn.next_functions[0][0]
                 self.conv1.weight.register_hook(tensor_hook)
-                self.conv1.weight.register_post_accumulate_grad_hook(
-                    post_acc_grad_hook)
+                self.conv1.weight.register_post_accumulate_grad_hook(post_acc_grad_hook)
                 self.acc_grad1.register_prehook(acc_grad_node_pre_hook)
 
                 def acc_grad_node_post_hook1(grad_in, grad_out):
                     self.conv1.weight.grad.mul_(10.0)
+
                 self.acc_grad1.register_hook(acc_grad_node_post_hook1)
 
                 self.acc_grad2 = self.conv2.weight.view_as(
-                    self.conv2.weight).grad_fn.next_functions[0][0]
+                    self.conv2.weight
+                ).grad_fn.next_functions[0][0]
                 self.conv2.weight.register_hook(tensor_hook)
-                self.conv2.weight.register_post_accumulate_grad_hook(
-                    post_acc_grad_hook)
+                self.conv2.weight.register_post_accumulate_grad_hook(post_acc_grad_hook)
                 self.acc_grad2.register_prehook(acc_grad_node_pre_hook)
 
                 def acc_grad_node_post_hook2(grad_in, grad_out):
                     self.conv2.weight.grad.mul_(10.0)
+
                 self.acc_grad2.register_hook(acc_grad_node_post_hook2)
 
             def forward(self, x):

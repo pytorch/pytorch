@@ -447,7 +447,11 @@ class AutogradCompilerInstance:
 
     @staticmethod
     def is_placeholder(node):
-        if node.op == "placeholder" or (node.op == "call_function" and node.target == operator.getitem and node.args[0].op == "placeholder"):
+        if node.op == "placeholder" or (
+            node.op == "call_function"
+            and node.target == operator.getitem
+            and node.args[0].op == "placeholder"
+        ):
             return True
         return False
 
@@ -538,9 +542,14 @@ class AutogradCompilerInstance:
 
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if n.op == "call_function" and n.target == torch.ops.inductor.accumulate_grad_.default:
+                if (
+                    n.op == "call_function"
+                    and n.target == torch.ops.inductor.accumulate_grad_.default
+                ):
                     acc_grad_node = n
-            assert acc_grad_node is not None, "post_acc_grad_hook must have corresponding acc grad node"
+            assert (
+                acc_grad_node is not None
+            ), "post_acc_grad_hook must have corresponding acc grad node"
 
             acc_grad_node.append(getitem_node)
             getitem_node.append(node)
@@ -573,11 +582,18 @@ class AutogradCompilerInstance:
                         input_nodes_and_users.append(user)
 
             arg = max(input_nodes_and_users)  # last input users
-            if arg.op == "call_function" and arg.target == torch.ops.inductor.accumulate_grad_.default:
+            if (
+                arg.op == "call_function"
+                and arg.target == torch.ops.inductor.accumulate_grad_.default
+            ):
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
-                    if n.op == "call_function" and n.target == call_hook and n.kwargs.get("hook_type", None) == "post_acc_grad_hook":
+                    if (
+                        n.op == "call_function"
+                        and n.target == call_hook
+                        and n.kwargs.get("hook_type", None) == "post_acc_grad_hook"
+                    ):
                         post_acc_grad_hook_node = n
 
                 if post_acc_grad_hook_node is not None:
