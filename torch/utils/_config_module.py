@@ -212,7 +212,7 @@ class ConfigModule(ModuleType):
                     continue
             if skip_default and self._is_default(key):
                 continue
-            config[key] = copy.deepcopy(self.__getattr__(key))
+            config[key] = copy.deepcopy(getattr(self, key))
         return config
 
     def save_config(self) -> bytes:
