@@ -878,7 +878,7 @@ Process 87741 stopped
 * thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
     frame #0: 0x00000001024e2628 libtorch_python.dylib`at::indexing::impl::applySelect(self=0x00000001004ee8a8, dim=0, index=(data_ = 3), real_dim=0, (null)=0x000000016fdfe535, self_sizes= Has Value=true ) at TensorIndexing.h:239:7
    236         const at::Device& /*self_device*/,
-   237         const c10::optional<SymIntArrayRef>& self_sizes) {
+   237         const std::optional<SymIntArrayRef>& self_sizes) {
    238       // See NOTE [nested tensor size for indexing]
 -> 239       if (self_sizes.has_value()) {
    240         auto maybe_index = index.maybe_as_int();
@@ -1080,10 +1080,6 @@ Here are a few well known pitfalls and workarounds:
   might work, but on Windows your program will crash. ASAN may not
   catch all of these problems: stay vigilant to the possibility that
   your crash is due to a real memory problem.
-
-* (NVCC) `c10::optional` does not work when used from device code. Don't use
-  it from kernels. Upstream issue: https://github.com/akrzemi1/Optional/issues/58
-  and our local issue #10329.
 
 * `constexpr` generally works less well on MSVC.
 
