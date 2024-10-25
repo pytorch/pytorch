@@ -15,13 +15,13 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.8", "12.1", "12.4"]
+CUDA_ARCHES = ["11.8", "12.1", "12.4", "12.6"]
 
 
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.1"}
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.1", "12.6": "12.6.2"}
 
 
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9"}
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9", "12.6": "9"}
 
 
 ROCM_ARCHES = ["6.1", "6.2"]
@@ -82,6 +82,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "12.6": (
+        "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.6.3.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -384,10 +399,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.4", "12.1", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.4", "12.1", "11.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12.4, 12.1, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12.6, 12.4, 12.1, 11.8, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -395,7 +410,7 @@ def generate_wheels_matrix(
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.4", "12.1", "11.8"]
+                arch_version in ["12.6", "12.4", "12.1", "11.8"]
                 and os == "linux"
                 or arch_version == "cuda-aarch64"
             ):
@@ -471,7 +486,7 @@ def generate_wheels_matrix(
 
     return ret
 
-
+validate_nccl_dep_consistency("12.6")
 validate_nccl_dep_consistency("12.4")
 validate_nccl_dep_consistency("12.1")
 validate_nccl_dep_consistency("11.8")
