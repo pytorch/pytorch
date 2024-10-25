@@ -1,0 +1,32 @@
+# flake8: noqa: F401
+r"""
+This file is in the process of migration to `torch/ao/quantization`, and
+is kept here for compatibility while the migration process is ongoing.
+If you are adding a new entry/functionality, please, add it to the
+`torch/ao/quantization/fake_quantize.py`, while adding an import statement
+here.
+"""
+
+from torch.ao.quantization.fake_quantize import (
+    _is_fake_quant_script_module,
+    _is_per_channel,
+    _is_per_tensor,
+    _is_symmetric_quant,
+    default_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
+    default_fixed_qparams_range_neg1to1_fake_quant,
+    default_fused_act_fake_quant,
+    default_fused_per_channel_wt_fake_quant,
+    default_fused_wt_fake_quant,
+    default_histogram_fake_quant,
+    default_per_channel_weight_fake_quant,
+    default_weight_fake_quant,
+    disable_fake_quant,
+    disable_observer,
+    enable_fake_quant,
+    enable_observer,
+    FakeQuantize,
+    FakeQuantizeBase,
+    FixedQParamsFakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
