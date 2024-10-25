@@ -3860,16 +3860,6 @@ class ShapeEnv:
             new_t = end_new - start_new
             print(f"*** timing: old: {old_t}, new: {new_t}, multiple: {old_t / new_t}")
         else:
-            old = self._compute_symbolic_stride_old(
-                source,
-                size,
-                ex_size,
-                ex_stride,
-                dynamic_strides,
-                constraint_strides,
-                are_sizes_static,
-                symbolic_context,
-            )
             new = self._compute_symbolic_stride_new(
                 source,
                 size,
@@ -3880,8 +3870,48 @@ class ShapeEnv:
                 are_sizes_static,
                 symbolic_context,
             )
+            old = self._compute_symbolic_stride_old(
+                source,
+                size,
+                ex_size,
+                ex_stride,
+                dynamic_strides,
+                constraint_strides,
+                are_sizes_static,
+                symbolic_context,
+            )
 
-        assert old == new, f"Mismatch:\n  old: {old!r}\n  new: {new!r}"
+        def recursive_eq(shape_env, a, b, state):
+            if a == b:
+                return True
+            if isinstance(a, (int, sympy.Integer)):
+                return a == b
+            elif isinstance(a, sympy.Symbol):
+                if not isinstance(b, sympy.Symbol):
+                    return False
+                if a in state:
+                    return state[a] == b
+                elif b in state:
+                    return state[b] == a
+                else:
+                    if shape_env.size_hint(a) != shape_env.size_hint(b):
+                        return False
+                    if shape_env.var_to_range[a] != shape_env.var_to_range[b]:
+                        return False
+                    state[a] = b
+                    state[b] = a
+                    return True
+            elif isinstance(a, (list, tuple)):
+                if not isinstance(b, (list, tuple)):
+                    return False
+                if len(a) != len(b):
+                    return False
+                return all(recursive_eq(shape_env, a1, b1, state) for a1, b1 in zip(a, b))
+            else:
+                breakpoint()
+
+        state = {}
+        assert recursive_eq(self, old, new, state), f"Mismatch:\n  old: {old!r}\n  new: {new!r}"
         return old
 
     def _compute_symbolic_stride_new(
