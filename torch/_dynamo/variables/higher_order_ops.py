@@ -633,7 +633,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
-            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
+            return InvokeSubgraphImplHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ in ("invoke_quant_tracer", "invoke_quant"):
+            return InvokeQuantHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1487,7 +1489,14 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="wrap_body",
+        description=None,
     ):
         return add_subgraph(
             tx,
@@ -1505,7 +1514,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         under_activation_checkpoint=False,
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
-
         (
             (body_r, treespec),
             body_graph,
@@ -1523,7 +1531,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod
+            tx,
+            fn_vt,
+            fn_args_vt,
+            kwargs,
+            body_gmod,
+            description=description,
         )
         body_node = make_attr(tx, body_name)
 
@@ -2610,28 +2623,7 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
-class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
-    ):
-        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
-        # inputs have already been seen before. If yes, the subgraph is already
-        # installed in the output graph and we can just access the subgraph
-        # using the saved attr name.
-
-        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
-
-        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
-
-        if key in tx.output.seen_invoke_subgraphs:
-            return tx.output.seen_invoke_subgraphs[key]
-
-        body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
-        )
-        tx.output.seen_invoke_subgraphs[key] = body_name
-        return body_name
-
+class InvokeSubgraphImplHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2648,7 +2640,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             _,
             body_name,
         ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
+            tx, args[0], args[2].items, kwargs, args[1].as_python_constant()
         )
 
         if len(p_kwargs) > 0:
@@ -2668,3 +2660,77 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
+
+
+class InvokeSubgraphHigherOrderVariable(InvokeSubgraphImplHigherOrderVariable):
+    def install_subgraph_in_output_graph(
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="invoke_subgraph",
+        description=None,
+    ):
+        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
+        # inputs have already been seen before. If yes, the subgraph is already
+        # installed in the output graph and we can just access the subgraph
+        # using the saved attr name.
+
+        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
+
+        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
+
+        if key in tx.output.seen_invoke_subgraphs:
+            return tx.output.seen_invoke_subgraphs[key]
+
+        body_name = super().install_subgraph_in_output_graph(
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
+        )
+        tx.output.seen_invoke_subgraphs[key] = body_name
+        return body_name
+
+
+class InvokeQuantHigherOrderVariable(InvokeSubgraphImplHigherOrderVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        scheme = kwargs.pop("scheme", None)
+        quant_options = kwargs.pop("quant_options", None)
+        if scheme:
+            scheme = scheme.guard_as_python_constant()
+        if quant_options:
+            quant_options = quant_options.guard_as_python_constant()
+
+        tc = torch._guards.TracingContext.get()
+        identifier = f"quant_invoke_{next(tc.invoke_subgraph_mapping_counter)}"
+        tc.invoke_subgraph_mapping[identifier] = (scheme, quant_options)
+        return super().call_function(
+            tx,
+            [args[0], variables.ConstantVariable(identifier)] + args[1:],
+            kwargs=kwargs,
+        )
+
+    def install_subgraph_in_output_graph(
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="wrap_body",
+        description=None,
+    ):
+        assert description is not None
+        out = add_subgraph(
+            tx,
+            f"{description}",
+            body_gmod,
+        )
+        tc = torch._guards.TracingContext.get()
+        tc.invoke_subgraph_mapping[out] = tc.invoke_subgraph_mapping[description]
+        return out
