@@ -34,6 +34,18 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
+    def _discontiguous_tensor(
+        self, view_size: Tuple[int, ...], device=torch.device(GPU_TYPE)
+    ) -> torch.Tensor:
+        """
+        Create a padded tensor of the given size.
+        The strides correspond to a tensor that is twice as large in each dimension.
+        """
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+        return view
+
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -205,14 +217,7 @@ class TritonBlockPointerTest(InductorTestCase):
             b = y * 2
             return a + b
 
-        def get_input(view_size: Tuple[int]) -> torch.Tensor:
-            device = torch.device(GPU_TYPE)
-            full_size = tuple(2 * dim for dim in view_size)
-            full = torch.randn(full_size).to(device)
-            view = torch.as_strided(full, view_size, full.stride())
-            return view
-
-        x, y = (get_input(size) for size in (x_size, y_size))
+        x, y = (self._discontiguous_tensor(size) for size in (x_size, y_size))
 
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
@@ -310,10 +315,7 @@ class TritonBlockPointerTest(InductorTestCase):
         Tests a reduction kernel.
         """
 
-        device = torch.device(GPU_TYPE)
-        full_size = tuple(2 * dim for dim in view_size)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(view_size)
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -346,15 +348,7 @@ class TritonBlockPointerTest(InductorTestCase):
         def foo(x, y):
             return torch.sum(x + y)
 
-        device = torch.device(GPU_TYPE)
-        full_size = tuple(2 * dim for dim in view_size)
-
-        def get_input() -> torch.Tensor:
-            full = torch.randn(full_size).to(device)
-            view = torch.as_strided(full, view_size, full.stride())
-            return view
-
-        inputs = [get_input() for input_idx in range(2)]
+        inputs = [self._discontiguous_tensor(view_size) for input_idx in range(2)]
 
         # Expect 2 block pointers: inputs
         result, (code,) = self.run_and_compare(
@@ -516,11 +510,7 @@ class TritonBlockPointerTest(InductorTestCase):
         """
         Tests a reduction kernel.
         """
-
-        device = torch.device(GPU_TYPE)
-        full_size = tuple(2 * dim for dim in view_size)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(view_size)
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -541,11 +531,9 @@ class TritonBlockPointerTest(InductorTestCase):
         """
         Tests a 2D reduction without an "x" dimension.
         """
-        view_size = (2, 346)  # Need to choose a specific size to get no x dim
-        device = torch.device(GPU_TYPE)
-        full_size = tuple(2 * dim for dim in view_size)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(
+            (2, 346)
+        )  # Need to choose a specific size to get no x dim
 
         # Expect 1 block pointer for the input.
         result, (code,) = self.run_and_compare(
