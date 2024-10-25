@@ -19,6 +19,7 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
+    ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
     SymIntArgument,
@@ -219,19 +220,6 @@ class UnflattenedModule(torch.nn.Module):
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
-        preserved_module_targets_with_multiple_calls = [
-            entry.fqn.split("@")[0]
-            for entry in export_module.module_call_graph
-            if "@" in entry.fqn
-        ]
-        for buf in export_module.graph_signature.buffers_to_mutate.values():
-            for fqn in preserved_module_targets_with_multiple_calls:
-                if buf.startswith(fqn + "."):
-                    raise ValueError(
-                        f"Found multiple calls of module {fqn} that mutate buffer {buf}. "
-                        "Unflattening while preserving signatures is NYI for this case."
-                    )
-
         fqn_list = [entry.fqn for entry in export_module.module_call_graph]
         assert fqn_list[0] == ""
         export_graph = deepcopy(export_module.graph)
@@ -245,7 +233,15 @@ class UnflattenedModule(torch.nn.Module):
         self._run_with_interpeter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
+
+        self.ivals = _IVals()
+        # record any intermediate value x that is used, with the modules that used it,
+        # and generate instructions to read the corresponding attribute
         seen_modules = _outline_submodules(export_graph, self)
+        # for each read intermediate value x, find the module that created it,
+        # and generate instructions to update the corresponding attribute;
+        # finally, initialize all these attributes
+        self.ivals.create(seen_modules.values())
 
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
@@ -584,7 +580,10 @@ def unflatten(
     return UnflattenedModule(module, flat_args_adapter)
 
 
-def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
+def _inplace_buffer_mutations(
+    graph: torch.fx.Graph,
+    graph_signature: ExportGraphSignature,
+) -> None:
     """Transform buffer mutations from their functionalized form into a copy_
     node in the graph.
 
@@ -784,8 +783,10 @@ class _ModuleFrame:
 
         if module is not None:
             self.module = module
+            self.ivals = module.ivals if hasattr(module, "ivals") else {}
         else:
             self.module = InterpreterModule(torch.fx.Graph())
+            self.ivals = parent.ivals
 
         self.graph = self.module.graph
 
@@ -948,6 +949,10 @@ class _ModuleFrame:
             # if module call signature needs to be preserved
             self.copy_sym_call_function(x)
             return self.node_map[x]
+        elif self.module_call_graph.get(self.fqn) is not None:
+            # x is an ival that is not in placeholders, so create a
+            # get_attr node corresponding to attribute __ival__x
+            return self.ivals.read(self.fqn, self.graph, x)
         else:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
@@ -1196,6 +1201,106 @@ def _reorder_submodules(
     children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)
+
+
+class _IVals:
+    """
+    Collect the intermediate values of buffer mutations in a graph,
+    along with the module call fqns that create and use them. Later,
+    in each fqn associated with an intermediate value we will install
+    a corresponding attribute, so that it can be updated and read.
+
+    Example: in the following graph, suppose that buf_in and buf_out
+    are the input and output values of a buffer.
+
+        buf_in = placeholder()
+        ...
+        ival1 = f0(buf_in, ...)  # inside self.n0(...)
+        ...
+        ival2 = f1(ival1, ...)  # inside self.n1(...)
+        ...
+        buf_out = f2(ival2, ...)  # inside self.n2(...)
+        return buf_out, ...
+
+    Here ival1 and ival2 are intermediate values created inside
+    calls to n0 and n1 respectively, and used inside calls to
+    n1 and n2 respectively.
+
+    Thus our analysis will produce {ival1: {n0, n1}, ival2: {n1, n2}}.
+    """
+
+    def __init__(self):
+        # ival node name -> set of fqns that create and use it
+        self.fqns = defaultdict(set)
+        # ival node name -> tensor storage for corresponding attribute
+        self.storage = {}
+
+    def read(self, fqn, graph, node):
+        """
+        Read attribute corresponding to a given intermediate value.
+        """
+        # to read ival x, get attribute __ival__x
+        with graph.inserting_before(None):
+            ival_node = graph.get_attr("__ival__" + node.name, type_expr=node.type)
+            ival_node.meta = copy.copy(node.meta)
+
+        if node.name not in self.storage:
+            # create empty tensor matching fake, using a cache
+            # to ensure the same tensor is returned per ival_name
+            fake = node.meta["val"]
+            self.storage[node.name] = torch.empty(fake.shape, dtype=fake.dtype)
+        self.fqns[node.name].add(fqn)
+
+        return ival_node
+
+    def update(self, fqn, graph, node):
+        """
+        Update attribute corresponding to a given intermediate value.
+        """
+        self.fqns[node.name].add(fqn)
+
+        # to update ival x, get attribute __ival__x and copy x to __ival__x
+        with graph.inserting_after(node):
+            ival_node = graph.get_attr("__ival__" + node.name, type_expr=node.type)
+            ival_node.meta = copy.copy(node.meta)
+        with graph.inserting_after(ival_node):
+            new_ival_node = graph.create_node(
+                "call_function", torch.ops.aten.copy_, (ival_node, node)
+            )
+            new_ival_node.meta = copy.copy(node.meta)
+
+    def create(self, partitions):
+        """
+        Update attributes corresponding to intermediate values that were read.
+        Finally, initialize attributes in all modules that read or update
+        corresponding intermediate values.
+        """
+
+        entries = []
+        for shared_submodules in partitions:
+            for entry in shared_submodules:
+                entries.append(entry)
+                graph = entry.module.graph
+                for node in graph.nodes:
+                    if node.name in self.storage:
+                        self.update(entry.fqn, graph, node)
+
+        # fqn -> list of ival node names read or updated through it
+        ivals = defaultdict(list)
+        for name, fqns in self.fqns.items():
+            for fqn in fqns:
+                ivals[fqn].append(name)
+
+        for entry in entries:
+            for name in ivals[entry.fqn]:
+                ival_name = f"__ival__{name}"
+                # for a ival named x created in module call m,
+                # create attribute m.__ival__x, initially empty
+                setattr(
+                    entry.module,
+                    ival_name,
+                    self.storage[name],
+                )
 
 
 def _deduplicate_modules(partitions):
