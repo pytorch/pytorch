@@ -21,6 +21,7 @@ class ResultFileEntry:
     metric_name: str
     actual_value: int
 
+
 def replace_with_zeros(num):
     """
     Keeps the first three digits of an integer and replaces the rest with zeros.
@@ -48,6 +49,7 @@ def replace_with_zeros(num):
         modified_num = num
 
     return modified_num
+
 
 def main():
     # Expected file is the file that have the results that we are comparing against.
@@ -129,7 +131,11 @@ def main():
 
         new_entry = copy.deepcopy(entry)
         # only change if abs(ratio) > entry.noise_margin /4.
-        new_entry.expected_value = replace_with_zeros(result) if abs(ratio) > entry.noise_margin / 4 else entry.expected_value
+        new_entry.expected_value = (
+            replace_with_zeros(result)
+            if abs(ratio) > entry.noise_margin / 4
+            else entry.expected_value
+        )
         new_expected[key] = new_entry
 
         if result > high:
@@ -183,9 +189,6 @@ def main():
                     }
                 ),
             )
-    print("new expected results file content if needed:")
-    with open(reference_expected_results_path) as f:
-        print(f.read())
 
     with open(reference_expected_results_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
@@ -200,6 +203,15 @@ def main():
                     entry.noise_margin,
                 ]
             )
+            # Three empty rows for merge conflicts.
+            writer.writerow([])
+            writer.writerow([])
+            writer.writerow([])
+
+    print("new expected results file content if needed:")
+    with open(reference_expected_results_path) as f:
+        print(f.read())
+
     if fail:
         print(
             f"There was some failures you can use the new reference expected result stored at path:"
