@@ -281,23 +281,34 @@ class Unpickler:
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
-                if type(inst) is torch.Tensor:
-                    # Legacy unpickling
-                    inst.set_(*state)
-                elif type(inst) is torch.nn.Parameter:
-                    inst.__setstate__(state)
-                elif type(inst) is OrderedDict:
-                    inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
-                    if hasattr(inst, "__setstate__"):
+                BUILD_ERROR_STR = (
+                    "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
+                    f"via `add_safe_globals`, but got {type(inst)}"
+                )
+                slotstate = None
+                if isinstance(state, tuple) and len(state) == 2:
+                    state, slotstate = state
+                if state:
+                    if type(inst) is torch.Tensor:
+                        # Legacy unpickling
+                        inst.set_(*state)
+                    elif type(inst) is torch.nn.Parameter:
                         inst.__setstate__(state)
-                    else:
+                    elif type(inst) is OrderedDict:
                         inst.__dict__.update(state)
-                else:
-                    raise UnpicklingError(
-                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
-                        f"via `add_safe_globals`, but got {type(inst)}"
-                    )
+                    elif type(inst) in _get_user_allowed_globals().values():
+                        if hasattr(inst, "__setstate__"):
+                            inst.__setstate__(state)
+                        else:
+                            inst.__dict__.update(state)
+                    else:
+                        raise UnpicklingError(BUILD_ERROR_STR)
+                if slotstate:
+                    if type(inst) in _get_user_allowed_globals().values():
+                        for k, v in slotstate.items():
+                            setattr(inst, k, v)
+                    else:
+                        raise UnpicklingError(BUILD_ERROR_STR)
             # Stack manipulation
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
