@@ -164,7 +164,6 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         del config.e_ignored
 
     def test_get_hash(self):
-        print(config.get_hash())
         self.assertEqual(
             config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
