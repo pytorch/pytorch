@@ -47,6 +47,8 @@ def main():
     with open(expected_file_path) as f:
         reader = csv.reader(f)
         for row in reader:
+            if len(row) == 0:
+                continue
             entry = ExpectedFileEntry(
                 benchmark_name=row[0].strip(),
                 metric_name=row[1].strip(),
