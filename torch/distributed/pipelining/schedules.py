@@ -2363,7 +2363,7 @@ def _simulate_comms_compute(
                 ):
                     return True
                 elif (
-                    p.computation_type in (B, BW)
+                    p.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
                     and p.stage_index == action.stage_index + 1
                     and p.microbatch_index == action.microbatch_index
                 ):
