@@ -3578,42 +3578,17 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs: Dict[str, Any],
         node_schedule: List[BaseSchedulerNode],
     ) -> List[SIMDKernel]:
+        kernels: List[SIMDKernel] = [kernel]
         if not config.triton.multi_kernel:
-            return [kernel]
-        optional_cooperative = kernel.cooperative_reduction and not kernel_kwargs.get(
-            "override_cooperative_reduction"
-        )
+            return kernels
+
         optional_persistent = kernel.persistent_reduction and not kernel_kwargs.get(
             "override_persistent_reduction"
         )
-
-        kernels: List[SIMDKernel] = [kernel]
-        if optional_cooperative:
-            # TODO(jansel): should we gate this based on size?
-            kernels.append(
-                other := self.kernel_type(
-                    *kernel_args,
-                    **kernel_kwargs,
-                    override_cooperative_reduction=False,
-                )
-            )
-            if optional_persistent and other.persistent_reduction:
-                kernels.append(
-                    self.kernel_type(
-                        *kernel_args,
-                        **kernel_kwargs,
-                        override_persistent_reduction=False,
-                    )
-                )
-                kernels.append(
-                    self.kernel_type(
-                        *kernel_args,
-                        **kernel_kwargs,
-                        override_cooperative_reduction=False,
-                        override_persistent_reduction=False,
-                    )
-                )
-        elif optional_persistent:
+        optional_cooperative = kernel.cooperative_reduction and not kernel_kwargs.get(
+            "override_cooperative_reduction"
+        )
+        if optional_persistent:
             kernels.append(
                 self.kernel_type(
                     *kernel_args,
@@ -3621,6 +3596,26 @@ class TritonScheduling(SIMDScheduling):
                     override_persistent_reduction=False,
                 )
             )
+        if optional_cooperative:
+            _, rnumel = kernel.numels
+            # for larger sizes non-cooperative gets very slow
+            if V.graph.sizevars.statically_known_leq(rnumel, 65536):
+                kernels.append(
+                    other := self.kernel_type(
+                        *kernel_args,
+                        **kernel_kwargs,
+                        override_cooperative_reduction=False,
+                    )
+                )
+                if optional_persistent and other.persistent_reduction:
+                    kernels.append(
+                        self.kernel_type(
+                            *kernel_args,
+                            **kernel_kwargs,
+                            override_cooperative_reduction=False,
+                            override_persistent_reduction=False,
+                        )
+                    )
 
         if len(kernels) > 1:
             for kernel2 in kernels[1:]:
