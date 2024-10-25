@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Callable, List, Tuple, Union
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -62,13 +62,13 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
-@exposed_in("torch")
+@exposed_in("torch")  # type: ignore[misc]
 def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
     false_fn: Callable,
     operands: Union[Tuple, List] = (),
-):
+) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 

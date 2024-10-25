@@ -7,15 +7,8 @@
 # may not be very robust because it's not clear what __module__ is used for.
 # However, both numpy and jax overwrite the __module__ attribute of their APIs
 # without problem, so it seems fine.
-
-from typing import Any, Callable, TypeVar
-
-
-_F = TypeVar("_F", bound=Callable[..., Any])
-
-
-def exposed_in(module: str) -> Callable[[_F], _F]:
-    def wrapper(fn: _F) -> _F:
+def exposed_in(module):
+    def wrapper(fn):
         fn.__module__ = module
         return fn
 
