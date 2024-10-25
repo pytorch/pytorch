@@ -280,9 +280,9 @@ algorithms.
 
     >>> scheduler = ...
     >>> for epoch in range(100):
-    >>>	    train(...)
-    >>>	    validate(...)
-    >>>	    scheduler.step()
+    >>>     train(...)
+    >>>     validate(...)
+    >>>     scheduler.step()
 
 .. warning::
   Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
@@ -520,7 +520,7 @@ EMA models are constructed by specifying the ``multi_avg_fn`` argument as follow
 >>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
-Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Suggested values are close to 1.0, as too low decay values can negatively impact model convergence.
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to :func:`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999.
 
 :func:`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
@@ -549,7 +549,7 @@ the parameters that you provide, but you can also use custom averaging functions
 In the following example ``ema_model`` computes an exponential moving average using the ``avg_fn`` parameter:
 
 >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
->>>	    0.9 * averaged_model_parameter + 0.1 * model_parameter
+>>>         0.9 * averaged_model_parameter + 0.1 * model_parameter
 >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 
 
@@ -567,7 +567,7 @@ constant. For example, the following code creates a scheduler that linearly anne
 learning rate from its initial value to 0.05 in 5 epochs within each parameter group:
 
 >>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, \
->>>	    anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
+>>>         anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
 
 You can also use cosine annealing to a fixed value instead of linear annealing by setting
 ``anneal_strategy="cos"``.
@@ -607,15 +607,15 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
 >>>
 >>> for epoch in range(300):
->>>	  for input, target in loader:
->>>	      optimizer.zero_grad()
->>>	      loss_fn(model(input), target).backward()
->>>	      optimizer.step()
->>>	  if epoch > swa_start:
->>>	      swa_model.update_parameters(model)
->>>	      swa_scheduler.step()
->>>	  else:
->>>	      scheduler.step()
+>>>       for input, target in loader:
+>>>           optimizer.zero_grad()
+>>>           loss_fn(model(input), target).backward()
+>>>           optimizer.step()
+>>>       if epoch > swa_start:
+>>>           swa_model.update_parameters(model)
+>>>           swa_scheduler.step()
+>>>       else:
+>>>           scheduler.step()
 >>>
 >>> # Update bn statistics for the swa_model at the end
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
@@ -631,14 +631,14 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 
 >>> loader, optimizer, model, loss_fn = ...
 >>> ema_model = torch.optim.swa_utils.AveragedModel(model, \
->>>		multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
+>>>             multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
 >>>
 >>> for epoch in range(300):
->>>	  for input, target in loader:
->>>	      optimizer.zero_grad()
->>>	      loss_fn(model(input), target).backward()
->>>	      optimizer.step()
->>>	      ema_model.update_parameters(model)
+>>>       for input, target in loader:
+>>>           optimizer.zero_grad()
+>>>           loss_fn(model(input), target).backward()
+>>>           optimizer.step()
+>>>           ema_model.update_parameters(model)
 >>>
 >>> # Update bn statistics for the ema_model at the end
 >>> torch.optim.swa_utils.update_bn(loader, ema_model)
