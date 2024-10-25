@@ -151,14 +151,15 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
-def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
-    assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors: List[Tensor] = []
+def get_plain_tensors(
+    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
+) -> List[Tensor]:
+    # This function is used in Runtime, do not add redundant asserts
+    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            assert isinstance(curr, Tensor)
             plain_tensors.append(curr)
             continue
 
@@ -1438,9 +1439,14 @@ class FakeTensorMode(TorchDispatchMode):
         if isinstance(func, torch._ops.HigherOrderOperator):
             # For invoke_subgraph op, if the identifier is set then its safe to
             # cache the fake tensor result.
-            if func is torch._higher_order_ops.invoke_subgraph:
-                if isinstance(args[1], str):
-                    return
+            from torch._higher_order_ops.utils import (
+                registered_hop_fake_tensor_cache_key_validation_fns,
+            )
+
+            if func in registered_hop_fake_tensor_cache_key_validation_fns:
+                return registered_hop_fake_tensor_cache_key_validation_fns[func](
+                    self, *args, **kwargs
+                )
 
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")

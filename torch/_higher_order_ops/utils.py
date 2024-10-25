@@ -464,6 +464,9 @@ registered_hop_fake_fns: Dict[torch._ops.OpOverload, Callable] = {}
 
 
 def register_hop_fake(op, fn=None):
+    """
+    Register a fake function for a HOP.
+    """
     assert op not in registered_hop_fake_fns
 
     def register(func):
@@ -474,6 +477,26 @@ def register_hop_fake(op, fn=None):
             return mode.__torch_dispatch__(op, [], args, kwargs)
 
         registered_hop_fake_fns[op] = func
+        return func
+
+    if fn is None:
+        return register
+    return register(fn)
+
+
+registered_hop_fake_tensor_cache_key_validation_fns: Dict[
+    torch._ops.OpOverload, Callable
+] = {}
+
+
+def register_hop_fake_tensor_cache_key_validation(op, fn=None):
+    """
+    Register fake tensor cache key validation function for a HOP.
+    """
+    assert op not in registered_hop_fake_tensor_cache_key_validation_fns
+
+    def register(func):
+        registered_hop_fake_tensor_cache_key_validation_fns[op] = func
         return func
 
     if fn is None:

@@ -589,12 +589,19 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_fake_tensor_cache_key_validation(self, identifier: str, value: bool): ...
+
+    @abstractmethod
+    def get_fake_tensor_cache_key_validation(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: Dict[str, Callable] = {}
         self.proxy_dispatch_cache: Dict[str, Callable] = {}
         self.dynamo_identifiers: Dict[str, str] = {}
+        self.cache_key_validation_done: Dict[str, Union[None, bool]] = {}
 
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
@@ -613,6 +620,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_fake_tensor_cache_key_validation(self, identifier: str, value: bool):
+        self.cache_key_validation_done[identifier] = value
+
+    def get_fake_tensor_cache_key_validation(self, identifier: str):
+        return self.cache_key_validation_done.get(identifier, None)
 
 
 class HopDispatchSetCache:
