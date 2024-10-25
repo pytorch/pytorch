@@ -6244,7 +6244,11 @@ def dot(self, other):
             return torch.vdot(other.conj(), self)
 
     _dot_check(self, other)
-    return torch.sum(self * other, dtype=self.dtype)
+
+    return elementwise_type_promotion_wrapper(
+        type_promoting_args=("self", "other"),
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )(lambda self, other: (self * other).sum())(self, other)
 
 
 @register_decomposition(aten.vdot)
@@ -6262,8 +6266,12 @@ def vdot(self, other):
         return torch.dot(self, other.conj()).conj()
 
     _dot_check(self, other)
+
     # The decomposition fails if you do self.conj()... not sure why
-    return torch.sum(self.conj_physical() * other, dtype=self.dtype)
+    return elementwise_type_promotion_wrapper(
+        type_promoting_args=("self", "other"),
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )(lambda self, other: (self.conj_physical() * other).sum())(self, other)
 
 
 @register_decomposition(aten.select_scatter)
