@@ -3190,18 +3190,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         input = torch.full((10240, 10240), float(self.rank), device=f"cuda:{self.rank}")
         dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        # self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
         # Running another collective on the same tensor should still work
         dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        # self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
-
-        # Intentionally test memory-stressed case
-        for _ in range(50000):
-            input = torch.full(
-                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
-            )
-            dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
-        # self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 50002)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

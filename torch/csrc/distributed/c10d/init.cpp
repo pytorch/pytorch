@@ -933,9 +933,9 @@ This class does not support ``__members__`` property.)");
       py::arg("tensor"),
       py::arg("work"));
 
-  module.def("_get_work_registry_size", [](bool is_weakref) {
-    return ::c10d::get_work_registry_size(is_weakref);
-  }, py::arg("is_weakref"));
+  module.def("_get_work_registry_size", []() {
+    return ::c10d::get_work_registry_size();
+  });
 
   // Remove a group from the native registry
   module.def(

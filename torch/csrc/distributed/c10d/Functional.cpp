@@ -42,7 +42,6 @@ at::Tensor& all_reduce_(
   std::vector<at::Tensor> inputs{input};
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce(inputs, opts);
-  c10d::register_work(input, work);
   return input;
 }
 
@@ -65,9 +64,6 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce_coalesced(inputs, opts);
-  for (const auto& tensor : inputs) {
-    c10d::register_work(tensor, work);
-  }
   return inputs;
 }
 
@@ -108,9 +104,6 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
-  for (const auto& tensor : outputs) {
-    c10d::register_work(tensor, work);
-  }
   return outputs;
 }
 
@@ -132,7 +125,6 @@ at::Tensor& all_gather_into_tensor_out(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->_allgather_base(output, input, opts);
-  c10d::register_work(output, work);
   return output;
 }
 
@@ -168,9 +160,6 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
-  for (const auto& tensor : outputs) {
-    c10d::register_work(tensor, work);
-  }
   return outputs;
 }
 
@@ -202,7 +191,6 @@ at::Tensor all_to_all_single(
       const_cast<at::Tensor&>(input),
       output_split_sizes,
       input_split_sizes);
-  c10d::register_work(output, work);
   return output;
 }
 
@@ -214,7 +202,6 @@ at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->broadcast(inputs, opts);
-  c10d::register_work(input, work);
   return input;
 }
 
