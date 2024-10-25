@@ -401,7 +401,7 @@ at::Tensor CUDASymmetricMemory::get_signal_pad(
   const auto element_size = c10::elementSize(*dtype);
   std::vector<int64_t> shape;
   if (sizes.size() != 0) {
-    shape = std::move(sizes.vec());
+    shape = sizes.vec();
   } else {
     shape.push_back(signal_pad_size / element_size);
   }
