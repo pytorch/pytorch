@@ -96,8 +96,8 @@ def _binary_helper(fn, args, kwargs, inplace):
             "Input masks must match. If you need support for this, please open an issue on Github."
         )
 
-    data_args, data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
-    mask_args, mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())
+    data_args, _data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
+    mask_args, _mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())
 
     args0_layout = data_args[0].layout
     same_layout = (
