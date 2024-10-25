@@ -2321,8 +2321,6 @@ def _simulate_comms_compute(
 
     _prev_ops_rank: Dict[int, Set[_Action]] = {rank: set() for rank in _schedule}
 
-    # TODO(whc) - restore the _prev_ops helper that adds the one next op from the pipeline_order to the set
-    # to restore previous simulator behavior and pass failing tests
     def add_to_schedule(rank: int, action: Optional[_Action]):
         _schedule[rank].append(action)
         if action is not None:
