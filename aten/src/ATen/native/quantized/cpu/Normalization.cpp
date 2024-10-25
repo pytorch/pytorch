@@ -389,7 +389,7 @@ Tensor quantized_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   Tensor qy;
   // TODO: this should arguably support 3d as well
