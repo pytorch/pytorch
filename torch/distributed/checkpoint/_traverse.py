@@ -32,17 +32,20 @@ def _keep_visiting_tensors(value: STATE_DICT_ITEM) -> bool:
     return isinstance(value, torch.Tensor)
 
 
-# TODO: update docstring for traverse.py
 def traverse_state_dict(
     state_dict: STATE_DICT_TYPE,
     visitor: Callable[[OBJ_PATH, STATE_DICT_ITEM], None],
     keep_traversing: Callable[[STATE_DICT_ITEM], bool] = _keep_visiting_tensors,
 ) -> None:
     """
-    Invoke ``visitor`` for each value recursively in ``state_dict``.
-    Mapping will be traversed and ``visitor`` will be applied to the leaf elements.
-    ``visitor`` will only be applied to elements in a list or a tuple, if the
-    container contains tensors or mappings.
+    Recursively traverse a `state_dict`` and apply a ``visitor`` function to each leaf element.
+    ``visitor`` will only be applied to elements in a list or a tuple, if the container contains tensors or mappings.
+
+    Args:
+        state_dict (STATE_DICT_TYPE): The state dictionary to traverse.
+        visitor (Callable[[OBJ_PATH, STATE_DICT_ITEM], None]): A function to apply to each leaf element.
+        keep_traversing (Callable[[STATE_DICT_ITEM], bool], optional): A function to determine whether to
+            continue traversing a container.
     """
 
     def _is_terminal(value: STATE_DICT_ITEM) -> bool:
@@ -81,10 +84,19 @@ def traverse_state_dict_v_2_3(
     keep_traversing: Callable[[STATE_DICT_ITEM], bool] = _keep_visiting_tensors,
 ) -> None:
     """
+    Recursively traverse a `state_dict`` and apply a ``visitor`` function to each leaf element.
+
     Traversal is short-circuited when if finds a collection for which ``keep_visiting_tensors`` evaluates
     to false for all elements.
     By default, all collections with at least one ``torch.Tensor`` element are traversed.
     Visitor takes a path argument that is a tuple of the keys used to reach it.
+
+    Args:
+        state_dict (STATE_DICT_TYPE): The state dictionary to traverse.
+        visitor (Callable[[OBJ_PATH, STATE_DICT_ITEM], None]): A function to apply to each leaf element.
+        keep_traversing (Callable[[STATE_DICT_ITEM], bool], optional): A function to determine whether to
+            continue traversing a container.
+
     """
 
     # a value is terminal if it has no other containers values inside it
@@ -121,7 +133,15 @@ def traverse_state_dict_v_2_3(
 def set_element(
     root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: STATE_DICT_ITEM
 ) -> None:
-    """Set ``value`` in ``root_dict`` along the ``path`` object path."""
+    """
+    This function navigates through the `root_dict` following the sequence of keys
+    provided in `path` and sets the `value` at the final key.
+
+    Args:
+        root_dict (STATE_DICT_TYPE): The root dictionary to modify.
+        path (OBJ_PATH): A tuple representing the sequence of keys to navigate through the dictionary.
+        value (STATE_DICT_ITEM): The value to set.
+    """
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
     def extend_list(lst: List[STATE_DICT_ITEM], idx: int) -> None:
@@ -155,7 +175,17 @@ def get_element(
     path: OBJ_PATH,
     default_value: Optional[T] = None,
 ) -> Optional[T]:
-    """Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found."""
+    """
+    Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found.
+
+    Args:
+        root_dict (STATE_DICT_TYPE): The root dictionary to search.
+        path (OBJ_PATH): A tuple representing the sequence of keys to navigate through the dictionary.
+        default_value (Optional[T], optional): The value to return if the path is not found. Defaults to None.
+
+    Returns:
+        Optional[T]: The value at the specified path, or `default_value` if the path is not found.
+    """
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
         if type(part) is int:
@@ -204,5 +234,10 @@ def print_tensor(
 
     By default the content is printed using the builtin ``print`` but this can
     be change by passing a different ``print_fun` callable.
+
+    Args:
+        path (OBJ_PATH): A tuple representing the sequence of keys to navigate through the dictionary.
+        value (STATE_DICT_ITEM): The value to print.
+        print_fun (Callable[[str], None], optional): Print function to use. Defaults to `print`.
     """
     _print_nested(value, prefix=str(path), print_fun=print_fun)
