@@ -994,15 +994,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
         use_full_backward: Optional[bool] = None,
     ):
-        # TODO(whc) can we just delete this assert? It is convenient to do a unit test with a single stage, and
-        # eventually I wonder if we should delete all the PipelineScheduleSingle classes and unify to IR-based schedules
-        # using the 'Runtime' class which happens to derive from Multi.
-        # if len(stages) <= 1:
-        #     raise ValueError(
-        #         f"Multi-stage schedule expects at least two stages but got {len(stages)}"
-        #     )
         # Init parent
-
         super().__init__(
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
@@ -2190,7 +2182,7 @@ def _simulate_comms_compute(
 
     # TODO(whc) - restore the _prev_ops helper that adds the one next op from the pipeline_order to the set
     # to restore previous simulator behavior and pass failing tests
-    def schedule(rank: int, action: Optional[_Action]):
+    def add_to_schedule(rank: int, action: Optional[_Action]):
         _schedule[rank].append(action)
         if action is not None:
             _prev_ops_rank[rank].add(action)
@@ -2262,11 +2254,11 @@ def _simulate_comms_compute(
             action = pipeline_order[rank][0]
             if _ready_to_schedule(action):
                 if action is not None:
-                    schedule(rank, action)
+                    add_to_schedule(rank, action)
                 pipeline_order[rank].pop(0)
                 progress = True
             else:
-                schedule(rank, None)
+                add_to_schedule(rank, None)
 
         for i in sorted(pipeline_order, reverse=True):
             if len(pipeline_order[i]) == 0:
