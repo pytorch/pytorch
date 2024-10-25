@@ -572,8 +572,13 @@ def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
 class HalideCSEVariable(CSEVariable):
     undefined_re = re.compile(r"\b(tmp\d+)\[\?\]")
 
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -706,9 +711,9 @@ class HalideKernel(SIMDKernel):
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
         self.has_indirect_indexing = False
 
-    def create_cse_var(self, name, bounds=None):
+    def create_cse_var(self, name, bounds=None, dtype=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds)
+        return HalideCSEVariable(name, bounds, dtype)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
