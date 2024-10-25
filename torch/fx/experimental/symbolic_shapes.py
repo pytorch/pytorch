@@ -2144,9 +2144,9 @@ class DimConstraints:
         source_name_to_debug_name: Mapping[str, str],
     ) -> None:
         # We try to solve systems of inequalities with 1 free variable.
-        self._univariate_inequalities: Dict[sympy.Symbol, Set[SympyBoolean]] = (
-            defaultdict(set)
-        )
+        self._univariate_inequalities: Dict[
+            sympy.Symbol, Set[SympyBoolean]
+        ] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
         # NOTE: _symbols_with_equalities is always a subset of _univariate_inequalities.keys()
         # and removing a symbol from the former => removing it from the latter.
@@ -4248,9 +4248,9 @@ class ShapeEnv:
                         sloc,
                     )
                 else:
-                    self.var_to_range[sympy_expr] = (
-                        self._default_unspecified_value_range()
-                    )
+                    self.var_to_range[
+                        sympy_expr
+                    ] = self._default_unspecified_value_range()
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
 
                 # Small performance optimization: if we have a min-max constraint,
@@ -4513,9 +4513,9 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
-        symbol_to_constraints: DefaultDict[sympy.Symbol, Set[Constraint]] = (
-            collections.defaultdict(set)
-        )
+        symbol_to_constraints: DefaultDict[
+            sympy.Symbol, Set[Constraint]
+        ] = collections.defaultdict(set)
         constraint_violations: List[Tuple[bool, str, Callable[[], str]]] = []
 
         def record_constraint_violation(
