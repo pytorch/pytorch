@@ -64,13 +64,6 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
-// TODO: remove this change after a safe rollout.
-// Control whether we sleep after an exception is thrown.
-// This change is temporary and is used to safely remove the current sleep that
-// exists after an exception is thrown.
-static std::vector<std::string> TORCH_NCCL_SLEEP_AFTER_EXCEPTION = {
-    "TORCH_NCCL_SLEEP_AFTER_EXCEPTION"};
-
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -499,13 +492,20 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
     // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
     // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
-    // accepts int. Otherwise, an imlicit conversion may happen at the API call
+    // accepts int. Otherwise, an implicit conversion may happen at the API call
     // and the value may become negative.
     // [Note 2]: this member is pybinded to Python, the value passed from Python
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
+#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+#else
+    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
+    // `split_color` is pybinded to Python, so we need to define it. So we use
+    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
+    int split_color{-2};
+#endif
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };
@@ -715,6 +715,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void eagerConnectSingleDevice(at::Device device) override;
 
   void performNocolorSplit(at::Device device);
+
+  // If all comms on this PG are fully initialized, return true.
+  bool isInitialized();
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
@@ -1033,6 +1036,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
+
+  // promise to coordinate flight recorder dump.
+  std::promise<void> promiseFlightRecorderDump_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.
