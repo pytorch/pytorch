@@ -323,6 +323,76 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
+  libtorch-cuda12_6-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.6-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: libtorch-cuda12_6-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda12_6-shared-with-deps-pre-cxx11-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - libtorch-cuda12_6-shared-with-deps-pre-cxx11-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.6-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+      build_name: libtorch-cuda12_6-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda12_6-shared-with-deps-pre-cxx11-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-pre-cxx11-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.6-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+      build_name: libtorch-cuda12_6-shared-with-deps-pre-cxx11
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
