@@ -2199,7 +2199,8 @@ class CheckFunctionManager:
                 )
                 raise AssertionError(f"Guard check failed: {reasons}")
 
-            self.profile_guard_eval(output_graph.local_scope)
+            if guards_log.isEnabledFor(logging.DEBUG):
+                self.profile_guard_eval(output_graph.local_scope)
 
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
