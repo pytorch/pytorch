@@ -670,7 +670,7 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
@@ -678,7 +678,7 @@ class HalideKernel(SIMDKernel):
         override_persistent_reduction=None,
     ) -> None:
         super().__init__(
-            *groups,
+            tiling,
             index_dtype=index_dtype,
             mutations=mutations,
             reduction_hint=reduction_hint,
@@ -823,7 +823,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    if tree.prefix == "r":
+                    if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
