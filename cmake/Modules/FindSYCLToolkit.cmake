@@ -61,11 +61,11 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   )
 endif()
 # Windows now supports sycl.lib without a version suffix. However, we still include hardcoded
-# versions (8, 7, 6) to ensure backward compatibility with older compiler versions.
+# versions (8, 7) to ensure backward compatibility with older compiler versions.
 # TODO: Remove hardcoded versions when compatibility with older SYCL runtime versions is no longer required.
 if(WIN32)
   set(SYCL_LIBRARY_FOUND FALSE)
-  foreach(sycl_runtime_version "" 8 7 6)
+  foreach(sycl_runtime_version "" 8 7)
     find_library(
       SYCL_LIBRARY
       NAMES "sycl${sycl_runtime_version}"
