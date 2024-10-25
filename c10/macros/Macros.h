@@ -118,7 +118,7 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
-#ifndef FBCODE_CAFFE2
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NO_DEPRECATED)
 /// DEPRECATED: Warn if a type or return value is discarded.
 #define C10_NODISCARD [[nodiscard]]
 
