@@ -80,6 +80,7 @@ if numpy.__version__ > "2":
     from numpy._core.tests._locales import CommaDecimalPointLocale
 else:
     from numpy.core.tests._locales import CommaDecimalPointLocale
+
 from numpy.testing._private.utils import _no_tracing, requires_memory
 
 
