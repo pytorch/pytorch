@@ -61,7 +61,7 @@ if __name__ == "__main__":
     with open(args.native_functions_yml) as f:
         contents = f.read()
 
-    yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
+    yaml = ruamel.yaml.YAML(typ='safe')
     yaml.preserve_quotes = True  # type: ignore[assignment]
     yaml.width = 1000  # type: ignore[assignment]
     yaml.boolean_representation = ["False", "True"]  # type: ignore[attr-defined]

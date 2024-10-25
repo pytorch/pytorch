@@ -208,7 +208,13 @@ def update_schema():
         _check(match is not None, "checksum not found in schema.yaml")
         assert match is not None
         checksum_base = match.group(1)
-        from yaml import load, Loader
+        from yaml import load
+        
+        # Safely load fast C Yaml loader/dumper if they are available
+        try:
+            from yaml import CSafeLoader as Loader
+        except ImportError:
+            from yaml import SafeLoader as Loader #type:ignore[assignment, misc]
 
         dst = load(content, Loader=Loader)
         assert isinstance(dst, dict)
