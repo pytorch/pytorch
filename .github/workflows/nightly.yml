@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -53,7 +54,7 @@ jobs:
   update-vision-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-vision-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
@@ -68,7 +69,7 @@ jobs:
   update-audio-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-audio-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
@@ -83,7 +84,7 @@ jobs:
   update-executorch-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-executorch-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main

@@ -20,6 +20,7 @@ permissions: read-all
 
 jobs:
   llm-td:
+    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
     permissions:
@@ -35,6 +36,7 @@ jobs:
       contents: read
 
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -131,6 +133,7 @@ jobs:
         ]}
 
   pytorch-linux-focal-py3-clang9-android-ndk-r21e-build:
+    if: github.repository_owner == 'pytorch'
     name: pytorch-linux-focal-py3-clang9-android-ndk-r21e-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
@@ -142,6 +145,7 @@ jobs:
         ]}
 
   macos-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:

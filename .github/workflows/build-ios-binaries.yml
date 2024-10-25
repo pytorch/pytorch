@@ -38,6 +38,7 @@ concurrency:
 jobs:
   # TODO: Figure out how to migrate this job to M1 runner
   ios-build-test:
+    if: github.repository_owner == 'pytorch'
     name: ios-build-test
     uses: ./.github/workflows/_ios-build-test.yml
     with:

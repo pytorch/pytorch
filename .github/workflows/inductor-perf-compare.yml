@@ -14,6 +14,7 @@ permissions: read-all
 
 jobs:
   get-default-label-prefix:
+    if: github.repository_owner == 'pytorch'
     name: get-default-label-prefix
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -23,6 +24,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   get-test-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-test-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:

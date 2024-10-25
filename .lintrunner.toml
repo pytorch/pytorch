@@ -1007,6 +1007,28 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
+[[linter]]
+code = 'NO_WORKFLOWS_ON_FORK'
+include_patterns = [
+    '.github/**/*.yml',
+    '.github/**/*.yaml',
+]
+exclude_patterns = [
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/no_workflows_on_fork.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0.1',
+]
+
 # usort + ruff-format
 [[linter]]
 code = 'PYFMT'

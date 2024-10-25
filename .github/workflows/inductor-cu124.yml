@@ -19,6 +19,7 @@ permissions: read-all
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -74,6 +75,7 @@ jobs:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp:
+    if: github.repository_owner == 'pytorch'
     name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -100,6 +102,7 @@ jobs:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_4-py3_12-gcc9-inductor-build:
+    if: github.repository_owner == 'pytorch'
     name: cuda12.4-py3.12-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:

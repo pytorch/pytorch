@@ -22,6 +22,7 @@ permissions: read-all
 
 jobs:
   llm-td:
+    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
     permissions:
@@ -37,6 +38,7 @@ jobs:
       contents: read
 
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:

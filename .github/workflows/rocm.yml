@@ -19,6 +19,7 @@ permissions: read-all
 
 jobs:
   target-determination:
+    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     permissions:
@@ -26,6 +27,7 @@ jobs:
       contents: read
 
   linux-focal-rocm6_2-py3_10-build:
+    if: github.repository_owner == 'pytorch'
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
     with:
