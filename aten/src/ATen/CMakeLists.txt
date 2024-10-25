@@ -109,6 +109,7 @@ file(GLOB mps_mm "mps/*.mm")
 file(GLOB mps_h "mps/*.h")
 file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
 file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
+file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
 file(GLOB_RECURSE native_mps_h "native/mps/*.h")
 
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
@@ -560,6 +561,48 @@ endif()
 
 if(USE_MPS)
     set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+    function(metal_to_air SRC TARGET FLAGS)
+        add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} -Wall -Wextra -fno-fast-math
+                           DEPENDS ${SRC}
+                           OUTPUT ${TARGET}
+                           COMMENT "Compiling ${SRC} to ${TARGET}"
+                           VERBATIM)
+    endfunction()
+    function(air_to_metallib TARGET OBJECTS)
+        set(_OBJECTS ${OBJECTS} ${ARGN})
+        add_custom_command(COMMAND xcrun metallib -o ${TARGET} ${_OBJECTS}
+                           DEPENDS ${_OBJECTS}
+                           OUTPUT ${TARGET}
+                           COMMENT "Linking ${TARGET}"
+                           VERBATIM)
+    endfunction()
+
+    include(../../../cmake/Metal.cmake)
+    if(CAN_COMPILE_METAL)
+        foreach(SHADER ${native_mps_metal})
+            cmake_path(GET SHADER STEM TGT_STEM)
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
+            string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+            list(APPEND AIR_BASIC ${TGT_BASIC})
+            list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
+            metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+        endforeach()
+        air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
+        air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib)
+    else()
+        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
+        foreach(SHADER ${native_mps_metal})
+            cmake_path(GET SHADER STEM TGT_STEM)
+            string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
+            file(READ ${SHADER} SHADER_CONTENT)
+            file(WRITE ${SHADER_HDR_NAME} "#include <ATen/native/mps/OperationUtils.h>\n")
+            file(APPEND ${SHADER_HDR_NAME} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
+            file(APPEND ${SHADER_HDR_NAME} "${SHADER_CONTENT}")
+            file(APPEND ${SHADER_HDR_NAME} ")SHDR\");\n")
+        endforeach()
+    endif()
 endif()
 
 if(USE_ROCM)
