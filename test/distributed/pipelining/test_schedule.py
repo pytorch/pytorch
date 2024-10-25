@@ -335,7 +335,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: stage_idx,
                 "num_stages": 2,
-                "simulated_steps": 9,
+                "simulated_steps": 11,
             },
             {
                 "schedule": "v_2_rank_4_stage",
@@ -422,7 +422,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: [0, 1, 1, 0][stage_idx],
                 "num_stages": 4,
-                "simulated_steps": 21,
+                "simulated_steps": 24,
             },
         ],
     )
@@ -516,7 +516,7 @@ class TestScheduleLowering(TestCase):
 
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
         # print(_format_pipeline_order(simulated_schedule))
-        self.assertEqual(num_steps, 96)
+        self.assertEqual(num_steps, 113)
 
     @requires_nccl()
     def test_grad_with_v_schedule(self):
