@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinousTest,
     requires_nccl,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
@@ -979,8 +980,14 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
 
 if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+
     rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 2))
+    world_size = int(os.getenv("WORLD_SIZE", -1))
+
+    if world_size == -1:  # Not set by external launcher
+        world_size = torch.cuda.device_count()
 
     if rank != -1:
         # Launched with torchrun or other multi-proc launchers. Directly run the test.

@@ -377,6 +377,25 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
+    user_stack_formatted = "".join(traceback.format_list(user_stack))
+    user_stack_trace = (
+        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"  # noqa: UP031
+        % (
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
+        )
+    )
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "dynamo_graph_break_reason",
+            "encoding": "string",
+        },
+        payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc() if exc_info else ''}",
+    )
+
     # torch._dynamo.explain() formats this a little nicer, and presents a slightly
     # more actionable user code pointer
     if (
@@ -384,16 +403,11 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         and not explain
         and graph_break_dup_warning_checker.add(frame_loc)
     ):
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
-            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s",
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-            user_stack_formatted,
+            user_stack_trace,
             exc_info=exc_info,
         )
     else:

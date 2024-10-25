@@ -192,7 +192,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           schema_arg_type->castRaw<at::OptionalType>()->getElementType();
 
       if (serialized_arg_type == "as_none") {
-        stack.emplace_back(c10::nullopt);
+        stack.emplace_back(std::nullopt);
         if (inner_type->kind() == c10::TypeKind::TensorType) {
           // Tensor is None
           dynamic_args.emplace_back(index, DynamicArgType::TensorType, 0);
@@ -414,7 +414,7 @@ void OSSProxyExecutor::call_function(
                 flatten_tensor_args[tensor_id++]);
             optional_tensor_list.emplace_back(*tensor);
           } else if (item_type == "as_none") {
-            optional_tensor_list.emplace_back(c10::nullopt);
+            optional_tensor_list.emplace_back(std::nullopt);
           }
         }
         stack[arg_index] = optional_tensor_list;
