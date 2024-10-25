@@ -227,6 +227,8 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
+        # Needed to make sure we don't accidentally specialize any symbols
+        self.fake_tensor_mode.shape_env._suppress_guards_enter()
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -382,6 +384,8 @@ class AutogradCompilerInstance:
             {},
         )
         self.stack.close()
+        # Needed to make sure we don't accidentally specialize any symbols
+        self.fake_tensor_mode.shape_env._suppress_guards_exit()
         self.fx_tracer.create_node(
             "output",
             "output",
