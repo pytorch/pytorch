@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 from torch import device, dtype, Tensor
 
@@ -8,7 +8,7 @@ class Parameter(Tensor):
 
 def is_lazy(
     param: Tensor,
-) -> TypeGuard[UninitializedParameter | UninitializedBuffer]: ...
+) -> TypeIs[UninitializedParameter | UninitializedBuffer]: ...
 
 class UninitializedParameter(Tensor):
     def __init__(self, data: Tensor = ..., requires_grad: bool = ...) -> None: ...
