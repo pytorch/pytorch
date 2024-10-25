@@ -681,9 +681,12 @@ class _PipelineStageBase(ABC):
                 if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
                     bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
-                grads_input, param_groups = self.backward_maybe_with_nosync(
-                    "input", bwd_kwargs
-                )
+                grads_input = []
+                param_groups = []
+                if not self.is_first:
+                    grads_input, param_groups = self.backward_maybe_with_nosync(
+                        "input", bwd_kwargs
+                    )
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
@@ -696,7 +699,7 @@ class _PipelineStageBase(ABC):
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
 
-        if self.is_last:
+        if self.is_last and not self.is_first:
             # stage_output is no longer used in the last stage for backward and only needed
             # to return to the user in merge_output_chunks, therefore
             # this should be detached to release autograd graph context and free memory earlier
