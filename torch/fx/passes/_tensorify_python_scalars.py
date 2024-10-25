@@ -106,7 +106,6 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
-    specialized_float_nodes: dict[fx.Node, float] = {}
 
     first_non_placeholder = None
     placeholders = set()
