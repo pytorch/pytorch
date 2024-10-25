@@ -1691,14 +1691,15 @@ def embedding_dense_backward(func, *args, **kwargs):
     num_weights: int = new_kwargs.pop("num_weights")
     grad_output: NestedTensor = new_kwargs.pop("grad_output")
     if new_kwargs["scale_grad_by_freq"]:
-        raise NotImplementedError
+        raise NotImplementedError()
 
     check_ragged_dim_same(func, indices, "self", grad_output, "grad_output")
-    out = torch.zeros(num_weights, grad_output.size(-1))
     src = grad_output._values
     indices = indices._values
-    indices = indices[indices != new_kwargs["padding_idx"]]
+    if new_kwargs["padding_idx"] != -1:
+        indices = indices[indices != new_kwargs["padding_idx"]]
     indices = indices.long().unsqueeze(1).expand(-1, src.size(1))
+    out = grad_output._values.new_zeros((num_weights, grad_output.size(-1)))
     out.scatter_add_(dim=0, index=indices, src=src)
     return out
 
