@@ -818,7 +818,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
 
 
 @contextlib.contextmanager
-def allow_inflight_collective_as_graph_input_ctx(allow: bool = True):
+def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     """
     Context manager to temporarily set whether inflight collectives are allowed as graph inputs.
     Common use case is when the collective is issued in eager (with `async_op=True`) but waited in compiled region:
@@ -833,19 +833,19 @@ def allow_inflight_collective_as_graph_input_ctx(allow: bool = True):
         torch.ops.c10d_functional.wait_tensor(y)
         return y * y
 
-    # the context manager ensures that `wait_tensor(y)` will take effect
+    # the context manager ensures that `wait_tensor(y)` will wait on the correct work object
     with allow_inflight_collective_as_graph_input_ctx():
         y = all_reduce_eager(x)
         z = all_reduce_wait_compiled(y)
     ```
     With this context manager, when a collective is called, under the hood the work object of the collective
-    will be registered in the work registry, so that the wait_tensor() in compiled region called on
-    the output tensor of the collective can wait on the correct work object.
+    will be registered in the work registry, and the wait_tensor() in compiled region called on
+    the output tensor of the collective will wait on the correct work object.
     """
     previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
 
     try:
-        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(allow)
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
         yield
     finally:
         torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(

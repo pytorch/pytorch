@@ -193,7 +193,7 @@ def _create_c10d_store(
         start_daemon = rank == 0
         return TCPStore(
             host_name=hostname,
-            port=6792,
+            port=port,
             world_size=world_size,
             is_master=start_daemon,
             timeout=timeout,
