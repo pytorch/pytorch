@@ -36,6 +36,7 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <tuple>
 #include <utility>
 
 namespace at::native { inline namespace CPU_CAPABILITY {
@@ -271,7 +272,7 @@ struct VectorizedLoop2d {
     const int64_t *outer_strides = &strides[ntensors];
 
     if (is_contiguous<traits>(strides)) {
-      for (const auto i C10_UNUSED : c10::irange(size1)) {
+      for ([[maybe_unused]] const auto i : c10::irange(size1)) {
         vectorized_loop(data.data(), size0, 0, op, vop);
         advance(data, outer_strides);
       }
@@ -279,12 +280,12 @@ struct VectorizedLoop2d {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
         if (idx) {
-          for (const auto i C10_UNUSED : c10::irange(size1)) {
+          for ([[maybe_unused]] const auto i : c10::irange(size1)) {
             vectorized_loop(data.data(), size0, idx, op, vop);
             advance(data, outer_strides);
           }
         } else {
-          for (const auto i C10_UNUSED : c10::irange(size1)) {
+          for ([[maybe_unused]] const auto i : c10::irange(size1)) {
             basic_loop(data.data(), strides, 0, size0, op);
             advance(data, outer_strides);
           }
