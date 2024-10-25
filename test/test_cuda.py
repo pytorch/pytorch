@@ -423,9 +423,12 @@ class TestCuda(TestCase):
         torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
         if torch.version.hip:
-            default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
+            default_workspace_size = 1024 * 32 * 1024 # :1024:32  32MiB
+            # different size (128 MiB) expected on MI300 GPU
+            if torch.cuda.get_device_capability() >= (9, 4):
+                default_workspace_size = 1024 * 128 * 1024 # :1024:128
         else:
-            default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
+            default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8  8MiB
             # different size (32 MiB) expected on Hopper GPU
             if torch.cuda.get_device_capability() == (9, 0):
                 default_workspace_size = 4096 * 8 * 1024
