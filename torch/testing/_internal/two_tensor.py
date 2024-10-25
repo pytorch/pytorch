@@ -74,7 +74,7 @@ class TwoTensor(torch.Tensor):
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         out_flat = [
-            TwoTensor(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            cls(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
             for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)

@@ -191,24 +191,24 @@ def runtime_unwrap_tensor_subclasses(
     append_symints: bool,
     subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None,
 ):
-    def flatten_subclass(t: Union[Tensor, int], meta: Optional[SubclassCreationMeta]):
-        if not is_traceable_wrapper_subclass(t):
-            return [t]
+    def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta]):
+        if not is_traceable_wrapper_subclass(x):
+            return [x]
 
-        assert isinstance(t, Tensor)
+        assert isinstance(x, Tensor)
 
-        attrs, _ = t.__tensor_flatten__()
+        attrs, _ = x.__tensor_flatten__()
         tensors_and_sizes: List[Union[Tensor, int]] = []
 
         for attr in attrs:
-            inner_tensor = getattr(t, attr)
+            inner_tensor = getattr(x, attr)
             inner_meta = meta.attrs.get(attr)
             tensors_and_sizes.extend(flatten_subclass(inner_tensor, inner_meta))
 
         if append_symints:
             assert isinstance(meta, SubclassCreationMeta)
             # outer_size
-            size = t.size()
+            size = x.size()
             symint_placeholders = compute_symint_placeholders(meta.outer_size)
             assert len(size) == len(symint_placeholders)
             tensors_and_sizes.extend(
@@ -225,6 +225,9 @@ def runtime_unwrap_tensor_subclasses(
         return tensors_and_sizes
 
     xs_inner: List[Union[int, Tensor, SymInt]] = []
+
+    if append_symints:
+        assert subclass_metas is not None
 
     for idx, x in enumerate(wrapped_args):
         if not is_traceable_wrapper_subclass(x):
@@ -245,7 +248,7 @@ def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
     ret_unwrapped = []
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
-        a_unwrapped = runtime_unwrap_tensor_subclasses([a], append_symints=False)
+        a_unwrapped = unwrap_tensor_subclasses([a], append_symints=False)
         ret_unwrapped.extend(a_unwrapped)
         n = len(a_unwrapped)
         ret_indices_to_original.extend([i] * n)

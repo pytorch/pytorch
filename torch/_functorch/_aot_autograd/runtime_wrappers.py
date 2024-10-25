@@ -1894,6 +1894,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     all_args = runtime_unwrap_tensor_subclasses(
                         all_args,
+                        # SymInts that are inputs to the backward graph are
+                        # already included in the "all_args" list.
+                        # Any symints coming from tensor subclasses should always
+                        # come from primals, and so they will show up as extra
+                        # arguments to the forward graph, and they will be saved
+                        # as activation in the backward graph.
                         append_symints=False,
                     )
                 else:

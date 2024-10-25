@@ -2391,11 +2391,73 @@ class GraphModule(torch.nn.Module):
         out = f(z)
         self.assertEqual(out, z.sin())
 
-    @unittest.expectedFailure
+    def test_subclass_TwoTensor_nested_diff_sizes(self):
+        class TT(TwoTensor):
+            @staticmethod
+            def __new__(cls, a, b, outer_size=None, outer_stride=None):
+                if outer_size is None:
+                    outer_size = a.size()
+                if outer_stride is None:
+                    outer_stride = a.stride()
+
+                assert (
+                    a.device == b.device
+                    and a.layout == b.layout
+                    and a.requires_grad == b.requires_grad
+                    and a.dtype == b.dtype
+                )
+                shape = outer_size
+                kwargs = {}
+                kwargs["strides"] = outer_stride
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+                return out
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                a, b = inner_tensors["a"], inner_tensors["b"]
+                if type(a) is torch.Tensor:
+                    assert outer_size is not None
+                    assert outer_stride is not None
+                return TT(a, b, outer_size, outer_stride)
+
+        @torch.compile(dynamic=True)
+        def f(x, y):
+            tmp1 = x.sin()
+            tmp2 = y.sin()
+            return tmp1.sum(), tmp2.sum()
+
+        x = TT(
+            TT(
+                torch.randn(3, 4),
+                torch.randn(5, 6, 7),
+            ),
+            TT(
+                torch.randn(4),
+                torch.randn(2, 3),
+            ),
+        )
+
+        y = TT(
+            torch.randn(2, 3, 4, 5),
+            TT(
+                torch.randn(3, 4),
+                torch.randn(5),
+            ),
+        )
+
+        out = f(x, y)
+        self.assertEqual(out, (x.sin().sum(), y.sin().sum()))
+
     def test_njt_subclass_simple(self):
         def f(nt):
             y = nt.clone()
-            return y * y.size(0) * y.size(1)
+            return y * y.size(0)
 
         nt, _ = get_jagged_tensor(((2, 3, 4), 5), None, True)
 
@@ -2409,8 +2471,7 @@ class GraphModule(torch.nn.Module):
         clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
         mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_9);  clone = None
-        mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_10);  mul = None
-        return (mul_1, primals_2, primals_3, primals_4, primals_9, primals_8, primals_8, primals_8, primals_9, primals_10)
+        return (mul, primals_2, primals_3, primals_4, primals_9, primals_8, primals_8, primals_8, primals_9)
 """,  # noqa: B950
         )
 
@@ -2418,10 +2479,9 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_8: "Sym(s1)", primals_9: "Sym(s2)", primals_10: "Sym(s3)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
-        mul_2: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_10);  tangents_1 = primals_10 = None
-        mul_3: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul_2, primals_9);  mul_2 = None
-        return (mul_3, tangents_2, tangents_3, tangents_4, primals_9, primals_8, primals_8, None, None, None)
+    def forward(self, primals_8: "Sym(s1)", primals_9: "Sym(s2)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
+        mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_9);  tangents_1 = None
+        return (mul_1, tangents_2, tangents_3, tangents_4, primals_9, primals_8, primals_8, None, None, None)
 """,  # noqa: B950
         )
 
@@ -2462,7 +2522,6 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @unittest.expectedFailure
     def test_njt_subclass_from_buffer(self):
         # create the NJT from a buffer(?)
         def f(nt):
@@ -2470,7 +2529,7 @@ class GraphModule(torch.nn.Module):
             offsets = None
             nt2, _ = get_jagged_tensor(nested_size, offsets, requires_grad=False)
             nt3 = torch.cat([nt2, nt], dim=-1)
-            return nt3.sin() * nt3.size(1)
+            return nt3.sin() * nt3.size(0)
 
         nested_size = ((2, 3, 4), 5)
         offsets = None
@@ -2493,15 +2552,22 @@ class <lambda>(torch.nn.Module):
         randn_2: "f64[4, 5]" = torch.ops.aten.randn.default([4, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
 
         cat: "f64[9, 5]" = torch.ops.aten.cat.default([randn, randn_1, randn_2]);  randn = randn_1 = randn_2 = None
+        zeros: "i64[1]" = torch.ops.aten.zeros.default([1], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
+        _tensor_constant0 = self._tensor_constant0
+        lift_fresh_copy: "i64[3]" = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+        cumsum: "i64[3]" = torch.ops.aten.cumsum.default(lift_fresh_copy, 0);  lift_fresh_copy = None
+        cat_1: "i64[4]" = torch.ops.aten.cat.default([zeros, cumsum]);  zeros = cumsum = None
+        zeros_1: "f32[2, 0]" = torch.ops.aten.zeros.default([2, 0], device = device(type='cpu'), pin_memory = False)
+        zeros_2: "f32[4, 0]" = torch.ops.aten.zeros.default([4, 0], device = device(type='cpu'), pin_memory = False)
 
-        cat_2: "f64[9, s2 + 5]" = torch.ops.aten.cat.default([arg0_1, cat], 1);  arg0_1 = cat = None
+        cat_2: "f64[9, s2 + 5]" = torch.ops.aten.cat.default([cat, arg0_1], 1);  cat = arg0_1 = None
 
         sin: "f64[9, s2 + 5]" = torch.ops.aten.sin.default(cat_2)
-        mul: "f64[9, s2 + 5]" = torch.ops.aten.mul.Tensor(sin, arg9_1);  sin = arg9_1 = None
+        mul: "f64[9, s2 + 5]" = torch.ops.aten.mul.Tensor(sin, 3);  sin = None
 
-        sym_size_int_1: "Sym(s2 + 5)" = torch.ops.aten.sym_size.int(cat_2, 1);  cat_2 = None
+        sym_size_int: "Sym(s2 + 5)" = torch.ops.aten.sym_size.int(cat_2, 1);  cat_2 = None
         sym_stride_int: "Sym(s2 + 5)" = torch.ops.aten.sym_stride.int(mul, 0)
-        return (mul, arg1_1, arg2_1, arg3_1, arg8_1, sym_size_int_1, sym_stride_int)
+        return (mul, cat_1, zeros_1, zeros_2, sym_size_int, sym_stride_int)
 """,  # noqa: B950
         )
 
