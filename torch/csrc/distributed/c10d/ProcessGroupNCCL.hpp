@@ -778,6 +778,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Abort all communicators on this rank.
   bool abortComms(std::optional<std::string> abortReason = std::nullopt);
 
+  // A helper function to check if nonblocking API mode should be used.
+  // Use this helper instead of directly checking `useNonblocking_` variable.
+  bool useNonblocking();
+
  private:
   int globalRankStart;
   int globalRankStride;
@@ -1237,6 +1241,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<ProcessGroupStatus> pgStatus_ =
       std::make_shared<ProcessGroupStatus>();
+
+  // Internal cached value: use NCCL non-blocking API mode or not.
+  // Use `useNonblocking()` method instead of accessing this variable directly.
+  std::optional<bool> useNonblocking_{std::nullopt};
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

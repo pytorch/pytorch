@@ -237,7 +237,6 @@ DEFINE_CONSTANT(started_state, "started");
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
-bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
@@ -314,6 +313,8 @@ class NCCLComm {
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     comm->initialized_ = true;
+    // Old style comm is always blocking.
+    comm->nonBlocking_ = false;
     return comm;
   }
 
@@ -324,26 +325,19 @@ class NCCLComm {
       ncclUniqueId commId,
       ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
-    bool isInitialized = false;
-    if (nccl_use_nonblocking()) {
-      config.blocking = 0;
-      LOG(INFO) << "Rank " << rank
-                << ": creating NCCL communicator in nonblocking mode";
-      C10D_NCCL_CHECK_NONBLOCKING(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-    } else {
-      C10D_NCCL_CHECK(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-      // under blocking mode, comm is initialized after NCCL CHECK
-      isInitialized = true;
-    }
+    comm->nonBlocking_ = config.blocking == 0;
+    LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+              << (comm->nonBlocking_ ? "nonblocking" : "blocking");
+    C10D_NCCL_CHECK_NONBLOCKING(
+        ncclCommInitRankConfig(
+            &(comm->ncclComm_), numRanks, commId, rank, &config),
+        std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
-    comm->initialized_ = isInitialized;
+    // Under blocking mode, comm is initialized immediately after NCCL init
+    // returns; Under nonblocking mode, we check whether comm is initialized the
+    // *next* time ncclComm_ is accessed.
+    comm->initialized_ = !comm->nonBlocking_;
     return comm;
   }
 
@@ -387,6 +381,7 @@ class NCCLComm {
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
     std::swap(initialized_, other.initialized_);
+    std::swap(nonBlocking_, other.nonBlocking_);
   }
 
   ncclComm_t getNcclComm();
@@ -555,6 +550,10 @@ class NCCLComm {
   // better error messaging.
   std::optional<std::string> commFailureReason_;
   bool initialized_{false};
+  // Whether this communicator is using nonblocking mode. Recorded during comm
+  // creation or split. For safety, we give a default value of true (more
+  // protection).
+  bool nonBlocking_{true};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;

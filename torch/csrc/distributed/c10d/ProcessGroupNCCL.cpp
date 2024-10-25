@@ -986,7 +986,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
-            << ", TORCH_NCCL_USE_COMM_NONBLOCKING: " << nccl_use_nonblocking()
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
@@ -1058,6 +1057,39 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   getNCCLComm(key, device, OpType::ALLREDUCE);
 }
 
+bool ProcessGroupNCCL::useNonblocking() {
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  return false;
+#endif
+  // Already parsed, return the cached value
+  if (useNonblocking_.has_value()) {
+    return useNonblocking_.value();
+  }
+  // Get environment variable.
+  auto nbEnv = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+
+  // 1st priority: Respect the user's setting
+  if (options_->config.blocking != NCCL_CONFIG_UNDEF_INT) {
+    useNonblocking_ = options_->config.blocking == 0;
+  }
+  // 2nd priority: Respect the environment variable
+  else if (nbEnv.has_value()) {
+    useNonblocking_ = nbEnv.value();
+  }
+  // 3rd priority: automatically use nonblocking if we are in eager init mode
+  else if (getBoundDeviceId()) {
+    useNonblocking_ = true;
+  }
+  // 4th priority: otherwise, nonblocking = false to preserve old behavior
+  else {
+    useNonblocking_ = false;
+  }
+
+  LOG(INFO) << logPrefix()
+            << "Using non-blocking mode: " << useNonblocking_.value();
+  return useNonblocking_.value();
+}
+
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   // If our backend doesn't support splitting, this is a no-op for
   // ranks not in the new subgroup (and ranks that would be in it will
@@ -1066,6 +1098,8 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
   NCCLComm::split(
       comm.get(),
@@ -2355,6 +2389,11 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
 
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
+#endif
+
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
     // Find a valid, healthy communicator to split from if possible.
@@ -2771,7 +2810,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
-  if (nccl_use_nonblocking()) {
+  if (useNonblocking()) {
     groupEndNonblocking(comm);
   } else {
     groupEnd();
@@ -3091,8 +3130,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #endif
 
   {
-    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(
-        comm, nccl_use_nonblocking());
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comm, useNonblocking());
     for (const auto i : c10::irange(inputs.size())) {
       // Both `inputs' and `outputs' are created on a worker stream and used in
       // different ncclStreams.  Hence, both must record the ncclStream to
@@ -4648,7 +4686,7 @@ void ProcessGroupNCCL::groupEndNonblocking(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
+  if (!useNonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
   } else {
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), comm, std::nullopt);
