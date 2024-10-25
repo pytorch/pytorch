@@ -364,9 +364,9 @@ inline bool isIntegralType(ScalarType t, bool includeBool) {
   return isIntegral || (includeBool && t == ScalarType::Bool);
 }
 
-[[deprecated(
-    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]] inline bool
-isIntegralType(ScalarType t) {
+C10_DEPRECATED_MESSAGE(
+    "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
+inline bool isIntegralType(ScalarType t) {
   return isIntegralType(t, /*includeBool=*/false);
 }
 

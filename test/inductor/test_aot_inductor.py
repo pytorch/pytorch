@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import itertools
+import logging
 import os
 import sys
 import tempfile
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
 
@@ -143,6 +145,7 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         {
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -3694,6 +3697,24 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
 
+class AOTInductorLoggingTest(LoggingTestCase):
+    @make_logging_test(dynamic=logging.DEBUG)
+    def test_shape_env_reuse(self, records):
+        # make sure ShapeEnv is only created once and reused afterwards
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 4),)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        with torch.no_grad():
+            torch._inductor.aot_compile(ep.module(), inputs)
+        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
@@ -3727,43 +3748,16 @@ def fail_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    "test_duplicate_constant_folding": fail_cpu(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_missing_cubin": fail_cpu(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_cpu(is_skip=True),
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_shifted_constraint_ranges": fail_cpu(is_skip=True),
-    # failed on MacOS
-    "test_zero_grid_with_backed_symbols": fail_cpu(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122991
-    "test_runtime_checks_complex": fail_cpu(is_skip=True),
-    "test_runtime_checks_fp8": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_cuda(is_skip=True),
     # quantized unsupported for GPU
-    "test_quantized_linear": fail_cuda(is_skip=True),
-    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
+    "test_quantized_linear": fail_cuda(),
+    "test_quanatized_int8_linear": fail_cuda(),
 }
-
-
-if not IS_FBCODE:
-    # The following test passes internally but fails in OSS CI. To be investigated.
-    CUDA_TEST_FAILURES.update(
-        {
-            "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
-            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
-                is_skip=True
-            ),
-            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
-        }
-    )
 
 
 class AOTInductorTestABICompatibleCpu(AOTITestCase):
