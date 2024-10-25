@@ -650,16 +650,16 @@ class TestDeserialize(TestCase):
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
-    def test_sym_bool(self) -> None:
+    def test_sym_bool_dynamic_shapes(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
-                z = x[:,-y.shape[0]:,:]
+                z = x[:, -y.shape[0] :, :]
                 return z
 
-        inputs = (torch.ones(4, 5 ,10), torch.ones(3))
+        inputs = (torch.ones(4, 5, 10), torch.ones(3))
         dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
         # Compile with dynamic_shapes set to get operator.neg involved
         self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
