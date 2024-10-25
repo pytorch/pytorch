@@ -2491,23 +2491,22 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
 
 
 def get_guard_fail_reason_helper(
-    guard_fn: GuardFn,
+    guard_manager: GuardFn,
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
     """
-    Return the reason why `guard_fn` failed.
+    Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
-    Only the first failed check of guard_fn is reported.
+    Only the first failed check of guard_manager is reported.
     """
-    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
-    scope.update(guard_fn.closure_vars)
+    scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
+    scope.update(guard_manager.closure_vars)
     reasons: List[str] = []
 
     no_tensor_aliasing_check_failed = False
 
     verbose_code_parts: List[str] = []
-    guard_manager = guard_fn
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
@@ -2529,10 +2528,12 @@ def get_guard_fail_reason_helper(
                 verbose_code_parts = []
 
     if no_tensor_aliasing_check_failed:
-        reasons = recompilation_reason_for_no_tensor_aliasing_guard(guard_fn, scope)
+        reasons = recompilation_reason_for_no_tensor_aliasing_guard(
+            guard_manager, scope
+        )
     else:
         for part in verbose_code_parts:
-            global_scope = dict(guard_fn.global_scope)
+            global_scope = dict(guard_manager.global_scope)
             global_scope["__compile_source__"] = part
             with report_compile_source_on_error():
                 try:
@@ -2557,17 +2558,17 @@ def get_guard_fail_reason_helper(
 
 
 def get_guard_fail_reason(
-    guard_fn: GuardFn,
+    guard_manager: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
     compile_id: CompileId,
 ) -> str:
-    reason_str = get_guard_fail_reason_helper(guard_fn, f_locals, compile_id)
+    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
-        if guard_fn.guard_fail_fn is not None:
-            guard_fn.guard_fail_fn(
+        if guard_manager.guard_fail_fn is not None:
+            guard_manager.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
@@ -2589,7 +2590,7 @@ def get_and_maybe_log_recompilation_reason(
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
-            cache_entry.check_fn,
+            cache_entry.guard_manager,
             cache_entry.code,
             frame.f_locals,
             cache_entry.compile_id,
@@ -2639,7 +2640,7 @@ def get_and_maybe_log_recompilation_reason(
 
 
 def guard_error_hook(
-    guard_fn: GuardFn,
+    guard_manager: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
     index: int,
@@ -2648,15 +2649,15 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
-    print("lambda " + ", ".join(guard_fn.args) + ":")
-    print(" ", " and\n  ".join(guard_fn.code_parts))
+    print("lambda " + ", ".join(guard_manager.args) + ":")
+    print(" ", " and\n  ".join(guard_manager.code_parts))
 
-    print(guard_fn)
+    print(guard_manager)
 
-    local_scope = {"L": f_locals, **guard_fn.closure_vars}
-    for guard in guard_fn.code_parts:
+    local_scope = {"L": f_locals, **guard_manager.closure_vars}
+    for guard in guard_manager.code_parts:
         try:
-            eval(guard, guard_fn.global_scope, local_scope)
+            eval(guard, guard_manager.global_scope, local_scope)
         except:  # noqa: B001,E722
             print(f"Malformed guard:\n{guard}")
 
