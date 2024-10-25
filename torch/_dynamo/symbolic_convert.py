@@ -2746,6 +2746,7 @@ class InstructionTranslatorBase(
 
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_ids: Set[int]
+    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
 
     @staticmethod
     def current_tx() -> "InstructionTranslator":
@@ -2819,6 +2820,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_ids = mutated_closure_cell_ids
+            self.contents_var_to_mutated_cell = {}
             if self.export:
                 assert (
                     self.one_graph
@@ -3336,14 +3338,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
+                root_tx = self.output.root_tx
                 if (
                     maybe_cell is not None
-                    and hasattr(maybe_cell, "original_cell")
-                    and id(maybe_cell.original_cell)
-                    not in self.output.root_tx.mutated_closure_cell_ids
+                    and maybe_cell in root_tx.contents_var_to_mutated_cell
+                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
+                    not in root_tx.mutated_closure_cell_ids
                 ):
                     self.output.root_tx.mutated_closure_cell_ids.add(
-                        id(maybe_cell.original_cell)
+                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
                     )
                     raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")

@@ -284,9 +284,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             # the analysis with this cell's name in the
                             # mutated list here
                             result[name] = contents_var
-                            # Store the cell object in this field so we can look
-                            # it up later for membership check.
-                            contents_var.original_cell = cell
+                            # Map the variable to the original cell so we can
+                            # look it up later, see
+                            # `InliningInstructionTranslator.STORE_DEREF`.
+                            tx.contents_var_to_mutated_cell[contents_var] = cell
                             continue
 
                         # cells are written to with "cell_contents",
