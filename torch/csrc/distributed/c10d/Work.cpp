@@ -1,7 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <distributed/c10d/ProcessGroup.hpp>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
 
 namespace c10d {

@@ -304,7 +304,7 @@ void register_work(
 void register_work_weakref(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  // RankLocal<WorkRegistry>::get().register_work<WeakWorkPtr>(tensor, work);
+  RankLocal<WorkRegistry>::get().register_work<WeakWorkPtr>(tensor, work);
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
