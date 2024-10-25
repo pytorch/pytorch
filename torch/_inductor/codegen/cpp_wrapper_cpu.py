@@ -86,6 +86,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        equal_to_1=None,
     ):
         """
         Generates kernel call code.
@@ -110,6 +111,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 triton_meta,
                 autotune_configs,
                 grid_extra_kwargs,
+                equal_to_1,
             )
         else:
             assert arg_types is not None and len(call_args) == len(
