@@ -2325,8 +2325,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             fx_node.target
             == aten._scaled_dot_product_efficient_attention_backward.default
             and idx in (0, 5)
-            and len(stride_order) == 4
         ):
+            assert len(stride_order) == 4
             # The 0 and 5th arguments for aten._scaled_dot_product_efficient_attention_backward.default
             # are for out and gradient_out. They have to be in
             # (3, 1, 2, 0) stride order. Otherwise the kernel will crash.
