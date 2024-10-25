@@ -856,6 +856,11 @@ def flex_attention(
     original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
+            if len(configs) == 1:
+                raise ValueError(
+                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We"
+                    f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
+                )
             continue
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
@@ -869,7 +874,7 @@ def flex_attention(
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
-        flex_attention_template.maybe_append_choice(
+        error = flex_attention_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
                 query,
@@ -894,6 +899,8 @@ def flex_attention(
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
+        if error is not None and len(configs) == 1:
+            raise error
     inputs_for_autotuning = (
         [
             query,
