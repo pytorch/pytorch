@@ -16,11 +16,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   } else {
     this->trace_annotation = "Unknown";
   }
-  // TODO - clean this up when enable_cpp_guard_manager is True by default
-  if (py::hasattr(this->check_fn, "root")) {
-    this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
-        this->check_fn.attr("root"));
-  }
+  this->root_mgr =
+      torch::dynamo::convert_to_root_guard_manager(this->check_fn.attr("root"));
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
