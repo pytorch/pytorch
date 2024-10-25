@@ -1191,8 +1191,7 @@ class TMADescriptorVariable(VariableTracker):
         **kwargs,
     ):
         assert isinstance(data_ptr, variables.DataPtrVariable)
-
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.data_ptr = data_ptr
         self.dims = dims
         self.block_dims = block_dims
@@ -1224,8 +1223,8 @@ class CreateTMADescriptorVariable(VariableTracker):
         rank: int,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
         assert rank in (1, 2)
+        super().__init__(**kwargs)
         self.rank = rank
 
     def call_function(
@@ -1259,9 +1258,9 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
             block_dims = [
                 kwargs["block_dim1"] if "block_dim1" in kwargs else args[3],
-                kwargs["block_dim2"] if "block_dim2" in kwargs else args[4],
+                kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
             ]
-        element_size = kwargs["ptr"] if "ptr" in kwargs else args[-1]
+        element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
         return TMADescriptorVariable(
             data_ptr=ptr,
