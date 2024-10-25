@@ -437,6 +437,20 @@ class AutogradCompilerInstance:
                     aot_id,
                 )
 
+    @staticmethod
+    def get_all_nodes(args):
+        nodes = []
+        for n in args:
+            if type(n) is torch.fx.Node:  # filter out non-Node args, like None
+                nodes.append(n)
+        return nodes
+
+    @staticmethod
+    def is_placeholder(node):
+        if node.op == "placeholder" or (node.op == "call_function" and node.target == operator.getitem and node.args[0].op == "placeholder"):
+            return True
+        return False
+
     def reorder_accumulate_grad_nodes(self):
         """
         Usage of AOTAutograd causes all the accumulate_grad_ nodes to get pushed to the end of
@@ -446,12 +460,14 @@ class AutogradCompilerInstance:
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=torch.ops.inductor.accumulate_grad_.default
         ):
-            arg = max(node.args)  # last arg
+            param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
-            if arg.target == operator.getitem:
-                getitem_node = arg
-                arg = arg.args[0]
-            if arg is not node.prev and arg.op != "placeholder":
+            if grad_node.target == operator.getitem:
+                getitem_node = grad_node
+                grad_node = getitem_node.args[0]
+
+            arg = max([param_node, grad_node])  # last arg
+            if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(node)
                 if getitem_node is not None:
                     arg.append(getitem_node)
@@ -472,7 +488,7 @@ class AutogradCompilerInstance:
             getitem_node = node.args[0]
             input_node = node.args[1]  # tensor_pre_hook handle only one grad tensor
 
-            if input_node is not node.prev and input_node.op != "placeholder":
+            if input_node is not node.prev and not self.is_placeholder(input_node):
                 input_node.append(getitem_node)
                 getitem_node.append(node)
 
@@ -490,10 +506,11 @@ class AutogradCompilerInstance:
                 continue
 
             getitem_node = node.args[0]
-            input_nodes = node.args[1]  # pre_hook handle a tuple of grad tensors
+            # pre_hook handle a tuple of grad tensors
+            input_nodes = self.get_all_nodes(node.args[1])
 
             arg = max(input_nodes)  # last input
-            if arg is not node.prev and arg.op != "placeholder":
+            if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(getitem_node)
                 getitem_node.append(node)
 
@@ -504,12 +521,18 @@ class AutogradCompilerInstance:
         schedules them as soon as possible. This pass attempts to reorder the
         graph to mimic eager behavior.
         """
+        post_acc_grad_hooks = []
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_hook
         ):
             if node.kwargs.get("hook_type", None) != "post_acc_grad_hook":
                 continue
 
+            post_acc_grad_hooks.append(node)
+
+        # nodes in post_acc_grad_hooks are in topo order. For hooks registered
+        # to same node, we should keep their relative order
+        for node in reversed(post_acc_grad_hooks):
             getitem_node = node.args[0]
             param_node = node.args[1]  # post_acc_grad_hook handle one param
 
@@ -562,7 +585,7 @@ class AutogradCompilerInstance:
                     getitem_node.append(node)
                     continue
 
-            if arg is not node.prev and arg.op != "placeholder":
+            if arg is not node.prev and not self.is_placeholder(arg):
                 arg.append(getitem_node)
                 getitem_node.append(node)
 
