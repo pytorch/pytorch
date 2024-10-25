@@ -3,7 +3,7 @@ name: inductor-periodic
 on:
   push:
     tags:
-      - ciflow/inductor/*
+      - ciflow/inductor-periodic/*
   workflow_dispatch:
   schedule:
     # Run every 4 hours during the week and every 12 hours on the weekend
