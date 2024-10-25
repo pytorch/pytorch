@@ -104,10 +104,10 @@ ExtraState* get_extra_state(PyCodeObject* code);
 // this function, consider if set_extra_state should be called.
 void destroy_extra_state(void* obj);
 
-// Clears the existing object sitting on the extra scratch spance and sets it
+// Clears the existing object sitting on the extra scratch space and sets it
 // up with the new state. Note that _PyCode_SetExtra calls the
 // destroy_extra_state deleter internally, and therefore we don't call it
-// explicity here.
+// explicitly here.
 
 // Ownership contract
 // args
