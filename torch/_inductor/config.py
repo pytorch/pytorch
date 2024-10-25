@@ -28,6 +28,10 @@ def bundled_autotune_remote_cache_default() -> Optional[bool]:
     return _get_tristate_env("TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE")
 
 
+def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
+    return _get_tristate_env("TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE")
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -52,6 +56,11 @@ fx_graph_cache = (
 # True: Enables the cache
 # None: Not set -- Off for OSS, JustKnobs based for internal
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
+
+# should we bundle triton caching into fx graph cache
+bundle_triton_into_fx_graph_cache: Optional[
+    bool
+] = bundle_triton_into_fx_graph_cache_default()
 
 # Enable autotune local cache.
 #

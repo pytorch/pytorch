@@ -19,6 +19,7 @@ from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -458,10 +459,14 @@ class CachingAutotuner(KernelInterface):
             compile_kwargs = compile_meta
 
         if warm_cache_only:
-            return (
-                triton.compile(*compile_args, **compile_kwargs),
-                None,
+            start_time = time.time_ns()
+            binary = triton.compile(*compile_args, **compile_kwargs)
+            compile_time_ns = time.time_ns() - start_time
+            launcher = None
+            TritonBundler.put(
+                binary.hash, compile_time_ns, self.triton_meta.get("device", 0)
             )
+            return binary, launcher
 
         # importing from torch is safe now that precompile has returned
         from torch._dynamo.device_interface import DeviceGuard
@@ -474,7 +479,9 @@ class CachingAutotuner(KernelInterface):
             device_interface.synchronize(device_interface.current_device())
 
             try:
+                start_time = time.time_ns()
                 binary = triton.compile(*compile_args, **compile_kwargs)
+                compile_time_ns = time.time_ns() - start_time
             except Exception:
                 log.exception(
                     "Triton compilation failed: %s\n%s\nmetadata: %s",
@@ -696,6 +703,10 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
+
+        TritonBundler.put(
+            binary.hash, compile_time_ns, self.triton_meta.get("device", 0)
+        )
 
         return binary, launcher
 

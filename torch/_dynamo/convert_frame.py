@@ -1044,6 +1044,9 @@ def _compile(
                 remote_cache_time_saved = frame_phase_timing[frame_key].get(
                     "remote_cache_time_saved", 0
                 )
+                triton_bundler_time_saved = frame_phase_timing[frame_key].get(
+                    "triton_bundler_time_saved", 0
+                )
                 possibly_missed_reinplacing_bytes = (
                     torch._dynamo.utils.counters["inductor"][
                         "possibly_missed_reinplacing_bytes"
@@ -1073,6 +1076,7 @@ def _compile(
                 dynamo_time_before_restart = time.time() - start_time
                 possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
+                triton_bundler_time_saved = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1119,6 +1123,7 @@ def _compile(
                 guarded_code is not None,
                 possibly_missed_reinplacing_opportunities,
                 remote_cache_time_saved,
+                triton_bundler_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,

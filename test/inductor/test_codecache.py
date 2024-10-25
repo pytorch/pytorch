@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
 import pickle
+import shutil
 import tempfile
 import unittest
 from typing import List, Optional, Union
@@ -125,7 +126,8 @@ class TestFxGraphCache(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
-    def test_cache_load_function(self, device, dtype, dynamic):
+    @parametrize("bundle_triton", (False, True))
+    def test_cache_load_function(self, device, dtype, dynamic, bundle_triton):
         """
         Verify that we can populate and load functions from the cache.
         """
@@ -140,30 +142,42 @@ class TestFxGraphCache(TestCase):
         a = torch.rand(25, dtype=dtype, device=device)
         b = torch.rand(5, 5, dtype=dtype, device=device)
 
-        compiled_fn = torch.compile(fn, dynamic=dynamic)
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
 
-        # A first call should miss in the cache.
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+            # A first call should miss in the cache.
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
 
-        # A second call should hit. (First reset so in-memory guards
-        # don't prevent compilation).
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
-        self.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+            if bundle_triton and device != "cpu":
+                self.assertEqual(counters["inductor"]["triton_bundler_save_kernel"], 7)
+                self.assertEqual(counters["inductor"]["triton_bundler_write_kernel"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            for m in torch._inductor.codecache.PyCodeCache.cache.values():
+                os.remove(m.__file__)
+            # Clean triton kernels
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+            self.reset()
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+            if bundle_triton and device != "cpu":
+                self.assertEqual(counters["inductor"]["triton_bundler_save_kernel"], 7)
+                self.assertEqual(counters["inductor"]["triton_bundler_write_kernel"], 7)
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
-    def test_remote_cache_load_function(self, device, dtype, dynamic):
+    @parametrize("bundle_triton", (False, True))
+    def test_remote_cache_load_function(self, device, dtype, dynamic, bundle_triton):
         from unittest.mock import patch
 
         if device == GPU_TYPE and not HAS_GPU:
@@ -180,9 +194,9 @@ class TestFxGraphCache(TestCase):
         with config.patch(
             {
                 "fx_graph_remote_cache": True,
+                "bundle_triton_into_fx_graph_cache": bundle_triton,
             }
         ), patch.dict(os.environ), PatchCaches():
-            os.environ.pop("TRITON_CACHE_MANAGER", None)
             for _ in range(4):
                 with fresh_inductor_cache():
                     compiled_fn = torch.compile(fn, dynamic=dynamic)

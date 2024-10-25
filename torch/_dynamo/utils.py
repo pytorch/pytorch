@@ -226,7 +226,11 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
 # Use frame_phase_timing to record remote_cache_time_saved
 # This follows the same principles of key as the other frame phase timings,
 # but is incremented by FxGraphCache (and later AOTAutogradCache) directly
-def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -> None:
+# triton_bundler argument is used to distinguish between whole inductor cache or
+# just partial triton_bundler
+def add_remote_cache_time_saved(
+    time_saved_ns: int, is_backward: bool, triton_bundler: bool
+) -> None:
     key = None
     if is_backward:
         # Use compile id as the frame key for backwards compilation
@@ -235,7 +239,10 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
         key = str(curr_frame)
     # Convert to seconds (as a float)
     time_saved = time_saved_ns / 1e9
-    _add_time_spent(key, "remote_cache_time_saved", time_saved)
+    phase_name = (
+        "triton_bundler_time_saved" if triton_bundler else "remote_cache_time_saved"
+    )
+    _add_time_spent(key, phase_name, time_saved)
 
 
 # dynamo_timed is a context manager
@@ -343,10 +350,14 @@ def dynamo_timed(
                                 remote_cache_time_saved = frame_phase_timing[
                                     compile_id
                                 ].get("remote_cache_time_saved", None)
+                                triton_bundler_time_saved = frame_phase_timing[
+                                    compile_id
+                                ].get("triton_bundler_time_saved", None)
                             else:
                                 inductor_compile_time = None
                                 code_gen_time = None
                                 remote_cache_time_saved = None
+                                triton_bundler_time_saved = None
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
                             )
@@ -357,6 +368,7 @@ def dynamo_timed(
                                 fail_type,
                                 fail_reason,
                                 remote_cache_time_saved,
+                                triton_bundler_time_saved,
                                 structured_logging_overhead_s,
                                 False,  # is_forward
                             )
@@ -798,6 +810,7 @@ class CompilationMetrics:
     has_guarded_code: bool
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
+    triton_bundler_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     config_suppress_errors: Optional[bool]
     config_inline_inbuilt_nn_modules: Optional[bool]
@@ -814,6 +827,7 @@ class BwdCompilationMetrics:
     fail_type: Optional[str]
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
+    triton_bundler_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     is_forward: Optional[bool]
 
